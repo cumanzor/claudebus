@@ -199,10 +199,14 @@ env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3)
 
 ## Why not the built-in teammate mailbox?
 
-Claude Code's teammate `SendMessage` is *also* a file-based mailbox under
-`<config>/teams/<team>/inboxes/`, and an external process *can* write to it. But it only
-works when the session already has an **active teammate** (the inbox poller isn't armed in
-a solo session), so you'd have to keep a dummy keepalive teammate alive per session — and
-the file layout is undocumented and can change in any release. claudebus gets the same
-result from stable, documented primitives, adds a real liveness-aware registry, and spans
-CCS profiles.
+Claude Code's teammate `SendMessage` is **closed by design**: teammates are spawn-bound
+subprocesses, registered with their parent session **in-process at spawn time**. There
+*are* team files on disk (`<config>/teams/session-<sid>/` — config, inboxes), but they are
+not a delivery path: a hand-launched `claude` process with matching `--team-name` /
+`--parent-session-id` flags comes up alive yet is unreachable via SendMessage, and writing
+to the inbox files registers nothing (verified empirically). A session can only message
+agents it forked itself — there is no cross-session addressing at all. That closed
+boundary is exactly what claudebus provides: an open, file-based channel any process,
+window, or CCS profile can append to, built from stable documented primitives with a
+liveness-aware registry. The two compose: SendMessage for in-session fan-out, cbus for
+session-to-session.
