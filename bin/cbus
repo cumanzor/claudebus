@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+# cbus — claude session bus. tiny file-based message bus so live Claude Code
+# sessions can talk, organized into named channels.
+#
+# layout ($CBUS_DIR, default ~/.claude-bus):
+#   <channel>/<alias>/meta.json    {alias, channel, sessionId, cwd, listenerPid, ownerPid, host, ts}
+#   <channel>/<alias>/inbox.jsonl  append-only, one JSON message per line
+#
+# a session joins a channel (alias auto-picked: main, then fork-N), then arms
+# `cbus tail <channel>/<alias>` under the Monitor tool to receive. any process
+# reaches it with `cbus send <channel>/<alias> "text"`; a bare alias resolves
+# within the sender's own channel(s). the channel name "global" is reserved by
+# convention as the machine-wide bus for a master orchestrator.
+set -euo pipefail
+
+CBUS_DIR="${CBUS_DIR:-$HOME/.claude-bus}"
+PY="${CBUS_PYTHON:-python3}"
+
+die() { printf 'cbus: %s\n' "$*" >&2; exit 1; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+command -v "$PY" >/dev/null 2>&1 || die "python3 not found (set CBUS_PYTHON)"
+
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]; }
+
+meta_path()  { printf '%s/%s/%s/meta.json'   "$CBUS_DIR" "$1" "$2"; }
+inbox_path() { printf '%s/%s/%s/inbox.jsonl' "$CBUS_DIR" "$1" "$2"; }
+
+# read a scalar field out of a json file
+jget() { # <file> <field>
+  [ -f "$1" ] || return 1
+  "$PY" -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")
+except Exception: pass' "$1" "$2"
+}
+
+pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+
+# walk up from the current process to the owning Claude Code process, so the
+# listener can be tied to the *session's* liveness, not just the tail's. an
+# orphaned tail (after a session crash) keeps running with a live pid, but its
+# owning `claude` pid is gone — that's the signal we record. prints the pid, or
+# nothing if no claude ancestor is found (caller falls back to pid-only checks).
+find_owner_pid() {
+  local p="$PPID" depth=0 comm
+  while [ -n "$p" ] && [ "$p" -gt 1 ] && [ "$depth" -lt 16 ]; do
+    comm="$(ps -p "$p" -o comm= 2>/dev/null || true)"
+    case "${comm##*/}" in claude|claude-*) printf '%s\n' "$p"; return 0 ;; esac
+    p="$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' ')"
+    depth=$((depth+1))
+  done
+  return 1
+}
+
+# a recorded listener is truly alive only if: its pid exists, that pid is still
+# *this* tail (args reference the inbox — guards against pid recycling), and the
+# owning session pid, if recorded, is alive (guards against an orphaned tail).
+meta_listener_alive() { # <meta.json>
+  local pid owner inbox
+  pid="$(jget "$1" listenerPid || true)"
+  [ -n "$pid" ] || return 1
+  pid_alive "$pid" || return 1
+  inbox="$(dirname "$1")/inbox.jsonl"
+  ps -ww -p "$pid" -o args= 2>/dev/null | grep -qF -- "$inbox" || return 1
+  owner="$(jget "$1" ownerPid || true)"
+  [ -n "$owner" ] || return 0
+  pid_alive "$owner"
+}
+
+# patch a single field into an existing meta.json (value "" clears it to null)
+jset() { # <file> <field> <value>
+  [ -f "$1" ] || return 1
+  "$PY" -c 'import json,sys
+m=json.load(open(sys.argv[1]))
+v=sys.argv[3]
+m[sys.argv[2]] = (int(v) if v.isdigit() else (None if v=="" else v))
+json.dump(m, open(sys.argv[1],"w"), indent=2)' "$1" "$2" "$3"
+}
+
+# split "channel/alias" (or bare "alias") into T_CH / T_AL
+T_CH="" T_AL=""
+split_target() {
+  case "$1" in
+    */*) T_CH="${1%%/*}"; T_AL="${1#*/}" ;;
+    *)   T_CH="";         T_AL="$1" ;;
+  esac
+}
+
+# every channel/alias registered to the current CLAUDE_CODE_SESSION_ID
+resolve_self() {
+  local sid="${CLAUDE_CODE_SESSION_ID:-}" m found=0
+  [ -n "$sid" ] || return 1
+  for m in "$CBUS_DIR"/*/*/meta.json; do
+    [ -f "$m" ] || continue
+    if [ "$(jget "$m" sessionId)" = "$sid" ]; then
+      printf '%s/%s\n' "$(basename "$(dirname "$(dirname "$m")")")" \
+                       "$(basename "$(dirname "$m")")"
+      found=1
+    fi
+  done
+  [ "$found" -eq 1 ]
+}
+
+# find a bare alias among the sender's own channels
+find_peer_channel() { # <alias>
+  local al="$1" line ch
+  while IFS= read -r line; do
+    ch="${line%%/*}"
+    [ -f "$(meta_path "$ch" "$al")" ] && { printf '%s\n' "$ch"; return 0; }
+  done < <(resolve_self 2>/dev/null || true)
+  return 1
+}
+
+# a peer is dead when its listener pid is gone — but a peer that never armed
+# (listenerPid null) gets a grace window so join's auto-prune can't sweep a
+# sibling that joined moments ago and hasn't started its Monitor yet.
+peer_dead() { # <meta.json>
+  local pid; pid="$(jget "$1" listenerPid || true)"
+  if [ -z "$pid" ]; then
+    [ -n "$(find "$1" -mmin +10 2>/dev/null)" ]
+  else
+    ! meta_listener_alive "$1"
+  fi
+}
+
+# drop dead peers in one channel; remove the channel dir once empty.
+# also clears a legacy v1 entry (meta.json directly at channel level).
+prune_channel() { # <channel>
+  local chdir="$CBUS_DIR/$1" d
+  [ -d "$chdir" ] || return 0
+  if [ -f "$chdir/meta.json" ]; then
+    if peer_dead "$chdir/meta.json"; then
+      rm -rf "$chdir"
+      printf 'pruned legacy peer %s\n' "$1" >&2
+    fi
+    return 0
+  fi
+  for d in "$chdir"/*/; do
+    [ -f "$d/meta.json" ] || continue
+    if peer_dead "$d/meta.json"; then
+      printf 'pruned %s/%s\n' "$1" "$(basename "$d")" >&2
+      rm -rf "$d"
+    fi
+  done
+  rmdir "$chdir" 2>/dev/null || true
+}
+
+pick_alias() { # <channel> — main if free, else lowest free fork-N
+  local ch="$1" n=1
+  [ -f "$(meta_path "$ch" main)" ] || { echo main; return; }
+  while [ -f "$(meta_path "$ch" "fork-$n")" ]; do n=$((n+1)); done
+  echo "fork-$n"
+}
+
+cmd_join() { # <channel> [alias]
+  local ch="${1:?usage: cbus join <channel> [alias]}"
+  local alias="${2:-}"
+  valid_name "$ch" || die "channel must be [A-Za-z0-9._-]"
+  prune_channel "$ch"
+  local line
+  while IFS= read -r line; do
+    if [ "${line%%/*}" = "$ch" ]; then
+      printf 'already joined "%s" as "%s"\n' "$ch" "${line#*/}"
+      printf 'listen (if not armed) with the Monitor tool: cbus tail %s\n' "$line"
+      return 0
+    fi
+  done < <(resolve_self 2>/dev/null || true)
+  if [ -z "$alias" ]; then
+    alias="$(pick_alias "$ch")"
+  else
+    valid_name "$alias" || die "alias must be [A-Za-z0-9._-]"
+    local m; m="$(meta_path "$ch" "$alias")"
+    [ -f "$m" ] && meta_listener_alive "$m" && die "\"$ch/$alias\" is taken by a live listener"
+  fi
+  local dir="$CBUS_DIR/$ch/$alias"
+  mkdir -p "$dir"
+  : > "$dir/inbox.jsonl"   # fresh peer, fresh inbox
+  "$PY" -c 'import json,sys
+json.dump({"alias":sys.argv[1],"channel":sys.argv[2],"sessionId":sys.argv[3],
+"cwd":sys.argv[4],"listenerPid":None,"ownerPid":None,"host":sys.argv[5],"ts":sys.argv[6]},
+open(sys.argv[7],"w"), indent=2)' \
+    "$alias" "$ch" "${CLAUDE_CODE_SESSION_ID:-}" "$PWD" \
+    "$(hostname -s 2>/dev/null || hostname)" "$(now)" "$dir/meta.json"
+  printf 'joined channel "%s" as "%s" (session %s)\n' "$ch" "$alias" "${CLAUDE_CODE_SESSION_ID:-none}"
+  printf 'address: %s/%s\n' "$ch" "$alias"
+  printf 'now arm listening with the Monitor tool: cbus tail %s/%s\n' "$ch" "$alias"
+}
+
+cmd_send() { # <target> [--from X] [--force] <text...>
+  local target="${1:?usage: cbus send <[channel/]alias> [--from X] <text>}"; shift
+  local from="" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) from="${2:?}"; shift 2 ;;
+      --force) force=1; shift ;;
+      *) break ;;
+    esac
+  done
+  local text="$*"
+  [ -n "$text" ] || die "empty message"
+  split_target "$target"
+  if [ -z "$T_CH" ]; then
+    T_CH="$(find_peer_channel "$T_AL")" \
+      || die "no peer \"$T_AL\" in your channels — use <channel>/<alias> (cbus list)"
+  fi
+  local tmeta; tmeta="$(meta_path "$T_CH" "$T_AL")"
+  [ -f "$tmeta" ] || die "no such peer \"$T_CH/$T_AL\" (cbus list)"
+  if ! meta_listener_alive "$tmeta"; then
+    if [ "$force" -eq 1 ]; then
+      printf 'cbus: warning: "%s/%s" is not listening — sending anyway\n' "$T_CH" "$T_AL" >&2
+    else
+      die "\"$T_CH/$T_AL\" is not listening; use --force to queue anyway"
+    fi
+  fi
+  if [ -z "$from" ]; then
+    # prefer own registration in the target channel, else first registration
+    local line
+    while IFS= read -r line; do
+      [ -z "$from" ] && from="$line"
+      [ "${line%%/*}" = "$T_CH" ] && { from="$line"; break; }
+    done < <(resolve_self 2>/dev/null || true)
+  fi
+  [ -n "$from" ] || from="${CBUS_ALIAS:-$(hostname -s 2>/dev/null || hostname)-$PPID}"
+  local line
+  line="$(FROM="$from" TO="$T_CH/$T_AL" TS="$(now)" TEXT="$text" "$PY" -c 'import json,os
+print(json.dumps({"from":os.environ["FROM"],"to":os.environ["TO"],
+"ts":os.environ["TS"],"text":os.environ["TEXT"]}))')"
+  printf '%s\n' "$line" >> "$(inbox_path "$T_CH" "$T_AL")"
+  printf 'sent to %s/%s (from %s)\n' "$T_CH" "$T_AL" "$from"
+}
+
+cmd_tail() { # <channel>/<alias> — used under the Monitor tool
+  split_target "${1:?usage: cbus tail <channel>/<alias>}"
+  if [ -z "$T_CH" ]; then
+    T_CH="$(find_peer_channel "$T_AL")" || die "use <channel>/<alias>"
+  fi
+  local inbox; inbox="$(inbox_path "$T_CH" "$T_AL")"
+  [ -f "$inbox" ] || die "no such peer \"$T_CH/$T_AL\" — join first"
+  # become the listener: exec makes tail inherit our pid, so when the Monitor
+  # tool kills this process the recorded pid dies and liveness flips to "off"
+  # on its own — no trap needed (a trap can't fire while tail -F is foreground).
+  # also record the owning claude pid so a crash-orphaned tail still reads dead.
+  local m; m="$(meta_path "$T_CH" "$T_AL")"
+  jset "$m" listenerPid "$$" || true
+  jset "$m" ownerPid "$(find_owner_pid || echo '')" || true
+  # raw JSON lines are the events (readable as-is). -n +1 replays from
+  # join (join truncates the inbox) so nothing sent between join and arming
+  # the monitor is lost; -F survives recreation.
+  exec tail -n +1 -F "$inbox" 2>/dev/null
+}
+
+cmd_list() { # [--active] [channel]
+  local active=0 chosen="" chdir d ch alias pid host cwd live any=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --active|-a) active=1; shift ;;
+      *) chosen="$1"; shift ;;
+    esac
+  done
+  for chdir in "$CBUS_DIR"/*/; do
+    [ -d "$chdir" ] || continue
+    ch="$(basename "$chdir")"
+    [ -z "$chosen" ] || [ "$ch" = "$chosen" ] || continue
+    if [ -f "$chdir/meta.json" ]; then
+      [ "$active" -eq 1 ] && continue
+      any=1
+      printf '%-7s %-28s legacy v1 entry — run: cbus prune\n' 'off   ' "$ch"
+      continue
+    fi
+    for d in "$chdir"*/; do
+      [ -f "$d/meta.json" ] || continue
+      if meta_listener_alive "$d/meta.json"; then live="listen"; else live="off   "; fi
+      [ "$active" -eq 1 ] && [ "$live" = "off   " ] && continue
+      any=1
+      alias="$(basename "$d")"
+      pid="$(jget "$d/meta.json" listenerPid || true)"
+      host="$(jget "$d/meta.json" host || true)"
+      cwd="$(jget "$d/meta.json" cwd || true)"
+      printf '%-7s %-28s pid=%-7s %s  %s\n' "$live" "$ch/$alias" "${pid:-?}" "${host:-?}" "${cwd:-?}"
+    done
+  done
+  [ "$any" -eq 1 ] || { [ "$active" -eq 1 ] && echo "no active listeners" || echo "no peers registered"; }
+}
+
+cmd_channels() {
+  local chdir d ch total live pid any=0
+  for chdir in "$CBUS_DIR"/*/; do
+    [ -d "$chdir" ] || continue
+    [ -f "$chdir/meta.json" ] && continue   # legacy v1 entry, not a channel
+    ch="$(basename "$chdir")"; total=0; live=0
+    for d in "$chdir"*/; do
+      [ -f "$d/meta.json" ] || continue
+      total=$((total+1))
+      meta_listener_alive "$d/meta.json" && live=$((live+1))
+    done
+    [ "$total" -gt 0 ] || continue
+    any=1
+    printf '%-20s %d peers (%d listening)\n' "$ch" "$total" "$live"
+  done
+  [ "$any" -eq 1 ] || echo "no channels"
+}
+
+cmd_prune() { # [channel]
+  local chosen="${1:-}" chdir n=0 out
+  for chdir in "$CBUS_DIR"/*/; do
+    [ -d "$chdir" ] || continue
+    [ -z "$chosen" ] || [ "$(basename "$chdir")" = "$chosen" ] || continue
+    out="$(prune_channel "$(basename "$chdir")" 2>&1)" || true
+    [ -n "$out" ] && { printf '%s\n' "$out"; n=$((n+1)); }
+  done
+  [ "$n" -gt 0 ] || echo "nothing to prune"
+}
+
+cmd_leave() { # [channel] — remove this session's registration(s)
+  local ch="${1:-}" line n=0
+  while IFS= read -r line; do
+    if [ -z "$ch" ] || [ "${line%%/*}" = "$ch" ]; then
+      rm -rf "${CBUS_DIR:?}/${line%%/*}/${line#*/}"
+      rmdir "$CBUS_DIR/${line%%/*}" 2>/dev/null || true
+      printf 'left %s\n' "$line"
+      n=$((n+1))
+    fi
+  done < <(resolve_self 2>/dev/null || true)
+  [ "$n" -gt 0 ] || die "not joined${ch:+ to \"$ch\"}"
+}
+
+cmd_unregister() { # <channel>/<alias> — force-remove any peer
+  split_target "${1:?usage: cbus unregister <channel>/<alias>}"
+  [ -n "$T_CH" ] || die "use <channel>/<alias>"
+  [ -d "$CBUS_DIR/$T_CH/$T_AL" ] || die "no such peer \"$T_CH/$T_AL\""
+  rm -rf "${CBUS_DIR:?}/$T_CH/$T_AL"
+  rmdir "$CBUS_DIR/$T_CH" 2>/dev/null || true
+  printf 'unregistered %s/%s\n' "$T_CH" "$T_AL"
+}
+
+cmd_whoami() {
+  resolve_self || { echo "not joined in this session"; return 1; }
+}
+
+cmd_inbox() {
+  split_target "${1:?usage: cbus inbox <channel>/<alias>}"
+  [ -n "$T_CH" ] || die "use <channel>/<alias>"
+  inbox_path "$T_CH" "$T_AL"
+}
+
+case "${1:-}" in
+  join)       shift; cmd_join "$@" ;;
+  register)   shift; cmd_join global "$@" ;;   # deprecated: v1 alias for the global channel
+  send)       shift; cmd_send "$@" ;;
+  tail)       shift; cmd_tail "$@" ;;
+  list|peers) shift; cmd_list "$@" ;;
+  active)     shift; cmd_list --active "$@" ;;
+  channels)   shift; cmd_channels ;;
+  prune)      shift; cmd_prune "$@" ;;
+  leave)      shift; cmd_leave "$@" ;;
+  unregister) shift; cmd_unregister "$@" ;;
+  whoami)     shift; cmd_whoami ;;
+  inbox)      shift; cmd_inbox "$@" ;;
+  ""|-h|--help)
+    cat <<'USAGE'
+cbus — message bus between live Claude Code sessions, in named channels
+
+  cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
+                                   prunes dead peers in the channel first)
+  cbus tail <channel>/<alias>      stream inbox (run under the Monitor tool)
+  cbus send <target> [opts] TEXT   append a message to a peer's inbox;
+                                   target is <channel>/<alias>, or a bare
+                                   <alias> within your own channel(s)
+       --from <ch/alias>           override sender (default: auto-resolved)
+       --force                     send even if target's pid looks dead
+  cbus list [--active] [channel]   peers with listen/off state, host, cwd
+  cbus active [channel]            only peers currently listening (= list --active)
+  cbus channels                    channels with peer counts
+  cbus whoami                      this session's channel/alias registrations
+  cbus inbox <channel>/<alias>     print inbox path
+  cbus prune [channel]             remove dead peers (and empty channels)
+  cbus leave [channel]             leave channel(s) this session joined
+  cbus unregister <channel>/<alias>  force-remove any peer
+
+convention: channel "global" is the machine-wide orchestrator bus; per-task or
+per-repo channels (e.g. the repo name) are the default for parent/fork pairs.
+
+env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3)
+USAGE
+    ;;
+  *) die "unknown command '${1}' (cbus --help)" ;;
+esac
