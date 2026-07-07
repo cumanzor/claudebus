@@ -153,6 +153,24 @@ A channel is an N-way registry, not a pair. Every session that joins the same
 channel can message every other; aliases are auto-assigned and recycled
 (`main`, then `fork-1`, `fork-2`, … reusing freed slots).
 
+## Networked relay (NUC)
+
+`relay/` holds `cbus-relay`, a std-lib-only Go daemon that extends the bus across
+machines (epic in progress; the cbus client side lands separately):
+
+- **`POST /send`** (bearer token) appends `{from,to,ts,text}` — the exact local
+  inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
+- **`GET /tail?channel=&alias=`** upgrades to WebSocket, authed via
+  `Sec-WebSocket-Protocol: bearer.cbus.<token>` (k8s-apiserver pattern — the
+  Claude Code Monitor `ws:` source can't send headers). Replays queued messages,
+  then streams; delivered messages move `new/` → `cur/` (at-least-once).
+- **`GET /peers`** (bearer) — presence/queue depth; liveness = relay presence +
+  30s/90s ping heartbeat, not pids. **`/healthz`** — unauthenticated.
+- Runs as systemd unit `cbus-relay` on the NUC, loopback `127.0.0.1:8090`,
+  fronted by the CF tunnel. Deploy with `relay/deploy.sh` (builds on the NUC).
+- One active tail per peer: a new `/tail` displaces the old (per-message
+  displacement checks — no duplicate delivery on handover).
+
 ## CLI reference
 
 ```

@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-07 16:00:00 UTC] [Relay] New relay/ — std-lib-only Go daemon on the NUC: POST /send (bearer) → Maildir spool → WS /tail (subprotocol token, k8s pattern) → Monitor {ws:} events. Presence heartbeat, single-tail displacement (dup-free, race-fixed after gpt-5.5 review), systemd unit, deploy.sh. Verified end-to-end incl. kill -9 durability and a real Mac Monitor consuming a relay push.
+
 [2026-07-07 04:05:00 UTC] [CLI/Commands] New `cbus branch [target] [channel]` — join + channel-derive + fork with bootstrap prompt in one command. `/bus-branch` slims to two tool calls (branch, then arm Monitor); cc-branch.sh and its hardcoded path drop out of the skill's allowed-tools (helper resolved by cbus, override via CC_BRANCH).
 
 [2026-07-07 03:40:00 UTC] [Docs] Corrected delivery semantics: Monitor events are push — an idle session wakes and acts autonomously (verified live: parent replied to a bus message with no user present); "turn boundary" only defers delivery on a busy session.

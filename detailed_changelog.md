@@ -1,5 +1,67 @@
 # Changelog (detailed)
 
+## [2026-07-07 16:00:00 UTC] [Relay] cbus-relay daemon on the NUC — networked leg of the bus
+
+[Attempt #1]
+
+First subtask of the networked-relay epic: a std-lib-only Go daemon that carries
+bus messages across machines. Send = HTTP POST; receive = WebSocket consumed by
+Claude Code's Monitor `{ws:}` source, so delivery stays turn-native with no
+polling. Auth split per the endorsed design: bearer token on /send (CF Access
+service token fronts it in prod), `Sec-WebSocket-Protocol: bearer.cbus.<token>`
+on /tail (k8s-apiserver pattern; Monitor can't send custom headers).
+
+### [Files Changed]
+
+- `relay/go.mod`, `relay/internal/wire/ws.go` — hand-rolled minimal WebSocket:
+  server upgrade (GET+version+key validation, subprotocol echo in the 101),
+  client dial (handshake deadline, strict 101 parse, accept-key check), frame IO
+  (masking-direction enforcement, RSV/opcode/control-size validation, 1MiB cap,
+  per-write deadlines via Conn.WriteTimeout).
+- `relay/internal/spool/spool.go` — Maildir store tmp→new→cur (atomic renames,
+  enqueue-ordered names). Process-crash-safe; explicitly NOT fsync/power-loss
+  durable (documented decision).
+- `relay/cmd/cbus-relay/main.go` — /send, /tail, /peers, /healthz; presence hub;
+  single-active-tail displacement with per-message done-checks and ENOENT-
+  tolerant mark (dup-free handover); 30s ping / 90s pong-grace heartbeat;
+  constant-time token compares; name validation (no `.`/`..`); 5s
+  ReadHeaderTimeout.
+- `relay/cmd/wstail/main.go` — test client mirroring Monitor's behavior.
+- `relay/cbus-relay.service`, `relay/deploy.sh` — systemd unit (vuegraf
+  template) + idempotent rsync/build/token/enable deploy.
+- `README.md` — "Networked relay (NUC)" section.
+
+### [Review]
+
+zen codereview (gpt-5.5, high thinking): 1 HIGH (displacement/drain overlap
+could duplicate delivery and kill the displacing tail on a mark race) — fixed +
+regression-tested; 4 MEDIUM applied (write deadlines, masking enforcement,
+frame validation, pong payload echo); 2 MEDIUM declined with rationale
+(fsync power-loss durability — overkill for a session bus, documented instead;
+seq-first spool names — breaks cross-restart ordering); LOWs applied
+(version/key validation, ReadHeaderTimeout, Peers error propagation, wstail
+strict status parse + handshake deadline).
+
+### [Possible Ripple Effects]
+
+- NUC gains a systemd service `cbus-relay` on loopback :8090 and a token file
+  `/home/relay/cbus-relay/token` (0600). Not yet exposed via CF (epic .4).
+- Message shape over the relay is identical to local inbox lines, so the .3
+  client work needs no translation layer.
+- At-least-once delivery: crash between WS write and new/→cur move redelivers.
+
+### [Testing Notes]
+
+On-NUC suite (loopback :8091, throwaway spool): healthz; 401 unauth; queue→new/;
+name validation 400; wrong WS token refused pre-upgrade; subprotocol echoed;
+in-order replay; new/→cur moves; live push while connected; presence
+connect/disconnect flips; kill -9 → restart → queued message replayed; systemd
+revive after SIGKILL (pid changed, service active). Displacement regression:
+7 msgs across an A→B tail handover → 7 delivered, 7 unique, 0 leftover.
+Mac-side contract test: ssh -L forward, real Monitor `{ws:}` with subprotocol
+token armed in a live session, curl POST /send → message arrived as a Monitor
+turn event. This is the exact .3 consumption path, proven before CF wiring.
+
 ## [2026-07-07 04:05:00 UTC] [CLI / Commands] `cbus branch` — collapse /bus-branch parent-side turns
 
 [Attempt #1]
