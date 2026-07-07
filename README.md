@@ -87,9 +87,8 @@ This places:
 
 Make sure `~/.local/bin` is on your `PATH`.
 
-> **Paths:** `commands/bus-branch.md` hardcodes the absolute path to `cc-branch.sh`
-> (Claude Code slash commands need absolute paths in `allowed-tools`). If your `$HOME`
-> or config dir differs, edit that path. `cc-branch.sh` itself relaunches through
+> **Paths:** `cbus branch` finds the fork helper at `~/.claude/bin/cc-branch.sh`
+> (override with `CC_BRANCH=/path`). `cc-branch.sh` itself relaunches through
 > `ccs <profile>` when it detects a CCS config dir — drop that branch if you don't use
 > CCS and just call `claude` directly.
 
@@ -102,12 +101,12 @@ Make sure `~/.local/bin` is on your `PATH`.
 /bus-branch window mytask     # explicit channel name
 ```
 
-Joins the parent to the channel, arms the parent's listener, then forks the
-current conversation into a new terminal via `cc-branch.sh` with a bootstrap
-turn (printed by `cbus bootstrap <channel> <parent>`, so the prompt ships with
-the binary): the child self-joins the same channel, arms its own listener, and
-announces itself to the parent. The child reports results back with `cbus send`
-instead of a handoff doc.
+Runs `cbus branch <target> [channel]` — a single command that joins the parent
+to the channel and forks the conversation into a new terminal (via
+`cc-branch.sh`) with the canonical bootstrap turn — then arms the parent's
+listener. The child self-joins the same channel, arms its own listener, and
+announces itself to the parent, reporting results back with `cbus send` instead
+of a handoff doc.
 
 The child resumes the parent's transcript at boot, so it sees the parent's live
 Monitor as one harmless "no completion record" background-task note. This is
@@ -171,11 +170,13 @@ cbus channels                    channels with peer counts
 cbus whoami                      this session's channel/alias memberships
 cbus inbox <channel>/<alias>     print inbox path
 cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
+cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
 cbus prune [channel]             remove dead peers (and empty channels)
 cbus leave [channel]             leave channel(s) this session joined
 cbus unregister <channel>/<alias>  force-remove any peer
 
-env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3)
+env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),
+     CC_BRANCH (fork helper path, default ~/.claude/bin/cc-branch.sh)
 ```
 
 `cbus register <alias>` is kept as a deprecated v1 alias for `cbus join global <alias>`.

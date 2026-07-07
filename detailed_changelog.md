@@ -1,5 +1,45 @@
 # Changelog (detailed)
 
+## [2026-07-07 04:05:00 UTC] [CLI / Commands] `cbus branch` — collapse /bus-branch parent-side turns
+
+[Attempt #1]
+
+/bus-branch was slow: the parent side alone took 3-4 model turns (join, think,
+fork, think, arm), each a full round-trip. The dominant child-boot cost
+(`--fork-session` re-reads the whole parent transcript) is inherent to forking
+and deliberately left alone — the user chose to slim the parent side only.
+
+### [Files Changed]
+
+- `bin/cbus`: new `cmd_branch [window|tab|tmux] [channel]` — derives the channel
+  from the git repo basename when omitted (fallback `global`), joins
+  idempotently, resolves the parent alias, and invokes the fork helper with
+  `--prompt "$(cbus bootstrap <ch> <alias>)"`. Helper path defaults to
+  `~/.claude/bin/cc-branch.sh`, overridable via `CC_BRANCH` (also the test
+  seam). Dispatch + usage + env docs updated.
+- `commands/bus-branch.md`: reduced to two tool calls — `cbus branch <target>
+  [channel]`, then arm the Monitor. AskUserQuestion only when no target passed.
+  `cc-branch.sh` (and its per-user absolute path) dropped from `allowed-tools`
+  entirely — `Bash(cbus:*)` now covers the whole flow, which also resolves the
+  review finding about the hardcoded path breaking other users.
+- `README.md`, `CHEATSHEET.md`: `cbus branch` in CLI reference, fork-flow
+  description updated, obsolete hardcoded-path caveat replaced with `CC_BRANCH`.
+
+### [Possible Ripple Effects]
+
+- Channel derivation moved from skill prose (model-executed) into shell — same
+  rule (`basename $(git rev-parse --show-toplevel)`, sanitized), now
+  deterministic and prompt-drift-proof.
+- Skills installed to `~/.claude/commands` must be reinstalled for the slimmed
+  /bus-branch to take effect.
+
+### [Testing Notes]
+
+- Stub helper via `CC_BRANCH` (no real windows): repo cwd derives channel
+  `claudebus`; non-repo cwd falls back to `global`; explicit channel wins;
+  idempotent re-branch keeps the same parent alias; bad target and missing
+  helper produce clear errors; bootstrap prompt passed through intact. PASS.
+
 ## [2026-07-07 03:04:06 UTC] [Core / CLI / Commands] Review fix set — send gate, join atomicity, re-arm replay, bootstrap subcommand, fork-ordering revert
 
 [Attempt #1] (fork-ordering is Attempt #2 — the first attempt, arm-after-fork,

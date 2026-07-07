@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-07 04:05:00 UTC] [CLI/Commands] New `cbus branch [target] [channel]` — join + channel-derive + fork with bootstrap prompt in one command. `/bus-branch` slims to two tool calls (branch, then arm Monitor); cc-branch.sh and its hardcoded path drop out of the skill's allowed-tools (helper resolved by cbus, override via CC_BRANCH).
+
 [2026-07-07 03:40:00 UTC] [Docs] Corrected delivery semantics: Monitor events are push — an idle session wakes and acts autonomously (verified live: parent replied to a bus message with no user present); "turn boundary" only defers delivery on a busy session.
 
 [2026-07-07 03:04:06 UTC] [Core] `send` now accepts a joined-but-never-armed peer (first arm replays the inbox); only a dead ex-listener is refused. Fixes the self-contradiction with the join→arm replay design.

@@ -42,7 +42,8 @@ Incoming messages arrive in your session as JSON events:
 ```sh
 cbus join <channel> [alias]      # what /bus-listen does first (idempotent)
 cbus tail <channel>/<alias>      # the listener — armed via the Monitor tool
-cbus bootstrap <channel> [parent] # canonical fork-child prompt (used by /bus-branch)
+cbus bootstrap <channel> [parent] # canonical fork-child prompt
+cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-branch runs)
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)

@@ -362,6 +362,30 @@ cmd_inbox() {
   inbox_path "$T_CH" "$T_AL"
 }
 
+# one-shot parent side of /bus-branch: derive channel, join (idempotent), fork
+# with the canonical bootstrap prompt. collapses what used to be three model
+# turns into a single command; the caller only arms the Monitor afterwards.
+cmd_branch() { # [window|tab|tmux] [channel]
+  local target="${1:-window}" ch="${2:-}"
+  case "$target" in window|tab|tmux) ;; *) die "target must be window|tab|tmux" ;; esac
+  if [ -z "$ch" ]; then
+    ch="$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null | tr -cd 'A-Za-z0-9._-')"
+    [ -n "$ch" ] || ch=global
+  fi
+  valid_name "$ch" || die "bad channel \"$ch\""
+  cmd_join "$ch" >/dev/null
+  local line alias=""
+  while IFS= read -r line; do
+    [ "${line%%/*}" = "$ch" ] && { alias="${line#*/}"; break; }
+  done < <(resolve_self 2>/dev/null || true)
+  [ -n "$alias" ] || die "failed to join \"$ch\""
+  local helper="${CC_BRANCH:-$HOME/.claude/bin/cc-branch.sh}"
+  [ -x "$helper" ] || die "fork helper not found: $helper (set CC_BRANCH)"
+  "$helper" "$target" --prompt "$(cmd_bootstrap "$ch" "$alias")"
+  printf 'parent: %s/%s (child will announce itself on the bus)\n' "$ch" "$alias"
+  printf 'arm listening (if not armed) with the Monitor tool: cbus tail %s/%s\n' "$ch" "$alias"
+}
+
 # canonical bootstrap turn for a forked child session — keeping it here (not
 # duplicated in skill files) means prompt fixes ship with the binary.
 cmd_bootstrap() { # <channel> [parent-alias]
@@ -388,6 +412,7 @@ case "${1:-}" in
   whoami)     shift; cmd_whoami ;;
   inbox)      shift; cmd_inbox "$@" ;;
   bootstrap)  shift; cmd_bootstrap "$@" ;;
+  branch)     shift; cmd_branch "$@" ;;
   ""|-h|--help)
     cat <<'USAGE'
 cbus — message bus between live Claude Code sessions, in named channels
@@ -410,6 +435,9 @@ cbus — message bus between live Claude Code sessions, in named channels
   cbus whoami                      this session's channel/alias registrations
   cbus inbox <channel>/<alias>     print inbox path
   cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
+  cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
+                                   (target: window|tab|tmux; channel auto-derives
+                                   from the git repo name; arm the Monitor after)
   cbus prune [channel]             remove dead peers (and empty channels)
   cbus leave [channel]             leave channel(s) this session joined
   cbus unregister <channel>/<alias>  force-remove any peer
@@ -417,7 +445,8 @@ cbus — message bus between live Claude Code sessions, in named channels
 convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.
 
-env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3)
+env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),
+     CC_BRANCH (fork helper path, default ~/.claude/bin/cc-branch.sh)
 USAGE
     ;;
   *) die "unknown command '${1}' (cbus --help)" ;;
