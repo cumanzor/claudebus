@@ -42,6 +42,7 @@ Incoming messages arrive in your session as JSON events:
 ```sh
 cbus join <channel> [alias]      # what /bus-listen does first (idempotent)
 cbus tail <channel>/<alias>      # the listener — armed via the Monitor tool
+cbus bootstrap <channel> [parent] # canonical fork-child prompt (used by /bus-branch)
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
@@ -50,7 +51,12 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ## Gotchas
 
 - Delivery is **at turn boundaries** — a peer sees your message next time it acts.
-- `send` **refuses a dead peer** unless `--force` (which just queues it).
+- `send` **refuses a dead ex-listener** unless `--force` (best effort — a re-arm
+  follows from the end of the inbox, so the queued line may never be delivered);
+  a joined-but-not-yet-armed peer is always accepted (first arm replays the inbox;
+  re-arms follow from the end, no redelivery).
+- Reply targets must be `channel/alias` — a `hostname-PID` sender is unjoined and
+  has no inbox to reply to.
 - **Liveness** = the real `tail` pid, cross-checked against its inbox args (no
   false `listen` from a recycled pid) and the owning `claude` pid (a crash-orphaned
   tail still reads `off`). A clean exit kills the tail via the Monitor.

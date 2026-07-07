@@ -45,13 +45,16 @@ Each participating session **joins a channel** and **arms a listener**:
 
 ### Design details worth knowing
 
-- **No lost messages during setup.** `join` truncates the inbox and the listener
-  replays from line 1 (`tail -n +1 -F`), so anything sent between *join* and
-  *arming the Monitor* is still delivered — there's no silent race window.
+- **No lost messages during setup.** `join` truncates the inbox and the *first*
+  arm replays from line 1 (`tail -n +1 -F`), so anything sent between *join* and
+  *arming the Monitor* is still delivered — `send` accepts a joined-but-not-yet-
+  armed peer for exactly this reason. A *re*-arm follows from the end of the
+  inbox instead, so old messages are never redelivered.
 - **Liveness is a real process, not a stale flag.** The tracked `listenerPid` *is*
   the `tail` process. When a window closes or the Monitor is stopped, the peer flips
   to `off` on its own, and `cbus send` refuses to message a dead window (override
-  with `--force`, which just queues the line). Two edge cases are hardened:
+  with `--force`, which queues the line best-effort — a re-arm follows from the
+  end of the inbox, so it may never be delivered). Two edge cases are hardened:
   - *pid recycling* — a live pid is only trusted if its process args still
     reference this peer's inbox, so an unrelated process that inherited the number
     doesn't read as a false `listen`.
@@ -98,12 +101,17 @@ Make sure `~/.local/bin` is on your `PATH`.
 /bus-branch window mytask     # explicit channel name
 ```
 
-Joins the parent to the channel, forks the current conversation into a new
-terminal via `cc-branch.sh` with a bootstrap turn (so the child self-joins the
-same channel, arms its own listener, and announces itself to the parent), then
-arms the parent's listener. The fork happens *before* the parent's Monitor is
-armed so the child's transcript snapshot doesn't contain a stale background-task
-record. The child reports results back with `cbus send` instead of a handoff doc.
+Joins the parent to the channel, arms the parent's listener, then forks the
+current conversation into a new terminal via `cc-branch.sh` with a bootstrap
+turn (printed by `cbus bootstrap <channel> <parent>`, so the prompt ships with
+the binary): the child self-joins the same channel, arms its own listener, and
+announces itself to the parent. The child reports results back with `cbus send`
+instead of a handoff doc.
+
+The child resumes the parent's transcript at boot, so it sees the parent's live
+Monitor as one harmless "no completion record" background-task note. This is
+cosmetic and unavoidable — the transcript is read when the child starts, always
+after the parent armed — and the bootstrap prompt tells the child to ignore it.
 
 ### Put two already-open sessions on a channel
 
@@ -155,12 +163,13 @@ cbus send <target> [opts] TEXT   append a message to a peer's inbox;
                                  target is <channel>/<alias>, or a bare
                                  <alias> within your own channel(s)
      --from <ch/alias>           override sender (default: auto-resolved)
-     --force                     send even if target isn't currently listening
+     --force                     send even if target's listener died (best effort)
 cbus list [--active] [channel]   peers with listen/off state, host, cwd
 cbus active [channel]            only peers currently listening (= list --active)
 cbus channels                    channels with peer counts
 cbus whoami                      this session's channel/alias memberships
 cbus inbox <channel>/<alias>     print inbox path
+cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
 cbus prune [channel]             remove dead peers (and empty channels)
 cbus leave [channel]             leave channel(s) this session joined
 cbus unregister <channel>/<alias>  force-remove any peer
