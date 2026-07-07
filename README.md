@@ -38,7 +38,8 @@ Each participating session **joins a channel** and **arms a listener**:
   **Monitor** tool (persistent). `tail` `exec`s in place so *its own pid* becomes
   the liveness signal. Each incoming line arrives in that session's conversation
   as a JSON event `{"from","to","ts","text"}` (addresses in full `channel/alias`
-  form), delivered at a turn boundary.
+  form) — push delivery: an idle session is woken immediately; a busy one sees it
+  when its current step completes.
 - **Send** — `cbus send <channel>/<alias> "text"` appends a line to the target's
   inbox. Within your own channel a bare alias works: `cbus send fork-1 "text"`.
   The sender's `from` is resolved automatically from `$CLAUDE_CODE_SESSION_ID`.
@@ -187,8 +188,12 @@ env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3)
   but don't expose the bus directory beyond your own machine.
 - **Channels are namespaces, not isolation.** Any local process can send to any channel;
   the channel only scopes addressing and cleanup.
-- **Delivery is at turn boundaries.** A message lands the next time the receiving session
-  takes a turn — it won't interrupt a session that's sitting idle mid-prompt until it acts.
+- **Delivery is push — an idle session wakes and can act autonomously.** A Monitor
+  event re-invokes the receiving agent on its own: a session sitting idle at the
+  prompt processes the message (and can reply) with no human present. Only a *busy*
+  session defers — the event queues until its current step completes rather than
+  interrupting it. Corollary: a peer message can trigger action while you're away,
+  which is why incoming messages are treated as untrusted peer requests.
 - **No broadcast primitive.** `cbus send` targets one peer; message N times to reach N peers.
 - **Requires `python3`** (used only for robust JSON read/write) and a BSD/GNU `tail` with `-F`.
 

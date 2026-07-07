@@ -50,7 +50,8 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 
 ## Gotchas
 
-- Delivery is **at turn boundaries** — a peer sees your message next time it acts.
+- Delivery is **push** — an idle peer is woken by the event and can act/reply with
+  no human present; a busy peer sees it when its current step completes.
 - `send` **refuses a dead ex-listener** unless `--force` (best effort — a re-arm
   follows from the end of the inbox, so the queued line may never be delivered);
   a joined-but-not-yet-armed peer is always accepted (first arm replays the inbox;

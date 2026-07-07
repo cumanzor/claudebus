@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-07 03:40:00 UTC] [Docs] Corrected delivery semantics: Monitor events are push — an idle session wakes and acts autonomously (verified live: parent replied to a bus message with no user present); "turn boundary" only defers delivery on a busy session.
+
 [2026-07-07 03:04:06 UTC] [Core] `send` now accepts a joined-but-never-armed peer (first arm replays the inbox); only a dead ex-listener is refused. Fixes the self-contradiction with the join→arm replay design.
 [2026-07-07 03:04:06 UTC] [Core] Atomic alias claim on `join` — bare `mkdir` as the lock, so concurrent joins can't pick the same alias and truncate each other's inbox.
 [2026-07-07 03:04:06 UTC] [Core] Re-arm no longer redelivers the whole inbox — `-n +1` only on first arm, `-n 0` after. `--force` to a dead ex-listener is now documented best-effort.
