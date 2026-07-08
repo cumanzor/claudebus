@@ -37,6 +37,23 @@ Incoming messages arrive in your session as JSON events:
 `{"from":"ch/alias","to":"ch/alias","ts",...,"text":...}` — reply with
 `cbus send <from> "..."`.
 
+## Cross-machine (relay-backed) channels
+
+Address form: `<channel>@<host>/<alias>` — aliases are explicit (short
+hostname/role). One host today: `nuc`.
+
+```sh
+cbus auth set nuc --token - --cf-id - --cf-secret -  # one-time seed (Keychain; from 1Password)
+cbus send dev@nuc/nuc "ping"       # queues if peer offline; replay on connect
+cbus tail dev@nuc/mbp              # prints Monitor {ws:} arm spec + claims identity
+cbus list @nuc                     # relay peers: connected/queued/lastSeen
+cbus leave dev@nuc                 # drop local identity marker
+```
+
+- Endpoint autodetects: loopback on the relay host, else `wss://bus.example.com` + CF Access.
+- Remote receive = the session arms `Monitor {ws:}` from the printed spec.
+- Arm a tail first: it records your identity so `send`'s `from` is routable.
+
 ## Under the hood (rarely needed)
 
 ```sh

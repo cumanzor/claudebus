@@ -171,6 +171,37 @@ machines (epic in progress; the cbus client side lands separately):
 - One active tail per peer: a new `/tail` displaces the old (per-message
   displacement checks — no duplicate delivery on handover).
 
+### Using remote channels from cbus
+
+The client speaks to the relay through the `<channel>@<host>/<alias>` address
+form (one host today: `nuc`):
+
+```sh
+cbus auth set nuc --token - --cf-id - --cf-secret -   # seed macOS Keychain (values from 1Password; '-' reads stdin)
+cbus send dev@nuc/nuc "build finished"                # POST /send — queues if the peer is offline
+cbus tail dev@nuc/mbp                                 # prints the Monitor ws arm spec + claims 'mbp' as your identity
+cbus list @nuc                                        # peers the relay knows: connected / queued / lastSeen
+cbus leave dev@nuc                                    # drop the local identity marker
+```
+
+Details that matter:
+
+- **Aliases are explicit** — pick a short hostname/role (`mbp`, `nuc`, `ci`).
+  There's no remote registry; a taken alias is self-evident because the relay
+  keeps one active tail per peer (your Monitor visibly drops if displaced).
+- **Endpoint autodetects**: a session on the relay host probes
+  `127.0.0.1:8090/healthz` and talks loopback with no CF Access; everyone else
+  goes through `https://bus.example.com` with CF Access service-token headers.
+- **Credentials are never in code**: `cbus auth` stores them in the macOS
+  Keychain (`security(1)`) or, on Linux, 0600 files under `~/.config/cbus/`.
+- **Receive is Monitor-native**: remote `tail` prints the `Monitor {ws:}` arm
+  spec (URL + `bearer.cbus.<token>` subprotocol) rather than exec'ing a
+  process — the session arms it, and messages arrive as turn events exactly
+  like local ones.
+- Arming a remote tail records an **identity marker** so later sends on that
+  channel auto-fill a routable `from`; without one, `from` falls back to
+  `hostname-PID` (unroutable — same caveat as local unjoined senders).
+
 ## CLI reference
 
 ```
@@ -190,6 +221,14 @@ cbus inbox <channel>/<alias>     print inbox path
 cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
 cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
 cbus prune [channel]             remove dead peers (and empty channels)
+
+remote (relay-backed) — address form <channel>@<host>/<alias>:
+cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
+cbus tail <ch>@<host>/<al>       print Monitor ws arm spec + claim identity
+cbus list [<ch>]@<host>          relay peers: connected / queued / lastSeen
+cbus leave <ch>@<host>           drop the local identity marker
+cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   ('-' = stdin)
+cbus auth status [host]          credential state, masked
 cbus leave [channel]             leave channel(s) this session joined
 cbus unregister <channel>/<alias>  force-remove any peer
 

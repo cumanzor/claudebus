@@ -12,6 +12,14 @@ The user passed: "$ARGUMENTS" — optional channel, optional alias.
    basename (`basename $(git rev-parse --show-toplevel)`, sanitized to
    `[A-Za-z0-9._-]`), else `global`. To join the machine-wide orchestrator bus
    explicitly, the user passes `global`.
+
+   **Remote channel?** If the channel contains `@` (e.g. `dev@nuc`), it's
+   relay-backed and cross-machine: pick an explicit alias (short hostname/role,
+   e.g. `mbp`), run `cbus tail <channel>/<alias>` (full form `dev@nuc/mbp`) to
+   get the **Monitor ws arm spec**, arm the Monitor from it (`ws:` source, NOT
+   a command), and skip steps 2-3 below. `cbus list @<host>` shows remote
+   peers. Requires `cbus auth` credentials — if missing, tell the user to run
+   `cbus auth set <host>` with values from 1Password.
 2. Run `cbus join <channel> [alias]` — alias is optional; the CLI auto-picks
    (`main`, then `fork-N`) and prunes dead peers in the channel first. Note the
    `channel/alias` address it prints.

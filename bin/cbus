@@ -113,6 +113,155 @@ find_peer_channel() { # <alias>
   return 1
 }
 
+# ---- remote (relay-backed) channels: <channel>@<host>/<alias> ----
+# a remote channel lives AT a relay site; aliases are explicit by convention
+# (short hostname/role). collisions are self-evident: the relay keeps one
+# active tail per peer, so a taken alias visibly displaces the other Monitor.
+
+R_CH="" R_HOST="" R_AL=""
+split_remote() { # <channel>@<host>[/<alias>]  (empty channel allowed for list)
+  local rest="${1#*@}"
+  R_CH="${1%%@*}"
+  case "$rest" in
+    */*) R_HOST="${rest%%/*}"; R_AL="${rest#*/}" ;;
+    *)   R_HOST="$rest";       R_AL="" ;;
+  esac
+  [ -z "$R_CH" ] || valid_name "$R_CH" || die "bad channel \"$R_CH\""
+  valid_name "$R_HOST" || die "bad host \"$R_HOST\""
+  [ -z "$R_AL" ] || valid_name "$R_AL" || die "bad alias \"$R_AL\""
+}
+
+site_public_url() { # <host> — env CBUS_SITE_<HOST>_URL overrides the built-in
+  local var="CBUS_SITE_$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')_URL"
+  local v="${!var:-}"
+  if [ -n "$v" ]; then printf '%s' "$v"; return; fi
+  case "$1" in
+    nuc) printf 'https://bus.example.com' ;;
+    *) die "unknown relay host \"$1\" (set $var)" ;;
+  esac
+}
+
+# front-door pick: a session ON the relay host reaches it at loopback (no CF
+# Access); everyone else goes through the public hostname. zero config — probe.
+relay_base() { # <host> -> "local <url>" | "public <url>"
+  local lu="${CBUS_RELAY_LOCAL_URL:-http://127.0.0.1:8090}"
+  if curl -fsS -m 0.3 "$lu/healthz" 2>/dev/null | grep -q '^ok$'; then
+    printf 'local %s' "$lu"
+  else
+    printf 'public %s' "$(site_public_url "$1")"
+  fi
+}
+
+ws_url() { # http(s) url -> ws(s) url
+  case "$1" in
+    https://*) printf 'wss://%s' "${1#https://}" ;;
+    http://*)  printf 'ws://%s'  "${1#http://}" ;;
+  esac
+}
+
+# credentials: macOS Keychain (security(1)); Linux 0600 files. never hardcoded.
+auth_store_dir() { printf '%s/cbus/%s' "${XDG_CONFIG_HOME:-$HOME/.config}" "$1"; }
+auth_get() { # <host> <field: token|cf-id|cf-secret>
+  if [ "$(uname -s)" = Darwin ]; then
+    security find-generic-password -s "cbus-relay-$1" -a "$2" -w 2>/dev/null
+  else
+    cat "$(auth_store_dir "$1")/$2" 2>/dev/null
+  fi
+}
+auth_put() { # <host> <field> <value>
+  if [ "$(uname -s)" = Darwin ]; then
+    security add-generic-password -U -s "cbus-relay-$1" -a "$2" -w "$3" >/dev/null
+  else
+    local d; d="$(auth_store_dir "$1")"
+    (umask 077 && mkdir -p "$d" && printf '%s' "$3" > "$d/$2")
+  fi
+}
+
+# identity marker: arming a remote tail claims that alias as this machine's
+# default `from` on that channel (last arm wins; --from overrides per send)
+marker_path() { printf '%s/.remote/%s/%s' "$CBUS_DIR" "$1" "$2"; } # <host> <ch>
+
+# assemble curl auth args for a relay call into the given array name
+relay_auth_args() { # <host> <mode> <arrayname>
+  local token cfid cfsec
+  token="$(auth_get "$1" token)" || die "no relay token for \"$1\" — run: cbus auth set $1 --token -"
+  eval "$3+=(-H \"Authorization: Bearer \$token\")"
+  if [ "$2" = public ]; then
+    cfid="$(auth_get "$1" cf-id)"   || die "no cf-id for \"$1\" — run: cbus auth set $1 --cf-id -"
+    cfsec="$(auth_get "$1" cf-secret)" || die "no cf-secret for \"$1\" — run: cbus auth set $1 --cf-secret -"
+    eval "$3+=(-H \"CF-Access-Client-Id: \$cfid\" -H \"CF-Access-Client-Secret: \$cfsec\")"
+  fi
+}
+
+cmd_send_remote() { # <ch@host/alias> [--from X] <text...>
+  split_remote "$1"; shift
+  [ -n "$R_AL" ] || die "remote send needs <channel>@<host>/<alias>"
+  local from=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) from="${2:?}"; shift 2 ;;
+      --force) shift ;;   # meaningless remotely: the spool always queues
+      *) break ;;
+    esac
+  done
+  local text="$*"
+  [ -n "$text" ] || die "empty message"
+  local mode base; read -r mode base <<<"$(relay_base "$R_HOST")"
+  local args=(-fsS -X POST "$base/send" -H "Content-Type: application/json")
+  relay_auth_args "$R_HOST" "$mode" args
+  if [ -z "$from" ]; then
+    local m; m="$(marker_path "$R_HOST" "$R_CH")"
+    if [ -f "$m" ]; then
+      from="$R_CH@$R_HOST/$(cat "$m")"
+    else
+      from="$(hostname -s 2>/dev/null || hostname)-$PPID"  # unroutable; documented
+    fi
+  fi
+  local payload
+  payload="$(CH="$R_CH" AL="$R_AL" FROM="$from" TEXT="$text" "$PY" -c 'import json,os
+print(json.dumps({"channel":os.environ["CH"],"alias":os.environ["AL"],
+"from":os.environ["FROM"],"text":os.environ["TEXT"]}))')"
+  curl "${args[@]}" -d "$payload" >/dev/null || die "relay send failed ($mode $base)"
+  printf 'sent to %s@%s/%s via %s relay (from %s)\n' "$R_CH" "$R_HOST" "$R_AL" "$mode" "$from"
+}
+
+cmd_tail_remote() { # <ch@host/alias> — emit the Monitor ws arm spec + claim identity
+  split_remote "$1"
+  [ -n "$R_AL" ] || die "remote tail needs <channel>@<host>/<alias>"
+  local mode base token; read -r mode base <<<"$(relay_base "$R_HOST")"
+  token="$(auth_get "$R_HOST" token)" || die "no relay token for \"$R_HOST\" — run: cbus auth set $R_HOST --token -"
+  local url; url="$(ws_url "$base")/tail?channel=$R_CH&alias=$R_AL"
+  local m; m="$(marker_path "$R_HOST" "$R_CH")"
+  mkdir -p "$(dirname "$m")" && printf '%s\n' "$R_AL" > "$m"
+  cat <<EOF
+remote listening is armed with the Monitor tool's ws source (not a command):
+  url:         $url
+  protocols:   ["bearer.cbus.$token"]
+  description: cbus:$R_CH@$R_HOST/$R_AL   (persistent: true)
+identity recorded: sends to $R_CH@$R_HOST/* default to from=$R_CH@$R_HOST/$R_AL
+note: the protocols entry carries the relay token — expected; it IS the auth.
+EOF
+}
+
+cmd_list_remote() { # [<ch>]@<host> — thin read of the relay's /peers
+  split_remote "$1"
+  local mode base; read -r mode base <<<"$(relay_base "$R_HOST")"
+  local args=(-fsS "$base/peers")
+  relay_auth_args "$R_HOST" "$mode" args
+  curl "${args[@]}" | CH="$R_CH" HOST="$R_HOST" "$PY" -c 'import json,os,sys
+peers=json.load(sys.stdin); ch=os.environ["CH"]; host=os.environ["HOST"]; shown=False
+for key in sorted(peers):
+    c,_,a=key.partition("/")
+    if ch and c!=ch: continue
+    p=peers[key]; shown=True
+    state="listen" if p.get("connected") else "off   "
+    queued=p.get("queued",0); seen=p.get("lastSeen","?")
+    addr="%s@%s/%s" % (c,host,a)
+    print("%s  %-28s queued=%-3s lastSeen=%s" % (state,addr,queued,seen))
+if not shown:
+    print("no remote peers" + ((" in %s@%s" % (ch,host)) if ch else ""))'
+}
+
 # a peer is dead when its listener pid is gone — but a peer that never armed
 # (listenerPid null) gets a grace window so join's auto-prune can't sweep a
 # sibling that joined moments ago and hasn't started its Monitor yet.
@@ -200,6 +349,7 @@ open(sys.argv[7],"w"), indent=2)' \
 }
 
 cmd_send() { # <target> [--from X] [--force] <text...>
+  case "${1:-}" in *@*) cmd_send_remote "$@"; return $? ;; esac
   local target="${1:?usage: cbus send <[channel/]alias> [--from X] <text>}"; shift
   local from="" force=0
   while [ $# -gt 0 ]; do
@@ -246,6 +396,7 @@ print(json.dumps({"from":os.environ["FROM"],"to":os.environ["TO"],
 }
 
 cmd_tail() { # <channel>/<alias> — used under the Monitor tool
+  case "${1:-}" in *@*) cmd_tail_remote "$@"; return $? ;; esac
   split_target "${1:?usage: cbus tail <channel>/<alias>}"
   if [ -z "$T_CH" ]; then
     T_CH="$(find_peer_channel "$T_AL")" || die "use <channel>/<alias>"
@@ -268,7 +419,8 @@ cmd_tail() { # <channel>/<alias> — used under the Monitor tool
   exec tail -n "$from_line" -F "$inbox" 2>/dev/null
 }
 
-cmd_list() { # [--active] [channel]
+cmd_list() { # [--active] [channel | [ch]@host]
+  case "${1:-}" in *@*) cmd_list_remote "$@"; return $? ;; esac
   local active=0 chosen="" chdir d ch alias pid host cwd live any=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -331,6 +483,16 @@ cmd_prune() { # [channel]
 }
 
 cmd_leave() { # [channel] — remove this session's registration(s)
+  case "${1:-}" in
+    *@*) # remote: drop the identity marker (the relay itself is untouched)
+      split_remote "$1"
+      [ -n "$R_CH" ] || die "usage: cbus leave <channel>@<host>"
+      local m; m="$(marker_path "$R_HOST" "$R_CH")"
+      [ -f "$m" ] || die "no remote identity for $R_CH@$R_HOST"
+      rm -f "$m"; rmdir "$(dirname "$m")" 2>/dev/null || true
+      printf 'left %s@%s (identity marker removed; queued mail stays on the relay)\n' "$R_CH" "$R_HOST"
+      return 0 ;;
+  esac
   local ch="${1:-}" line n=0
   while IFS= read -r line; do
     if [ -z "$ch" ] || [ "${line%%/*}" = "$ch" ]; then
@@ -352,8 +514,53 @@ cmd_unregister() { # <channel>/<alias> — force-remove any peer
   printf 'unregistered %s/%s\n' "$T_CH" "$T_AL"
 }
 
+cmd_auth() { # set <host> [--token V] [--cf-id V] [--cf-secret V]  |  status [host]
+  local sub="${1:-status}"; [ $# -gt 0 ] && shift
+  case "$sub" in
+    set)
+      local host="${1:?usage: cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]  (V='-' reads stdin)}"; shift
+      valid_name "$host" || die "bad host \"$host\""
+      local n=0 field val
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --token|--cf-id|--cf-secret)
+            field="${1#--}"; val="${2:?missing value for $1}"; shift 2
+            [ "$val" = - ] && val="$(cat)"
+            val="$(printf '%s' "$val" | tr -d '[:space:]')"
+            [ -n "$val" ] || die "empty $field"
+            auth_put "$host" "$field" "$val"; n=$((n+1)) ;;
+          *) die "unknown flag $1" ;;
+        esac
+      done
+      [ "$n" -gt 0 ] || die "nothing to set (pass --token / --cf-id / --cf-secret)"
+      local where="macOS Keychain (cbus-relay-$host)"
+      [ "$(uname -s)" = Darwin ] || where="$(auth_store_dir "$host") (0600)"
+      printf 'stored %d credential(s) for %s in %s\n' "$n" "$host" "$where"
+      ;;
+    status)
+      local host="${1:-nuc}" f v
+      printf 'site %s:\n' "$host"
+      for f in token cf-id cf-secret; do
+        v="$(auth_get "$host" "$f" || true)"
+        if [ -n "$v" ]; then printf '  %-10s set (…%s)\n' "$f" "${v: -4}"
+        else printf '  %-10s absent\n' "$f"; fi
+      done
+      ;;
+    *) die "usage: cbus auth set <host> ... | cbus auth status [host]" ;;
+  esac
+}
+
 cmd_whoami() {
-  resolve_self || { echo "not joined in this session"; return 1; }
+  local any=0
+  resolve_self && any=1
+  local f
+  for f in "$CBUS_DIR"/.remote/*/*; do
+    [ -f "$f" ] || continue
+    printf '%s@%s/%s (remote)\n' "$(basename "$f")" \
+      "$(basename "$(dirname "$f")")" "$(cat "$f")"
+    any=1
+  done
+  [ "$any" -eq 1 ] || { echo "not joined in this session"; return 1; }
 }
 
 cmd_inbox() {
@@ -413,6 +620,7 @@ case "${1:-}" in
   inbox)      shift; cmd_inbox "$@" ;;
   bootstrap)  shift; cmd_bootstrap "$@" ;;
   branch)     shift; cmd_branch "$@" ;;
+  auth)       shift; cmd_auth "$@" ;;
   ""|-h|--help)
     cat <<'USAGE'
 cbus — message bus between live Claude Code sessions, in named channels
@@ -442,11 +650,29 @@ cbus — message bus between live Claude Code sessions, in named channels
   cbus leave [channel]             leave channel(s) this session joined
   cbus unregister <channel>/<alias>  force-remove any peer
 
+remote (relay-backed) channels — address form <channel>@<host>/<alias>:
+
+  cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
+       --from <ch@host/al>         override sender (default: identity marker,
+                                   set by the last remote tail on that channel)
+  cbus tail <ch>@<host>/<al>       print the Monitor ws arm spec (url +
+                                   protocols) and claim the alias as this
+                                   machine's identity on that channel
+  cbus list [<ch>]@<host>          peers known to the relay (connected/queued)
+  cbus leave <ch>@<host>           drop the local identity marker
+  cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   (V='-'=stdin)
+  cbus auth status [host]          credential state, masked
+
+  aliases are explicit — pick a short hostname/role (e.g. mbp, nuc). endpoint
+  autodetects: loopback :8090 on the relay host, else the public CF hostname.
+  known hosts: nuc (override/add via CBUS_SITE_<HOST>_URL).
+
 convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.
 
 env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),
-     CC_BRANCH (fork helper path, default ~/.claude/bin/cc-branch.sh)
+     CC_BRANCH (fork helper path, default ~/.claude/bin/cc-branch.sh),
+     CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL (relay endpoints)
 USAGE
     ;;
   *) die "unknown command '${1}' (cbus --help)" ;;

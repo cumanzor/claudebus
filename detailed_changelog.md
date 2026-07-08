@@ -1,5 +1,68 @@
 # Changelog (detailed)
 
+## [2026-07-08 17:05:00 UTC] [Core] Remote (relay-backed) channels in the cbus client — cbus-foc.3
+
+[Attempt #1] (scope settled after two crossed-message rounds with the parent
+session: explicit aliases, relay untouched — Carlos cut the registry/presence
+build as over-engineering)
+
+Client-only wiring that turns the .1 relay into usable cross-machine channels.
+The relay binary is byte-identical to f64753e; everything below is bin/cbus.
+
+### [Files Changed]
+
+- `bin/cbus`
+  - `split_remote` + routing hooks at the top of `cmd_send`/`cmd_tail`/
+    `cmd_list`/`cmd_leave`: `<channel>@<host>/<alias>` addresses divert to the
+    remote paths; local behavior untouched.
+  - `cmd_auth` (`set`/`status`): credentials in macOS Keychain via security(1)
+    (service `cbus-relay-<host>`, accounts token/cf-id/cf-secret) or 0600 files
+    under ~/.config/cbus/ on Linux (NUC has no Keychain). `-` reads stdin;
+    status prints masked last-4 only. No tokens in code — per the standing
+    requirement; ssh-reading the NUC token file remains dev-only.
+  - `relay_base`: zero-config front-door pick — probe 127.0.0.1:8090/healthz
+    (300ms); reachable = loopback mode (no CF headers, ws://), else public
+    (https://bus.example.com + CF-Access-Client-Id/Secret headers). Env
+    overrides: CBUS_SITE_<HOST>_URL, CBUS_RELAY_LOCAL_URL.
+  - `cmd_send_remote`: curl POST /send with bearer (+CF when public); `from`
+    auto-fills from the channel's identity marker (routable), else
+    hostname-PID fallback (documented unroutable, mirrors local unjoined).
+  - `cmd_tail_remote`: prints the Monitor `{ws:}` arm spec (url + `bearer.
+    cbus.<token>` subprotocol + description/persistent) instead of exec'ing a
+    process, and records the identity marker ($CBUS_DIR/.remote/<host>/<ch>).
+  - `cmd_list_remote`: thin read of the relay's existing /peers — connected/
+    queued/lastSeen per peer; no server-side additions.
+  - `cmd_leave` remote form drops the marker only (relay untouched, queued
+    mail stays); `cmd_whoami` lists remote identities alongside local.
+- `README.md`: "Using remote channels from cbus" section + CLI reference block.
+- `CHEATSHEET.md`: cross-machine section.
+- `commands/bus-listen.md`: remote-channel path (arm Monitor ws from the spec).
+
+### [Possible Ripple Effects]
+
+- Alias collisions are handled by convention + visibility (relay keeps one
+  active tail per peer; displacement drops the loser's Monitor) — deliberate,
+  reserve-on-join deferred.
+- Identity markers are machine-level, last-arm-wins — two local sessions
+  claiming different aliases on the same remote channel share the default
+  `from` (override per send with --from).
+- The Monitor arm spec necessarily prints the relay token (it IS the ws auth);
+  transcripts are local, accepted trade-off.
+
+### [Testing Notes]
+
+- Offline: address validation (`..`, missing alias, unknown host), Keychain
+  round-trip (set/status masked/delete), public-mode correctly demanding CF
+  creds, arm-spec content, marker lifecycle (tail records → whoami shows →
+  leave removes). All pass.
+- Live (ssh -L 8090 = the documented dev/local mode): send queued pre-tail →
+  Monitor armed from the printed spec → queued message REPLAYED as a turn
+  event; live send delivered with marker-based routable from=probe@nuc/mbp;
+  `cbus list @nuc` flipped off→listen and queued 1→0; cleanup verified.
+- NOT yet tested: the public CF front door (needs cf-id/cf-secret seeded from
+  1Password) — that is exactly the .4 acceptance round-trip, pending a live
+  NUC-side session.
+
 ## [2026-07-07 16:00:00 UTC] [Relay] cbus-relay daemon on the NUC — networked leg of the bus
 
 [Attempt #1]

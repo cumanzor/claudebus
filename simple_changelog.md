@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-08 17:05:00 UTC] [Core] Remote channels: <channel>@<host>/<alias> addressing in send/tail/list/leave (relay UNTOUCHED — reuses .1 contract). cbus auth set/status (Keychain on macOS, 0600 files on Linux; no tokens in code), healthz-probe front-door autodetect (loopback on relay host, else CF front door), remote tail emits the Monitor {ws:} arm spec + records an identity marker for routable from. Verified live: queued-replay + live push into a real Monitor via the relay.
+
 [2026-07-07 17:15:00 UTC] [Docs] New docs/prior-art-and-cc-internals.md — durable record of the tool landscape review (session-bridge, AMQ, principle-19, cyrusagents inbox, mcp_agent_mail, CCS, claude-intercom), the Claude Code internals probes (why native SendMessage can't cross sessions), the constraints that shaped the design (Monitor ws: headers, safety classifier, fork transcript semantics, push delivery), and the full decision-log timeline with shas. bdx cbus-foc/cbus-oq9 epic context appended with pointers.
 
 [2026-07-07 16:00:00 UTC] [Relay] New relay/ — std-lib-only Go daemon on the NUC: POST /send (bearer) → Maildir spool → WS /tail (subprotocol token, k8s pattern) → Monitor {ws:} events. Presence heartbeat, single-tail displacement (dup-free, race-fixed after gpt-5.5 review), systemd unit, deploy.sh. Verified end-to-end incl. kill -9 durability and a real Mac Monitor consuming a relay push.
