@@ -181,9 +181,44 @@ auth_put() { # <host> <field> <value>
   fi
 }
 
-# identity marker: arming a remote tail claims that alias as this machine's
-# default `from` on that channel (last arm wins; --from overrides per send)
-marker_path() { printf '%s/.remote/%s/%s' "$CBUS_DIR" "$1" "$2"; } # <host> <ch>
+# identity marker: SESSION-scoped — arming a remote tail claims that alias as
+# THIS session's default `from` on that channel (--from overrides per send).
+# layout: .remote/<host>/<channel>/<sessionId> = {alias, ownerPid, ts}.
+# per-session slots mean two sessions can hold different aliases on the same
+# remote channel; ownerPid gives prune the same liveness rule as local peers.
+marker_sid()  { printf '%s' "${CLAUDE_CODE_SESSION_ID:-nosession-$PPID}"; }
+marker_dir()  { printf '%s/.remote/%s/%s' "$CBUS_DIR" "$1" "$2"; }      # <host> <ch>
+marker_file() { printf '%s/%s' "$(marker_dir "$1" "$2")" "$(marker_sid)"; }
+
+# sweep markers whose owning claude pid is gone; legacy machine-global markers
+# (a FILE at the channel path) are unowned by definition — always swept.
+prune_remote_markers() {
+  local hostdir chdir f pid
+  for hostdir in "$CBUS_DIR"/.remote/*/; do
+    [ -d "$hostdir" ] || continue
+    for chdir in "$hostdir"*; do
+      [ -e "$chdir" ] || continue
+      if [ -f "$chdir" ]; then
+        rm -f "$chdir"
+        printf 'pruned legacy remote marker %s@%s\n' \
+          "$(basename "$chdir")" "$(basename "$hostdir")" >&2
+        continue
+      fi
+      for f in "$chdir"/*; do
+        [ -f "$f" ] || continue
+        pid="$(jget "$f" ownerPid || true)"
+        if ! pid_alive "$pid"; then
+          rm -f "$f"
+          printf 'pruned remote marker %s@%s (session %s, owner %s)\n' \
+            "$(basename "$chdir")" "$(basename "$hostdir")" \
+            "$(basename "$f")" "${pid:-none}" >&2
+        fi
+      done
+      rmdir "$chdir" 2>/dev/null || true
+    done
+    rmdir "$hostdir" 2>/dev/null || true
+  done
+}
 
 # print auth headers as a curl config (fed to `curl -K -` on stdin) so
 # credentials never appear in any process's argv — visible via ps otherwise
@@ -215,9 +250,11 @@ cmd_send_remote() { # <ch@host/alias> [--from X] <text...>
   local mode base cfg; read -r mode base <<<"$(relay_base "$R_HOST")"
   cfg="$(relay_auth_config "$R_HOST" "$mode")"
   if [ -z "$from" ]; then
-    local m; m="$(marker_path "$R_HOST" "$R_CH")"
-    if [ -f "$m" ]; then
-      from="$R_CH@$R_HOST/$(cat "$m")"
+    # per-session identity only: an unrelated session must never inherit
+    # another session's alias (that misroutes replies to the wrong Monitor)
+    local mf al; mf="$(marker_file "$R_HOST" "$R_CH")"
+    if [ -f "$mf" ] && al="$(jget "$mf" alias)" && [ -n "$al" ]; then
+      from="$R_CH@$R_HOST/$al"
     else
       from="$(hostname -s 2>/dev/null || hostname)-$PPID"  # unroutable; documented
     fi
@@ -238,14 +275,19 @@ cmd_tail_remote() { # <ch@host/alias> — emit the Monitor ws arm spec + claim i
   local mode base token; read -r mode base <<<"$(relay_base "$R_HOST")"
   token="$(auth_get "$R_HOST" token)" || die "no relay token for \"$R_HOST\" — run: cbus auth set $R_HOST --token -"
   local url; url="$(ws_url "$base")/tail?channel=$R_CH&alias=$R_AL"
-  local m; m="$(marker_path "$R_HOST" "$R_CH")"
-  mkdir -p "$(dirname "$m")" && printf '%s\n' "$R_AL" > "$m"
+  local md; md="$(marker_dir "$R_HOST" "$R_CH")"
+  [ -f "$md" ] && rm -f "$md"   # legacy machine-global marker: unowned, replace
+  mkdir -p "$md"
+  "$PY" -c 'import json,sys
+json.dump({"alias":sys.argv[1],"ownerPid":int(sys.argv[2]),"ts":sys.argv[3]},
+open(sys.argv[4],"w"), indent=2)' \
+    "$R_AL" "$(find_owner_pid || echo "$PPID")" "$(now)" "$(marker_file "$R_HOST" "$R_CH")"
   cat <<EOF
 remote listening is armed with the Monitor tool's ws source (not a command):
   url:         $url
   protocols:   ["bearer.cbus.$token"]
   description: cbus:$R_CH@$R_HOST/$R_AL   (persistent: true)
-identity recorded: sends to $R_CH@$R_HOST/* default to from=$R_CH@$R_HOST/$R_AL
+identity recorded for THIS session: sends to $R_CH@$R_HOST/* default to from=$R_CH@$R_HOST/$R_AL
 note: the protocols entry carries the relay token — expected; it IS the auth.
 EOF
 }
@@ -485,18 +527,26 @@ cmd_prune() { # [channel]
     out="$(prune_channel "$(basename "$chdir")" 2>&1)" || true
     [ -n "$out" ] && { printf '%s\n' "$out"; n=$((n+1)); }
   done
+  # remote identity markers ride along on every prune (skipped when a single
+  # channel was requested — markers are host/channel-scoped, not bus channels)
+  if [ -z "$chosen" ]; then
+    out="$(prune_remote_markers 2>&1)" || true
+    [ -n "$out" ] && { printf '%s\n' "$out"; n=$((n+1)); }
+  fi
   [ "$n" -gt 0 ] || echo "nothing to prune"
 }
 
 cmd_leave() { # [channel] — remove this session's registration(s)
   case "${1:-}" in
-    *@*) # remote: drop the identity marker (the relay itself is untouched)
+    *@*) # remote: drop THIS session's identity marker only (relay untouched)
       split_remote "$1"
       [ -n "$R_CH" ] || die "usage: cbus leave <channel>@<host>"
-      local m; m="$(marker_path "$R_HOST" "$R_CH")"
-      [ -f "$m" ] || die "no remote identity for $R_CH@$R_HOST"
-      rm -f "$m"; rmdir "$(dirname "$m")" 2>/dev/null || true
-      printf 'left %s@%s (identity marker removed; queued mail stays on the relay)\n' "$R_CH" "$R_HOST"
+      local mf; mf="$(marker_file "$R_HOST" "$R_CH")"
+      [ -f "$mf" ] || die "no remote identity for $R_CH@$R_HOST in this session"
+      rm -f "$mf"
+      rmdir "$(marker_dir "$R_HOST" "$R_CH")" 2>/dev/null || true
+      rmdir "$(dirname "$(marker_dir "$R_HOST" "$R_CH")")" 2>/dev/null || true
+      printf 'left %s@%s (this session'\''s marker removed; queued mail stays on the relay)\n' "$R_CH" "$R_HOST"
       return 0 ;;
   esac
   local ch="${1:-}" line n=0
@@ -595,11 +645,17 @@ cmd_auth() { # set <host> [--token V] [--cf-id V] [--cf-secret V]  |  status [ho
 cmd_whoami() {
   local any=0
   resolve_self && any=1
-  local f
-  for f in "$CBUS_DIR"/.remote/*/*; do
+  # THIS session's remote from-defaults only. a marker is not reachability —
+  # `cbus list <ch>@<host>` is the truth source for who is actually connected.
+  local f al ch host
+  for f in "$CBUS_DIR"/.remote/*/*/"$(marker_sid)"; do
     [ -f "$f" ] || continue
-    printf '%s@%s/%s (remote)\n' "$(basename "$f")" \
-      "$(basename "$(dirname "$f")")" "$(cat "$f")"
+    ch="$(basename "$(dirname "$f")")"
+    host="$(basename "$(dirname "$(dirname "$f")")")"
+    al="$(jget "$f" alias || true)"
+    [ -n "$al" ] || continue
+    printf '%s@%s/%s (remote from-default — reachability: cbus list @%s)\n' \
+      "$ch" "$host" "$al" "$host"
     any=1
   done
   [ "$any" -eq 1 ] || { echo "not joined in this session"; return 1; }
@@ -698,13 +754,15 @@ cbus — message bus between live Claude Code sessions, in named channels
 remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 
   cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
-       --from <ch@host/al>         override sender (default: identity marker,
-                                   set by the last remote tail on that channel)
+       --from <ch@host/al>         override sender (default: THIS session's
+                                   identity marker, set when it armed a remote
+                                   tail on that channel; sessions never inherit
+                                   another session's alias)
   cbus tail <ch>@<host>/<al>       print the Monitor ws arm spec (url +
                                    protocols) and claim the alias as this
                                    machine's identity on that channel
   cbus list [<ch>]@<host>          peers known to the relay (connected/queued)
-  cbus leave <ch>@<host>           drop the local identity marker
+  cbus leave <ch>@<host>           drop THIS session's identity marker
   cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   (V='-'=stdin)
   cbus auth status [host]          credential state, masked
 
