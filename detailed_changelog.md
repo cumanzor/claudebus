@@ -1,5 +1,59 @@
 # Changelog (detailed)
 
+## [2026-07-08 21:30:00 UTC] [Core] Session-scoped bridge identity — cbus-ny8
+
+[Attempt #1]
+
+Fixes the bug Carlos hit dogfooding unrelated sessions: the remote identity
+marker was machine-global and ownerless, so (a) every session's `whoami`
+reported every bridge on the machine, and (b) — the sharper edge — any
+session sending to a bridged channel auto-filled the marker owner's alias,
+impersonating it and misrouting replies to the wrong session's Monitor.
+
+### [Files Changed]
+
+- `bin/cbus`
+  - Marker layout: `.remote/<host>/<channel>` (single file, machine-global) →
+    `.remote/<host>/<channel>/<sessionId>` holding `{alias, ownerPid, ts}`.
+    Per-session slots: two sessions can hold different aliases on the same
+    remote channel; O(1) self-lookup via `marker_file`. Sessions without
+    CLAUDE_CODE_SESSION_ID key on `nosession-$PPID`.
+  - `cmd_tail_remote`: writes the session-scoped marker (owning claude pid via
+    find_owner_pid, $PPID fallback); a legacy FILE at the channel path is
+    removed and replaced by the dir (migration).
+  - `cmd_send_remote`: from-fill reads only the caller's marker — an unrelated
+    session falls back to the unroutable hostname-PID form instead of
+    impersonating.
+  - `cmd_whoami`: lists only this session's markers, worded
+    "remote from-default — reachability: cbus list @<host>" (a marker never
+    proved a Monitor was armed; the relay's /peers is the truth source).
+  - `cmd_leave` (remote): removes only the caller's marker.
+  - `cmd_prune`: new prune_remote_markers sweep — dead-ownerPid markers and
+    legacy machine-global files (unowned by definition) are removed; empty
+    dirs cleaned. No grace window needed: ownerPid is recorded at arm time,
+    never null (unlike local listenerPid).
+- `README.md`, `CHEATSHEET.md`, usage text: session-scoped wording; the
+  marker documented as a from-default, not reachability.
+
+### [Possible Ripple Effects]
+
+- Relay untouched (client-only, like .3/.5).
+- Existing legacy markers migrate lazily (next arm) or via `cbus prune`.
+- whoami output format for remote entries changed (scripts parsing it would
+  see the new wording).
+
+### [Testing Notes]
+
+- Multi-session core case: sid-A tails ch@site/alice, sid-B tails ch@site/bob
+  → both markers coexist; whoami(A)=alice only, whoami(B)=bob only,
+  whoami(C)=nothing remote; send from-fill A→alice, B→bob, C→hostname-PID
+  fallback (no impersonation); A's leave removes only A's marker. ALL PASS.
+- Migration: legacy file at channel path replaced by dir on next arm. PASS.
+- Prune: dead-owner marker swept, live-owner kept, legacy file swept, empty
+  dirs cleaned. PASS.
+- Live: this session's real legacy marker (bridge@nuc) migrated by re-arming;
+  whoami shows the new wording with the session-keyed file on disk. PASS.
+
 ## [2026-07-08 19:45:00 UTC] [Core] Review-hygiene fix set — cbus-foc.5 (closes the relay epic)
 
 [Attempt #1]

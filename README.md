@@ -182,7 +182,7 @@ cbus auth set nuc --token - --cf-id - --cf-secret -   # seed macOS Keychain (val
 cbus send dev@nuc/nuc "build finished"                # POST /send — queues if the peer is offline
 cbus tail dev@nuc/mbp                                 # prints the Monitor ws arm spec + claims 'mbp' as your identity
 cbus list @nuc                                        # peers the relay knows: connected / queued / lastSeen
-cbus leave dev@nuc                                    # drop the local identity marker
+cbus leave dev@nuc                                    # drop THIS session's identity marker
 ```
 
 Details that matter:
@@ -199,9 +199,15 @@ Details that matter:
   spec (URL + `bearer.cbus.<token>` subprotocol) rather than exec'ing a
   process — the session arms it, and messages arrive as turn events exactly
   like local ones.
-- Arming a remote tail records an **identity marker** so later sends on that
-  channel auto-fill a routable `from`; without one, `from` falls back to
-  `hostname-PID` (unroutable — same caveat as local unjoined senders).
+- Arming a remote tail records a **session-scoped identity marker**
+  (`.remote/<host>/<channel>/<sessionId>` = `{alias, ownerPid, ts}`) so *this
+  session's* later sends on that channel auto-fill a routable `from`. Sessions
+  never inherit each other's aliases (no cross-session impersonation); a
+  session without its own marker falls back to `hostname-PID` (unroutable —
+  same caveat as local unjoined senders). Markers carry the owning `claude`
+  pid, so `cbus prune` sweeps them when their session dies. A marker is a
+  from-default, **not** proof of reachability — `cbus list <ch>@<host>` is the
+  truth source for who is actually connected.
 
 ## CLI reference
 
@@ -227,7 +233,7 @@ remote (relay-backed) — address form <channel>@<host>/<alias>:
 cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
 cbus tail <ch>@<host>/<al>       print Monitor ws arm spec + claim identity
 cbus list [<ch>]@<host>          relay peers: connected / queued / lastSeen
-cbus leave <ch>@<host>           drop the local identity marker
+cbus leave <ch>@<host>           drop THIS session's identity marker
 cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   ('-' = stdin)
 cbus auth status [host]          credential state, masked
 cbus leave [channel]             leave channel(s) this session joined

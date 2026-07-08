@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-08 21:30:00 UTC] [Core] Session-scoped bridge identity (fixes cross-session marker leak + impersonation): markers move to .remote/<host>/<channel>/<sessionId> = {alias, ownerPid, ts}. whoami/send/leave operate on the caller's marker only — sessions never inherit each other's aliases; whoami wording is now "remote from-default", not reachability (cbus list @host is the truth source). prune sweeps dead-owner + legacy machine-global markers; legacy file->dir migration on next arm. Client-only; relay untouched.
+
 [2026-07-08 19:45:00 UTC] [Core] Review-hygiene fix set: relay credentials no longer appear in any process argv (curl auth via config-on-stdin `-K -`; Keychain writes via `security -i`); the eval in header assembly is gone with the refactor; CBUS_SITE_<HOST>_URL var name now sanitizes non-alphanumerics so dotted hosts resolve under set -eu.
 
 [2026-07-08 17:09:00 UTC] [CLI/Commands] New `cbus rename <new-alias> [channel]` — true local rename: mv the peer dir + rewrite meta.alias so multiple forks are legible in `cbus list` (fork-3 → discovery). Local-only (refuses @host remote aliases — relay-side); resolves this session's registration, demands a channel when joined to >1, refuses names held by a live listener, reclaims dead ones, preserves the inbox. The live tail is stale after the mv, so it prints a re-arm reminder. New `/bus-rename` slash command runs it then TaskStops + re-arms the Monitor on the new address. (CC TUI session title stays manual: `/rename` — not externally settable in v2.1.204.)

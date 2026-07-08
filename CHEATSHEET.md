@@ -48,12 +48,14 @@ cbus auth set nuc --token - --cf-id - --cf-secret -  # one-time seed (Keychain; 
 cbus send dev@nuc/nuc "ping"       # queues if peer offline; replay on connect
 cbus tail dev@nuc/mbp              # prints Monitor {ws:} arm spec + claims identity
 cbus list @nuc                     # relay peers: connected/queued/lastSeen
-cbus leave dev@nuc                 # drop local identity marker
+cbus leave dev@nuc                 # drop THIS session's identity marker
 ```
 
 - Endpoint autodetects: loopback on the relay host, else `wss://bus.example.com` + CF Access.
 - Remote receive = the session arms `Monitor {ws:}` from the printed spec.
-- Arm a tail first: it records your identity so `send`'s `from` is routable.
+- Arm a tail first: it records THIS session's identity so `send`'s `from` is
+  routable. Markers are session-scoped (no cross-session alias inheritance) and
+  are a from-default, not reachability — `cbus list @<host>` shows who's connected.
 
 ## Under the hood (rarely needed)
 
