@@ -1,5 +1,72 @@
 # Changelog (detailed)
 
+## [2026-07-08 17:09:00 UTC] [CLI/Commands] `cbus rename` — legible local aliases
+
+[Attempt #1] (scope confirmed with Carlos via AskUserQuestion: true rename over a
+cosmetic label; feature #2 "auto-set the CC session title" dropped after research
+showed the live TUI title is not externally settable — see below. Rebased onto
+fork-2's 692af95, coordinated live over the cbus channel before touching the file.)
+
+Auto-picked aliases (`main`, `fork-N`) make a busy channel hard to read once
+several sessions join. `cbus rename` gives a session a meaningful local name.
+
+### [Files Changed]
+
+- `bin/cbus`
+  - `cmd_rename <new-alias> [channel]` (inserted before `cmd_auth`, ~line 517):
+    refuses `@host` targets up front (remote aliases are relay-side, out of
+    scope per fork-2's identity-marker design); `valid_name` on both args;
+    resolves this session's registration via `resolve_self`, selecting the one
+    in `[channel]` or the sole membership — dies asking for a channel when the
+    session is joined to more than one. No-ops with a message if new == old.
+    Guards the destination: refuses if `meta_listener_alive` (won't clobber a
+    live peer), else `rm -rf`s a stale/dead holder to reclaim the name. `mv`s
+    `<ch>/<old>` → `<ch>/<new>` (inbox history + meta preserved), then `jset`
+    rewrites `meta.alias`. Prints a re-arm reminder because the live `tail -F`
+    still follows the OLD inbox path and goes stale after the mv.
+  - Dispatch: `rename)` case added next to `leave`/`unregister`; `--help`
+    usage line added under `cbus leave`.
+- `commands/bus-rename.md` (new): `/bus-rename <new-alias> [channel]` slash
+  command — runs `cbus rename`, then TaskStops the existing
+  `cbus:<ch>/<old-alias>` Monitor and re-arms a persistent Monitor on
+  `cbus tail <ch>/<new-alias>`. Notes the CC title stays a manual `/rename`.
+- `install.sh`: installs `bus-rename.md`.
+- `README.md`, `CHEATSHEET.md`: usage lines + command-file table row.
+
+### [Design notes / why]
+
+- Re-arm, not silent follow: `tail -F` follows by path, so `mv`ing the dir
+  strands the old listener on a path that never reappears. A true rename
+  therefore MUST re-arm the Monitor — trivial in the slash-command loop, which
+  already owns the Monitor task.
+- Inbox on rename follows-from-end: the re-arm sees `listenerPid` already set,
+  so it uses `tail -n 0` (no whole-inbox replay → no duplicate old events).
+  Trade-off: a message landing in the sub-second mv/re-arm gap isn't replayed;
+  acceptable for a deliberate low-traffic op, re-send if it matters.
+- Feature #2 (set the CC conversation title to the alias) was dropped after
+  research: native command is `/rename` (no `/name`), interactive-only; the
+  name lives in `<config>/sessions/<pid>.json` (`name`/`nameSource`) but the
+  running TUI holds it in memory and ignores external writes (verified live —
+  the value changed on disk, the prompt box did not). Only `claude -n <name>`
+  at launch is programmatic. Left as a manual `/rename` nudge.
+
+### [Possible Ripple Effects]
+
+- `resolve_self` globs `$CBUS_DIR/*/*/meta.json`; `.remote/` markers are dot-dir
+  and excluded, so rename never sees remote identities. Confirmed.
+- A peer mid-`cbus send` to the old alias during the mv gap could hit a moved
+  path; send resolves the target dir at call time, so it either lands in the
+  old inbox (moved with the dir) or errors "no such peer" — no corruption.
+
+### [Testing Notes]
+
+Verified in an isolated `CBUS_DIR`: basic rename (dir moved, `meta.alias`
+updated, inbox preserved, whoami/list reflect it); remote `@host` refusal;
+same-name no-op; dead-peer name reclaim; multi-channel ambiguity error +
+explicit-channel success; not-joined error; and refusal to clobber a peer held
+open by a real `tail -F` (own registration left intact on refusal). `bash -n`
+clean.
+
 ## [2026-07-08 17:05:00 UTC] [Core] Remote (relay-backed) channels in the cbus client — cbus-foc.3
 
 [Attempt #1] (scope settled after two crossed-message rounds with the parent

@@ -84,6 +84,7 @@ This places:
 | `bin/cc-branch.sh` | `~/.claude/bin/cc-branch.sh` | session fork helper (only needed for `/bus-branch`) |
 | `commands/bus-listen.md` | `~/.claude/commands/bus-listen.md` | slash command to join a channel |
 | `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | slash command to fork + auto-join both sides |
+| `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | slash command to rename this session's alias |
 
 Make sure `~/.local/bin` is on your `PATH`.
 
@@ -230,6 +231,7 @@ cbus leave <ch>@<host>           drop the local identity marker
 cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   ('-' = stdin)
 cbus auth status [host]          credential state, masked
 cbus leave [channel]             leave channel(s) this session joined
+cbus rename <new-alias> [channel]  rename this session's local alias (re-arm after)
 cbus unregister <channel>/<alias>  force-remove any peer
 
 env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),

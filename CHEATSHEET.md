@@ -30,6 +30,7 @@ cbus active [channel]                    # only peers currently listening
 cbus channels                            # channels with peer counts
 cbus whoami                              # my channel/alias memberships
 cbus prune                               # sweep dead peers everywhere
+cbus rename <new-alias> [channel]        # rename my local alias (re-arm tail after)
 cbus leave [channel]                     # leave (default: all my channels)
 ```
 
