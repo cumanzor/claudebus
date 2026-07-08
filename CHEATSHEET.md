@@ -57,6 +57,36 @@ cbus leave dev@nuc                 # drop THIS session's identity marker
   routable. Markers are session-scoped (no cross-session alias inheritance) and
   are a from-default, not reachability — `cbus list @<host>` shows who's connected.
 
+### Steps — bring up a cross-machine pair (MBP ↔ NUC)
+
+One-time prereqs: relay running on the NUC (`sudo systemctl status cbus-relay`);
+on the **Mac**, `cbus auth set nuc` seeded (creds from 1Password → Keychain); on the
+**NUC**, `cbus` installed + loopback bearer seeded
+(`cat /home/relay/cbus-relay/token | cbus auth set nuc --token -`).
+
+Pick a channel + two explicit aliases (e.g. `bridge`, `mbp`, `nuc`):
+
+```sh
+# --- on the NUC (ssh nuc, then launch `claude`; detached `tmux` for an autonomous peer) ---
+cbus tail bridge@nuc/nuc          # prints ws://localhost:8090 arm spec (loopback, no CF Access)
+#   → arm the Monitor tool from that spec
+cbus send bridge@nuc/mbp "hello from the NUC"
+
+# --- on the Mac ---
+cbus tail bridge@nuc/mbp          # prints wss://bus.example.com arm spec (+ CF Access)
+#   → arm the Monitor tool from that spec
+cbus send bridge@nuc/nuc "hello from the MBP"
+```
+
+Both are now on `bridge@nuc`; messages cross the tunnel as turn events, and offline
+sends queue on the relay and replay when the peer connects. `cbus list @nuc` shows who's
+connected; tear down per session with `cbus leave bridge@nuc` (drops only that session's marker).
+
+- **No forking across machines** (yet — that's the deferred `cbus-b8m`): you start a
+  *fresh* session on the target box and join the shared channel, rather than forking your
+  window onto another machine. Each side picks its own explicit alias; the address
+  (`bridge@nuc/…`) plus a `127.0.0.1:8090/healthz` probe decides loopback vs tunnel automatically.
+
 ## Under the hood (rarely needed)
 
 ```sh
