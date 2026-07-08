@@ -132,7 +132,9 @@ split_remote() { # <channel>@<host>[/<alias>]  (empty channel allowed for list)
 }
 
 site_public_url() { # <host> — env CBUS_SITE_<HOST>_URL overrides the built-in
-  local var="CBUS_SITE_$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')_URL"
+  # any non-alphanumeric in the host (dots allowed by valid_name) maps to _
+  # so the constructed name is always a valid identifier under set -eu
+  local var="CBUS_SITE_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_' | sed 's/_$//')_URL"
   local v="${!var:-}"
   if [ -n "$v" ]; then printf '%s' "$v"; return; fi
   case "$1" in
@@ -170,7 +172,9 @@ auth_get() { # <host> <field: token|cf-id|cf-secret>
 }
 auth_put() { # <host> <field> <value>
   if [ "$(uname -s)" = Darwin ]; then
-    security add-generic-password -U -s "cbus-relay-$1" -a "$2" -w "$3" >/dev/null
+    # security -i reads the command from stdin, keeping the secret out of argv
+    printf 'add-generic-password -U -s "cbus-relay-%s" -a "%s" -w "%s"\n' \
+      "$1" "$2" "$3" | security -i >/dev/null
   else
     local d; d="$(auth_store_dir "$1")"
     (umask 077 && mkdir -p "$d" && printf '%s' "$3" > "$d/$2")
@@ -181,15 +185,17 @@ auth_put() { # <host> <field> <value>
 # default `from` on that channel (last arm wins; --from overrides per send)
 marker_path() { printf '%s/.remote/%s/%s' "$CBUS_DIR" "$1" "$2"; } # <host> <ch>
 
-# assemble curl auth args for a relay call into the given array name
-relay_auth_args() { # <host> <mode> <arrayname>
+# print auth headers as a curl config (fed to `curl -K -` on stdin) so
+# credentials never appear in any process's argv — visible via ps otherwise
+relay_auth_config() { # <host> <mode>
   local token cfid cfsec
   token="$(auth_get "$1" token)" || die "no relay token for \"$1\" — run: cbus auth set $1 --token -"
-  eval "$3+=(-H \"Authorization: Bearer \$token\")"
+  printf 'header = "Authorization: Bearer %s"\n' "$token"
   if [ "$2" = public ]; then
     cfid="$(auth_get "$1" cf-id)"   || die "no cf-id for \"$1\" — run: cbus auth set $1 --cf-id -"
     cfsec="$(auth_get "$1" cf-secret)" || die "no cf-secret for \"$1\" — run: cbus auth set $1 --cf-secret -"
-    eval "$3+=(-H \"CF-Access-Client-Id: \$cfid\" -H \"CF-Access-Client-Secret: \$cfsec\")"
+    printf 'header = "CF-Access-Client-Id: %s"\n'     "$cfid"
+    printf 'header = "CF-Access-Client-Secret: %s"\n' "$cfsec"
   fi
 }
 
@@ -206,9 +212,8 @@ cmd_send_remote() { # <ch@host/alias> [--from X] <text...>
   done
   local text="$*"
   [ -n "$text" ] || die "empty message"
-  local mode base; read -r mode base <<<"$(relay_base "$R_HOST")"
-  local args=(-fsS -X POST "$base/send" -H "Content-Type: application/json")
-  relay_auth_args "$R_HOST" "$mode" args
+  local mode base cfg; read -r mode base <<<"$(relay_base "$R_HOST")"
+  cfg="$(relay_auth_config "$R_HOST" "$mode")"
   if [ -z "$from" ]; then
     local m; m="$(marker_path "$R_HOST" "$R_CH")"
     if [ -f "$m" ]; then
@@ -221,7 +226,9 @@ cmd_send_remote() { # <ch@host/alias> [--from X] <text...>
   payload="$(CH="$R_CH" AL="$R_AL" FROM="$from" TEXT="$text" "$PY" -c 'import json,os
 print(json.dumps({"channel":os.environ["CH"],"alias":os.environ["AL"],
 "from":os.environ["FROM"],"text":os.environ["TEXT"]}))')"
-  curl "${args[@]}" -d "$payload" >/dev/null || die "relay send failed ($mode $base)"
+  printf '%s\n' "$cfg" | curl -fsS -K - -X POST "$base/send" \
+    -H "Content-Type: application/json" -d "$payload" >/dev/null \
+    || die "relay send failed ($mode $base)"
   printf 'sent to %s@%s/%s via %s relay (from %s)\n' "$R_CH" "$R_HOST" "$R_AL" "$mode" "$from"
 }
 
@@ -245,10 +252,9 @@ EOF
 
 cmd_list_remote() { # [<ch>]@<host> — thin read of the relay's /peers
   split_remote "$1"
-  local mode base; read -r mode base <<<"$(relay_base "$R_HOST")"
-  local args=(-fsS "$base/peers")
-  relay_auth_args "$R_HOST" "$mode" args
-  curl "${args[@]}" | CH="$R_CH" HOST="$R_HOST" "$PY" -c 'import json,os,sys
+  local mode base cfg; read -r mode base <<<"$(relay_base "$R_HOST")"
+  cfg="$(relay_auth_config "$R_HOST" "$mode")"
+  printf '%s\n' "$cfg" | curl -fsS -K - "$base/peers" | CH="$R_CH" HOST="$R_HOST" "$PY" -c 'import json,os,sys
 peers=json.load(sys.stdin); ch=os.environ["CH"]; host=os.environ["HOST"]; shown=False
 for key in sorted(peers):
     c,_,a=key.partition("/")
