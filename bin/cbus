@@ -514,6 +514,42 @@ cmd_unregister() { # <channel>/<alias> — force-remove any peer
   printf 'unregistered %s/%s\n' "$T_CH" "$T_AL"
 }
 
+# rename this session's LOCAL peer: mv the dir + rewrite meta.alias, so tracking
+# multiple forks in `cbus list` is legible. remote (@host) aliases are relay-side
+# and out of scope. the live `tail -F` follows the OLD inbox path, so after the
+# mv it goes stale — the caller must re-arm the Monitor on the new address (the
+# /bus-rename command does this; we print the reminder).
+cmd_rename() { # <new-alias> [channel]
+  case "${1:-}" in
+    *@*) die "rename is local-only — remote (@host) aliases are relay-side (see cbus leave/tail)" ;;
+  esac
+  local new="${1:?usage: cbus rename <new-alias> [channel]}"
+  local want_ch="${2:-}"
+  valid_name "$new" || die "alias must be [A-Za-z0-9._-]"
+  [ -z "$want_ch" ] || valid_name "$want_ch" || die "bad channel \"$want_ch\""
+  # find this session's registration — the one in want_ch, else the sole one
+  local line match="" count=0
+  while IFS= read -r line; do
+    count=$((count+1))
+    [ -z "$want_ch" ] && [ -z "$match" ] && match="$line"
+    [ "${line%%/*}" = "$want_ch" ] && match="$line"
+  done < <(resolve_self 2>/dev/null || true)
+  [ -n "$match" ] || die "not joined${want_ch:+ to \"$want_ch\"} in this session"
+  [ -n "$want_ch" ] || [ "$count" -le 1 ] || \
+    die "joined to $count channels — pass one: cbus rename $new <channel>"
+  local ch="${match%%/*}" old="${match#*/}"
+  [ "$old" = "$new" ] && { printf 'already named "%s/%s"\n' "$ch" "$new"; return 0; }
+  local newdir="$CBUS_DIR/$ch/$new"
+  if [ -e "$newdir" ]; then
+    meta_listener_alive "$newdir/meta.json" && die "\"$ch/$new\" is taken by a live listener"
+    rm -rf "$newdir"   # reclaim a stale/dead peer holding the name
+  fi
+  mv "$CBUS_DIR/$ch/$old" "$newdir" || die "rename failed"
+  jset "$newdir/meta.json" alias "$new" || true
+  printf 'renamed %s/%s -> %s/%s\n' "$ch" "$old" "$ch" "$new"
+  printf 're-arm your listener (old tail is now stale): cbus tail %s/%s\n' "$ch" "$new"
+}
+
 cmd_auth() { # set <host> [--token V] [--cf-id V] [--cf-secret V]  |  status [host]
   local sub="${1:-status}"; [ $# -gt 0 ] && shift
   case "$sub" in
@@ -616,6 +652,7 @@ case "${1:-}" in
   prune)      shift; cmd_prune "$@" ;;
   leave)      shift; cmd_leave "$@" ;;
   unregister) shift; cmd_unregister "$@" ;;
+  rename)     shift; cmd_rename "$@" ;;
   whoami)     shift; cmd_whoami ;;
   inbox)      shift; cmd_inbox "$@" ;;
   bootstrap)  shift; cmd_bootstrap "$@" ;;
@@ -648,6 +685,8 @@ cbus — message bus between live Claude Code sessions, in named channels
                                    from the git repo name; arm the Monitor after)
   cbus prune [channel]             remove dead peers (and empty channels)
   cbus leave [channel]             leave channel(s) this session joined
+  cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
+                                   meta); re-arm the Monitor on the new address
   cbus unregister <channel>/<alias>  force-remove any peer
 
 remote (relay-backed) channels — address form <channel>@<host>/<alias>:
