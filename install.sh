@@ -24,7 +24,7 @@ place() { # <src> <dst>
 echo "installing claudebus ($mode):"
 place "$here/bin/cbus"          "$BIN_DIR/cbus"
 place "$here/bin/cc-branch.sh"  "$CC_BIN_DIR/cc-branch.sh"
-place "$here/commands/bus-listen.md" "$CMD_DIR/bus-listen.md"
+place "$here/commands/bus-join.md" "$CMD_DIR/bus-join.md"
 place "$here/commands/bus-branch.md" "$CMD_DIR/bus-branch.md"
 place "$here/commands/bus-rename.md" "$CMD_DIR/bus-rename.md"
 chmod +x "$BIN_DIR/cbus" "$CC_BIN_DIR/cc-branch.sh" 2>/dev/null || true

@@ -2,15 +2,15 @@
 
 ## Join a channel
 
-Peers live in **named channels**; addresses are `channel/alias`. `/bus-listen`
+Peers live in **named channels**; addresses are `channel/alias`. `/bus-join`
 and `/bus-branch` default the channel to the current repo's name. `global` is
 the reserved machine-wide channel for an orchestrator session.
 
 | goal | do this |
 |---|---|
-| Put current session on its repo channel | `/bus-listen` |
-| Join a specific channel / alias | `/bus-listen <channel> [alias]` |
-| Join the machine-wide bus | `/bus-listen global` |
+| Put current session on its repo channel | `/bus-join` |
+| Join a specific channel / alias | `/bus-join <channel> [alias]` |
+| Join the machine-wide bus | `/bus-join global` |
 | Fork + put both sides on the repo channel | `/bus-branch window` (or `tab` \| `tmux`) |
 | Fork onto a named channel | `/bus-branch window <channel>` |
 | N sessions | join the same channel from each — any-to-any |
@@ -90,7 +90,7 @@ connected; tear down per session with `cbus leave bridge@nuc` (drops only that s
 ## Under the hood (rarely needed)
 
 ```sh
-cbus join <channel> [alias]      # what /bus-listen does first (idempotent)
+cbus join <channel> [alias]      # what /bus-join does first (idempotent)
 cbus tail <channel>/<alias>      # the listener — armed via the Monitor tool
 cbus bootstrap <channel> [parent] # canonical fork-child prompt
 cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-branch runs)
