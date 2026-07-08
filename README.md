@@ -88,7 +88,7 @@ This places:
 |---|---|---|
 | `bin/cbus` | `~/.local/bin/cbus` | the message-bus CLI |
 | `bin/cc-branch.sh` | `~/.claude/bin/cc-branch.sh` | session fork helper (only needed for `/bus-branch`) |
-| `commands/bus-listen.md` | `~/.claude/commands/bus-listen.md` | slash command to join a channel |
+| `commands/bus-join.md` | `~/.claude/commands/bus-join.md` | slash command to join a channel |
 | `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | slash command to fork + auto-join both sides |
 | `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | slash command to rename this session's alias |
 
@@ -122,16 +122,16 @@ after the parent armed — and the bootstrap prompt tells the child to ignore it
 
 ### Put two already-open sessions on a channel
 
-Run `/bus-listen` in each window — both default to the channel named after the
+Run `/bus-join` in each window — both default to the channel named after the
 repo they're in, so two sessions in the same repo find each other with no pairing
 step. For cross-repo pairs, pass the same channel name explicitly:
 
 ```
 # window 1 (any repo)
-/bus-listen deploy laptop
+/bus-join deploy laptop
 
 # window 2 (any repo)
-/bus-listen deploy server
+/bus-join deploy server
 ```
 
 Then from either side, ask Claude to send:
@@ -148,7 +148,7 @@ peer across channels; `cbus channels` summarizes channels.
 ### The global channel
 
 `global` is an ordinary channel with a reserved meaning: the machine-wide bus.
-Join it from a session meant to oversee everything (`/bus-listen global` or
+Join it from a session meant to oversee everything (`/bus-join global` or
 `cbus join global`), and any session on the machine can reach it with
 `cbus send global/<alias> "..."` regardless of what channel it works in. A session
 can be in several channels at once (e.g. its repo channel *and* global) — arm one

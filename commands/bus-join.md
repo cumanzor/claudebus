@@ -1,12 +1,14 @@
 ---
-description: Join a cbus channel so other live sessions can message this one
-argument-hint: "[channel] [alias]"
+description: Join a cbus channel — local or cross-machine (@host) — so other sessions can message this one
+argument-hint: "[channel[@host]] [alias]"
 allowed-tools: Bash(cbus:*), Monitor
 ---
 
-Join this session to a `cbus` channel so peer sessions can talk to it.
+Join this session to a `cbus` channel — a **local** channel (file bus) or a
+**cross-machine** relay-backed channel (`<channel>@<host>`) — so peer sessions can
+talk to it.
 
-The user passed: "$ARGUMENTS" — optional channel, optional alias.
+The user passed: "$ARGUMENTS" — optional channel (optionally `channel@host`), optional alias.
 
 1. **Pick the channel**: use the one the user passed, else the git repo's
    basename (`basename $(git rev-parse --show-toplevel)`, sanitized to
