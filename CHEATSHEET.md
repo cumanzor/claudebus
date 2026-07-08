@@ -57,6 +57,36 @@ cbus leave dev@server                 # drop THIS session's identity marker
   routable. Markers are session-scoped (no cross-session alias inheritance) and
   are a from-default, not reachability — `cbus list @<host>` shows who's connected.
 
+### Steps — bring up a cross-machine pair (laptop ↔ server)
+
+One-time prereqs: relay running on the server (`sudo systemctl status cbus-relay`);
+on the **Mac**, `cbus auth set server` seeded (creds from a password manager → Keychain); on the
+**Server**, `cbus` installed + loopback bearer seeded
+(`cat /home/relay/cbus-relay/token | cbus auth set server --token -`).
+
+Pick a channel + two explicit aliases (e.g. `bridge`, `laptop`, `server`):
+
+```sh
+# --- on the server (ssh server, then launch `claude`; detached `tmux` for an autonomous peer) ---
+cbus tail bridge@server/server          # prints ws://localhost:8090 arm spec (loopback, no CF Access)
+#   → arm the Monitor tool from that spec
+cbus send bridge@server/laptop "hello from the server"
+
+# --- on the Mac ---
+cbus tail bridge@server/laptop          # prints wss://bus.example.com arm spec (+ CF Access)
+#   → arm the Monitor tool from that spec
+cbus send bridge@server/server "hello from the laptop"
+```
+
+Both are now on `bridge@server`; messages cross the tunnel as turn events, and offline
+sends queue on the relay and replay when the peer connects. `cbus list @server` shows who's
+connected; tear down per session with `cbus leave bridge@server` (drops only that session's marker).
+
+- **No forking across machines** (yet — that's the deferred `cbus-b8m`): you start a
+  *fresh* session on the target box and join the shared channel, rather than forking your
+  window onto another machine. Each side picks its own explicit alias; the address
+  (`bridge@server/…`) plus a `127.0.0.1:8090/healthz` probe decides loopback vs tunnel automatically.
+
 ## Under the hood (rarely needed)
 
 ```sh
