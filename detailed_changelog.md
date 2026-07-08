@@ -1,5 +1,38 @@
 # Changelog (detailed)
 
+## [2026-07-08 19:45:00 UTC] [Core] Review-hygiene fix set — cbus-foc.5 (closes the relay epic)
+
+[Attempt #1]
+
+The three findings from the .3 review (zen workflow self-audit), applied now
+that rename-task's 485740e freed bin/cbus.
+
+### [Files Changed]
+
+- `bin/cbus`
+  - `relay_auth_args` (eval-based argv assembly) replaced by
+    `relay_auth_config`: auth headers are printed as a curl config and fed via
+    `curl -K -` on stdin in `cmd_send_remote`/`cmd_list_remote` — bearer and
+    CF Access credentials never appear in any process argv (`ps`-visible
+    before). The refactor also deletes the eval outright (the nameref
+    alternative would have broken macOS's bash 3.2).
+  - `auth_put` (Darwin): Keychain writes go through `security -i` with the
+    command on stdin instead of `-w <secret>` in argv.
+  - `site_public_url`: the CBUS_SITE_<HOST>_URL variable name now maps every
+    non-alphanumeric to `_`, so hosts with dots (allowed by valid_name)
+    resolve instead of dying on bad substitution under set -eu.
+
+### [Testing Notes]
+
+- `security -i` round-trip (set/status/delete on a scratch site). PASS.
+- Dotted host: CBUS_SITE_MY_HOST_URL resolved for host `my.host`
+  (`ws://x.example:1/...` in the arm spec). PASS.
+- Static check: no curl call site carries Authorization/CF-Access material in
+  argv. PASS.
+- Live public loop with the new path: `cbus list @nuc` through the CF front
+  door, then a self-send (Keychain → config-on-stdin → CF Access → relay →
+  public wss) arrived on this session's armed Monitor as a turn event. PASS.
+
 ## [2026-07-08 17:09:00 UTC] [CLI/Commands] `cbus rename` — legible local aliases
 
 [Attempt #1] (scope confirmed with Carlos via AskUserQuestion: true rename over a
