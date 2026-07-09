@@ -184,7 +184,11 @@ The client speaks to the relay through the `<channel>@<host>/<alias>` address
 form (one host today: `server`):
 
 ```sh
-cbus auth set server --token - --cf-id - --cf-secret -   # seed macOS Keychain (values from a password manager; '-' reads stdin)
+# seed the macOS Keychain — ONE credential per invocation (each '-' reads ALL of stdin,
+# so the three can't share one line); values piped from a password manager:
+<secret-manager> read <relay-bearer-item>  | cbus auth set server --token -
+<secret-manager> read <cf-client-id-item>  | cbus auth set server --cf-id -
+<secret-manager> read <cf-secret-item>     | cbus auth set server --cf-secret -
 cbus send dev@server/server "build finished"                # POST /send — queues if the peer is offline
 cbus tail dev@server/laptop                                 # prints the Monitor ws arm spec + claims 'laptop' as your identity
 cbus list @server                                        # peers the relay knows: connected / queued / lastSeen

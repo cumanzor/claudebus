@@ -44,7 +44,10 @@ Address form: `<channel>@<host>/<alias>` — aliases are explicit (short
 hostname/role). One host today: `server`.
 
 ```sh
-cbus auth set server --token - --cf-id - --cf-secret -  # one-time seed (Keychain; from a password manager)
+# one-time seed — ONE credential per invocation ('-' reads all of stdin; from a password manager):
+<secret-manager> read <relay-bearer-item> | cbus auth set server --token -
+<secret-manager> read <cf-id-item>        | cbus auth set server --cf-id -
+<secret-manager> read <cf-secret-item>    | cbus auth set server --cf-secret -
 cbus send dev@server/server "ping"       # queues if peer offline; replay on connect
 cbus tail dev@server/laptop              # prints Monitor {ws:} arm spec + claims identity
 cbus list @server                     # relay peers: connected/queued/lastSeen
