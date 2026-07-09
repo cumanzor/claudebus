@@ -117,4 +117,8 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
   tail still reads `off`). A clean exit kills the tail via the Monitor.
 - A freshly-joined peer that hasn't armed its Monitor yet has a **10-min grace
   window** before prune can sweep it.
+- **Remote ws drops on sleep** — a cross-machine `cbus:<ch>@<host>` Monitor closes
+  with **1006** when the laptop sleeps or the network blips (local file-bus tails
+  survive). Re-arm on the close event: re-run `cbus tail <ch>@<host>/<alias>` and arm
+  the fresh spec; the relay replays queued mail on reconnect, so nothing is lost.
 - **No broadcast** — send once per target. **No auth** — don't expose `~/.claude-bus`.
