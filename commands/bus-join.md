@@ -22,6 +22,15 @@ The user passed: "$ARGUMENTS" — optional channel (optionally `channel@host`), 
    a command), and skip steps 2-3 below. `cbus list @<host>` shows remote
    peers. Requires `cbus auth` credentials — if missing, tell the user to run
    `cbus auth set <host>` with values from 1Password.
+
+   **Re-arm on drop (actionable):** the remote ws Monitor closes on network loss /
+   laptop sleep — you'll get a `[WebSocket closed: 1006]` (or similar) event for a
+   `cbus:<ch>@<host>` Monitor. Treat it as a signal to act, not just a notice:
+   immediately re-run `cbus tail <same channel@host/alias>` and arm the fresh spec
+   (the identity-marker refresh is idempotent), then confirm with
+   `cbus list @<host>`. The relay replays anything queued while you were
+   disconnected — nothing is lost. (Local file-bus tails are unaffected — this is
+   only the remote ws.)
 2. Run `cbus join <channel> [alias]` — alias is optional; the CLI auto-picks
    (`main`, then `fork-N`) and prunes dead peers in the channel first. Note the
    `channel/alias` address it prints.
