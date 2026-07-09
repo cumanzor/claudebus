@@ -44,7 +44,10 @@ Address form: `<channel>@<host>/<alias>` — aliases are explicit (short
 hostname/role). One host today: `nuc`.
 
 ```sh
-cbus auth set nuc --token - --cf-id - --cf-secret -  # one-time seed (Keychain; from 1Password)
+# one-time seed — ONE credential per invocation ('-' reads all of stdin; from 1Password):
+op read 'op://…/relay-bearer' | cbus auth set nuc --token -
+op read 'op://…/cf-id'        | cbus auth set nuc --cf-id -
+op read 'op://…/cf-secret'    | cbus auth set nuc --cf-secret -
 cbus send dev@nuc/nuc "ping"       # queues if peer offline; replay on connect
 cbus tail dev@nuc/mbp              # prints Monitor {ws:} arm spec + claims identity
 cbus list @nuc                     # relay peers: connected/queued/lastSeen

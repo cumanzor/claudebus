@@ -184,7 +184,11 @@ The client speaks to the relay through the `<channel>@<host>/<alias>` address
 form (one host today: `nuc`):
 
 ```sh
-cbus auth set nuc --token - --cf-id - --cf-secret -   # seed macOS Keychain (values from 1Password; '-' reads stdin)
+# seed the macOS Keychain — ONE credential per invocation (each '-' reads ALL of stdin,
+# so the three can't share one line); values piped from 1Password:
+op read 'op://…/relay-bearer'  | cbus auth set nuc --token -
+op read 'op://…/cf-client-id'  | cbus auth set nuc --cf-id -
+op read 'op://…/cf-secret'     | cbus auth set nuc --cf-secret -
 cbus send dev@nuc/nuc "build finished"                # POST /send — queues if the peer is offline
 cbus tail dev@nuc/mbp                                 # prints the Monitor ws arm spec + claims 'mbp' as your identity
 cbus list @nuc                                        # peers the relay knows: connected / queued / lastSeen
