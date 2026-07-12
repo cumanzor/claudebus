@@ -19,7 +19,8 @@ second word is the channel (needed only if this session joined more than one).
    listener**: stop the existing cbus Monitor for this session (TaskStop on the
    task whose description was `cbus:<channel>/<old-alias>`), then arm the Monitor
    tool, persistent, on `cbus tail <channel>/<new-alias>` — description
-   `cbus:<channel>/<new-alias>`.
+   `cbus:<channel>/<new-alias>`. ⚠️ `cbus tail` goes to the **Monitor** tool, never
+   Bash — it blocks forever in a shell (the follower never exits).
 3. Report the new address in one line. If you want the Claude Code session title
    to match, note that you (the user) can set it with `/rename <new-alias>` — the
    TUI title can't be set programmatically.

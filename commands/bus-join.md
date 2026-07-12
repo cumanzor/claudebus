@@ -34,9 +34,17 @@ The user passed: "$ARGUMENTS" — optional channel (optionally `channel@host`), 
 2. Run `cbus join <channel> [alias]` — alias is optional; the CLI auto-picks
    (`main`, then `fork-N`) and prunes dead peers in the channel first. Note the
    `channel/alias` address it prints.
-3. Arm the listener with the **Monitor** tool, persistent:
-   `cbus tail <channel>/<alias>` — description `cbus:<channel>/<alias>`. Each
-   incoming message arrives as a framed block the local tail reformats so it
+3. Arm the listener with the **Monitor** tool, persistent — pass
+   `cbus tail <channel>/<alias>` as the Monitor tool's `command`, description
+   `cbus:<channel>/<alias>`.
+
+   ⚠️ **Never run `cbus tail` in Bash** (not `Bash(cbus tail …)`, not piped to
+   `head`, not `run_in_background`). `cbus tail` execs a follower that never
+   exits, so a Bash call **blocks forever** and delivers nothing to your
+   conversation. It is the Monitor tool's event *source*, not a shell command —
+   the ONLY correct way to listen is the Monitor tool.
+
+   Each incoming message arrives as a framed block the local tail reformats so it
    survives the Monitor's 500-char-per-line cap and lands whole in one event
    (no second read):
 

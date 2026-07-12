@@ -20,7 +20,9 @@ Two steps, no more:
 2. Arm the parent's listener with the **Monitor** tool, persistent:
    `cbus tail <channel>/<parent-alias>` — description
    `cbus:<channel>/<parent-alias>`. Skip if this session already has a cbus
-   Monitor armed for this address.
+   Monitor armed for this address. ⚠️ Pass `cbus tail` to the **Monitor** tool,
+   never to Bash — it execs a follower that never exits, so a Bash call blocks
+   forever and receives nothing.
 
 Then confirm in one line: channel, parent alias, and target. The child
 announces its own alias via the bus when it boots; the user can then
