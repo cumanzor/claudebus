@@ -322,22 +322,28 @@ peer_dead() { # <meta.json>
   fi
 }
 
-# announce a presence event to every non-dead peer in <channel> except <self>.
-# uses the SAME !peer_dead rule as send, so a joined-but-unarmed peer still gets
-# it (replayed on its first arm) — meta_listener_alive alone would skip it. the
-# line carries kind=presence so the tail renders it as a compact one-liner.
-broadcast_presence() { # <channel> <self-alias> <event: join|leave|rename|departed> <text>
-  local ch="$1" self="$2" event="$3" text="$4" chdir="$CBUS_DIR/$1" d peer meta line
+# announce a presence event to every non-dead peer in <channel> except <skip>.
+# <from> is the event's subject (the from= field); <skip> defaults to <from> but
+# differs when the acting session isn't the subject (e.g. rename reclaiming a dead
+# name — the actor still sits at the OLD alias). uses the SAME !peer_dead rule as
+# send, so a joined-but-unarmed peer still gets it (replayed on its first arm) —
+# meta_listener_alive alone would skip it. renders via the normal tail frame with
+# kind=presence in the header.
+broadcast_presence() { # <channel> <from-alias> <event: join|leave|rename|departed> <text> [skip-alias]
+  local ch="$1" from="$2" event="$3" text="$4" skip="${5:-$2}"
+  local chdir="$CBUS_DIR/$1" d peer meta line ts; ts="$(now)"
   [ -d "$chdir" ] || return 0
   for d in "$chdir"/*/; do
     meta="$d/meta.json"; [ -f "$meta" ] || continue
     peer="$(basename "${d%/}")"
-    [ "$peer" = "$self" ] && continue
+    [ "$peer" = "$skip" ] && continue
     peer_dead "$meta" && continue
-    line="$(FROM="$ch/$self" TO="$ch/$peer" TS="$(now)" EVENT="$event" TEXT="$text" "$PY" -c 'import json,os
+    line="$(FROM="$ch/$from" TO="$ch/$peer" TS="$ts" EVENT="$event" TEXT="$text" "$PY" -c 'import json,os
 print(json.dumps({"from":os.environ["FROM"],"to":os.environ["TO"],"ts":os.environ["TS"],
 "kind":"presence","event":os.environ["EVENT"],"text":os.environ["TEXT"]}))')"
-    printf '%s\n' "$line" >> "$(inbox_path "$ch" "$peer")"
+    # a concurrent prune/leave can drop the target dir between peer_dead and here;
+    # under set -e an append to a vanished path would abort the whole command.
+    printf '%s\n' "$line" >> "$(inbox_path "$ch" "$peer")" 2>/dev/null || continue
   done
 }
 
@@ -356,13 +362,22 @@ prune_channel() { # <channel>
   for d in "$chdir"/*/; do
     [ -f "$d/meta.json" ] || continue
     if peer_dead "$d/meta.json"; then
-      local peer tmp; peer="$(basename "${d%/}")"; tmp="${d%/}.reap.$$"
-      # atomic claim: mv wins for exactly one concurrent reaper, so the departed
-      # event fires once even if two sessions prune the same dead peer at once.
+      local peer tmp; peer="$(basename "${d%/}")"
+      # DOT-prefixed temp: the */ glob (here and in broadcast) skips dotdirs, so a
+      # concurrent prune never rescans a half-reaped dir and a crash-orphaned temp
+      # is inert, not a phantom peer.
+      tmp="$chdir/.reap.$$.$peer"
+      # atomic claim: mv wins for exactly one concurrent reaper, so departed fires once.
       if mv "${d%/}" "$tmp" 2>/dev/null; then
-        printf 'pruned %s/%s\n' "$1" "$peer" >&2
-        rm -rf "$tmp"
-        broadcast_presence "$1" "$peer" departed "departed (listener gone)"
+        if peer_dead "$tmp/meta.json"; then
+          printf 'pruned %s/%s\n' "$1" "$peer" >&2
+          rm -rf "$tmp"
+          broadcast_presence "$1" "$peer" departed "departed (listener gone)"
+        elif [ -e "${d%/}" ]; then
+          rm -rf "$tmp"                                 # slot reclaimed again — drop our copy
+        else
+          mv "$tmp" "${d%/}" 2>/dev/null || rm -rf "$tmp" # a fresh join reclaimed it mid-mv — restore, no false departed
+        fi
       fi
     fi
   done
@@ -696,7 +711,7 @@ cmd_rename() { # <new-alias> [channel]
   if [ -e "$newdir" ]; then
     meta_listener_alive "$newdir/meta.json" && die "\"$ch/$new\" is taken by a live listener"
     rm -rf "$newdir"   # reclaim a stale/dead peer holding the name
-    broadcast_presence "$ch" "$new" departed "departed (name reclaimed)"
+    broadcast_presence "$ch" "$new" departed "departed (name reclaimed)" "$old"
   fi
   mv "$CBUS_DIR/$ch/$old" "$newdir" || die "rename failed"
   jset "$newdir/meta.json" alias "$new" || true
