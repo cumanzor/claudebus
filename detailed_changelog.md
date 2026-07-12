@@ -1,5 +1,48 @@
 # Changelog (detailed)
 
+## [2026-07-12 20:20:38 UTC] [Core] Presence hardening — second diff review
+
+[Attempt #2 — follow-up to the presence commit]
+
+A second adversarial diff review by the Fable-5 peer (`dev@nuc/reviewer`) against
+71348a7 found four real concurrency/robustness bugs and two cleanups. All fixed in
+`bin/cbus`:
+
+- **Reap temp escaped the namespace [reviewer #1].** `prune_channel`'s claim used a
+  SIBLING temp `alias.reap.$$`, which the `*/` glob (here and in
+  `broadcast_presence`) rescans as a peer — a concurrent prune could mv-claim it and
+  broadcast a mangled alias, and a crash between mv/rm orphaned it as a permanent
+  phantom. Now **dot-prefixed** (`$chdir/.reap.$$.<peer>`); `*/` skips dotdirs (same
+  idiom as `.remote`), so a half-reaped/orphaned dir is inert.
+- **mv-claim TOCTOU [reviewer #2].** `mv` claims whatever is at the path *now*, not
+  what `peer_dead` checked: a concurrent explicit-alias join could `rm -rf`+`mkdir` a
+  FRESH registration in the same slot, which the reaper would then mv out — silently
+  unregistering a just-joined peer + a false `departed`. Now the reaper
+  **re-verifies `peer_dead` on the moved dir** and, if it's alive, restores it
+  (`mv` back) or drops the temp if the slot was reclaimed again.
+- **rename-reclaim self-echo [reviewer #3].** `broadcast_presence` conflated the
+  event *subject* (`from=`) with the *actor to skip*. Rename-reclaim broadcasts
+  `from=new` while the actor still sits at `old`, so `old`'s still-armed stale tail
+  popped the event on its own Monitor. Split into `<from>` + optional `<skip>`
+  (defaults to `<from>`); rename-reclaim passes `skip=old`.
+- **`set -e` append hazard [reviewer #4].** `printf >> inbox` aborts the whole
+  command if the target dir vanished (concurrent prune/leave). In `cmd_leave` the
+  broadcast runs *before* the `rm`, so an abort left the session registered. Guarded
+  with `2>/dev/null || continue`.
+- **Cleanups [reviewer #5,#6].** One `now()` per event (was per-recipient → one event
+  carried differing timestamps); corrected the comment that overclaimed a "compact
+  one-liner" render (the follower renders the normal frame with `kind=` in the header).
+
+Filed **cbus-8no** for the pre-existing, presence-amplified rename mv→re-arm window
+(the re-arm seeks END, dropping anything appended to the new inbox meanwhile)
+[reviewer #7]. NUC propagation [reviewer #8] already done.
+
+### [Testing Notes]
+
+Isolated re-test: no `.reap` dirs leak (visible or hidden); `departed` fires exactly
+once for a dead peer; rename-reclaim self-echo count = 0 for the actor, 1 for a
+bystander. `bash -n` clean.
+
 ## [2026-07-12 20:04:18 UTC] [Core] Presence announcements — local (cbus-2r7)
 
 [Attempt #1]
