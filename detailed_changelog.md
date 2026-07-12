@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-07-12 20:04:18 UTC] [Core] Presence announcements — local (cbus-2r7)
+
+[Attempt #1]
+
+Peers came and went silently — you had to run `cbus list` to notice. This adds
+join/leave/rename/departed broadcasts so a session's armed Monitor surfaces roster
+changes live. App-agnostic by design (no tmux/iTerm2): the three voluntary events
+are explicit cbus commands, and involuntary departure rides the existing
+pid-liveness prune. Planned + reviewed adversarially by a Fable-5 peer
+(`dev@nuc/reviewer`); all 10 findings folded in (see the plan file).
+
+### [Files Changed] — all in `bin/cbus`
+
+- **`broadcast_presence <channel> <self> <event> <text>`** (new helper): appends
+  `{from,to,ts,kind:"presence",event,text}` to every peer in the channel except
+  `self`. Targets on **`!peer_dead`** — the SAME rule `cmd_send` uses — NOT
+  `meta_listener_alive` [reviewer #3]: a joined-but-unarmed peer (null listenerPid,
+  in grace) accepts sends and replays its inbox on first arm, so it must receive
+  presence too; a liveness-only broadcast would skip it forever.
+- **`cmd_join`**: after the peer registers, `broadcast_presence … join`.
+- **`cmd_leave`**: `broadcast_presence … leave` *before* `rm -rf` each registration.
+- **`cmd_rename`**: a `rename` event (old→new) after the mv, AND a `departed` event
+  when it reclaims a dead name-holder (`rm -rf "$newdir"`) [reviewer #2].
+- **`cmd_unregister`** (the manual kick primitive): `departed` after removal
+  [reviewer #2].
+- **`prune_channel`**: reaps now use an **atomic `mv`-claim** — only the session
+  whose `mv <dir> <dir>.reap.$$` wins removes + broadcasts `departed`, so two
+  concurrent prunes announce a departure once, not twice [reviewer #8].
+- **`cmd_bootstrap`**: dropped the manual `cbus send $parent "joined as X"` line —
+  `join` now auto-broadcasts, so keeping it would fire two join events per
+  branch/spawn [reviewer #9].
+
+### [Possible Ripple Effects]
+
+- Every join/leave/rename now writes a small presence line to each live peer's
+  inbox. Negligible volume; renders as a compact `kind=presence` one-liner via the
+  existing tail follower.
+- **Remote (@host) presence does NOT work yet** [reviewer #1]: the relay's
+  `sendReq`/`reframe` carry only from/to/ts/text, so `kind` is stripped on the wire.
+  Local presence only; remote is filed as `cbus-ijx.5` (add `kind` to the relay).
+- The NUC runs its own cbus copy for loopback bridge peers → must re-run
+  `install.sh` there or NUC-local prune/presence diverges [reviewer #10].
+
+### [Testing Notes]
+
+- Isolated `CBUS_DIR`, five simulated sessions: confirmed bob (armed-equivalent)
+  and **dave (joined, never armed)** both received join/rename/leave/departed
+  events in order; self-announcements are skipped; a dead "zombie" peer produced
+  exactly one `departed` when a later join triggered the prune. `bash -n` clean.
+
 ## [2026-07-12 05:51:32 UTC] [Relay] Remote ws-tail reframing — cross-machine parity with the local tail fix (cbus-mjz)
 
 [Attempt #1]
