@@ -1,5 +1,79 @@
 # Changelog (detailed)
 
+## [2026-07-12 01:40:50 UTC] [Core] `cbus tail` reframes messages to beat the Monitor 500-char line cap
+
+[Attempt #1]
+
+Carlos kept seeing receivers narrate "New sub-task from orchestrator, truncated
+again. Let me read the full message." — a wasteful double roundtrip. Root cause
+(measured live, not assumed): the Claude Code **Monitor** tool truncates any
+single stdout line at **exactly 500 characters**, and the old `cbus tail` piped
+`tail -F` straight through, emitting **one JSON line per message**. The JSON
+envelope alone (`{"from":…,"to":…,"ts":…,"text":"`) burns ~82 chars, so anything
+past ~418 chars of text was cut, and the receiver had to re-read the inbox.
+
+Key measured facts that shaped the fix:
+- Cap is **per-line**, not per-notification: two >500-char lines each truncate
+  independently at their own 500 boundary.
+- The Monitor **batches lines emitted within ~200ms into a single notification**.
+  => emit a long message as several short (<500-char) lines and it arrives whole,
+  in one event, with nothing truncated.
+
+### [Files Changed]
+
+- `bin/cbus` — `cmd_tail` (local path only; `cmd_tail_remote`/ws untouched):
+  - Replaced `exec tail -n "$from_line" -F "$inbox"` with an **`exec`'d python
+    follower** (`exec "$PY" -c '…' "$inbox" "$from_line"`). `exec` preserves the
+    single-process liveness model — the follower's argv contains the inbox path,
+    so `meta_listener_alive`'s `ps -ww … | grep -qF "$inbox"` still recognizes it
+    (verified: `cbus list` shows `listen` while armed, `off` after kill). No child
+    `tail` process, so nothing to orphan on SIGKILL.
+  - Follower behavior: reads the inbox line-by-line (accumulates partial lines
+    until newline), reframes each JSON message into
+    `◀ cbus msg from=<from> to=<to> ts=<ts> [kind=<kind>]` + body + `◀ cbus end
+    from=<from>`. Body = the text split on its own newlines, each segment
+    **byte-wrapped at 440 bytes** (safe under the 500 cap whether it counts bytes
+    or chars; never splits a multibyte char). Non-JSON / non-dict / text-less
+    lines pass through raw (defensive).
+  - Lifecycle parity with the old `tail -F`: first arm replays from start (`+1`,
+    since `join` truncated the inbox); a re-arm (listenerPid already set) follows
+    from end (`0`). Reopens the inbox on **inode change or size shrink** to survive
+    a rejoin's truncate or a `rename` dir move.
+  - Locale-hardened: `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`
+    so a `C`/`POSIX`-locale host can't crash the listener on unicode message text;
+    the `◀` marker is written via the ASCII `◀` escape so the `-c` **source**
+    stays pure ASCII (no argv-decode/tokenize dependency on locale). Verified under
+    `LC_ALL=POSIX PYTHONUTF8=0`.
+- `commands/bus-join.md`, `README.md`, `CHEATSHEET.md` — replaced the "incoming
+  message is a raw JSON line" contract with the framed-block format + the `from=`
+  reply note; documented that remote `@host` ws tails are NOT reframed yet.
+
+### [Possible Ripple Effects]
+
+- **Any consumer that parsed the raw JSON event line** (agents, docs, muscle
+  memory) now sees a framed block instead. Reply flow is unaffected — `from=` is
+  in the header — but anything machine-parsing the event must adapt. All shipped
+  docs/commands updated.
+- **Remote channels unchanged**: `<ch>@<host>` tails arm a Monitor `ws:` source
+  fed raw JSON frames by the relay; those still hit the 500-char cap for long
+  messages. Flagged in docs; a relay-side reframe is a separate follow-up.
+- **Delivery latency**: EOF poll sleeps 0.2s (was `tail -F`'s ~1s default) — if
+  anything, snappier. Very large messages (many wrapped lines) rely on the
+  Monitor batching them into one notification; a pathologically huge single
+  message could still hit an unknown total-notification cap (no worse than before,
+  where it truncated outright).
+
+### [Testing Notes]
+
+- Standalone follower harness: replay-from-start, live append, embedded newlines,
+  unicode (`✓ é 你好`) intact, in-place truncate → reopen → continued delivery,
+  longest emitted physical line = exactly 440 bytes. Re-ran under `LC_ALL=POSIX
+  PYTHONUTF8=0` with empty stderr (no UnicodeEncodeError).
+- Isolated end-to-end (`CBUS_DIR` sandbox): `join` → arm → `cbus list` = `listen`
+  (liveness accepts the follower) → send short + 1500-char messages (both framed,
+  long one wrapped) → kill → `cbus list` = `off`. `bash -n bin/cbus` clean; whole
+  file re-verified pure-ASCII in the `-c` block.
+
 ## [2026-07-08 21:30:00 UTC] [Core] Session-scoped bridge identity — cbus-ny8
 
 [Attempt #1]
