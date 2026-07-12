@@ -672,6 +672,22 @@ cmd_leave() { # [channel] — remove this session's registration(s)
   [ "$n" -gt 0 ] || die "not joined${ch:+ to \"$ch\"}"
 }
 
+# for a Claude Code SessionEnd hook: announce this session's departure from all
+# its channels (cmd_leave broadcasts a presence 'left' per local channel). the
+# hook delivers {session_id,...} on stdin and may NOT export CLAUDE_CODE_SESSION_ID,
+# so read the id from stdin first, env second. best-effort: never fail the exit.
+# only covers graceful exits — a hard kill leaves the lazy prune 'departed' backstop.
+cmd_hook_exit() {
+  local sid
+  sid="$("$PY" -c 'import json,sys
+try: print(json.load(sys.stdin).get("session_id") or "")
+except Exception: pass' 2>/dev/null || true)"
+  [ -n "$sid" ] || sid="${CLAUDE_CODE_SESSION_ID:-}"
+  [ -n "$sid" ] || return 0
+  # subshell: cmd_leave's die() on "not joined" exits only the subshell, not the hook
+  ( export CLAUDE_CODE_SESSION_ID="$sid"; cmd_leave ) >/dev/null 2>&1 || true
+}
+
 cmd_unregister() { # <channel>/<alias> — force-remove any peer
   split_target "${1:?usage: cbus unregister <channel>/<alias>}"
   [ -n "$T_CH" ] || die "use <channel>/<alias>"
@@ -827,6 +843,7 @@ case "${1:-}" in
   channels)   shift; cmd_channels ;;
   prune)      shift; cmd_prune "$@" ;;
   leave)      shift; cmd_leave "$@" ;;
+  hook-exit)  shift; cmd_hook_exit ;;   # SessionEnd hook: announce departure
   unregister) shift; cmd_unregister "$@" ;;
   rename)     shift; cmd_rename "$@" ;;
   whoami)     shift; cmd_whoami ;;
