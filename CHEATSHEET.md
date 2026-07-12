@@ -34,9 +34,18 @@ cbus rename <new-alias> [channel]        # rename my local alias (re-arm tail af
 cbus leave [channel]                     # leave (default: all my channels)
 ```
 
-Incoming messages arrive in your session as JSON events:
-`{"from":"ch/alias","to":"ch/alias","ts",...,"text":...}` — reply with
-`cbus send <from> "..."`.
+Incoming messages arrive in your session as a framed block (the local tail
+reformats each message so it survives the Monitor's 500-char-per-line cap and
+lands whole in one event — no second inbox read):
+
+```
+◀ cbus msg from=ch/alias to=you ts=...
+<full text, long lines soft-wrapped at ~440 bytes>
+◀ cbus end from=ch/alias
+```
+
+Reply with `cbus send <from> "..."` using the `from=` in the header. (Remote
+`@host` tails stream raw JSON ws frames and are not reframed yet.)
 
 ## Cross-machine (relay-backed) channels
 

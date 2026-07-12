@@ -41,11 +41,16 @@ Each participating session **joins a channel** and **arms a listener**:
   **auto-prunes dead peers first** so alias numbers get recycled instead of
   growing forever.
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
-  **Monitor** tool (persistent). `tail` `exec`s in place so *its own pid* becomes
-  the liveness signal. Each incoming line arrives in that session's conversation
-  as a JSON event `{"from","to","ts","text"}` (addresses in full `channel/alias`
-  form) — push delivery: an idle session is woken immediately; a busy one sees it
-  when its current step completes.
+  **Monitor** tool (persistent). It `exec`s a small python follower in place so
+  *its own pid* becomes the liveness signal (its argv carries the inbox path, which
+  `meta_listener_alive` checks). The follower reframes each stored message into a
+  short `◀ cbus msg from=… to=… ts=…` header + the text soft-wrapped at ~440 bytes
+  + a `◀ cbus end` marker. Why: the Monitor truncates any single stdout line at
+  **500 chars**, so a raw 1-line JSON event forces the receiver into a second inbox
+  read; emitting several short lines (which the Monitor batches into one
+  notification) delivers a long message whole in the first event. Push delivery: an
+  idle session is woken immediately; a busy one sees it when its step completes.
+  (Remote `@host` tails stream raw JSON ws frames and are not reframed yet.)
 - **Send** — `cbus send <channel>/<alias> "text"` appends a line to the target's
   inbox. Within your own channel a bare alias works: `cbus send fork-1 "text"`.
   The sender's `from` is resolved automatically from `$CLAUDE_CODE_SESSION_ID`.

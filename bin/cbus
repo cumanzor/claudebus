@@ -459,12 +459,81 @@ cmd_tail() { # <channel>/<alias> — used under the Monitor tool
   prev="$(jget "$m" listenerPid || true)"
   jset "$m" listenerPid "$$" || true
   jset "$m" ownerPid "$(find_owner_pid || echo '')" || true
-  # raw JSON lines are the events (readable as-is). the FIRST arm replays the
-  # whole inbox (-n +1): join truncated it, so nothing sent between join and
-  # arming is lost. a RE-arm (listenerPid was already set) must not redeliver
-  # old messages, so it follows from the end (-n 0). -F survives recreation.
+  # a python follower reframes each message instead of streaming raw JSON. why:
+  # the harness Monitor truncates any single stdout line at 500 chars, so one
+  # long JSON line per message forces the receiver into a second inbox read. the
+  # follower emits a short header (carries from= for replies) + byte-wrapped body
+  # lines (<=440B each) + an end marker; the Monitor batches lines written
+  # together into ONE notification, so a long message arrives intact in the first
+  # event. exec keeps THIS process as the sole Monitor-managed pid, and $inbox is
+  # in its argv so meta_listener_alive still recognizes it (no child tail to
+  # orphan). start '+1' replays the whole inbox on first arm (join truncated it,
+  # so nothing is lost); a RE-arm follows from the end ('0'). the follower re-opens
+  # on inode change / shrink to survive a rejoin's truncate, like tail -F.
   local from_line='+1'; [ -n "$prev" ] && from_line='0'
-  exec tail -n "$from_line" -F "$inbox" 2>/dev/null
+  exec "$PY" -c '
+import sys, os, time, json
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+inbox, start = sys.argv[1], sys.argv[2]
+BYTES = 440
+def wrap(seg):
+    out, cur, n = [], [], 0
+    for c in seg:
+        b = len(c.encode("utf-8"))
+        if n + b > BYTES and cur:
+            out.append("".join(cur)); cur, n = [], 0
+        cur.append(c); n += b
+    out.append("".join(cur))
+    return out
+def emit(line):
+    line = line.rstrip("\n")
+    if not line:
+        return
+    try:
+        m = json.loads(line)
+    except Exception:
+        sys.stdout.write(line + "\n"); sys.stdout.flush(); return
+    if not (isinstance(m, dict) and "text" in m):
+        sys.stdout.write(line + "\n"); sys.stdout.flush(); return
+    frm = str(m.get("from", "?")); to = str(m.get("to", "?"))
+    ts = str(m.get("ts", "")); kind = m.get("kind")
+    head = "\u25c0 cbus msg from=%s to=%s ts=%s" % (frm, to, ts)
+    if kind: head += " kind=%s" % kind
+    body = []
+    for seg in str(m.get("text", "")).split("\n"):
+        body.extend(wrap(seg) if seg else [""])
+    end = "\u25c0 cbus end from=%s" % frm
+    sys.stdout.write("\n".join([head] + body + [end]) + "\n")
+    sys.stdout.flush()
+f = open(inbox, "r", encoding="utf-8", errors="replace")
+if start == "0":
+    f.seek(0, os.SEEK_END)
+ino = os.fstat(f.fileno()).st_ino
+pend = ""
+while True:
+    chunk = f.readline()
+    if chunk:
+        pend += chunk
+        if pend.endswith("\n"):
+            emit(pend); pend = ""
+        continue
+    time.sleep(0.2)
+    try:
+        st = os.stat(inbox)
+    except OSError:
+        continue
+    if st.st_ino != ino or st.st_size < f.tell():
+        try: f.close()
+        except Exception: pass
+        try:
+            f = open(inbox, "r", encoding="utf-8", errors="replace")
+            ino = os.fstat(f.fileno()).st_ino; pend = ""
+        except OSError:
+            pass
+' "$inbox" "$from_line"
 }
 
 cmd_list() { # [--active] [channel | [ch]@host]
