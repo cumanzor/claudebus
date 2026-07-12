@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"claudebus/relay/internal/spool"
 	"claudebus/relay/internal/wire"
@@ -198,6 +199,58 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"ok":true,"id":%q}`+"\n", name)
 }
 
+// wsFrameSafe is the largest framed message that fits in one Monitor
+// notification; past ~3000 chars the harness truncates the tail (measured).
+const wsFrameSafe = 2800
+
+// wrapBytes hard-wraps a string at rune boundaries so no line exceeds limit
+// bytes (the Monitor truncates any single line at 500). Empty -> [""].
+func wrapBytes(seg string, limit int) []string {
+	if len(seg) <= limit {
+		return []string{seg}
+	}
+	var out []string
+	start := 0
+	for i, r := range seg {
+		if i > start && i-start+utf8.RuneLen(r) > limit {
+			out = append(out, seg[start:i])
+			start = i
+		}
+	}
+	return append(out, seg[start:])
+}
+
+// reframe rewrites a stored {from,to,ts,text} JSON line into the same framed,
+// line-wrapped block the local tail follower emits, so a long message survives
+// the Monitor's 500-char-per-line cap and arrives whole in one ws frame. A
+// non-JSON / text-less payload passes through unchanged (defensive).
+func reframe(payload []byte) []byte {
+	var m struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+		TS   string `json:"ts"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(payload, &m); err != nil || m.Text == "" {
+		return payload
+	}
+	lines := []string{""} // header filled in below (needs the total)
+	for _, seg := range strings.Split(m.Text, "\n") {
+		lines = append(lines, wrapBytes(seg, 440)...)
+	}
+	lines = append(lines, "◀ cbus end from="+m.From)
+	total := 0
+	for _, l := range lines {
+		total += len(l) + 1
+	}
+	head := fmt.Sprintf("◀ cbus msg from=%s to=%s ts=%s", m.From, m.To, m.TS)
+	if total > wsFrameSafe { // warn in the header (which survives) so it's not silent
+		head += fmt.Sprintf(" ⚠truncated~%dB", len(m.Text))
+	}
+	lines[0] = head
+	return []byte(strings.Join(lines, "\n"))
+}
+
 func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("channel")
 	alias := r.URL.Query().Get("alias")
@@ -274,7 +327,7 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			payload = []byte(strings.TrimRight(string(payload), "\n"))
-			if err := conn.WriteFrame(wire.OpText, payload); err != nil {
+			if err := conn.WriteFrame(wire.OpText, reframe(payload)); err != nil {
 				log.Printf("tail %s: write: %v (message stays queued)", key, err)
 				return
 			}
