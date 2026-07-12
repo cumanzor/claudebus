@@ -1,6 +1,70 @@
 # Changelog (detailed)
 
-## [2026-07-12 20:20:38 UTC] [Core] Presence hardening — second diff review
+## [2026-07-12 22:14:17 UTC] [Docs] Full behavioral audit → architecture docs + port map
+
+[Attempt #1]
+
+Complete functionality-and-behavior audit of the project at HEAD `f213e26`, run as a
+31-agent workflow (4.1M tokens, 0 errors): five parallel subsystem mappers
+(client surface, client internals, relay/cross-machine path, CC integration, design
+intent + all 24 commits) → three completeness critics (client coverage,
+relay/failure modes, docs-vs-code drift) over two rounds, finding and filling **56
+coverage gaps** → two port analysts (module decomposition, unix-primitive
+inventory) reconciled by a synthesis pass → six doc writers. Explicitly NOT a bug
+hunt: quirks are documented with a preserve-or-rethink disposition, not fixed.
+
+[Files Changed]
+
+- `docs/architecture/overview.md` (new, 417 lines) — what cbus is and why (closed
+  teammate mailbox research), component map + Mermaid architecture/sequence
+  diagrams, cross-machine topology, security model (trust boundary, asymmetric
+  CF Access auth, subprotocol bearer), design decisions with rationale, known
+  limitations (delivery semantics truth table incl. the ~90-120 s sleep-window
+  loss, no spool GC, no curl timeouts).
+- `docs/architecture/command-reference.md` (new, 1152 lines) — every subcommand
+  with args/flags/env/stdin/outputs/exit codes/error strings (both error
+  dialects), address grammar, Monitor-arming contract, deprecated v1 aliases,
+  slash commands, cc-branch.sh, install.sh, hook-exit flow.
+- `docs/architecture/protocol.md` (new, 1012 lines) — the compatibility contract:
+  `$CBUS_DIR` layout, meta.json/inbox.jsonl/marker/credential formats, atomicity
+  idioms, framing grammar (440-byte wrap, wsFrameSafe=2800, framer divergence
+  matrix), follower/replay semantics, liveness predicates, prune GC, presence
+  protocol, relay HTTP API, RFC 6455 ws subset + displacement + keepalive,
+  Maildir spool, constants/invariants checklist.
+- `docs/architecture/port-map.md` (new, 481 lines) — why bash is outgrown, module
+  decomposition (M1-M12), primitive→invariant→replacement inventory, bash-only
+  workarounds a port deletes, contract classes A (frozen) / B (semantic) / C
+  (free), phased migration (P0 shared core + golden framer tests → P1 remote
+  verbs side-by-side → P2 local transport/follower per-machine cutover → P3
+  post-homogenization semantics → P4 wire-touching relay work), Go
+  recommendation (shared framer package makes frame parity compile-time).
+- `~/dev-docs/projects/claudebus/{index,architecture,behavior-spec,port-map}.md`
+  (new, canonical LLM tier) — dense, file:line-anchored mirror incl. the
+  shipped-docs drift register and consolidated quirk registry.
+- `simple_changelog.md`, `detailed_changelog.md` — this entry.
+
+[Possible Ripple Effects]
+
+- Pure documentation; no runtime behavior changed. No NUC propagation needed
+  (nothing under `bin/` or `commands/` changed).
+- The docs freeze today's measured harness constants (500 chars/line, ~3000/
+  notification, ~200 ms batching → 440/2800) with provenance; if the Monitor
+  changes, protocol.md §4 and the port plan's P0 re-measure step are the anchors.
+- README/CHEATSHEET stale claims (e.g. residual `tail -F` requirement, missing
+  presence/hook-exit) are catalogued in behavior-spec §12 rather than fixed —
+  a follow-up doc pass can normalize the shipped docs against the register.
+
+[Testing Notes]
+
+- Spot-verified doc claims against source: CBUS_DIR default (bin/cbus:16),
+  python3 gate (:22), host table (:140-143), BYTES=440 (:522), wsFrameSafe=2800
+  (main.go:204), subprotocol prefix `bearer.cbus.` (main.go:28), listen addr
+  127.0.0.1:8090 (main.go:391), endpoints /send /tail /peers /healthz
+  (main.go:413-416), go 1.26 (go.mod) — all match.
+- Critic round 2 converged (no new gaps after fill round 2 of 2).
+- ~27 open questions unanswerable from code (CF Access config, live Monitor cap
+  drift, NUC spool state, SessionEnd-on-/clear semantics) are listed in
+  port-map.md §8 / index.md rather than guessed at.
 
 [Attempt #2 — follow-up to the presence commit]
 
