@@ -50,7 +50,11 @@ Each participating session **joins a channel** and **arms a listener**:
   read; emitting several short lines (which the Monitor batches into one
   notification) delivers a long message whole in the first event. Push delivery: an
   idle session is woken immediately; a busy one sees it when its step completes.
-  (Remote `@host` tails stream raw JSON ws frames and are not reframed yet.)
+  Remote `@host` tails get the identical framing — the **relay** reframes each
+  message server-side into one multiline ws frame (a multiline frame is capped
+  per-line at 500, not 500 total), so long cross-machine messages arrive whole
+  too. Both paths share a ~2800-char per-notification ceiling; past it the
+  header carries a `⚠truncated~<N>B` notice rather than silently cutting.
 - **Send** — `cbus send <channel>/<alias> "text"` appends a line to the target's
   inbox. Within your own channel a bare alias works: `cbus send fork-1 "text"`.
   The sender's `from` is resolved automatically from `$CLAUDE_CODE_SESSION_ID`.

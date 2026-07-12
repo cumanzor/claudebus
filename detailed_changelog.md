@@ -1,5 +1,79 @@
 # Changelog (detailed)
 
+## [2026-07-12 05:51:32 UTC] [Relay] Remote ws-tail reframing — cross-machine parity with the local tail fix (cbus-mjz)
+
+[Attempt #1]
+
+The 2026-07-12 local fix reframed `cbus tail` so long messages beat the Monitor's
+500-char line cap — but the REMOTE path (`<channel>@<host>`) was untouched: the
+relay pushed each stored message as a single raw-JSON ws frame, so long
+cross-machine messages still truncated at 500 with no local inbox to re-read
+(the body lives in the relay's Maildir). This brings remote to parity.
+
+### [Measured the ws truncation mechanics first]
+
+The local fix relied on stdout specifics; ws frames differ, so I probed them with
+a throwaway localhost ws server (pure-python, no prod risk) feeding a Monitor
+`ws:` source three frames:
+- single-line ~777 chars -> truncated at ~500 (per-line cap applies to ws too).
+- MULTILINE ~900 chars, lines <450 -> arrived WHOLE. **A multiline ws frame is
+  capped PER-LINE at 500, not 500 total.** This is the key that makes a
+  server-side reframe work.
+- MULTILINE ~2500 chars -> truncated mid-frame. Led to finding a SECOND,
+  independent cap: a ~3000-char per-NOTIFICATION ceiling. Confirmed on the real
+  local path (graduated CEIL probes): 2600/2800/2900 whole, 3000/3100 truncated
+  => ~3000 total incl. framing. THIS CEILING IS SHARED BY BOTH LOCAL AND REMOTE
+  (the local follower's wrapped lines batch into one notification too).
+
+### [Files Changed]
+
+- `relay/cmd/cbus-relay/main.go`:
+  - New `reframe([]byte) []byte`: parses the stored `{from,to,ts,text}` and emits
+    the same block the local follower does — `◀ cbus msg from=… to=… ts=…` header,
+    body split on the text's newlines then `wrapBytes`-wrapped at 440 bytes, and a
+    `◀ cbus end from=…` marker — joined by `\n` into ONE OpText frame. Non-JSON /
+    text-less payloads pass through unchanged (defensive).
+  - New `wrapBytes(string,int) []string`: rune-boundary byte-wrap (never splits a
+    multibyte rune); empty -> `[""]`.
+  - If the framed block would exceed `wsFrameSafe` (2800), the header gets a
+    `⚠truncated~<N>B` suffix (N = full text byte length). The suffix is in the
+    header, which is delivered first, so it survives the ~3000 cut — turning
+    silent truncation into a visible signal on both over-ceiling paths.
+  - `handleTail` delivery: `conn.WriteFrame(wire.OpText, reframe(payload))`.
+  - Added `unicode/utf8` import.
+- `relay/cmd/cbus-relay/reframe_test.go` (new): short/long-wrap/unicode-no-split/
+  newlines-preserved/bad-json-passthrough/oversize-warns; asserts every emitted
+  line <500 and that a long body reassembles to the original.
+- `relay/deploy.sh`: **bug fix** — used `systemctl enable --now`, which only
+  STARTS a stopped unit and is a no-op on an already-active one. Every deploy
+  since the service first came up rebuilt the binary but kept the OLD process
+  serving (caught live: the running pid had ~61h uptime right after a "successful"
+  deploy). Now `enable` (boot persistence) + `restart` (load the new binary).
+- Docs (`commands/bus-join.md`, `README.md`, `CHEATSHEET.md`): remote is no longer
+  "not reframed" — now describes server-side reframe + the shared ~2800 ceiling
+  and the `⚠truncated` notice.
+
+### [Possible Ripple Effects]
+
+- Remote ws consumers now receive a framed text block instead of raw JSON —
+  identical change to the local path; `from=` is in the header for replies.
+- The `~3000` per-notification ceiling is NEW knowledge that also bounds the
+  already-shipped LOCAL fix: a single message whose framed form exceeds ~2800
+  chars truncates on either path. Remote now warns in the header; the LOCAL
+  follower does NOT yet emit that warning — tracked as a follow-up (chunked
+  multi-notification delivery + local over-size warning).
+- Relay restart drops live ws tails (1006); receivers re-arm per the sleep-rearm
+  guidance. Done with no live remote peers.
+
+### [Testing Notes]
+
+- `go vet ./...` clean + `go test ./cmd/cbus-relay/` all pass on the NUC (isolated
+  /tmp build) BEFORE deploying — deploy.sh aborts on build failure (set -e) so a
+  bad build never reaches systemd.
+- Live NUC->relay->MBP after the real restart: 2429-char message arrived framed
+  and WHOLE (all 90 segments + REFRAMED2-END-OMEGA), vs the raw-JSON cut-at-500
+  seen from the stale pre-restart binary. Health `ok`, new pid uptime ~1s.
+
 ## [2026-07-12 01:40:50 UTC] [Core] `cbus tail` reframes messages to beat the Monitor 500-char line cap
 
 [Attempt #1]

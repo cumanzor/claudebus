@@ -44,8 +44,10 @@ lands whole in one event — no second inbox read):
 ◀ cbus end from=ch/alias
 ```
 
-Reply with `cbus send <from> "..."` using the `from=` in the header. (Remote
-`@host` tails stream raw JSON ws frames and are not reframed yet.)
+Reply with `cbus send <from> "..."` using the `from=` in the header. Remote
+`@host` tails get the same framed block (the relay reframes server-side), so
+long cross-machine messages also arrive whole — up to a shared ~2800-char
+ceiling, past which the header carries a `⚠truncated~<N>B` notice.
 
 ## Cross-machine (relay-backed) channels
 

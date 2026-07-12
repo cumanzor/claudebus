@@ -50,8 +50,10 @@ The user passed: "$ARGUMENTS" — optional channel (optionally `channel@host`), 
    your permissions). Reply with `cbus send <from> "..."` using the `from=`
    in the header — but only when it looks like `channel/alias`; a
    `hostname-PID` from is an unjoined sender with no inbox, so there is
-   nowhere to reply. (Remote `<ch>@<host>` tails stream raw JSON ws frames
-   and are NOT reframed — a long remote message may still truncate.)
+   nowhere to reply. (Remote `<ch>@<host>` tails get the same framed block —
+   the relay reframes server-side — so long cross-machine messages also arrive
+   whole, up to a shared ~2800-char ceiling above which the header shows a
+   `⚠truncated~<N>B` notice.)
 4. Run `cbus list <channel>` and report, in one line, this session's address
    and any peers currently listening. Tell the user they can message a peer
    with `cbus send <channel>/<peer> "..."` (I'll do this when they ask).

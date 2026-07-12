@@ -20,7 +20,10 @@ echo "== token =="
 ssh "$HOST" "[ -s $DEST/token ] && echo 'token exists' || { umask 077 && openssl rand -hex 32 > $DEST/token && echo 'token created'; }"
 
 echo "== systemd unit =="
-ssh "$HOST" "sudo cp $DEST/src/cbus-relay.service /etc/systemd/system/cbus-relay.service && sudo systemctl daemon-reload && sudo systemctl enable --now cbus-relay && sleep 1 && sudo systemctl is-active cbus-relay"
+# enable for boot persistence, then RESTART to load the freshly-built binary.
+# `enable --now` only *starts* a stopped unit — it is a no-op on an already-
+# active one, so it would silently keep serving the old binary after a rebuild.
+ssh "$HOST" "sudo cp $DEST/src/cbus-relay.service /etc/systemd/system/cbus-relay.service && sudo systemctl daemon-reload && sudo systemctl enable cbus-relay && sudo systemctl restart cbus-relay && sleep 1 && sudo systemctl is-active cbus-relay"
 
 echo "== health =="
 ssh "$HOST" "curl -fsS http://127.0.0.1:8090/healthz"
