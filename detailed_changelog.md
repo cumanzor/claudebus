@@ -1,5 +1,61 @@
 # Changelog (detailed)
 
+## [2026-07-13 19:05:02 UTC] [Port/Go] P2.4 verdict addendum — APPROVED with one confirmed finding
+
+[Attempt #1]
+
+Verdict addendum only — the P2.4 entry below (`a7d2a4f`, recorded in
+`87d97f9`) stands as written; this documents the review outcome and one
+confirmed finding rather than restating the milestone.
+
+[Verdict]
+
+- **APPROVED**, with one confirmed finding (below). The finding does not
+  invalidate anything already recorded — it's a coexistence edge case, not
+  a defect in the core LocalEmit/ArmLocalTail work.
+- Additional verification beyond `87d97f9`'s own testing notes: a
+  1574-input fuzz pass over the framer/path-handling surface, green apart
+  from the finding.
+
+[Finding — path-spelling compat under a non-default CBUS_DIR]
+
+- Go's `filepath.Join` (used to build `InboxPath`) **cleans** the path —
+  collapsing double slashes, trailing slashes, and `.` segments. Bash's
+  `inbox_path()` does raw string concatenation and preserves whatever
+  spelling `$CBUS_DIR` happens to have.
+- Under the **default** CBUS_DIR spelling (no trailing slash, no doubled
+  separators), both produce the same bytes — today's live differentials
+  and P2.4's own testing all ran under this default, which is why they're
+  unaffected and stand as recorded.
+- Under a **non-default** spelling (e.g. a trailing slash on `$CBUS_DIR`),
+  the two followers would record/search for byte-different argv strings,
+  breaking bash↔Go cross-liveness (`meta_listener_alive`'s argv grep) for
+  that session — a listener that's actually alive would read `off` to the
+  other client.
+- This is the **pre-registered "row-19 class"** of port regression
+  (port-map.md §3, row 19: "Inbox path deliberately kept in listener
+  argv" — flagged risk: *"The subtlest port regression: everything demos
+  fine single-session, then every armed listener reads 'off', send
+  refuses everything without `--force`, prune reaps live peers"*). It was
+  caught here specifically because the reviewer's probe used a
+  **non-default** CBUS_DIR spelling rather than the default one every
+  other test in this phase has used — exactly the kind of input that class
+  of regression hides from.
+
+[Ruling]
+
+- Add `compatInboxPath`, which reproduces bash's raw-concatenation
+  spelling **verbatim** (no `filepath.Clean`/`filepath.Join` normalization).
+- Use it **only** on the two cross-process compat surfaces: the value
+  written into the follower's `--inbox` argv, and the needle
+  `argvContains`/liveness matching searches for. Normal internal file I/O
+  (opening the inbox, writing to it, etc.) keeps using the clean,
+  normalized path — there's no reason to denormalize anything except the
+  two surfaces bash-era tooling actually string-compares against.
+- Rides a post-verdict commit, together with a whole-directory regression
+  test exercising a non-default CBUS_DIR spelling end-to-end (join, arm,
+  cross-liveness check) to pin the fix and prevent regression.
+
 ## [2026-07-13 18:53:12 UTC] [Port/Go] Phase 2 (4/N) — in-process blocking follower (local `cbus tail`)
 
 [Attempt #1]
