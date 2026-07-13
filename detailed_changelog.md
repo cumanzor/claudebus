@@ -1,5 +1,63 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:05:20 UTC] [Port/Go] Phase 0 (5/N) — wire conformance rig + m4 riders + relay wire-struct adoption — PHASE 0 CLOSED
+
+[Attempt #1]
+
+Final Phase 0 milestone: proves the shared core wire structs match the live
+relay contract end-to-end, closes the m4 reviewer riders, and single-sources
+the relay's wire structs onto `core`. Reviewer ran the rig himself
+(`-count=1`, green in 1.1s) and confirmed `reframe_test.go`'s byte-diff is
+EMPTY across the whole phase (5e71ddc..253f4a2). P0 is now closed.
+
+[Files Changed]
+
+- `relay/internal/conformance/conformance_test.go`, `doc.go` (new) — hermetic
+  wire conformance rig: builds and runs the real `cbus-relay` binary in a
+  sandbox (temp spool, ephemeral loopback port, token via env — no
+  `~/.claude-bus`, no NUC contact) and drives `POST /send`, `GET /peers`,
+  `GET /tail` (ws) against the shared core wire structs. Proves
+  `core.SendReq`/`core.PeersResponse`/`core.Message` match the live relay:
+  `/send` accepts a marshaled `SendReq` (200 `{ok,id}`); `/peers` decodes into
+  `PeersResponse` with the queued peer; `/tail` delivers exactly
+  `core.Reframe` of the reconstructed stored line, and `core.Message`
+  round-trips it. Reuses the in-repo `wire.Dial` ws client (as `wstail`
+  does); std-lib only, `-short`-skippable.
+- `internal/core/testdata/emit_golden.py` — m4 reviewer riders: restored the
+  `◀` (U+25C0) escapes in the head/end so the lifted `wrap()`/`emit()` diffs
+  byte-exact against bin/cbus:522-551; the BEGIN marker now declares the one
+  structural omission (bin/cbus:521's argv setup, N/A to a stdin driver) —
+  provenance now reads "byte-exact modulo one declared omission". Added a
+  `sys.stdin` UTF-8 reconfigure in the driver code (not the lift) so a
+  C-locale regen can't crash.
+- `internal/core/testdata/gen_corpus.py` — relabeled the in-band-marker case
+  as `(spoof, framed)`.
+- `internal/core/testdata/corpus.jsonl`, `corpus.golden` — regenerated,
+  byte-identical to before.
+- `relay/cmd/cbus-relay/main.go` — replaced the relay's private `sendReq` and
+  presence structs with `core.SendReq`/`core.PeersEntry` (identical json
+  tags), single-sourcing the `POST /send` body and `GET /peers` entry shapes
+  with the package the future Go client imports. Pure refactor: byte-identical
+  wire output.
+
+[Possible Ripple Effects]
+
+- None functional. The relay's wire output is byte-identical pre/post
+  refactor, guarded by the conformance rig (re-run green against the
+  rebuilt binary) and `reframe_test.go` (byte-unchanged).
+- Carry-forward for P1: the conformance rig's build cache can go stale
+  across runs without `-count=1` (self-invalidating cache risk) — rides the
+  first P1 commit. Also carried: rig negative-path assertions, and a
+  deploy.sh NUC-cleanup check.
+
+[Testing Notes]
+
+- Reviewer independently ran the rig (`-count=1`, green in 1.1s) and diffed
+  `reframe_test.go` across the entire phase (5e71ddc..253f4a2) — EMPTY.
+- **Phase 0 complete: shared core + conformance harness, 7 code commits
+  (cc17a16, 347e8c8, 48afb14, c7db0ab, 7031c5b, 253f4a2 + the earlier
+  4cac62f restructure), all reviewer-approved, HEAD 253f4a2.**
+
 ## [2026-07-13 00:51:45 UTC] [Port/Go] Phase 0 (4/N) — golden framer parity corpus + oversize flip-point + gofmt gate
 
 [Attempt #1]
