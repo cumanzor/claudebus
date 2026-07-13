@@ -1,0 +1,29 @@
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+joined ch as orch
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+left ch
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+departed (listener gone)
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+renamed orch -> lead
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+line1
+line2
+line3
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+joined 🎉 你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你
+你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z kind=presence
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/oooooooooooooooooooooooooooooooooooooooooooooooooo to=ch/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm ts=2026-07-13T00:00:00Z kind=presence
+hi
+◀ cbus end from=ch/oooooooooooooooooooooooooooooooooooooooooooooooooo

@@ -6,6 +6,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -59,10 +60,36 @@ func wrapBytes(seg string, limit int) []string {
 	return append(out, seg[start:])
 }
 
+// Frame markers, shared by Reframe (relay) and LocalEmit (local follower) so the
+// literal exists once. bin/cbus:544,549.
+const (
+	markerMsg = "◀ cbus msg"
+	markerEnd = "◀ cbus end"
+)
+
+// frameHead is the base header both framers build from: `◀ cbus msg from=.. to=..
+// ts=..`. The relay may append a ⚠truncated warning; the local follower may append
+// ` kind=..` (see the two callers).
+func frameHead(from, to, ts string) string {
+	return markerMsg + " from=" + from + " to=" + to + " ts=" + ts
+}
+
+// frameBody wraps text into rune-safe body lines (BodyWrap bytes) and appends the
+// end marker for `from`. This is the shared wrap/marker core — there is no second
+// copy of the wrap loop in LocalEmit.
+func frameBody(text, from string) []string {
+	var lines []string
+	for _, seg := range strings.Split(text, "\n") {
+		lines = append(lines, wrapBytes(seg, BodyWrap)...)
+	}
+	return append(lines, markerEnd+" from="+from)
+}
+
 // Reframe rewrites a stored {from,to,ts,text} JSON line into the same framed,
 // line-wrapped block the local tail follower emits, so a long message survives
 // the Monitor's per-line cap and arrives whole in one ws frame. A non-JSON /
-// text-less payload passes through unchanged (defensive).
+// text-less payload passes through unchanged (defensive). The relay path DROPS
+// `kind` (presence renders only locally) — see LocalEmit for the local counterpart.
 //
 // The returned bytes carry NO trailing newline: on the relay path the block is
 // sent as one ws OpText frame; the local follower is responsible for appending
@@ -84,19 +111,68 @@ func Reframe(payload []byte) []byte {
 	if err := json.Unmarshal(payload, &m); err != nil || m.Text == "" {
 		return payload
 	}
-	lines := []string{""} // header filled in below (needs the total)
-	for _, seg := range strings.Split(m.Text, "\n") {
-		lines = append(lines, wrapBytes(seg, BodyWrap)...)
-	}
-	lines = append(lines, "◀ cbus end from="+m.From)
+	lines := append([]string{""}, frameBody(m.Text, m.From)...) // [0] = header placeholder (needs the total)
 	total := 0
 	for _, l := range lines {
 		total += len(l) + 1
 	}
-	head := fmt.Sprintf("◀ cbus msg from=%s to=%s ts=%s", m.From, m.To, m.TS)
+	head := frameHead(m.From, m.To, m.TS)
 	if total > WSFrameSafe { // warn in the header (which survives) so it's not silent
 		head += fmt.Sprintf(" ⚠truncated~%dB", len(m.Text))
 	}
 	lines[0] = head
 	return []byte(strings.Join(lines, "\n"))
+}
+
+// LocalEmit renders one stored inbox line into the framed block the LOCAL tail
+// follower streams to stdout — the in-process counterpart to Reframe. It differs
+// from the relay framer in exactly two byte-visible ways: it KEEPS `kind=` in the
+// header (presence events are displayed locally) and it appends the single '\n'
+// stdout line terminator that is part of every local write. So on the parity
+// domain (all fields present as strings, non-empty text, no kind) the golden
+// contract holds verbatim: bash emit() bytes == LocalEmit(line) == Reframe(line)+"\n".
+// The local follower has no oversize ⚠ warning (that is a relay-only concern).
+//
+// Degenerate inputs follow ruling D6 (deliberately NOT the bash follower's
+// verbatim behavior): a non-JSON payload, any non-string field, or empty/null/
+// missing text passes THROUGH unframed — plus its stdout terminator — which fixes
+// bash's None-leak on null text; and a framed line with missing from/to renders
+// "?" so the local column is never blank. These divergences are pinned in
+// TestLocalEmitDivergenceMatrix (citing D6), never in the golden corpus.
+func LocalEmit(payload []byte) []byte {
+	line := bytes.TrimRight(payload, "\n")
+	if len(line) == 0 {
+		return nil // an empty inbox line emits nothing (bash: `if not line: return`)
+	}
+	// Pointer fields distinguish absent (nil -> "?") from present, and a non-string
+	// field unmarshal-errors into passthrough (the D6 strict gate, == Reframe's).
+	var m struct {
+		From *string `json:"from"`
+		To   *string `json:"to"`
+		TS   *string `json:"ts"`
+		Text *string `json:"text"`
+		Kind *string `json:"kind"`
+	}
+	if err := json.Unmarshal(line, &m); err != nil || m.Text == nil || *m.Text == "" {
+		out := make([]byte, len(line)+1)
+		copy(out, line)
+		out[len(line)] = '\n'
+		return out
+	}
+	frm, to, ts := "?", "?", ""
+	if m.From != nil {
+		frm = *m.From
+	}
+	if m.To != nil {
+		to = *m.To
+	}
+	if m.TS != nil {
+		ts = *m.TS
+	}
+	head := frameHead(frm, to, ts)
+	if m.Kind != nil && *m.Kind != "" {
+		head += " kind=" + *m.Kind
+	}
+	lines := append([]string{head}, frameBody(*m.Text, frm)...)
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
