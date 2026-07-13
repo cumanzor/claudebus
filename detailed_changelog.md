@@ -1,5 +1,58 @@
 # Changelog (detailed)
 
+## [2026-07-13 17:39:14 UTC] [Port/Go] Phase 2 (3/N) — local send + send-gate + MaxMessageBytes
+
+[Attempt #1]
+
+Third Phase 2 milestone: local `send` with the full gate trichotomy,
+matching bash's size-limit behavior deliberately differently, and closing
+out the presence cross-parse rider flagged during P2.2 review. Approved.
+
+[Files Changed]
+
+- `internal/core/message.go` — new `MaxMessageBytes = 1 MiB`, aligned with
+  the relay's `POST /send` body cap (`http.MaxBytesReader`) so both the
+  local and remote paths share one message-size invariant instead of two
+  independently-chosen numbers.
+- `internal/client/send.go`, `send_test.go` (new) — `LocalSend` implements
+  the send-gate trichotomy: never-armed (`listenerPid` null) → accepted
+  unconditionally; listener alive → accepted; armed-then-dead → refused
+  unless `--force`, which queues best-effort with a warning. The local
+  from-chain resolves in order: own registration in the target channel →
+  first own registration anywhere → `$CBUS_ALIAS` → `<shorthost>-<ppid>`
+  (unroutable fallback). Appends via `O_APPEND` single-write. A message
+  exceeding `MaxMessageBytes` is **rejected**, never silently truncated —
+  a deliberate delta from bash's unguarded stdio write, which has no size
+  cliff at all and would just write whatever the shell handed it.
+- `cmd/cbus/main.go` — wires the local `send` branch, including the
+  `--from ""` null-check parity fix carried over from the remote path.
+- `internal/core/golden_test.go` — presence cross-parse rider (flagged
+  during P2.2 review): a Go-canonical presence line
+  (`{from,to,ts,kind,event,text}`) and its python-marshaled equivalent
+  frame byte-identically through the lifted `emit()`, including the
+  `kind=` header — proving the D8 canonical-bytes ruling extends to
+  presence lines, not just plain messages. Reviewer re-verified this using
+  the **real** rename-produced presence artifact from P2.2's join/rename
+  work, rather than a synthetic line, closing the flag with a live
+  fixture instead of a hand-built one.
+
+[Testing Notes]
+
+- Send-gate unit tests: never-armed/live/dead+force paths.
+- From-chain resolution + unroutable-fallback test.
+- Max-line reject-not-truncate test (message at/over `MaxMessageBytes`).
+- Differential vs bash cbus: `send` stdout byte-identical; a Go-sent and a
+  bash-sent line coexisting in the same inbox decode identically on
+  either client. Green on both platforms.
+
+[Possible Ripple Effects]
+
+- One anti-drift rider identified during review: the relay should also
+  adopt `core.MaxMessageBytes` (currently its own `1 MiB`
+  `http.MaxBytesReader` constant, coincidentally the same value but not
+  the same symbol) so the two caps can't silently drift apart. Rides the
+  next commit.
+
 ## [2026-07-13 02:43:35 UTC] [Port/Go] CORRECTION — P2.1-F1 mechanism claim retracted
 
 [Attempt #1]
