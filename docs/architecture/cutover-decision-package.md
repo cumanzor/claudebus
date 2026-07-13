@@ -76,9 +76,9 @@ last machine cuts over.
 
 | Gate | Result | Source |
 |------|--------|--------|
-| Class A/B sweep, MBP | 27/27 | `scratchpad/p26_sweep.sh` |
-| Class A/B sweep, NUC (linux/amd64) | 27/27 | same, via rsync-to-tmp + build + run + delete |
-| Rollback-safety | all pass | `scratchpad/p26_rollback.sh` |
+| Class A/B sweep, MBP | 27/27 | `scripts/p26_sweep.sh` |
+| Class A/B sweep, NUC (linux/amd64) | 27/27 | `scripts/p26_sweep.sh` via rsync-to-tmp + build + run + delete |
+| Rollback-safety | all pass | `scripts/p26_rollback.sh` |
 | Installer (fresh / M12 symlink / hook-check) | all pass | `install-cbus-go.sh` |
 | `go test -race -count=1 ./...` | green | repo test suite |
 | P2.1–P2.5 milestone differentials | closed | `detailed_changelog.md` |

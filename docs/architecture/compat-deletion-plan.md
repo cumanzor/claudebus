@@ -16,6 +16,10 @@ delete in one commit. This is the inventory.
 | 6 | **bash artifacts** — `bin/cbus`, `bin/cc-branch.sh`, `install.sh` | repo root / `bin/` | the bash client + its fork helper + its installer | remove; `install-cbus-go.sh` (or a retargeted `install.sh`) is the sole installer, placing the Go binary as `cbus` |
 | 7 | **A3/A6 frozen credential-store locations** | `internal/client/cred.go` | keychain / XDG paths frozen so no re-seed is needed across the bash↔Go boundary | may relax, but no reason to — keep frozen |
 
+**Grep-driven sweep:** shims #1–#4 carry a source token — `grep -rn 'COMPAT(P3' internal/ cmd/`
+enumerates them (#1 re-exec, #2 raw spelling ×2 surfaces, #3 mtime fallback, #4 the
+`CBUS_PYTHON` help line). #5 needs no code change (rename), #6 is bash files, #7 stays.
+
 Notes:
 - Items 1–3 are gated on **P3 structural liveness**, not on cutover: they must stay
   until *no* bash `cbus` process can arm a tail anywhere (all machines homogenized).

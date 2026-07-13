@@ -90,6 +90,7 @@ func MetaListenerAlive(metaPath string) bool {
 	return pidAlive(m.OwnerPid)
 }
 
+// COMPAT(P3 #2): raw inbox spelling (needle half) — deletes with argv-grep liveness.
 // metaInboxNeedle is the inbox path argvContains greps for — the SECOND Decision 2
 // compat surface (F1). It MUST be the raw bash inbox_path() spelling so it matches a
 // live follower's --inbox argv under ANY CBUS_DIR spelling: bash writes and greps the
@@ -146,7 +147,9 @@ func PeerDead(metaPath string) bool {
 
 // unarmedGraceElapsed reports whether a never-armed peer is past the grace window.
 // It prefers the dual-written lastActivity field and falls back to the meta file's
-// mtime (D3 — the mtime fallback is dropped in P3). A missing meta is not dead.
+// mtime. COMPAT(P3 #3): the mtime fallback bridges bash-written peers (bash never
+// wrote lastActivity) — it deletes at homogenization (-> lastActivity-only). A missing
+// meta is not dead.
 func unarmedGraceElapsed(metaPath string) bool {
 	if ts, ok := lastActivity(metaPath); ok {
 		return time.Since(ts) > unarmedGrace

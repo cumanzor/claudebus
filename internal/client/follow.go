@@ -55,6 +55,7 @@ const (
 	tailFlagFrom  = "--from"
 )
 
+// COMPAT(P3 #2): raw inbox spelling — deletes with argv-grep liveness (-> filepath.Join).
 // compatInboxPath is bash inbox_path() VERBATIM (bin/cbus:27): dir + "/" + ch + "/" +
 // al + "/inbox.jsonl", with NO filepath.Clean. This spelling is the Decision 2
 // liveness compat surface and MUST match bash's raw `printf '%s/%s/%s/inbox.jsonl'`
@@ -112,7 +113,7 @@ func ParseTailFollower(args []string) (inbox string, mode ReplayMode, ok bool) {
 // re-execs (image-replacing) into the blocking follower. It returns only on failure;
 // on success syscall.Exec never returns.
 //
-// COMPAT (Decision 2 — dies with P3 structural liveness): the re-exec carries the
+// COMPAT(P3 #1) (Decision 2 — dies with P3 structural liveness): the re-exec carries the
 // resolved inbox path as a hidden --inbox arg so the bash-era liveness predicate
 // (meta_listener_alive greps `ps -o args=` for the inbox) reads this Go follower as
 // alive during coexistence. A TRUE syscall.Exec (image replace, not a child fork)
