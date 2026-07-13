@@ -1,5 +1,48 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:27:53 UTC] [Port/Go] Phase 1 (2/N) — address resolution (M2) + bare-alias resolution; probe no-redirect fix
+
+[Attempt #1]
+
+Second Phase 1 milestone: full address grammar (M2) and session identity
+(M3 storage half), plus the P1.1 probe-redirect finding fixed. Approved
+clean — no findings; reviewer mutation-verified the redirect guard.
+
+[Files Changed]
+
+- `internal/client/addr.go`, `addr_test.go` (new) — `IsRemote` (`@` anywhere
+  in the target = remote); `ParseLocal` (split at the first `/`, keeping the
+  empty-channel-skips-validation quirk so `/alias` ≡ `alias`; a second `/`
+  makes the alias invalid, e.g. `a/b/c` → bad alias); `ParseRemote` (split at
+  the first `@` then the first `/`, each present part validated, empty parts
+  skipped); `Parse` wires bare-alias resolution through an injected
+  `Resolver`. Name validation reuses `core.ValidName`; malformed names are
+  hard errors under the approved soft→hard ruling (unlike bash's
+  non-fatal-die-in-substitution). Table tests lifted from protocol.md §1.2.
+- `internal/client/identity.go`, `identity_test.go` (new) — `CBUSDir`,
+  `SessionID`, `ResolveSelf` (`$CBUS_DIR/*/*/meta.json` scan keyed on
+  `sessionId`, dot-dir blind, same glob order as bash's `find_peer_channel`),
+  `FindPeerChannel` (first own channel holding a bare alias), torn-meta-read
+  tolerant (a mid-write read is treated as absent, matching `jget`'s
+  exception-swallowing). Tests run over a seeded temp `$CBUS_DIR`.
+- `internal/client/endpoint.go`, `endpoint_test.go` — P1.1 finding fixed:
+  `probeLocalOK` now sets `CheckRedirect` → `ErrUseLastResponse` so the
+  loopback trust-by-port probe never follows a 3xx off-loopback to an
+  ok-serving host; new `httptest` 302 case asserts the probe falls back to
+  public mode instead of trusting the redirect target.
+
+[Possible Ripple Effects]
+
+- None functional yet — still no verb wired to real network/disk I/O in
+  `cmd/cbus`.
+
+[Testing Notes]
+
+- `go test ./...` green.
+- Reviewer mutation-verified the redirect guard (flipped `CheckRedirect` back
+  to default and confirmed the new 302 test fails), confirming it's load-bearing
+  rather than incidental.
+
 ## [2026-07-13 01:21:30 UTC] [Port/Go] Phase 1 (1/N) — cbus-go skeleton + front-door/endpoint resolution; conformance rig hardened
 
 [Attempt #1]
