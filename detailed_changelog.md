@@ -1,5 +1,43 @@
 # Changelog (detailed)
 
+## [2026-07-13 02:43:35 UTC] [Port/Go] CORRECTION — P2.1-F1 mechanism claim retracted
+
+[Attempt #1]
+
+No code change. Corrects the record set by the two prior entries
+(`dd86250` "record P2.1", `effe3e4` "record P2.1 F1 fix"), both of which
+stated the mechanism as "darwin `KERN_PROCARGS2` serves a zombie process's
+cached argv with `err == nil`."
+
+[What changed]
+
+- The reviewer re-ran the repro conclusively and **retracted** that
+  mechanism claim: the original repro window caught the child process while
+  it was still technically running (a timing artifact), not in a genuine
+  zombie state. On a real darwin zombie, the `KERN_PROCARGS2` sysctl call
+  fails naturally with `EINVAL` — it does NOT return stale cached argv with
+  a success code, contrary to what was recorded.
+- Practical consequence: the pre-fix code (before `bf11d46`) was likely
+  **already outcome-correct** — a true zombie's argv read would already have
+  failed and the argv clause would already have read dead, without needing
+  the explicit `SZOMB` check.
+- The fix itself (`bf11d46`'s `procZombie`/`SZOMB` detection) and its
+  regression test (`TestArgvClauseZombieDead`) are **retained** — not
+  reverted. Explicit zombie detection is a fail-open hedge that doesn't rely
+  on an unstated/unverified kernel error-code behavior, and the regression
+  test still documents the intended contract (zombie → argv-dead)
+  regardless of which code path currently enforces it.
+- The code comments in `procinfo_darwin.go` and `liveness.go` that describe
+  the (retracted) "serves cached argv" mechanism are now inaccurate and are
+  queued for a reword at the top of P2.2.
+
+[Why this is recorded]
+
+- Mechanism claims in this changelog are treated as load-bearing fact, not
+  narrative color — a retracted claim gets its own entry rather than a
+  silent edit to the original, so the record shows what was believed, when,
+  and why it changed.
+
 ## [2026-07-13 02:40:05 UTC] [Port/Go] Phase 2 (1/N, F1 fix) — darwin zombie reads argv-dead
 
 [Attempt #1]
