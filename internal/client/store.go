@@ -1,0 +1,374 @@
+package client
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"claudebus/internal/core"
+)
+
+// peerMeta is the meta.json shape written by the store. listenerPid/ownerPid are
+// carried as raw JSON so a rewrite (rename) preserves null-vs-int verbatim. Field
+// order matches the bash json.dump (bin/cbus:428-433); lastActivity is the D3
+// dual-write, omitted when absent so a rewritten bash-era meta stays byte-identical.
+type peerMeta struct {
+	Alias        string          `json:"alias"`
+	Channel      string          `json:"channel"`
+	SessionID    string          `json:"sessionId"`
+	Cwd          string          `json:"cwd"`
+	ListenerPid  json.RawMessage `json:"listenerPid"`
+	OwnerPid     json.RawMessage `json:"ownerPid"`
+	Host         string          `json:"host"`
+	TS           string          `json:"ts"`
+	LastActivity string          `json:"lastActivity,omitempty"`
+}
+
+var jsonNull = json.RawMessage("null")
+
+// writeMeta writes meta.json atomically: a sibling temp file renamed over the
+// target, so a concurrent reader sees old-or-new, never torn (protocol.md §2.2
+// upgrade; bash writes in place). indent=2 to match json.dump.
+func writeMeta(dir string, m peerMeta) error {
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, ".meta.tmp."+strconv.Itoa(os.Getpid()))
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "meta.json"))
+}
+
+// pickAlias returns "main" if free, else the lowest free "fork-N" (bin/cbus:387-392).
+func pickAlias(ch string) string {
+	root := CBUSDir()
+	if !fileExists(filepath.Join(root, ch, "main", "meta.json")) {
+		return "main"
+	}
+	for n := 1; ; n++ {
+		a := "fork-" + strconv.Itoa(n)
+		if !fileExists(filepath.Join(root, ch, a, "meta.json")) {
+			return a
+		}
+	}
+}
+
+func cwd() string {
+	d, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return d
+}
+
+func chSuffix(ch string) string {
+	if ch == "" {
+		return ""
+	}
+	return " to " + strconv.Quote(ch)
+}
+
+// Join joins ch, auto-picking or claiming alias. Returns the resolved alias and
+// alreadyJoined=true when this session already held a registration in ch (no-op).
+// It auto-prunes the channel and broadcasts a join event (bin/cbus:394-438).
+func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
+	if !core.ValidName(ch) {
+		return "", false, fmt.Errorf("channel must be [A-Za-z0-9._-]")
+	}
+	PruneChannel(ch)
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch {
+			return reg.Alias, true, nil
+		}
+	}
+	root := CBUSDir()
+	var dir string
+	if alias == "" {
+		// bare mkdir is the atomic claim: it fails EEXIST if a concurrently-joining
+		// sibling picked the same alias first, so nobody truncates another's inbox.
+		if err := os.MkdirAll(filepath.Join(root, ch), 0o755); err != nil {
+			return "", false, err
+		}
+		for tries := 0; ; tries++ {
+			alias = pickAlias(ch)
+			dir = filepath.Join(root, ch, alias)
+			if os.Mkdir(dir, 0o755) == nil {
+				break
+			}
+			if tries >= 49 {
+				return "", false, fmt.Errorf("cannot claim an alias in %q", ch)
+			}
+		}
+	} else {
+		if !core.ValidName(alias) {
+			return "", false, fmt.Errorf("alias must be [A-Za-z0-9._-]")
+		}
+		dir = filepath.Join(root, ch, alias)
+		metaPath := filepath.Join(dir, "meta.json")
+		if fileExists(metaPath) && MetaListenerAlive(metaPath) {
+			return "", false, fmt.Errorf("%q is taken by a live listener", ch+"/"+alias)
+		}
+		_ = os.RemoveAll(dir) // reclaim a stale/dead peer holding the name
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", false, err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "inbox.jsonl"), nil, 0o644); err != nil { // truncate-at-join
+		return "", false, err
+	}
+	now := Now()
+	m := peerMeta{
+		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
+		ListenerPid: jsonNull, OwnerPid: jsonNull,
+		Host: ShortHostname(), TS: now, LastActivity: now,
+	}
+	if err := writeMeta(dir, m); err != nil {
+		return "", false, err
+	}
+	BroadcastPresence(ch, alias, "join", "joined "+ch+" as "+alias, alias)
+	return alias, false, nil
+}
+
+// Leave removes this session's registration(s) — all, or only in ch — broadcasting
+// a leave BEFORE removal (bin/cbus:662-673).
+func Leave(ch string) (left []string, err error) {
+	root := CBUSDir()
+	for _, reg := range ResolveSelf() {
+		if ch != "" && reg.Channel != ch {
+			continue
+		}
+		BroadcastPresence(reg.Channel, reg.Alias, "leave", "left "+reg.Channel, reg.Alias)
+		_ = os.RemoveAll(filepath.Join(root, reg.Channel, reg.Alias))
+		_ = os.Remove(filepath.Join(root, reg.Channel)) // rmdir if empty
+		left = append(left, reg.Channel+"/"+reg.Alias)
+	}
+	if len(left) == 0 {
+		return nil, fmt.Errorf("not joined%s", chSuffix(ch))
+	}
+	return left, nil
+}
+
+// Unregister force-removes any peer and broadcasts departed (bin/cbus:691-699).
+func Unregister(ch, al string) error {
+	root := CBUSDir()
+	dir := filepath.Join(root, ch, al)
+	if !dirExists(dir) {
+		return fmt.Errorf("no such peer %q", ch+"/"+al)
+	}
+	_ = os.RemoveAll(dir)
+	BroadcastPresence(ch, al, "departed", "unregistered", al)
+	_ = os.Remove(filepath.Join(root, ch))
+	return nil
+}
+
+// Rename renames this session's local alias (mv dir + rewrite meta.alias),
+// reclaiming a dead name-holder with a departed event (bin/cbus:706-737). Returns
+// the channel, old alias, and alreadyNamed=true when new==old (no-op).
+func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err error) {
+	if !core.ValidName(newAlias) {
+		return "", "", false, fmt.Errorf("alias must be [A-Za-z0-9._-]")
+	}
+	if wantCh != "" && !core.ValidName(wantCh) {
+		return "", "", false, fmt.Errorf("bad channel %q", wantCh)
+	}
+	var match string
+	count := 0
+	for _, reg := range ResolveSelf() {
+		count++
+		if wantCh == "" && match == "" {
+			match = reg.Channel + "/" + reg.Alias
+		}
+		if reg.Channel == wantCh {
+			match = reg.Channel + "/" + reg.Alias
+		}
+	}
+	if match == "" {
+		return "", "", false, fmt.Errorf("not joined%s in this session", chSuffix(wantCh))
+	}
+	if wantCh == "" && count > 1 {
+		return "", "", false, fmt.Errorf("joined to %d channels — pass one: cbus rename %s <channel>", count, newAlias)
+	}
+	ch, old, _ = strings.Cut(match, "/")
+	if old == newAlias {
+		return ch, old, true, nil
+	}
+	root := CBUSDir()
+	newDir := filepath.Join(root, ch, newAlias)
+	if _, statErr := os.Lstat(newDir); statErr == nil {
+		if MetaListenerAlive(filepath.Join(newDir, "meta.json")) {
+			return "", "", false, fmt.Errorf("%q is taken by a live listener", ch+"/"+newAlias)
+		}
+		_ = os.RemoveAll(newDir)
+		BroadcastPresence(ch, newAlias, "departed", "departed (name reclaimed)", old) // skip=old actor
+	}
+	if os.Rename(filepath.Join(root, ch, old), newDir) != nil {
+		return "", "", false, fmt.Errorf("rename failed")
+	}
+	_ = setMetaAlias(newDir, newAlias) // best-effort, like bash `|| true`
+	BroadcastPresence(ch, newAlias, "rename", "renamed "+old+" -> "+newAlias, newAlias)
+	return ch, old, false, nil
+}
+
+// setMetaAlias rewrites only meta.alias, preserving every other field verbatim
+// (raw pids). The port writes the alias as a string always, dropping bash jset's
+// digit→int coercion (port-map row 16, a documented C-delta).
+func setMetaAlias(dir, newAlias string) error {
+	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		return err
+	}
+	var m peerMeta
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	m.Alias = newAlias
+	return writeMeta(dir, m)
+}
+
+// PruneChannel drops dead peers in one channel via the atomic reap dance and
+// removes the channel dir once empty (bin/cbus:352-385). Returns human messages
+// (bash prints these to stderr).
+func PruneChannel(ch string) []string {
+	var msgs []string
+	root := CBUSDir()
+	chDir := filepath.Join(root, ch)
+	if !dirExists(chDir) {
+		return nil
+	}
+	// legacy v1: a meta.json directly at the channel level
+	if fileExists(filepath.Join(chDir, "meta.json")) {
+		if PeerDead(filepath.Join(chDir, "meta.json")) {
+			_ = os.RemoveAll(chDir)
+			msgs = append(msgs, "pruned legacy peer "+ch)
+		}
+		return msgs
+	}
+	entries, _ := os.ReadDir(chDir)
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		peer := e.Name()
+		peerDir := filepath.Join(chDir, peer)
+		metaPath := filepath.Join(peerDir, "meta.json")
+		if !fileExists(metaPath) || !PeerDead(metaPath) {
+			continue
+		}
+		// dot-prefixed same-parent temp: glob-invisible, EXDEV-proof rename claim.
+		tmp := filepath.Join(chDir, ".reap."+strconv.Itoa(os.Getpid())+"."+peer)
+		if os.Rename(peerDir, tmp) != nil {
+			continue // lost the claim to another reaper
+		}
+		switch {
+		case PeerDead(filepath.Join(tmp, "meta.json")):
+			_ = os.RemoveAll(tmp)
+			msgs = append(msgs, "pruned "+ch+"/"+peer)
+			BroadcastPresence(ch, peer, "departed", "departed (listener gone)", peer)
+		case dirExists(peerDir):
+			_ = os.RemoveAll(tmp) // a fresh join reclaimed the slot — drop our copy
+		default:
+			if os.Rename(tmp, peerDir) != nil { // false claim — restore
+				_ = os.RemoveAll(tmp)
+			}
+		}
+	}
+	_ = os.Remove(chDir) // rmdir if empty
+	return msgs
+}
+
+// PruneRemoteMarkers sweeps .remote markers whose owning pid is dead; legacy
+// file-markers are always removed; empty dirs are rmdir'd (bin/cbus:195-221).
+func PruneRemoteMarkers() []string {
+	var msgs []string
+	root := filepath.Join(CBUSDir(), ".remote")
+	hosts, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	for _, h := range hosts {
+		if !h.IsDir() {
+			continue
+		}
+		hostDir := filepath.Join(root, h.Name())
+		chans, _ := os.ReadDir(hostDir)
+		for _, c := range chans {
+			chPath := filepath.Join(hostDir, c.Name())
+			if !c.IsDir() { // legacy machine-global file-marker — always swept
+				_ = os.Remove(chPath)
+				msgs = append(msgs, "pruned legacy remote marker "+c.Name()+"@"+h.Name())
+				continue
+			}
+			sids, _ := os.ReadDir(chPath)
+			for _, s := range sids {
+				if s.IsDir() {
+					continue
+				}
+				mf := filepath.Join(chPath, s.Name())
+				if !pidAlive(markerOwnerPid(mf)) {
+					_ = os.Remove(mf)
+					msgs = append(msgs, "pruned remote marker "+c.Name()+"@"+h.Name()+" (session "+s.Name()+")")
+				}
+			}
+			_ = os.Remove(chPath) // rmdir if empty
+		}
+		_ = os.Remove(hostDir)
+	}
+	return msgs
+}
+
+// markerOwnerPid reads a marker's ownerPid (0 if absent/torn -> treated as dead).
+func markerOwnerPid(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var m struct {
+		OwnerPid json.RawMessage `json:"ownerPid"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return 0
+	}
+	return rawInt(m.OwnerPid)
+}
+
+// Prune runs PruneChannel over one channel or all, plus the remote-marker sweep on
+// a bare prune (bin/cbus:632-647). Returns all messages.
+func Prune(chosen string) []string {
+	var msgs []string
+	root := CBUSDir()
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if chosen != "" && e.Name() != chosen {
+			continue
+		}
+		msgs = append(msgs, PruneChannel(e.Name())...)
+	}
+	if chosen == "" {
+		msgs = append(msgs, PruneRemoteMarkers()...)
+	}
+	return msgs
+}
+
+// LeaveRemote drops THIS session's identity marker for ch@host (no relay call —
+// queued mail stays on the relay; bin/cbus:651-660).
+func LeaveRemote(host, ch string) error {
+	if ch == "" {
+		return fmt.Errorf("usage: cbus leave <channel>@<host>")
+	}
+	mf := filepath.Join(CBUSDir(), ".remote", host, ch, markerSID())
+	if !fileExists(mf) {
+		return fmt.Errorf("no remote identity for %s@%s in this session", ch, host)
+	}
+	_ = os.Remove(mf)
+	_ = os.Remove(filepath.Join(CBUSDir(), ".remote", host, ch))
+	_ = os.Remove(filepath.Join(CBUSDir(), ".remote", host))
+	return nil
+}
