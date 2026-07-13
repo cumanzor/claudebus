@@ -3,12 +3,17 @@ package client
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
+
+// unarmedGrace is the window a joined-but-never-armed peer survives before prune
+// may sweep it — long enough that join's auto-prune can't reap a sibling
+// mid-setup (bin/cbus:319, `find -mmin +10`).
+const unarmedGrace = 10 * time.Minute
 
 // PeerMeta is the subset of a peer's meta.json the read-only verbs render.
 type PeerMeta struct {
@@ -77,7 +82,7 @@ func MetaListenerAlive(metaPath string) bool {
 		return false
 	}
 	inbox := filepath.Join(filepath.Dir(metaPath), "inbox.jsonl")
-	if !psArgsContain(m.ListenerPid, inbox) {
+	if !argvContains(m.ListenerPid, inbox) {
 		return false
 	}
 	if m.OwnerPid == 0 {
@@ -95,12 +100,59 @@ func pidAlive(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
-// psArgsContain reports whether pid's full argv contains needle, via
-// `ps -ww -p <pid> -o args=` (the -ww defeats argv truncation, bin/cbus:64).
-func psArgsContain(pid int, needle string) bool {
-	out, err := exec.Command("ps", "-ww", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+// argvContains reports whether pid's argv contains needle, read via the platform
+// procArgs (sysctl KERN_PROCARGS2 on darwin, /proc/<pid>/cmdline on linux — no ps
+// spawn). A read error (ESRCH/EPERM, or a zombie whose args are gone) returns
+// false, so the argv clause reads DEAD with no invented leniency — matching
+// `ps -o args=` going empty (Decision 1 condition iii, reviewer edge D1).
+func argvContains(pid int, needle string) bool {
+	args, err := procArgs(pid)
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), needle)
+	return strings.Contains(args, needle)
+}
+
+// PeerDead is the prune / broadcast-recipient / send-gate predicate (bin/cbus:316-323):
+// a never-armed peer (null listenerPid, or a torn "field absent" read) is dead only
+// once past the unarmed grace window; an armed-ever peer is dead iff its listener is
+// no longer alive.
+func PeerDead(metaPath string) bool {
+	if m, ok := ReadPeerMeta(metaPath); ok && m.ListenerPid != 0 {
+		return !MetaListenerAlive(metaPath)
+	}
+	return unarmedGraceElapsed(metaPath)
+}
+
+// unarmedGraceElapsed reports whether a never-armed peer is past the grace window.
+// It prefers the dual-written lastActivity field and falls back to the meta file's
+// mtime (D3 — the mtime fallback is dropped in P3). A missing meta is not dead.
+func unarmedGraceElapsed(metaPath string) bool {
+	if ts, ok := lastActivity(metaPath); ok {
+		return time.Since(ts) > unarmedGrace
+	}
+	fi, err := os.Stat(metaPath)
+	if err != nil {
+		return false
+	}
+	return time.Since(fi.ModTime()) > unarmedGrace
+}
+
+// lastActivity reads the dual-written lastActivity timestamp from a meta.json.
+func lastActivity(metaPath string) (time.Time, bool) {
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var m struct {
+		LastActivity string `json:"lastActivity"`
+	}
+	if json.Unmarshal(b, &m) != nil || m.LastActivity == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse("2006-01-02T15:04:05Z", m.LastActivity)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
 }

@@ -3,9 +3,7 @@ package client
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -58,28 +56,25 @@ func WriteRemoteMarker(host, channel, alias string) error {
 // OwnerPID walks up from PPID to the owning claude session pid so a marker's
 // ownerPid tracks the SESSION's liveness (find_owner_pid, bin/cbus:44-53): the
 // first ancestor within 16 hops whose command basename is "claude" or "claude-*".
-// Uses ps for parity with the bash client on both darwin and linux.
+// Uses the platform procParent (sysctl on darwin, procfs on linux) — no ps spawn.
 func OwnerPID() (int, bool) {
 	p := os.Getppid()
 	for depth := 0; p > 1 && depth < 16; depth++ {
-		comm := psField(p, "comm")
-		if base := comm[strings.LastIndexByte(comm, '/')+1:]; base == "claude" || strings.HasPrefix(base, "claude-") {
+		comm, ppid, err := procParent(p)
+		if err != nil {
+			return 0, false
+		}
+		base := comm
+		if i := strings.LastIndexByte(base, '/'); i >= 0 {
+			base = base[i+1:]
+		}
+		if base == "claude" || strings.HasPrefix(base, "claude-") {
 			return p, true
 		}
-		next, err := strconv.Atoi(psField(p, "ppid"))
-		if err != nil || next <= 0 {
+		if ppid <= 1 {
 			break
 		}
-		p = next
+		p = ppid
 	}
 	return 0, false
-}
-
-// psField runs `ps -p <pid> -o <field>=` (header suppressed) and trims the result.
-func psField(pid int, field string) string {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", field+"=").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }

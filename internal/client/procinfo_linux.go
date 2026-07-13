@@ -1,0 +1,49 @@
+//go:build linux
+
+package client
+
+import (
+	"errors"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// linux process inspection via procfs (no ps spawn, Decision 1a).
+
+var errBadStat = errors.New("unparseable /proc stat")
+
+// procArgs returns pid's argv space-joined (as `ps -o args=`), from
+// /proc/<pid>/cmdline (NUL-separated). A read error — ESRCH, or a zombie whose
+// cmdline is empty — makes the argv liveness clause read DEAD (edge D1).
+func procArgs(pid int) (string, error) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	return strings.Join(parts, " "), nil
+}
+
+// procParent returns pid's comm (`ps -o comm=`) and parent pid from
+// /proc/<pid>/stat. comm is field 2 in parens and may itself contain spaces or
+// parens, so it is delimited by the FIRST '(' and the LAST ')'.
+func procParent(pid int) (comm string, ppid int, err error) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return "", 0, err
+	}
+	s := string(b)
+	open := strings.IndexByte(s, '(')
+	closeParen := strings.LastIndexByte(s, ')')
+	if open < 0 || closeParen < 0 || closeParen < open {
+		return "", 0, errBadStat
+	}
+	comm = s[open+1 : closeParen]
+	rest := strings.Fields(s[closeParen+1:]) // state ppid pgrp ...
+	if len(rest) < 2 {
+		return "", 0, errBadStat
+	}
+	ppid, err = strconv.Atoi(rest[1])
+	return comm, ppid, err
+}
