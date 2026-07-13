@@ -1,5 +1,134 @@
 # Changelog (detailed)
 
+## [2026-07-13 21:26:48 UTC] [Port/Go] Phase 2 (6/N) — cutover-readiness: installer, version stamp, help parity, decision docs — PHASE 2 CLOSED
+
+[Attempt #1]
+
+Sixth and final Phase 2 milestone: everything needed to make cutover a
+human decision rather than a technical blocker — an installer, version
+stamping, help/error parity, and the formal cutover-decision package —
+plus review riders and the `/bus-branch` smoke-test saga that upgraded
+the recommendation to unconditional. Phase 2 closes six-for-six
+(P2.1-P2.6).
+
+[Files Changed — 2b49b37, original submission]
+
+- `install-cbus-go.sh` (new) — builds `cbus-go` with a `-ldflags`
+  version stamp (`git describe`/hash), places it mode-agnostically
+  (`rm -f` then `cp`, fixing the M12 port-map risk where a `cp` through
+  an existing symlink would clobber the repo source instead of
+  replacing the target), and **reports** (read-only, never writes) the
+  current SessionEnd hook wiring state. Touches ONLY the `cbus-go`
+  binary path — no bash `cbus` path, no `install.sh` retargeting, no
+  `settings.json` writes of any kind.
+- `cmd/cbus/main.go` — `main.version` stamped via `-ldflags`; new
+  `cbus-go version`/`--version` verb (a readiness delta — bash `cbus`
+  has no version verb at all).
+- `cmd/cbus/usage.go` (new) — help/error parity (findings F-A/F-B,
+  ruling "Option X"): ports bash's `--help` output byte-for-byte
+  **except** the now-obsolete `CC_BRANCH` env var line (branch is
+  native since P2.5, so that bash env-override line is a deliberate,
+  ruled delta rather than a bug); unknown-command error matches bash's
+  exact single-quote + `cbus --help` pointer form. `cbus-go` now
+  self-identifies as `cbus` in its own help text, so cutover can be a
+  pure binary swap at the filesystem level; the resulting coexistence
+  oddity (running `cbus-go --help` directly still prints `cbus`) is
+  named explicitly in the decision package rather than left as a
+  surprise.
+- `docs/architecture/cutover-decision-package.md` (new) — the GO
+  recommendation, per-machine swap steps, a rollback procedure,
+  "what stays bash" (answer: nothing), and the evidence bundle.
+- `docs/architecture/compat-deletion-plan.md` (new) — enumerates the
+  coexistence shims that get deleted once the fleet reaches Phase 3
+  homogenization.
+- **Evidence**: Class A/B differential sweep, 27/27, run on BOTH MBP
+  (darwin/arm64) and the NUC (linux/amd64, via a temp binary — nothing
+  installed there); rollback-safety checks all pass (bash correctly
+  reads and operates on cbus-go-written state, including the D3
+  `lastActivity` field); the installer was validated including the M12
+  over-symlink case specifically. `go test -race -count=1 ./...`
+  green. **Zero cutover was executed** — this commit is readiness
+  work, not a switch.
+
+[Files Changed — 2826de5, review riders]
+
+- **R1**: greppable `// COMPAT(P3 #N)` markers added to every
+  coexistence shim the deletion plan names, so
+  `grep -rn 'COMPAT(P3' internal/ cmd/` mechanically enumerates all of
+  them: #1 the re-exec (`follow.go`), #2 the raw inbox spelling
+  (`follow.go`'s `compatInboxPath` + `liveness.go`'s
+  `metaInboxNeedle`), #3 the mtime grace fallback (`liveness.go`), #4
+  the `CBUS_PYTHON` help line (`usage.go`). Comment-only change — no
+  behavior touched.
+- **R2**: moved the P2.6 evidence from session-ephemeral scratchpad
+  into `scripts/` under version control — `p26_sweep.sh` (the Class
+  A/B sweep, every verb, 27/27) and `p26_rollback.sh` (the
+  bash-reads-cbus-go-state check). The decision package's evidence
+  bundle now points at these committed scripts (repo-relative, so they
+  run from any checkout); the deletion plan documents the `COMPAT(P3`
+  grep convention for future auditors. Both scripts re-run green from
+  their committed location.
+
+[Files Changed — 638c20b + 2aadf1a, the /bus-branch smoke saga]
+
+- **Window leg** (a real `ccs` fork, not a probe): the terminal window
+  stayed open with a live `ccs`→`claude` fork — PIDs captured and
+  confirmed alive for ≥90 seconds, directly refuting an earlier
+  "session ended instantly" observation. Exact launch command
+  recorded; env correctly replicated (personal profile, cwd,
+  `CLAUDE_CONFIG_DIR`); the launcher tmpfile self-deleted as designed.
+- **Tmux leg**: `cc-branch`'s tmux window ran the same launcher,
+  spawning the same kind of live fork; launch command and env
+  replication confirmed identical via `ps -wwE`.
+- **Diagnosis recorded**: the earlier "session ended instantly" result
+  was a **fast-exit PROBE artifact** — a deliberately short-lived test
+  invocation — not a defect in the branch/fork mechanism itself (a real
+  `ccs` session stays open exactly as expected). Separately, an
+  earlier-observed *slow child boot* was traced to the weight of
+  **this session's own 200+-turn parent transcript** at fork time, not
+  anything the port introduced — normal, shorter parent sessions boot
+  their children fast. The live test forks were deliberately killed
+  before their heavy boot completed, to avoid burning tokens
+  needlessly.
+- **Two findings recorded, neither blocking**: `ccs` was confirmed to
+  be a real, working binary in this environment (not a stub or missing
+  dependency); the launcher tmpfile lives under `$TMPDIR`, which is
+  cross-process-readable on this machine — pinning it to `/tmp`
+  specifically is filed as a Phase 3 hardening candidate, not a Phase 2
+  blocker (the tmpfile already self-deletes immediately after use).
+- **Child-boots-and-joins, "(d)" — the last smoke-gate leg** — was
+  completed by Carlos directly, running `cbus-go branch` manually in
+  his own normal-transcript sessions (both the window and tmux
+  surfaces) and confirming that **both** the parent and the newly
+  forked child appear in `cbus list` — the child genuinely boots,
+  joins its channel, and registers, not just that a terminal window
+  opened.
+- **Recommendation upgraded to unconditional GO** on the strength of
+  this evidence — the earlier caution around the fork mechanism is
+  fully resolved.
+
+[Whole-port invariant, restated at Phase 2 close]
+
+- Across all 48 commits of the port so far (`4cac62f`..`2aadf1a`), the
+  relay (`relay/cmd/cbus-relay`) has never been behaviorally modified
+  — only refactored (the shared framer extraction in Phase 0, the
+  `core.MaxMessageBytes` single-sourcing in Phase 2), with byte-parity
+  to its pre-port behavior proven at every step. `reframe_test.go`
+  remains byte-unchanged from the pre-port audit (HEAD `5e71ddc`)
+  throughout the entire effort — the strongest evidence that the
+  "relay stays, client gets ported" ground rule (port-map.md's opening
+  premise) has held in practice, not just on paper.
+
+[Possible Ripple Effects]
+
+- None functional from this milestone's own changes — installer,
+  version stamp, and help text are additive/cosmetic; the decision
+  package and deletion plan are docs.
+- Real ripple effect is organizational, not code: the project now has
+  everything needed for Carlos to flip individual machines over to
+  `cbus-go` whenever he chooses. Nothing in this milestone forces that
+  decision or its timing.
+
 ## [2026-07-13 19:46:44 UTC] [Port/Go] Phase 2 (5/N) — harness layer + real flag parser (P2.5) — CLOSED
 
 [Attempt #2]
