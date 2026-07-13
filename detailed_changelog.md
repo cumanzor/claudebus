@@ -1,5 +1,43 @@
 # Changelog (detailed)
 
+## [2026-07-13 02:40:05 UTC] [Port/Go] Phase 2 (1/N, F1 fix) — darwin zombie reads argv-dead
+
+[Attempt #1]
+
+Closes the one confirmed finding from P2.1's conditional approval: the
+darwin zombie liveness inversion.
+
+[Files Changed]
+
+- `internal/client/procinfo_darwin.go` — added `procZombie`, which reads
+  `pbi_status` (offset 4 of the `proc_bsdinfo` buffer `procParent` already
+  fetches) via `proc_pidinfo`/`PROC_PIDTBSDINFO` and compares against
+  `SZOMB` (5, from `<sys/proc.h>`). `procArgs` now checks `procZombie` first
+  and returns `syscall.ESRCH` for a zombie, instead of letting
+  `KERN_PROCARGS2` return the process's stale cached argv with `err == nil`.
+  Corrected the prior (false) comment claiming `KERN_PROCARGS2` already
+  errors for zombies — it doesn't; that was the bug.
+- `internal/client/liveness.go` — updated `argvContains`'s doc comment to
+  describe the darwin zombie case accurately (was asserting behavior that
+  didn't hold).
+- `internal/client/liveness_test.go` — new `TestArgvClauseZombieDead`,
+  reproducing reviewer's repro exactly: `exec.Command("true").Start()` left
+  unwaited becomes a zombie; `pidAlive` (`kill -0`) still succeeds, but the
+  argv clause must read dead. Without the `SZOMB` guard this test fails on
+  darwin (stays argv-alive); it passes with the fix.
+
+[Testing Notes]
+
+- New regression passes on both darwin (MBP) and linux (NUC).
+- This closes the P2.1 conditional-approval finding; P2.1 is now fully
+  closed (no further caveat).
+
+[Possible Ripple Effects]
+
+- None beyond the fix itself — the zombie edge case was the sole gap
+  identified, and normal kill/exit/crash liveness paths were already
+  unaffected.
+
 ## [2026-07-13 02:30:12 UTC] [Port/Go] Phase 2 (1/N) — liveness off ps-spawns (sysctl/procfs) + peer_dead
 
 [Attempt #1]
