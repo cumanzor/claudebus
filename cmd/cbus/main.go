@@ -202,11 +202,20 @@ func runTail(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus tail <channel>/<alias>")
 	}
+	// the re-exec'd follower (ArmLocalTail's syscall.Exec) carries a hidden --inbox;
+	// when present, THIS process is the follower — run the blocking loop, don't re-arm.
+	if inbox, mode, ok := client.ParseTailFollower(args); ok {
+		client.RunFollower(inbox, mode) // blocks until the Monitor kills us; never returns
+		return 0
+	}
 	if client.IsRemote(args[0]) {
 		return runTailRemote(args[0])
 	}
-	// the local tail is the blocking Monitor follower — Phase 2
-	return notImplemented("tail (local follower is Phase 2; cbus-go arms remote tails only)")
+	// local tail: arm this session as the listener and exec-replace into the follower.
+	if err := client.ArmLocalTail(args[0]); err != nil {
+		return die("%v", err)
+	}
+	return 0 // unreachable: ArmLocalTail image-replaces on success
 }
 
 // runTailRemote prints the ws arm-spec and writes this session's identity marker.
