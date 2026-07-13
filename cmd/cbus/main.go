@@ -53,8 +53,11 @@ func run(args []string) int {
 		// detection (args[0] is no longer @-shaped), matching the bash dead quirk.
 		return runList(append([]string{"--active"}, args[1:]...))
 
-	// P1 verbs still landing (remote tail, whoami, inbox, channels, read-only list).
-	case "tail", "channels", "whoami", "inbox":
+	case "tail":
+		return runTail(args[1:])
+
+	// P1 verbs still landing (whoami, inbox, channels, read-only list).
+	case "channels", "whoami", "inbox":
 		return notImplemented(verb)
 
 	// Phase 2 (local transport + harness) — not in the Go client during P1.
@@ -98,6 +101,7 @@ func runSendRemote(args []string) int {
 	}
 	rest := args[1:]
 	from := ""
+	fromSet := false
 	i := 0
 loop:
 	for i < len(rest) {
@@ -106,13 +110,18 @@ loop:
 			if i+1 >= len(rest) {
 				return die("missing value for --from")
 			}
-			from = rest[i+1]
+			from, fromSet = rest[i+1], true
 			i += 2
 		case "--force":
 			i++ // ignored remotely: the spool always queues
 		default:
 			break loop
 		}
+	}
+	// an explicit empty --from dies (bash ${2:?} null-check) rather than silently
+	// falling back to the default — that would mask an unset-$VAR scripting bug.
+	if fromSet && from == "" {
+		return die("--from: value must not be empty")
 	}
 	text := strings.Join(rest[i:], " ")
 	if text == "" {
@@ -122,13 +131,50 @@ loop:
 	if err != nil {
 		return die("%v", err)
 	}
-	if from == "" {
+	if !fromSet {
 		from = client.RemoteFromDefault(host, ch)
 	}
 	if err := client.RemoteSend(ep, core.SendReq{Channel: ch, Alias: al, From: from, Text: text}); err != nil {
 		return die("%v", err)
 	}
 	fmt.Printf("sent to %s@%s/%s via %s relay (from %s)\n", ch, host, al, ep.Mode(), from)
+	return 0
+}
+
+func runTail(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus tail <channel>/<alias>")
+	}
+	if client.IsRemote(args[0]) {
+		return runTailRemote(args[0])
+	}
+	// the local tail is the blocking Monitor follower — Phase 2
+	return notImplemented("tail (local follower is Phase 2; cbus-go arms remote tails only)")
+}
+
+// runTailRemote prints the ws arm-spec and writes this session's identity marker.
+// It runs nothing persistent (remote tail is print-only) and needs only the token
+// (the ws leg is subprotocol-only). bin/cbus:272-293.
+func runTailRemote(target string) int {
+	ch, host, al, err := client.ParseRemote(target)
+	if err != nil {
+		return die("%v", err)
+	}
+	if al == "" {
+		return die("remote tail needs <channel>@<host>/<alias>")
+	}
+	fd, err := client.ResolveFrontDoor(host)
+	if err != nil {
+		return die("%v", err)
+	}
+	token, _ := client.NewCredStore().Get(host, "token")
+	if token == "" {
+		return die("no relay token for %q — run: cbus auth set %s --token -", host, host)
+	}
+	if err := client.WriteRemoteMarker(host, ch, al); err != nil {
+		return die("marker: %v", err)
+	}
+	fmt.Print(client.RemoteTailSpec(fd.Base, token, ch, host, al))
 	return 0
 }
 

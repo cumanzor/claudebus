@@ -112,6 +112,13 @@ func TestAuthSetDoubleStdinDrainsOnce(t *testing.T) {
 	}
 }
 
+func TestSendRemoteEmptyFromDies(t *testing.T) {
+	// explicit --from "" must die (bash ${2:?}), before any network call
+	if rc := runSendRemote([]string{"c@testhost/a", "--from", "", "hello"}); rc == 0 {
+		t.Error(`send --from "" must die, not fall back to the default`)
+	}
+}
+
 func TestRenderRemoteList(t *testing.T) {
 	mustTime := func(s string) time.Time {
 		ts, err := time.Parse(time.RFC3339Nano, s)

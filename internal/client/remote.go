@@ -106,6 +106,21 @@ func RemoteSend(e RemoteEndpoint, req core.SendReq) error {
 	return nil
 }
 
+// RemoteTailSpec builds the Monitor ws arm-spec a remote `cbus tail` prints (A5):
+// the base's scheme is swapped to ws/wss and the relay token rides the
+// subprotocol (the ws leg is subprotocol-only — no CF Access). Byte-identical to
+// bin/cbus:285-292; the em-dash before "expected" is U+2014.
+func RemoteTailSpec(base, token, channel, host, alias string) string {
+	url := WSURL(base) + "/tail?channel=" + channel + "&alias=" + alias
+	addr := channel + "@" + host
+	return "remote listening is armed with the Monitor tool's ws source (not a command):\n" +
+		"  url:         " + url + "\n" +
+		"  protocols:   [\"bearer.cbus." + token + "\"]\n" +
+		"  description: cbus:" + addr + "/" + alias + "   (persistent: true)\n" +
+		"identity recorded for THIS session: sends to " + addr + "/* default to from=" + addr + "/" + alias + "\n" +
+		"note: the protocols entry carries the relay token — expected; it IS the auth.\n"
+}
+
 // RemoteList GETs <base>/peers into a core.PeersResponse.
 func RemoteList(e RemoteEndpoint) (core.PeersResponse, error) {
 	httpReq, err := http.NewRequest(http.MethodGet, e.Base+"/peers", nil)
