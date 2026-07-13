@@ -1,5 +1,42 @@
 # Changelog (detailed)
 
+## [2026-07-13 18:15:17 UTC] [Port/Go] Relay adopts core.MaxMessageBytes; coder session handoff
+
+[Attempt #1]
+
+Small follow-on closing the P2.3 anti-drift rider, plus a session handoff
+note for continuity.
+
+[Files Changed]
+
+- `relay/cmd/cbus-relay/main.go` — `handleSend` previously hardcoded
+  `http.MaxBytesReader(w, r.Body, 1<<20)`; now uses
+  `core.MaxMessageBytes`, so the local client's send-size limit and the
+  relay's `/send` body cap are single-sourced onto one constant instead of
+  two independently-written `1<<20` literals that happened to agree. Pure
+  refactor — the value is unchanged (1 MiB); the conformance rig was
+  re-run green and `reframe_test.go` is untouched.
+- `internal/core/message.go` — refreshed the doc comment on
+  `MaxMessageBytes`, which previously pointed at the relay's now-stale
+  hardcoded-literal anchor (`main.go:163`); it now describes the adopted
+  constant directly.
+
+[Possible Ripple Effects]
+
+- None — behavior-preserving single-sourcing, closing the drift risk
+  flagged in P2.3's review rather than introducing a new one.
+
+[Session handoff]
+
+- The coder session hit a context-limit checkpoint after 21 commits in
+  this effort (`4cac62f`..`82fd4ac`). The P2.4 spec — including the
+  `LocalEmit`-keeps-`kind` note (local delivery must preserve the `kind=`
+  header for presence lines it emits, matching the D8-extension-to-presence
+  ruling from P2.2) — is preserved in project memory so a successor coder
+  session can pick up P2.4 without re-deriving context.
+
+Commit: `82fd4ac`.
+
 ## [2026-07-13 18:10:49 UTC] [Port/Go] Phase 2 (2/N) — PeerStore mutations + presence (P2.2) — CLOSED after a concurrent-join fix
 
 [Attempt #2]
