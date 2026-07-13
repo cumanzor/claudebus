@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claudebus/internal/client"
+	"claudebus/internal/core"
 )
 
 // captureStdout runs f with os.Stdout redirected and returns what it wrote.
@@ -88,5 +90,57 @@ func TestAuthStatusBadHost(t *testing.T) {
 	store := client.NewFileCredStore()
 	if rc := runAuthStatus(store, []string{"bad/host"}); rc == 0 {
 		t.Error("auth status with a bad host should fail (closed gap)")
+	}
+}
+
+// TestAuthSetDoubleStdinDrainsOnce pins the reviewer-requested contract: each '-'
+// drains stdin, so a second stdin-fed credential in one invocation gets empty and
+// dies — and the first credential is still stored.
+func TestAuthSetDoubleStdinDrainsOnce(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	store := client.NewFileCredStore()
+	rc := runAuthSet(store, []string{"server", "--token", "-", "--cf-id", "-"}, strings.NewReader("only-one-token\n"))
+	if rc == 0 {
+		t.Error("second '-' should drain empty and fail")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "cbus", "server", "token")); string(b) != "only-one-token" {
+		t.Errorf("first token = %q, want only-one-token", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cbus", "server", "cf-id")); err == nil {
+		t.Error("cf-id must not be written after the drain-empty failure")
+	}
+}
+
+func TestRenderRemoteList(t *testing.T) {
+	mustTime := func(s string) time.Time {
+		ts, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ts
+	}
+	peers := core.PeersResponse{
+		"dev/server": {Connected: true, Queued: 0, LastSeen: mustTime("2026-07-12T14:31:10.802809793-06:00")},
+		"dev/laptop": {Connected: false, Queued: 3, LastSeen: mustTime("2026-07-12T15:00:00Z")},
+		"other/x":    {Connected: true, Queued: 1, LastSeen: mustTime("2026-07-12T15:00:00Z")},
+	}
+	// channel filter "dev" excludes other/x; sorted -> dev/laptop before dev/server
+	out := captureStdout(t, func() { renderRemoteList(peers, "dev", "server") })
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 filtered lines, got %d:\n%s", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], "off   ") || !strings.Contains(lines[0], "dev@server/laptop") || !strings.Contains(lines[0], "queued=3") {
+		t.Errorf("line0 = %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "listen") || !strings.Contains(lines[1], "dev@server/server") || !strings.Contains(lines[1], "lastSeen=2026-07-12T14:31:10.802809793-06:00") {
+		t.Errorf("line1 = %q", lines[1])
+	}
+
+	// empty result prints the "no remote peers in ..." line
+	empty := captureStdout(t, func() { renderRemoteList(core.PeersResponse{}, "dev", "server") })
+	if strings.TrimSpace(empty) != "no remote peers in dev@server" {
+		t.Errorf("empty render = %q", empty)
 	}
 }

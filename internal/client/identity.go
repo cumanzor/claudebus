@@ -2,8 +2,10 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -76,6 +78,46 @@ func FindPeerChannel(alias string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// markerSID is this session's remote-marker id: $CLAUDE_CODE_SESSION_ID, or the
+// deliberately-unroutable nosession-<ppid> fallback (bin/cbus:189).
+func markerSID() string {
+	if sid := SessionID(); sid != "" {
+		return sid
+	}
+	return "nosession-" + strconv.Itoa(os.Getppid())
+}
+
+// ShortHostname is `hostname -s` (the label before the first dot); "unknown" on
+// failure.
+func ShortHostname() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "unknown"
+	}
+	if i := strings.IndexByte(h, '.'); i >= 0 {
+		h = h[:i]
+	}
+	return h
+}
+
+// RemoteFromDefault is the default `from` for a remote send when --from is
+// omitted: THIS session's identity marker on (host, channel) if it has a non-empty
+// alias, else the unroutable <shorthost>-<ppid> fallback. It never consults local
+// registrations or $CBUS_ALIAS — the remote chain differs from the local one by
+// design (protocol.md §3.1).
+func RemoteFromDefault(host, channel string) string {
+	mf := filepath.Join(CBUSDir(), ".remote", host, channel, markerSID())
+	if b, err := os.ReadFile(mf); err == nil {
+		var m struct {
+			Alias string `json:"alias"`
+		}
+		if json.Unmarshal(b, &m) == nil && m.Alias != "" {
+			return channel + "@" + host + "/" + m.Alias
+		}
+	}
+	return fmt.Sprintf("%s-%d", ShortHostname(), os.Getppid())
 }
 
 // metaSessionID reads the sessionId out of a meta.json, tolerating a missing or

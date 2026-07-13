@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
+	"time"
 
 	"claudebus/internal/client"
 	"claudebus/internal/core"
@@ -41,10 +44,17 @@ func run(args []string) int {
 
 	case "auth":
 		return runAuth(args[1:])
+	case "send":
+		return runSend(args[1:])
+	case "list", "peers":
+		return runList(args[1:])
+	case "active":
+		// dispatch prepends --active; for a remote target this defeats remote
+		// detection (args[0] is no longer @-shaped), matching the bash dead quirk.
+		return runList(append([]string{"--active"}, args[1:]...))
 
-	// P1 verbs — landing milestone by milestone (remote send/list/tail, whoami,
-	// inbox, channels, read-only list).
-	case "send", "tail", "list", "peers", "active", "channels", "whoami", "inbox":
+	// P1 verbs still landing (remote tail, whoami, inbox, channels, read-only list).
+	case "tail", "channels", "whoami", "inbox":
 		return notImplemented(verb)
 
 	// Phase 2 (local transport + harness) — not in the Go client during P1.
@@ -66,6 +76,116 @@ func notImplemented(verb string) int {
 func die(format string, a ...any) int {
 	fmt.Fprintf(os.Stderr, "cbus: "+format+"\n", a...)
 	return 1
+}
+
+func runSend(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus send <target> [--from ch/al] [--force] TEXT")
+	}
+	if client.IsRemote(args[0]) {
+		return runSendRemote(args)
+	}
+	return notImplemented("send (local delivery is Phase 2)")
+}
+
+func runSendRemote(args []string) int {
+	ch, host, al, err := client.ParseRemote(args[0])
+	if err != nil {
+		return die("%v", err)
+	}
+	if al == "" {
+		return die("remote send needs <channel>@<host>/<alias>")
+	}
+	rest := args[1:]
+	from := ""
+	i := 0
+loop:
+	for i < len(rest) {
+		switch rest[i] {
+		case "--from":
+			if i+1 >= len(rest) {
+				return die("missing value for --from")
+			}
+			from = rest[i+1]
+			i += 2
+		case "--force":
+			i++ // ignored remotely: the spool always queues
+		default:
+			break loop
+		}
+	}
+	text := strings.Join(rest[i:], " ")
+	if text == "" {
+		return die("empty message")
+	}
+	ep, err := client.ResolveRemote(client.NewCredStore(), host)
+	if err != nil {
+		return die("%v", err)
+	}
+	if from == "" {
+		from = client.RemoteFromDefault(host, ch)
+	}
+	if err := client.RemoteSend(ep, core.SendReq{Channel: ch, Alias: al, From: from, Text: text}); err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("sent to %s@%s/%s via %s relay (from %s)\n", ch, host, al, ep.Mode(), from)
+	return 0
+}
+
+func runList(args []string) int {
+	if len(args) > 0 && client.IsRemote(args[0]) {
+		return runListRemote(args[0])
+	}
+	return notImplemented("list (read-only local is P1.6)")
+}
+
+func runListRemote(target string) int {
+	ch, host, _, err := client.ParseRemote(target)
+	if err != nil {
+		return die("%v", err)
+	}
+	ep, err := client.ResolveRemote(client.NewCredStore(), host)
+	if err != nil {
+		return die("%v", err)
+	}
+	peers, err := client.RemoteList(ep)
+	if err != nil {
+		return die("%v", err)
+	}
+	renderRemoteList(peers, ch, host)
+	return 0
+}
+
+// renderRemoteList prints /peers the way bin/cbus:299-310 does: sorted by
+// channel/alias key, optional channel filter, listen/off + queued + lastSeen.
+func renderRemoteList(peers core.PeersResponse, channelFilter, host string) {
+	keys := make([]string, 0, len(peers))
+	for k := range peers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	shown := false
+	for _, key := range keys {
+		c, a, _ := strings.Cut(key, "/")
+		if channelFilter != "" && c != channelFilter {
+			continue
+		}
+		p := peers[key]
+		shown = true
+		state := "off   "
+		if p.Connected {
+			state = "listen"
+		}
+		addr := c + "@" + host + "/" + a
+		fmt.Printf("%s  %-28s queued=%-3d lastSeen=%s\n", state, addr, p.Queued, p.LastSeen.Format(time.RFC3339Nano))
+	}
+	if !shown {
+		if channelFilter != "" {
+			fmt.Printf("no remote peers in %s@%s\n", channelFilter, host)
+		} else {
+			fmt.Println("no remote peers")
+		}
+	}
 }
 
 func runAuth(args []string) int {
