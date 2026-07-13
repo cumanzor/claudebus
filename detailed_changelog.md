@@ -1,5 +1,66 @@
 # Changelog (detailed)
 
+## [2026-07-13 00:23:31 UTC] [Port/Go] Phase 0 (1/N) — root module promotion + shared framer extraction
+
+[Attempt #1]
+
+Phase 0 of the bash→Go port (port-map.md §6): stand up a shared Go package that both
+the relay and the future Go client import, with no deployment and no behavior change.
+This commit does the module restructure plus the highest-value shared-code move (the
+framer). Assigned via the cbus `go-port` channel (coder role); the module layout was
+ratified as Option A (single root module) by the orchestrator before restructuring.
+
+[Files Changed]
+
+- `go.mod` (moved from `relay/go.mod`) — module path `claudebus/relay` → `claudebus`.
+  The module root moves to the repo root while the relay tree stays at `relay/`, so the
+  relay's three imports (`claudebus/relay/internal/{spool,wire}`) resolve UNCHANGED.
+  `internal/` now sits at the repo root, importable by both `relay/cmd/cbus-relay` and a
+  future `cmd/cbus` client. Verified: only those 3 import sites reference the old path,
+  and all stay valid.
+- `internal/core/frame.go` (new, ~110 lines) — `Reframe` + `wrapBytes` + the measured
+  constants (`MonitorLineCap=500`, `BodyWrap=440`, `WSFrameSafe=2800`), moved verbatim
+  from main.go:202-252. Provenance comments carry the 2026-07-13 live re-measurement and
+  the newly-observed harness behavior: truncation now emits an explicit `...(truncated)`
+  marker at BOTH the per-line cap and the ~3000 notification ceiling (previously a silent
+  cut on the local path). The header-less oversize-total quirk (protocol.md §4.4) is
+  preserved verbatim. Documents the no-trailing-newline output contract.
+- `relay/cmd/cbus-relay/main.go` — removed the local `reframe`/`wrapBytes`/`wsFrameSafe`;
+  `reframe()` is now a one-line wrapper delegating to `core.Reframe`. Added the
+  `claudebus/internal/core` import; dropped the now-unused `unicode/utf8` import (it was
+  used only by `wrapBytes`). Net −45 lines.
+- `relay/deploy.sh` — retargeted for the root-module layout: rsync now ships the repo
+  root's `go.mod` + `internal/` + `relay/` (keeps the module self-contained on the NUC);
+  build paths become `./relay/cmd/{cbus-relay,wstail}`; the systemd unit is copied from
+  `src/relay/cbus-relay.service`.
+
+[Possible Ripple Effects]
+
+- `relay/cmd/cbus-relay/reframe_test.go` is intentionally UNCHANGED and still passes —
+  it exercises the framer through the package-local `reframe` wrapper, which is the gate
+  proving this is a pure refactor. `git diff` on that file is empty.
+- The framer is now single-sourced: any future frame change is one edit in
+  `internal/core`, and (Phase 4) the Go client shares it — frame parity becomes a
+  compile-time property instead of two hand-synced implementations.
+- deploy.sh is NOT exercised until the next real relay deploy (tracked separately, e.g.
+  spool-GC). Its correctness here rests on the local simulation below; the first live
+  deploy post-restructure is the real test.
+- No wire, on-disk, or behavioral change: `core.Reframe` returns byte-identical output
+  to the prior `reframe` (no trailing newline; the ws OpText frame is unchanged).
+
+[Testing Notes]
+
+- `go build ./...`, `go vet ./...`, `go test ./...` all pass; the relay test package is
+  green (0.225s) with reframe_test.go byte-unchanged.
+- deploy.sh simulation (orchestrator-required, so the reviewer can check the layout
+  builds without a live deploy): rsync'd `go.mod` + `internal/` + `relay/` into a temp
+  `src/` mirroring the NUC layout, then ran the exact deploy build commands against it.
+  Native (`go build ./relay/cmd/cbus-relay` + wstail) → OK; NUC-target cross-compile
+  (`GOOS=linux GOARCH=amd64`) → OK (ELF x86-64, statically linked).
+- Go toolchain: none existed on the MBP (the relay was always built on the NUC via
+  deploy.sh's ssh). Installed go1.26.5 via Homebrew (user-approved) for local iteration
+  across the port.
+
 ## [2026-07-12 22:14:17 UTC] [Docs] Full behavioral audit → architecture docs + port map
 
 [Attempt #1]
