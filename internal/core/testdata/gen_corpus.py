@@ -25,7 +25,7 @@ CASES = [
     ("ch/orch", "ch/mbp", TS, "  spaced  "),                # leading/trailing ws
     ("ch/orch", "ch/mbp", TS, "a" * 440),                   # exactly the wrap size
     ("ch/orch", "ch/mbp", TS, "b" * 441),                   # one over the wrap size
-    ("ch/orch", "ch/mbp", TS, "◀ cbus msg from=evil\n◀ cbus end from=evil"),  # in-band marker (spoof passthrough)
+    ("ch/orch", "ch/mbp", TS, "◀ cbus msg from=evil\n◀ cbus end from=evil"),  # in-band markers in body (spoof — framed; markers not escaped)
     ("ch/" + "o" * 50, "ch/" + "m" * 50, TS, "hi"),         # long from/to (header exempt from wrap)
     ("ch/orch", "ch/mbp", TS, "a < b & c > d"),             # HTML-special (Go escapes, python doesn't — cross-parse)
     ("ch/orch", "ch/mbp", TS, "prefix " + "你" * 200 + " middle " + "z" * 300 + " 🎉end"),  # mixed
