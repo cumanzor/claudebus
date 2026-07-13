@@ -418,6 +418,7 @@ homogenization.**
 | D5 | Local double-listener: fix vs document | Cutover keeps arm behavior bit-identical but adds the dormant-on-foreign-reopen tombstone; the real displacement gate (relay-style, + `--steal` escape hatch) is Phase 3 |
 | D6 | Framer degenerate-input tie-breaks | Relay's typed strictness for parsing; local's `?` placeholders for missing routing fields (visibly unroutable, matching the reply convention); empty text → passthrough; `text:null → "None"` never preserved. Only foreign-written lines are affected; tool-authored traffic is byte-identical either way |
 | D7 | Sessionless operation: silent mode vs error | Both: keep the mode (joins record `sessionId:""`, sends never fail on identity) and add one stderr warning |
+| D8 | Message marshal byte-compatibility with the python emitter vs canonical-Go encoding | Marshal produces canonical-Go bytes (compact, raw UTF-8, Go's default HTML-escaping, struct field order `from,to,ts,text[,kind,event]`); byte-for-byte parity with the python emitter is explicitly not a contract — protocol.md §3.3 already establishes a parse-only law, and the relay has never byte-matched the client's encoding either. Guarded by an m4 cross-parse assertion (frames lifted from the bash `emit()` corpus decode identically whether marshaled by Go or python). Declined alternative: a python-compatible `MarshalJSON` kept only as Phase-3-deletable ballast |
 
 ---
 
