@@ -30,13 +30,14 @@ const (
 )
 
 // procArgs returns pid's argv joined by spaces (as `ps -o args=` renders it),
-// read via sysctl KERN_PROCARGS2. ESRCH/EPERM are returned so the argv liveness
-// clause reads DEAD. ZOMBIE handling (F1): unlike linux (where /proc/<pid>/cmdline
-// goes empty) and unlike `ps` (which shows "<defunct>"), darwin's KERN_PROCARGS2
-// keeps returning the process's CACHED argv with err=nil for a zombie — which
-// would read a zombie follower ALIVE while bash reads it dead. So a zombie is
-// detected first (procZombie) and reported as an error, matching bash. The
-// two-call probe handles the KERN_ARGMAX-bounded buffer sizing.
+// read via sysctl KERN_PROCARGS2. ESRCH/EPERM/EINVAL are returned so the argv
+// liveness clause reads DEAD. ZOMBIE handling (F1): on current kernels a real
+// zombie makes KERN_PROCARGS2 itself EINVAL (its args are reclaimed), so the read
+// naturally fails and the clause reads dead — matching bash's "<defunct>" and
+// linux's empty /proc/cmdline. procZombie is a fail-open belt-and-braces hedge for
+// any kernel/window where the argv read might still succeed for a not-yet-reaped
+// process; in practice it never fires (see its note). The two-call probe handles
+// the KERN_ARGMAX-bounded buffer sizing.
 func procArgs(pid int) (string, error) {
 	if procZombie(pid) {
 		return "", syscall.ESRCH
@@ -99,8 +100,11 @@ func procParent(pid int) (comm string, ppid int, err error) {
 	return string(c), ppid, nil
 }
 
-// procZombie reports whether pid is a zombie (pbi_status == SZOMB). A failed read
-// returns false — let pidAlive / the argv read decide rather than invent death.
+// procZombie reports whether pid is a zombie (pbi_status == SZOMB). It is a
+// fail-open hedge: PROC_PIDTBSDINFO itself errors for a real zombie, so this
+// returns false and never actually fires in practice — the KERN_PROCARGS2 EINVAL
+// in procArgs is the real guard. Kept as belt-and-braces for any kernel/window
+// where the info read might still succeed for a not-yet-reaped process.
 func procZombie(pid int) bool {
 	var buf [256]byte
 	r, _, errno := syscall.Syscall6(_SYS_proc_info,
