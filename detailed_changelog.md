@@ -1,5 +1,64 @@
 # Changelog (detailed)
 
+## [2026-07-13 19:12:32 UTC] [Port/Go] P2.4-F1 fix confirmed — P2.4 closed fully
+
+[Attempt #1]
+
+Closes the P2.4 verdict addendum's finding (path-spelling compat under a
+non-default CBUS_DIR). P2.4 is now fully closed; Phase 2 stands at 4/6
+milestones complete.
+
+[Files Changed]
+
+- `internal/client/follow.go` — new `compatInboxPath(dir, ch, al string)
+  string` does bash-verbatim raw concatenation (no `filepath.Clean`/`Join`
+  normalization), reproducing exactly what bash's `inbox_path()` produces
+  for any given `$CBUS_DIR` spelling. `InboxPath` (the argv-facing value)
+  now routes through it.
+- `internal/client/liveness.go` — new `metaInboxNeedle`, which rebuilds the
+  liveness needle `argvContains` searches for from the raw `$CBUS_DIR` plus
+  the peer's subpath — the previous version built the needle from a
+  cleaned path, so it silently diverged from a Go follower's raw-spelled
+  argv under any non-default CBUS_DIR spelling. Handles both legacy v1 and
+  v2 layouts.
+- `internal/client/follow_test.go` — extended the existing byte-equal pin
+  test with a non-clean-spelling case (a trailing-slash `$CBUS_DIR`),
+  asserting `argv == needle == bash-verbatim` all three ways. Also adds
+  the ruled `TestFollowDirDeletionNeverExits`: deleting the whole alias
+  directory out from under a running follower must not make it self-exit
+  — it keeps polling and reopens cleanly once the directory is recreated
+  (never-self-exit is a load-bearing contract, port-map.md §4 delete-list
+  item 10's inverse — this pins it under a harsher-than-normal deletion
+  case than plain file rotation).
+
+[Root cause, restated precisely]
+
+`filepath.Join` **cleans** — it collapses a trailing slash, so under
+`CBUS_DIR=/tmp/bus/` the Go follower's `--inbox` argv read
+`/tmp/bus/ch/al/inbox.jsonl` (single slash) while bash's `meta_listener_alive`
+built its search needle as `/tmp/bus//ch/al/inbox.jsonl` (double slash,
+preserving the trailing slash bash actually had configured) — a literal
+string mismatch. Direction matters here: bash read a **live** Go follower
+as `off` (and would have pruned it as dead), and symmetrically Go read a
+live bash follower as `off`. Both directions were broken, not just one.
+
+[Possible Ripple Effects]
+
+- None beyond the fix's scope — `compatInboxPath`/`metaInboxNeedle` only
+  affect the two named cross-process compat surfaces; normal file opens
+  still use clean paths throughout.
+- This closes out the port-map.md §3 row-19 regression class for the
+  argv-compat surface specifically; the general risk (any future code that
+  builds a path for cross-process string-comparison rather than for a
+  syscall) remains something to watch for elsewhere in the port.
+
+[Testing Notes]
+
+- `go test -race -count=1 ./...` green.
+- **LIVE**: all four bash↔Go liveness directions (bash reads Go, Go reads
+  bash, in both the "already correct default spelling" and the
+  "trailing-slash CBUS_DIR" configurations) read `alive` correctly.
+
 ## [2026-07-13 19:05:02 UTC] [Port/Go] P2.4 verdict addendum — APPROVED with one confirmed finding
 
 [Attempt #1]
