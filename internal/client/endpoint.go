@@ -103,7 +103,13 @@ func ResolveFrontDoor(host string) (FrontDoor, error) {
 // response line is exactly "ok" (bash: `curl -fsS -m 0.3 … | grep -q '^ok$'`).
 // A >=400 status (curl -f) or any transport error is not-ok.
 func probeLocalOK(base string) bool {
-	c := &http.Client{Timeout: probeTimeout}
+	c := &http.Client{
+		Timeout: probeTimeout,
+		// curl (no -L) does not follow redirects; Go's default chases up to 10.
+		// On the trust-by-port loopback probe, following a 3xx off-loopback to an
+		// "ok"-serving host would wrongly select local mode — so refuse to follow.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	resp, err := c.Get(strings.TrimRight(base, "/") + "/healthz")
 	if err != nil {
 		return false
