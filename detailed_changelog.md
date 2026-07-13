@@ -1,5 +1,121 @@
 # Changelog (detailed)
 
+## [2026-07-13 22:02:54 UTC] [Docs] Post-cutover documentation pass (17 files)
+
+[Attempt #1]
+
+Full documentation sweep following the 2026-07-13 cutover, applying a
+change map drafted by a Fable 5 subagent (research + spec, not
+implementation) against every doc that mentions the bash client. 8
+files MUST-CHANGE, 5 BANNER-only (audit-era body preserved as the
+verified contract the port was checked against), 4 NO-CHANGE. Applied
+in dependency order: user-facing docs (README/CHEATSHEET/bus-join.md)
+first, so the dev-docs status lines that claim "drift fixed" would
+actually be true when written.
+
+[Files Changed — repo, 4 commits]
+
+- **`e9c6a84`** — README.md + CHEATSHEET.md. Bash→Go implementation
+  statements (re-exec follower not python, `go build` install with no
+  python3/`tail -F` dependency, native `TerminalForker` branch,
+  `cbus --version`, hook-exit + presence subsections, 1 MiB message
+  cap) AND 14 pre-existing stale claims catalogued in
+  behavior-spec.md §12 fixed at the source rather than carried into
+  the new text: the `tail -n +1 -F` mechanism reference, two
+  "nothing is lost" overstatements (local ⚠truncated claim and the
+  cross-machine relay-replay claim), the relay "epic in progress"
+  line (shipped), the displacement "no duplicate delivery" overstate
+  (at-least-once, narrow handover race), the `$CLAUDE_CODE_SESSION_ID`-only
+  `from` resolution claim (full chain), missing presence/hook-exit
+  documentation, and several CLI-reference wording gaps (`whoami`,
+  `--force` remote scoping, `prune` marker sweep, env var list).
+- **`d5d7c61`** — architecture set. `overview.md`: header banner +
+  surgical edits to the component table, mermaid diagram, and
+  environment-assumptions section describing the Go client, while
+  leaving §1/§4/§5/Dogfooding/most of §6 as the historical rationale
+  record (still accurate — the design decisions describe intent, not
+  bash mechanics). `command-reference.md` and `protocol.md`: banner
+  only, pointing at the port's 10-item intended-deltas list; bodies
+  are the frozen behavioral contract the port was differentially
+  verified against and stay untouched. `port-map.md`: status banner +
+  `— DONE` stamps on the Phase 0/1/2 headings (Phase 2 additionally
+  notes the cutover execution date).
+- **`1ee6f46`** — `commands/bus-join.md` softens the "nothing is
+  lost" overstatement (the relay replays mail queued while no tail
+  was attached; the ~90-120s silent-drop window before that can still
+  lose mail) — the "execs a follower that never exits" warning stays,
+  since it's still literally true of the Go binary. Copied to
+  `~/.claude/commands/` on the MBP and propagated to the NUC via `scp`
+  by hand (checksums verified identical on both hosts) — explicitly
+  NOT via `./install.sh`, which would silently roll back the cutover
+  by reinstalling the bash client. `install.sh` itself: header comment
+  and closing message rewritten to state plainly that running this
+  script now IS the rollback procedure, with the rebuild command to
+  undo an accidental run.
+- **`485fe80`** — `cutover-decision-package.md` gets a status banner
+  and its summary line's tense corrected (was "cutover is user-gated,
+  nothing has been executed"; now reads as the record of a decision
+  that was already acted on). `compat-deletion-plan.md` gets a status
+  stamp: item 5 (self-id rename) done at cutover; items 1-4/6/7 remain
+  until P3 fleet homogenization.
+
+[Files Changed — dev-docs, direct edits, no git]
+
+- `index.md`: cutover-executed note after the audit line; Key Facts
+  table's Client/Client-install rows rewritten for the Go binary; Doc
+  map table annotates behavior-spec.md as frozen/verification-contract,
+  port-map.md as executed-through-P2, adds the two new cutover docs to
+  the repo-human-docs list, and resolves the "docs lag code" line now
+  that the repo fixes have landed; the liveness "five things" list
+  item 4 gets a sysctl/procfs parenthetical; Status section rewritten
+  from "cutover user-gated" to "cutover EXECUTED."
+- `architecture.md`: post-cutover note under the header; §2 component
+  table rows for Client CLI/Fork helper/Installer rewritten for the Go
+  client; §3 topology diagram's follower annotation updated; §4 data
+  flow steps 2 and the fork flow updated (re-exec wording, native
+  TerminalForker); §8's copy-install-drift bullet rewritten; §9 commit
+  timeline gets a final summary row for the whole go-port epic. §1,
+  §5 (decision rationale — still accurate as history), §6 (security),
+  §7 (delivery-semantics truth table — unchanged by the port) left
+  untouched per the map.
+- `behavior-spec.md`: banner declaring it FROZEN as the bash-era
+  reference/verification contract, with the same 10-item delta list
+  and a Go-side-equivalences paragraph (liveness via sysctl/procfs,
+  in-process re-exec'd follower, shared `core.LocalEmit` framer). §12's
+  heading annotated as resolved in this doc pass (applied only after
+  the repo-side fixes in `e9c6a84`/`1ee6f46` landed, so the claim is
+  true).
+- `port-map.md`: status banner (phases 0-2 executed, cutover done,
+  compat shims inventoried); Phase 2 heading's `— DONE` stamp extended
+  with the cutover execution date.
+
+[No-change files, per the map]
+
+- `docs/prior-art-and-cc-internals.md` — historical research record,
+  explicitly dated; its one bash-current-sounding line sits inside
+  that dated narrative and is accurate for its date.
+- `commands/bus-branch.md`, `commands/bus-rename.md` — no bash/
+  cc-branch references; their "execs/is a follower that never exits"
+  and rename-mechanism claims are still literally true of the Go
+  client.
+
+[Testing Notes]
+
+- Every edit was verified against the actual file content before
+  applying (line numbers in the source map had drifted slightly from
+  a few of my own earlier same-session edits; matched by exact text
+  instead). No map instruction contradicted the tree in a way that
+  required stopping to flag back.
+- `bus-join.md`'s propagation to both machines was checksum-verified
+  (`md5`/`md5sum` identical on MBP and NUC) rather than assumed.
+
+[Possible Ripple Effects]
+
+- None functional — this is a documentation-only pass. The one
+  behavior-adjacent artifact touched is the *installed* copy of the
+  three slash-command skills (not the port itself), which now read
+  the corrected `bus-join.md` on both machines.
+
 ## [2026-07-13 21:26:48 UTC] [Port/Go] Phase 2 (6/N) — cutover-readiness: installer, version stamp, help parity, decision docs — PHASE 2 CLOSED
 
 [Attempt #1]
