@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:57:22 UTC] [Port/Go] Phase 1 (5/N) — remote tail arm-spec (A5) + .remote identity markers (A3); --from "" now dies
+
+[Attempt #1]
+
+Fifth Phase 1 milestone: the remote `tail` verb (print-only arm-spec) and
+session-scoped `.remote` identity markers, plus the P1.4 ruled fix. Approved
+clean — reviewer reproduced all evidence live, including the end-to-end
+deep path (bash↔Go marker interop).
+
+[Files Changed]
+
+- `internal/client/marker.go`, `marker_test.go` (new) — `WriteRemoteMarker`
+  writes this session's identity marker at
+  `.remote/<host>/<channel>/<sessionId>` = `{alias, ownerPid, ts}`,
+  pretty-printed via `json.MarshalIndent` (verified byte-identical to
+  python's `json.dump(..., indent=2)`); a legacy machine-global FILE marker
+  at that path is replaced first, matching bash's behavior. `OwnerPID` walks
+  `$PPID` up to a `claude`-named ancestor via `ps` (parity with
+  `find_owner_pid`, 16-hop cap), falling back to raw `$PPID` when no
+  ancestor matches. `Now()` = `date -u` second precision.
+- `internal/client/remote.go` — `RemoteTailSpec` builds the Monitor `ws:`
+  arm-spec byte-identical to `cmd_tail_remote`'s bash heredoc (ws-scheme
+  swap, subprotocol token, the em-dash in the description line).
+- `cmd/cbus/main.go`, `main_test.go` — `tail <ch>@<host>/<al>` prints the
+  arm-spec and writes the identity marker (print-only, token-only side
+  effect — matches bash's "not a process" contract). The local
+  blocking-follower `tail` stays deferred to Phase 2 by design (M6 follower
+  work is local-transport scope, not remote).
+- `cmd/cbus/main.go` — ruled fix from the P1.4 verdict: an explicit
+  `--from ""` (present but empty) now dies with a usage error, matching
+  bash's `${2:?}` null-check, instead of silently falling through to the
+  from-default chain.
+
+[Testing Notes]
+
+- Marker indent=2 golden test, write/read round-trip, legacy-file-replace
+  test, unroutable-fallback test, arm-spec format test, `--from ""` die
+  test.
+- **LIVE differentials vs bash cbus**: A5 (arm-spec) byte-identical output;
+  A3 (markers) proven in BOTH directions — bash `cbus send` successfully
+  read a Go-written marker, and `cbus-go send` successfully read a
+  bash-written marker; marker JSON bytes are Go==python identical.
+- Local marker test residue was cleaned up after the run; only the relay's
+  spool residue remains (no GC exists server-side — expected).
+
+[Possible Ripple Effects]
+
+- None functional — remote `tail` is still print-only; no local listener
+  exists in cbus-go yet (Phase 2).
+
 ## [2026-07-13 01:48:02 UTC] [Port/Go] Phase 1 (4/N) — remote send/list client (M7), explicit timeouts, no retry
 
 [Attempt #1]
