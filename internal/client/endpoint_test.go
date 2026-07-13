@@ -114,6 +114,21 @@ func TestResolveFrontDoor(t *testing.T) {
 		}
 	})
 
+	t.Run("redirect is not followed -> public", func(t *testing.T) {
+		// an "ok"-serving target the probe must NOT be redirected to (F1)
+		target := healthz("ok\n", 200)
+		defer target.Close()
+		redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/healthz", http.StatusFound)
+		}))
+		defer redir.Close()
+		t.Setenv("CBUS_RELAY_LOCAL_URL", redir.URL)
+		fd, _ := ResolveFrontDoor("nuc")
+		if fd.Local {
+			t.Fatalf("a loopback 302 must not be followed to an ok-serving host: %+v", fd)
+		}
+	})
+
 	t.Run("slow probe times out -> public", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(600 * time.Millisecond) // > the 300ms probe timeout
