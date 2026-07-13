@@ -254,8 +254,15 @@ Behaviors that exist **only** because the implementation is bash. Each with its 
     principle).
 11. **`"$*"` message assembly + flags-before-text ordering** (bin/cbus:444-451). → a real flag
     parser with `--` support (documented observable change).
-12. **cc-branch.sh's self-deleting mktemp launcher** (bin/cc-branch.sh:31-44) — nested
-    osascript quoting. → build argv natively; pass env via the spawn API.
+12. ~~cc-branch.sh's self-deleting mktemp launcher~~ — **CORRECTED, NOT deletable** (was
+    mischaracterized here as a bash-only workaround). The true rationale: iTerm2's AppleScript
+    `do script` command parameter does not parse POSIX-style quoting, so a temp launcher script
+    avoids embedding a quoted, multi-arg command directly in the AppleScript string — this is an
+    AppleScript/iTerm2 constraint, not a bash one. Live-proven during the Go port: P2.5's `OSAForker`
+    built argv natively (no shim) and broke on the same tokenizer; the ruled fix resurrects the
+    launcher-shim pattern with this rationale documented. → the ported iTerm2 `TerminalForker`
+    backend keeps an equivalent temp-launcher-file mechanism; only the implementation (mktemp +
+    self-delete vs. some other temp-file scheme) is free to change, not the underlying need.
 13. **`'+1'`/`'0'` vestigial `tail -n` tokens** (bin/cbus:514, 553). → explicit replay enum.
 14. **stdout re-encoding with `errors="replace"`** (bin/cbus:517-520) — python-under-bash
     locale defensiveness. → controlled output encoding; keep the never-die-on-mojibake policy.
