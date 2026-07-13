@@ -1,5 +1,89 @@
 # Changelog (detailed)
 
+## [2026-07-13 18:10:49 UTC] [Port/Go] Phase 2 (2/N) — PeerStore mutations + presence (P2.2) — CLOSED after a concurrent-join fix
+
+[Attempt #2]
+
+Second Phase 2 milestone: local transport mutations (join/leave/rename/
+unregister/prune) and presence broadcasts, held after initial review found
+a concurrency regression in auto-pick join; now confirmed closed with the
+fix in place.
+
+[Files Changed]
+
+- `internal/client/store.go`, `store_test.go` — `Join` (bare-mkdir EEXIST
+  claim with a unified pick+claim, inbox truncate-at-join, meta
+  temp+rename, dual-write `lastActivity` per ruling D3), `Leave`, `Rename`
+  (same-parent `mv` + `meta.alias` rewrite preserving raw pids; alias is
+  always stored as a string, dropping bash `jset`'s digit-coercion —
+  port-map row 16's ruled Class-C delta), `Unregister`, `PruneChannel`
+  (dot-prefixed same-parent rename reap + 3-way re-verify + rmdir),
+  `PruneRemoteMarkers`, `Prune`, `LeaveRemote`.
+- `internal/client/presence.go` (new) — `BroadcastPresence`
+  (join/leave/rename/departed) with the `!PeerDead` recipient filter,
+  from-subject vs skip-actor split, once-only `departed` via the reap
+  mv-claim; `O_APPEND` single-write appends. Presence lines are
+  canonical-Go (D8) — the follower frames them identically to bash's, so
+  delivered events are byte-identical even though the raw stored line is
+  compact rather than matching bash's shape byte-for-byte. This is the
+  D8-extension-to-presence ruling.
+- `cmd/cbus/main.go` — wires `join`/`register`/`leave`/`rename`/
+  `unregister`/`prune`.
+
+[Testing Notes — original submission]
+
+- Unit tests: join create/truncate/dual-write/auto-pick/reclaim, presence
+  join broadcast + skip-self, prune reap + departed, rename, unregister,
+  leave.
+- Live differential vs bash cbus on a shared `$CBUS_DIR`: `meta.json`
+  byte-identical modulo the D3 `lastActivity` line; bash reads Go-written
+  metas; bash presence lands correctly in Go peer inboxes; Go's `prune`
+  correctly reaps a bash-written dead peer.
+
+[Finding F1 — concurrent auto-pick join loses claims]
+
+- The auto-pick claim loop burned all 50 retries inside a sibling's
+  `mkdir`→meta window. Bash's accidental protection here was never
+  designed-in: its subshell-per-attempt pick loop takes ~milliseconds per
+  try, which happens to act as a backoff; the Go loop runs in microseconds
+  and has no such accidental delay. Reviewer reproduced 8 concurrent joins
+  losing 3 claims to `"cannot claim an alias"` (5/8 success).
+- **Fix** (ruling option b): `claimAlias` now remembers EEXIST-failed
+  aliases *per invocation* and excludes them from later picks in the same
+  claim loop — only `errors.Is(err, fs.ErrExist)` poisons the exclude-set
+  (any other error still propagates as a real failure). This converges in
+  one extra round with no sleeps — deterministic, not a timing hack. The
+  contract preserved is Class-B: a unique alias per joiner; exact `fork-N`
+  *numbering* under concurrency was never deterministic in bash either and
+  need not match.
+- **Regression**: `TestConcurrentClaimUniqueAliases` — 24 concurrent
+  `claimAlias` calls under `-race` → 24 unique aliases, zero errors. Plus
+  reviewer's mixed 4-Go + 4-bash concurrent-join harness → 8/8 unique
+  aliases on both rounds (was 5/8 pre-fix).
+
+[Resent micro-notes from review]
+
+- `cwd()` uses `os.Getwd()`, which resolves the **physical** path; bash's
+  `$PWD` is the **logical** (symlink-preserving) shell variable. This is a
+  cosmetic divergence in the `cwd` display field of `meta.json` only — it
+  is never used for correctness/liveness — and is noted rather than
+  "fixed" since replicating `$PWD`'s exact resolution semantics from Go
+  isn't a meaningful goal for a display-only field.
+- `setMetaAlias` is a deliberate best-effort no-op-tolerant rewrite (mirrors
+  bash rename's `jset ... || true`) — it rewrites only `meta.alias`,
+  preserving every other field verbatim, and a failure here is swallowed
+  the same way bash swallows it.
+
+[Possible Ripple Effects]
+
+- None beyond the fix's scope — the claim-loop change only affects the
+  auto-pick (bare-alias) join path; explicit-alias join was already
+  single-shot and unaffected.
+
+**CONFIRMED CLOSED** — reviewer's mixed 4-Go + 4-bash concurrent-join
+harness passed 8/8 on both rounds. Commits: `c3db6b5` (original), `0e88056`
+(F1 fix).
+
 ## [2026-07-13 17:39:14 UTC] [Port/Go] Phase 2 (3/N) — local send + send-gate + MaxMessageBytes
 
 [Attempt #1]
