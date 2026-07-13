@@ -59,11 +59,11 @@ func run(args []string) int {
 		return runTail(args[1:])
 
 	case "whoami":
-		return runWhoami()
+		return runWhoami(args[1:])
 	case "inbox":
 		return runInbox(args[1:])
 	case "channels":
-		return runChannels()
+		return runChannels(args[1:])
 
 	case "join":
 		return runJoin(args[1:])
@@ -78,19 +78,17 @@ func run(args []string) int {
 	case "prune":
 		return runPrune(args[1:])
 
-	// Phase 2 harness layer — still landing (P2.5).
-	case "hook-exit", "bootstrap", "branch":
-		return notImplemented(verb)
+	case "hook-exit": // SessionEnd hook: announce departure (never fails the session)
+		return runHookExit()
+	case "bootstrap":
+		return runBootstrap(args[1:])
+	case "branch":
+		return runBranch(args[1:])
 
 	default:
 		fmt.Fprintf(os.Stderr, "cbus: unknown command %q (cbus-go --help)\n", verb)
 		return 1
 	}
-}
-
-func notImplemented(verb string) int {
-	fmt.Fprintf(os.Stderr, "cbus-go: %q not implemented yet (P1 in progress; use the bash cbus)\n", verb)
-	return 1
 }
 
 // die prints "cbus: <msg>" to stderr and returns exit code 1 (bin/cbus:19).
@@ -111,29 +109,18 @@ func runSend(args []string) int {
 
 func runSendLocal(args []string) int {
 	target := args[0]
-	rest := args[1:]
-	from, fromSet, force := "", false, false
-	i := 0
-loop:
-	for i < len(rest) {
-		switch rest[i] {
-		case "--from":
-			if i+1 >= len(rest) {
-				return die("missing value for --from")
-			}
-			from, fromSet = rest[i+1], true
-			i += 2
-		case "--force":
-			force = true
-			i++
-		default:
-			break loop
-		}
+	// unknown --flags are NOT strict here: a message body may legitimately start with
+	// '-' (and `--` terminates option parsing — the ruled delta).
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true}, map[string]bool{"--force": true}, false)
+	if err != nil {
+		return die("%v", err)
 	}
+	from, fromSet := p.has("--from")
+	force := p.flags["--force"]
 	if fromSet && from == "" {
 		return die("--from: value must not be empty")
 	}
-	text := strings.Join(rest[i:], " ")
+	text := strings.Join(p.pos, " ")
 	if text == "" {
 		return die("empty message")
 	}
@@ -156,31 +143,19 @@ func runSendRemote(args []string) int {
 	if al == "" {
 		return die("remote send needs <channel>@<host>/<alias>")
 	}
-	rest := args[1:]
-	from := ""
-	fromSet := false
-	i := 0
-loop:
-	for i < len(rest) {
-		switch rest[i] {
-		case "--from":
-			if i+1 >= len(rest) {
-				return die("missing value for --from")
-			}
-			from, fromSet = rest[i+1], true
-			i += 2
-		case "--force":
-			i++ // ignored remotely: the spool always queues
-		default:
-			break loop
-		}
+	// --force is accepted but ignored remotely (the spool always queues); `--`
+	// terminates option parsing (ruled delta) so a body may start with '-'.
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true}, map[string]bool{"--force": true}, false)
+	if err != nil {
+		return die("%v", err)
 	}
+	from, fromSet := p.has("--from")
 	// an explicit empty --from dies (bash ${2:?} null-check) rather than silently
 	// falling back to the default — that would mask an unset-$VAR scripting bug.
 	if fromSet && from == "" {
 		return die("--from: value must not be empty")
 	}
-	text := strings.Join(rest[i:], " ")
+	text := strings.Join(p.pos, " ")
 	if text == "" {
 		return die("empty message")
 	}
@@ -207,6 +182,9 @@ func runTail(args []string) int {
 	if inbox, mode, ok := client.ParseTailFollower(args); ok {
 		client.RunFollower(inbox, mode) // blocks until the Monitor kills us; never returns
 		return 0
+	}
+	if err := noExtra(args, 1, "usage: cbus tail <channel>/<alias>"); err != nil {
+		return die("%v", err)
 	}
 	if client.IsRemote(args[0]) {
 		return runTailRemote(args[0])
@@ -241,6 +219,56 @@ func runTailRemote(target string) int {
 		return die("marker: %v", err)
 	}
 	fmt.Print(client.RemoteTailSpec(fd.Base, token, ch, host, al))
+	return 0
+}
+
+// runHookExit runs the SessionEnd hook. It ALWAYS returns 0 — a hook must never fail
+// the session — and produces no stdout (best-effort local-leave, remote markers survive).
+func runHookExit() int {
+	client.HookExit(os.Stdin)
+	return 0
+}
+
+func runBootstrap(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus bootstrap <channel> [parent-alias]")
+	}
+	if err := noExtra(args, 2, "usage: cbus bootstrap <channel> [parent-alias]"); err != nil {
+		return die("%v", err)
+	}
+	ch := args[0]
+	parent := "main"
+	if len(args) > 1 {
+		parent = args[1]
+	}
+	if !core.ValidName(ch) {
+		return die("bad channel %q", ch)
+	}
+	if !core.ValidName(parent) {
+		return die("bad alias %q", parent)
+	}
+	fmt.Println(client.BootstrapPrompt(ch, parent))
+	return 0
+}
+
+func runBranch(args []string) int {
+	if err := noExtra(args, 2, "usage: cbus branch [window|tab|tmux] [channel]"); err != nil {
+		return die("%v", err)
+	}
+	target := "window"
+	if len(args) > 0 {
+		target = args[0]
+	}
+	ch := ""
+	if len(args) > 1 {
+		ch = args[1]
+	}
+	rch, alias, err := client.Branch(target, ch, client.OSAForker{})
+	if err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("parent: %s/%s (child will announce itself on the bus)\n", rch, alias)
+	fmt.Printf("arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", rch, alias)
 	return 0
 }
 
@@ -318,7 +346,10 @@ func runListLocal(active bool, chosen string) int {
 	return 0
 }
 
-func runChannels() int {
+func runChannels(args []string) int {
+	if err := noExtra(args, 0, "usage: cbus channels"); err != nil {
+		return die("%v", err)
+	}
 	root := client.CBUSDir()
 	channels, _ := os.ReadDir(root)
 	any := false
@@ -359,7 +390,10 @@ func runChannels() int {
 
 // runWhoami prints this session's local registrations (channel/alias) and remote
 // from-default markers; exits 1 when the session has neither (bin/cbus:775-792).
-func runWhoami() int {
+func runWhoami(args []string) int {
+	if err := noExtra(args, 0, "usage: cbus whoami"); err != nil {
+		return die("%v", err)
+	}
 	any := false
 	for _, reg := range client.ResolveSelf() {
 		fmt.Printf("%s/%s\n", reg.Channel, reg.Alias)
@@ -382,6 +416,9 @@ func runInbox(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus inbox <channel>/<alias>")
 	}
+	if err := noExtra(args, 1, "usage: cbus inbox <channel>/<alias>"); err != nil {
+		return die("%v", err)
+	}
 	ch, al, err := client.ParseLocal(args[0])
 	if err != nil {
 		return die("%v", err)
@@ -396,6 +433,9 @@ func runInbox(args []string) int {
 func runJoin(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus join <channel> [alias]")
+	}
+	if err := noExtra(args, 2, "usage: cbus join <channel> [alias]"); err != nil {
+		return die("%v", err)
 	}
 	ch := args[0]
 	alias := ""
@@ -422,6 +462,9 @@ func runJoin(args []string) int {
 }
 
 func runLeave(args []string) int {
+	if err := noExtra(args, 1, "usage: cbus leave [channel]"); err != nil {
+		return die("%v", err)
+	}
 	if len(args) > 0 && client.IsRemote(args[0]) {
 		ch, host, _, err := client.ParseRemote(args[0])
 		if err != nil {
@@ -451,6 +494,9 @@ func runRename(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus rename <new-alias> [channel]")
 	}
+	if err := noExtra(args, 2, "usage: cbus rename <new-alias> [channel]"); err != nil {
+		return die("%v", err)
+	}
 	if client.IsRemote(args[0]) {
 		return die("rename is local-only — remote (@host) aliases are relay-side (see cbus leave/tail)")
 	}
@@ -476,6 +522,9 @@ func runUnregister(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus unregister <channel>/<alias>")
 	}
+	if err := noExtra(args, 1, "usage: cbus unregister <channel>/<alias>"); err != nil {
+		return die("%v", err)
+	}
 	ch, al, err := client.ParseLocal(args[0])
 	if err != nil {
 		return die("%v", err)
@@ -491,6 +540,9 @@ func runUnregister(args []string) int {
 }
 
 func runPrune(args []string) int {
+	if err := noExtra(args, 1, "usage: cbus prune [channel]"); err != nil {
+		return die("%v", err)
+	}
 	chosen := ""
 	if len(args) > 0 {
 		chosen = args[0]
