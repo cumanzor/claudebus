@@ -1,7 +1,13 @@
 # claudebus — System Overview
 
-> Audience: a developer browsing this repo. This document describes the system **as it is**
-> (HEAD `f213e26`, audited 2026-07-12), including behavioral quirks — flagged, not fixed.
+> Audience: a developer browsing this repo. This document describes the system as
+> audited at HEAD `f213e26` (2026-07-12), when the client was the bash `bin/cbus` —
+> behavioral quirks flagged, not fixed. **As of 2026-07-13 the installed client is the Go
+> port** (`cmd/cbus` + `internal/client` + `internal/core`), differentially verified
+> byte-identical to the bash client (27/27 verbs; see
+> [cutover-decision-package.md](cutover-decision-package.md)). Topology, protocol,
+> semantics, and the security model below are unchanged; statements about bash/python3
+> mechanics describe the retired reference implementation (kept in `bin/` until P3).
 >
 > Companion documents:
 > - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
@@ -10,6 +16,10 @@
 > - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the landscape survey and the
 >   Claude Code internals probes that justified building this at all (the sole surviving copy of that
 >   research; the ephemeral scratchpads behind it are gone)
+> - [cutover-decision-package.md](cutover-decision-package.md) — the executed cutover's
+>   decision record and rollback procedure
+> - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash
+>   artifacts deleted at P3
 
 ---
 
@@ -74,13 +84,13 @@ Monitor-tail is the only turn-native answer with no hooks, no polling, and no in
 
 | Component | Where | What it is |
 |---|---|---|
-| **Client CLI** | `bin/cbus` | 914-line bash script; every subcommand (join/send/tail/list/prune/rename/branch/auth/…). python3 is a hard dependency: it is the JSON engine (~10 embedded one-liners) *and* the runtime of the listener process. |
+| **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`. No runtime dependencies. The retired 914-line bash implementation remains at `bin/cbus` as the rollback artifact until P3. |
 | **Local transport** | `~/.claude-bus/` | Plain files. `<channel>/<alias>/meta.json` (registration + liveness pids) and `inbox.jsonl` (append-only mailbox, one JSON message per line). `.remote/<host>/<channel>/<sessionId>` holds per-session remote identity markers. |
-| **The follower** | exec'd by `cbus tail` | A python process armed under the Monitor tool. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
+| **The follower** | exec'd by `cbus tail` | The cbus binary re-exec'd with `--inbox <path>` in argv (so bash-era liveness greps still match), running an in-process Go loop under the Monitor tool. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
 | **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the NUC bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /peers` presence; `GET /healthz`. |
 | **Maildir spool** | `relay/internal/spool` | `<root>/<channel>/<alias>/{tmp,new,cur}` — write to `tmp/`, atomic rename into `new/`, move to `cur/` after delivery. Crash-safe by construction (no fsync — deliberately not power-loss durable). |
 | **wstail** | `relay/cmd/wstail` | Loopback **debug/verification client** for `/tail`. TCP-only (no TLS) so it cannot cross the Cloudflare front door — it is not a production bridge. The real remote consumer is the Monitor's `ws:` source. |
-| **CC integration** | `commands/*.md`, `bin/cc-branch.sh`, `install.sh` | Three slash commands (`/bus-join`, `/bus-branch`, `/bus-rename`) that are deliberately thin — logic lives in the binary. `cc-branch.sh` forks the session into a new iTerm2 window/tab or tmux window via `--resume <sid> --fork-session` (CCS-profile-aware). `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
+| **CC integration** | `commands/*.md`; installers: `install-cbus-go.sh` (side-by-side Go), `install.sh` (legacy bash / rollback) | Three slash commands (`/bus-join`, `/bus-branch`, `/bus-rename`) that are deliberately thin — logic lives in the binary. `cbus branch` forks the session natively via a `TerminalForker` (iTerm2 window/tab via osascript with a temp-launcher shim, or tmux) using `--resume <sid> --fork-session` (CCS-profile-aware); `bin/cc-branch.sh` is no longer consulted (retained until P3). `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
 
 ```mermaid
 flowchart LR
@@ -88,12 +98,12 @@ flowchart LR
         direction TB
         sessA["CC session A<br/>Monitor: cbus tail repo/main"]
         sessB["CC session B (fork)<br/>Monitor: cbus tail repo/fork-1"]
-        cli["bin/cbus<br/>(bash + python3)"]
+        cli["cbus (Go)<br/>cmd/cbus + internal/*"]
         bus[("~/.claude-bus/&lt;ch&gt;/&lt;alias&gt;/<br/>meta.json + inbox.jsonl")]
         sessA -->|"Bash: cbus send"| cli
         sessB -->|"Bash: cbus send"| cli
         cli -->|append JSON line| bus
-        bus -->|"exec'd python follower<br/>framed ◀ cbus msg blocks"| sessA
+        bus -->|"re-exec'd Go follower<br/>framed ◀ cbus msg blocks"| sessA
         bus -->|follower| sessB
     end
 
@@ -191,10 +201,10 @@ If the receiver is offline, the flow stops at the spool: mail queues in `new/` a
   until someone notices.
 - **No forking across machines** (deferred, `cbus-b8m`): start a fresh session on the target box
   and join the shared channel; each side picks its own explicit alias.
-- **Copy-install drift**: `install.sh` copies by default, so the NUC's client copy must be
-  re-installed after any `bin/cbus` or `commands/` change (the relay has its own deploy path,
-  `relay/deploy.sh`, which rsyncs source and builds on the NUC with its Go toolchain). Nothing
-  enforces version sync between hosts.
+- **Install drift**: the Go client is version-stamped (`cbus --version`) but there is
+  still no version handshake between hosts — after any client change, rebuild/reinstall on
+  the NUC by hand (the relay has its own deploy path, `relay/deploy.sh`). `commands/*.md`
+  are still copy-installed.
 
 ---
 
@@ -387,21 +397,22 @@ Documented, accepted, or tracked — none are silent.
   monotonically, and dead test channels are immortal. Verified live on the NUC: no cron, no timer.
 - `cbus leave <ch>@<host>` is purely a local marker delete — the relay has no leave/unsubscribe
   endpoint; queued mail stays, and whoever next arms that alias inherits the backlog.
-- Remote send/list curls have **no timeout** (only the 0.3 s healthz probe is bounded) — a wedged
-  origin behind a live CF edge hangs the session's Bash tool call until the tool's own timeout.
+- Remote send/list requests time out at 4 s connect / 20 s total with no retry (a
+  Go-port fix; bash had none). A timeout after the relay already spooled the message still
+  has no idempotency key — a retry duplicates.
 - Token rotation is a manual all-clients outage with a non-1006 failure symptom (§4).
 - Copy-install drift between machines is a real failure mode; protocol changes require re-running
   `install.sh` on the NUC by hand.
 
 **Environment assumptions**
 
-- Requires python3 (any stock CPython 3, stdlib only) — it is both the JSON tool and the runtime
-  of the listener. (The README's residual "`tail -F`" requirement is stale: the follower replaced
-  `tail(1)` entirely.)
+- No interpreter dependency: the client is a static Go binary. (Bash-era: python3 was
+  both the JSON engine and the follower runtime.)
 - `ownerPid` detection needs a `claude`-named ancestor within 16 parent hops; unusual launchers
-  degrade liveness to pid+argv checks only.
-- `cc-branch.sh`'s window/tab targets are iTerm2-only AppleScript; tmux is the only
-  terminal-agnostic fork path. bash 3.2 (macOS system bash) is a hard floor for the client.
+  degrade liveness to pid+argv checks only (read via sysctl/procfs in the Go client — no
+  `ps` spawns; same semantics).
+- `window`/`tab` fork targets are iTerm2-only (osascript); tmux is the only
+  terminal-agnostic fork path. (The bash-3.2 floor no longer applies.)
 - The whole cross-machine contract hangs on measured, unnegotiated harness behavior: Monitor `ws:`
   supporting only `{url, protocols}`, the 500-char line cap, ~200 ms batching, and the ~3000-char
   notification ceiling. A harness change silently invalidates the constants (440-byte wrap,
@@ -410,9 +421,8 @@ Documented, accepted, or tracked — none are silent.
 **Interface residue**
 
 - `cbus register` (= `join global`) and `cbus peers` (= `list`) survive as undocumented v1
-  aliases; legacy v1 flat-registry entries are auto-pruned; `hook-exit` and the presence feature
-  are absent from the shipped README/CHEATSHEET (changelogs are the freshest intent source — the
-  README historically lags by one feature).
+  aliases; legacy v1 flat-registry entries are auto-pruned; `hook-exit` and presence
+  were added to the README/CHEATSHEET in the post-cutover doc pass (2026-07-13).
 
 For the exhaustive per-command behavior (including every quirk found in the audit), see
 [command-reference.md](command-reference.md); for wire/disk formats see

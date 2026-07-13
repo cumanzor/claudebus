@@ -6,6 +6,13 @@
 > may delete, and in what order to move. It is a plan, not a bug list — as-is behavior lives in
 > the companion documents.
 >
+> **STATUS (2026-07-13): plan executed through Phase 2.** The cutover happened —
+> `cbus` on the MBP and the NUC is the Go binary (27/27 differential parity; decision
+> record: [cutover-decision-package.md](cutover-decision-package.md)). This document
+> is preserved as the planning record. Phase 3 (compat deletion, structural liveness)
+> is pending fleet homogenization per
+> [compat-deletion-plan.md](compat-deletion-plan.md); Phase 4 is unchanged.
+>
 > Companion documents:
 > - [overview.md](overview.md) — system topology, design pillars, security model
 > - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
@@ -358,7 +365,7 @@ flowchart LR
     P3 --> P4
 ```
 
-**Phase 0 — shared core + conformance harness.** No deployment, no behavior change. Extract
+**Phase 0 — shared core + conformance harness — DONE.** No deployment, no behavior change. Extract
 into a Go package importable by both binaries (e.g. `internal/core`): M1 types with
 key-order-agnostic parsing, `validName`, wire structs; the framer moved out of
 main.go:208-252 with the degenerate-input matrix as table-driven tests and property tests for
@@ -368,7 +375,7 @@ on all tool-authored shapes). A wire conformance rig runs the actual relay binar
 CI-trivial) against the client structs. The relay may adopt the shared framer here as a pure
 refactor. Re-measure the harness caps (500 / ~3000 / batching) now.
 
-**Phase 1 — remote-side + read-only verbs, installed in parallel with bash.** Port the verbs
+**Phase 1 — remote-side + read-only verbs, installed in parallel with bash — DONE.** Port the verbs
 that don't mutate local liveness state: `auth set/status` (keep shelling to `security(1)`
 initially — defers the Keychain ACL prompt), address resolution (soft failures promoted to
 hard errors), the remote client (front-door probe, `send @host`, `list @host`, remote `tail`
@@ -378,7 +385,8 @@ against bash cbus on the same `$CBUS_DIR` and the live relay. Gates: relay wire 
 compatibility both directions (A3), credential locations (A6), the printed arm-spec structure
 (A5), `whoami`'s two line classes + exit-1-on-empty.
 
-**Phase 2 — local transport + follower: full per-machine cutover.** The core of the port.
+**Phase 2 — local transport + follower: full per-machine cutover — DONE. Cutover executed
+2026-07-13 (MBP + NUC).** The core of the port.
 PeerStore with the atomicity idioms mapped 1:1 (mkdir-EEXIST claim with pick/claim unified;
 same-parent rename reap + 3-way re-verify; O_APPEND single-write appends with an enforced max
 line size; temp+rename meta writes); liveness in compat mode (argv fingerprint kept on the

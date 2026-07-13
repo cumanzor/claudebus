@@ -4,6 +4,19 @@ This is the wire and on-disk compatibility contract for claudebus, written to be
 precise enough to reimplement **either side**: the bash client (`bin/cbus`), the Go
 relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 
+> **STATUS (2026-07-13):** the production client is the Go port; the contracts below
+> are unchanged and remain authoritative — the port was differentially verified
+> against them (27/27). `bin/cbus:N` anchors reference the retired bash
+> implementation (in-repo until P3). Port deltas touching this spec: remote HTTP
+> calls now time out at 4 s/20 s (§9.2's "no timeout" quirk — fixed); unknown hosts
+> and invalid names are hard errors (§12.1's non-fatal quirk — fixed); local sends
+> enforce the 1 MiB cap client-side (matching §9.2); a `--` flag terminator exists
+> and trailing junk errors on fixed-arity verbs (§1.1's quirks — fixed); the local
+> framer is the shared `core.LocalEmit`, so the §4.5 divergence matrix is unified per
+> port-map ruling D6 (tool-authored traffic byte-identical; foreign-written-line
+> tie-breaks now deliberate). The follower is an in-process Go loop re-exec'd with
+> `--inbox <path>` in argv — §5.1's "inbox path in argv" invariant still holds.
+
 Conventions:
 
 - Anchors are `file:line` against the repo working tree at that commit.
