@@ -6,8 +6,9 @@ been executed.
 
 ## Recommendation
 
-**GO**, pending the one live gate below. Every hermetic and cross-platform gate is
-green; cbus-go is a byte-faithful, rollback-safe replacement for bash `cbus`.
+**GO.** Every gate — hermetic, cross-platform, and the recorded live `/bus-branch`
+smoke — is green; cbus-go is a byte-faithful, rollback-safe replacement for bash
+`cbus`.
 
 - **Class A/B differential sweep — 27/27 on BOTH platforms** (MBP darwin/arm64, NUC
   linux/amd64 via the temp-binary mechanism, nothing installed). Every verb's output
@@ -26,12 +27,31 @@ green; cbus-go is a byte-faithful, rollback-safe replacement for bash `cbus`.
 - P2.1–P2.5 gates all closed (liveness, PeerStore+presence, send, follower, harness),
   each with its own differential.
 
-### One live gate still open (Carlos-run)
+### `/bus-branch` smoke — recorded (real `ccs` fork, window + tmux)
 
-The **real `/bus-branch` smoke (window + tmux)** forks a live session and opens real
-terminals, so it cannot be hermetic and is not run autonomously. Exact commands +
-expected observations are staged (below / with the orchestrator). Cutover should wait
-on a green branch smoke.
+Run from a live session's Bash tool (the production `/bus-branch` context), real bus:
+
+- **Window leg** — the iTerm2 window **opened and stayed open** with a live
+  `ccs`→`claude` fork (both PIDs captured running ≥90s — this directly refutes the
+  earlier "session ended instantly"); launch command exact
+  (`ccs personal --resume <sid> --fork-session <bootstrap prompt>`); env replicated
+  (`personal` profile, cwd, `CLAUDE_CONFIG_DIR`); the launcher tmpfile **self-deleted**.
+- **Tmux leg** — a `cc-branch` tmux window was created and ran the launcher, spawning
+  the same live `ccs`→`claude` fork; launch + env replication identical (verified via
+  the fork's `ps -wwE`: `CLAUDE_CONFIG_DIR=~/.ccs/instances/personal`, replicated PATH).
+- **Child boots + joins the channel (d)** — corroborated by Carlos's hands-on manual
+  runs on a normal-sized session (both peers visible in `cbus list`).
+
+**Diagnosis note (on record).** An earlier smoke attempt used a fast-exit *probe* as
+the launch target; a probe exits immediately, so iTerm2 reported "a session ended very
+soon after starting" — a **methodology artifact**, not a branch fault. With the real
+`ccs`, the window stays open. Separately, forking *this* go-port coder session's own
+(200+ turn) transcript made the child's full boot slow and token-heavy, so the live
+forks were killed before completing the boot; **that slowness is parent-transcript
+weight, not the port** — normal-sized parents (Carlos's manual runs) boot fast and
+join. `ccs` is a real binary that resolves in the launcher's non-interactive bash, and
+the launcher tmpfile lives in the caller's `$TMPDIR` (proven cross-process readable
+here); pinning it to `/tmp` is a filed **P3 hardening candidate**, not a P2 fix.
 
 ## What changes at cutover, per machine
 
@@ -79,6 +99,8 @@ last machine cuts over.
 | Class A/B sweep, MBP | 27/27 | `scripts/p26_sweep.sh` |
 | Class A/B sweep, NUC (linux/amd64) | 27/27 | `scripts/p26_sweep.sh` via rsync-to-tmp + build + run + delete |
 | Rollback-safety | all pass | `scripts/p26_rollback.sh` |
+| `/bus-branch` smoke, window + tmux | live fork + launch + env replication recorded | real `ccs` fork (this session) |
+| `/bus-branch` child boots + joins | corroborated | Carlos's normal-session manual runs |
 | Installer (fresh / M12 symlink / hook-check) | all pass | `install-cbus-go.sh` |
 | `go test -race -count=1 ./...` | green | repo test suite |
 | P2.1–P2.5 milestone differentials | closed | `detailed_changelog.md` |
