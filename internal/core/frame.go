@@ -19,20 +19,20 @@ import (
 const (
 	// MonitorLineCap: any single stdout/ws line is truncated past this. Bisected
 	// 2026-07-13: 500 chars pass intact, 505 truncated. This is why body lines
-	// wrap at BodyWrap bytes (a 440-byte line passes whole). bin/cbus:504,
-	// main.go:207 (measured).
+	// wrap at BodyWrap bytes (a 440-byte line passes whole). bin/cbus:504;
+	// main.go:207 (pre-extraction anchor). (measured)
 	MonitorLineCap = 500
 
 	// BodyWrap: message body segments hard-wrap at this many UTF-8 bytes,
 	// rune-safe (never splits a codepoint). Chosen so a wrapped line clears
-	// MonitorLineCap. bin/cbus:522, main.go:239.
+	// MonitorLineCap. bin/cbus:522; main.go:239 (pre-extraction anchor).
 	BodyWrap = 440
 
 	// WSFrameSafe: the relay ⚠truncated warning threshold. Past the ~3000-char
 	// per-notification ceiling (confirmed 2026-07-13: a multi-line burst is cut
 	// at ~3000 received) the harness truncates the tail, so the relay warns in
 	// the header (delivered first, survives the cut) once a framed block exceeds
-	// this. main.go:204 (measured).
+	// this. main.go:204 (pre-extraction anchor). (measured)
 	//
 	// Harness DELTA observed 2026-07-13: truncation now emits an explicit
 	// "...(truncated)" marker at BOTH the per-line cap and the notification
