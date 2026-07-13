@@ -366,9 +366,11 @@ Documented, accepted, or tracked — none are silent.
   doctrine is true only for mail that queued while *no* tail was attached. During the window,
   `/peers` also reports `connected:true` with a *fresh* `lastSeen`.
 - The ~2800/3000-char per-notification ceiling truncates very long messages on both paths. The
-  `⚠truncated~<N>B` header notice is **relay-only**; a long local message is silently cut by the
-  Monitor (the missing `◀ cbus end` marker is the detectable signal). Chunked delivery + a local
-  warning are tracked as `cbus-mew`.
+  `⚠truncated~<N>B` header notice is **relay-only** (app-level, in-band). As of the 2026-07-13
+  live re-measurement, the harness itself now emits an explicit `...(truncated)` marker at both
+  the 500-char line cap and the ~3000-char notification ceiling, so a long local message is no
+  longer silently cut — detection no longer relies solely on the missing `◀ cbus end` marker.
+  Chunked delivery + a dedicated local warning are still tracked as `cbus-mew`.
 - The rename `mv`→re-arm gap can drop messages (`cbus-8no`).
 - Local arming has no collision or ownership check: arming the same address twice leaves two live
   followers delivering everything twice, with liveness state pinned to the newer pid only — the
