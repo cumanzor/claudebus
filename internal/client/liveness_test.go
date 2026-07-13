@@ -75,6 +75,37 @@ func TestMetaListenerAlive(t *testing.T) {
 	}
 }
 
+// TestArgvClauseZombieDead pins F1: a zombie (kill -0 still succeeds) must FAIL
+// the argv clause. On darwin KERN_PROCARGS2 keeps returning the cached argv, so
+// without the SZOMB guard a zombie follower would read ALIVE while bash reads it
+// dead ("<defunct>"); on linux the cmdline goes empty. Either way, once the child
+// is a zombie the argv clause must read dead.
+func TestArgvClauseZombieDead(t *testing.T) {
+	cmd := exec.Command("true") // exits immediately; not Wait()ed -> zombie
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	defer func() { _ = cmd.Wait() }() // reap the zombie
+
+	// argvContains is true while "true" runs; once it's a zombie the clause must
+	// go false. If the F1 bug were present (darwin cached argv), it stays true.
+	deadline := time.Now().Add(3 * time.Second)
+	for argvContains(pid, "true") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if argvContains(pid, "true") {
+		t.Fatal("zombie argv clause still reads its cached argv (F1 inversion) — must read dead")
+	}
+	if !pidAlive(pid) {
+		t.Skip("child was reaped before the zombie window could be asserted (kernel timing)")
+	}
+	// the tri-state: kill -0 succeeds (zombie exists) yet the argv clause is dead
+	if pidAlive(pid) && argvContains(pid, "true") {
+		t.Error("zombie must be argv-dead despite kill -0 succeeding")
+	}
+}
+
 func TestPeerDead(t *testing.T) {
 	dir := t.TempDir()
 	mp := filepath.Join(dir, "meta.json")

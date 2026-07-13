@@ -22,17 +22,25 @@ const (
 	_PROC_CALL_PIDINFO = 2
 	_PROC_PIDTBSDINFO  = 3
 	// proc_bsdinfo field offsets (stable 64-bit ABI)
-	_off_pbi_ppid = 16
-	_off_pbi_comm = 48 // char pbi_comm[MAXCOMLEN=16]
+	_off_pbi_status = 4  // uint32 pbi_status
+	_off_pbi_ppid   = 16 // uint32 pbi_ppid
+	_off_pbi_comm   = 48 // char pbi_comm[MAXCOMLEN=16]
+
+	_SZOMB = 5 // process status: zombie (<sys/proc.h>)
 )
 
 // procArgs returns pid's argv joined by spaces (as `ps -o args=` renders it),
-// read via sysctl KERN_PROCARGS2. Any error — ESRCH/EPERM, or a ZOMBIE whose
-// args the kernel has reclaimed (KERN_PROCARGS2 errors while kill -0 still
-// succeeds) — is returned so the argv liveness clause reads DEAD, matching
-// `ps -o args=` going empty (reviewer edge D1). The two-call probe handles the
-// KERN_ARGMAX-bounded buffer sizing.
+// read via sysctl KERN_PROCARGS2. ESRCH/EPERM are returned so the argv liveness
+// clause reads DEAD. ZOMBIE handling (F1): unlike linux (where /proc/<pid>/cmdline
+// goes empty) and unlike `ps` (which shows "<defunct>"), darwin's KERN_PROCARGS2
+// keeps returning the process's CACHED argv with err=nil for a zombie — which
+// would read a zombie follower ALIVE while bash reads it dead. So a zombie is
+// detected first (procZombie) and reported as an error, matching bash. The
+// two-call probe handles the KERN_ARGMAX-bounded buffer sizing.
 func procArgs(pid int) (string, error) {
+	if procZombie(pid) {
+		return "", syscall.ESRCH
+	}
 	mib := [3]int32{_CTL_KERN, _KERN_PROCARGS2, int32(pid)}
 	var size uintptr
 	if _, _, errno := syscall.Syscall6(syscall.SYS___SYSCTL,
@@ -89,4 +97,17 @@ func procParent(pid int) (comm string, ppid int, err error) {
 		c = c[:i]
 	}
 	return string(c), ppid, nil
+}
+
+// procZombie reports whether pid is a zombie (pbi_status == SZOMB). A failed read
+// returns false — let pidAlive / the argv read decide rather than invent death.
+func procZombie(pid int) bool {
+	var buf [256]byte
+	r, _, errno := syscall.Syscall6(_SYS_proc_info,
+		_PROC_CALL_PIDINFO, uintptr(pid), _PROC_PIDTBSDINFO, 0,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if errno != 0 || int(r) < _off_pbi_status+4 {
+		return false
+	}
+	return binary.LittleEndian.Uint32(buf[_off_pbi_status:]) == _SZOMB
 }
