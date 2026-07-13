@@ -29,6 +29,38 @@ func TestInboxPathByteEqualsBash(t *testing.T) {
 	}
 }
 
+// TestInboxPathRawSpellingArgvEqualsNeedle is the F1 regression: under a NON-clean
+// CBUS_DIR spelling (trailing slash), both Decision 2 compat surfaces — the follower's
+// --inbox argv (InboxPath) AND Go's argvContains needle (metaInboxNeedle) — must equal
+// bash inbox_path()'s raw concatenation, in BOTH directions. filepath.Join would clean
+// the '//' away and desync from a live bash follower's argv (bash reads Go off / Go
+// reads bash off).
+func TestInboxPathRawSpellingArgvEqualsNeedle(t *testing.T) {
+	base := t.TempDir()
+	dir := base + "/" // trailing slash: filepath.Join would clean this
+	t.Setenv("CBUS_DIR", dir)
+	ch, al := "go-port", "coder"
+	bashVerbatim := dir + "/" + ch + "/" + al + "/inbox.jsonl" // bash printf, raw '//'
+
+	argv := InboxPath(ch, al)
+	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json") // built the way callers do (cleaned)
+	needle := metaInboxNeedle(metaPath)
+
+	if argv != bashVerbatim {
+		t.Errorf("--inbox argv = %q, want bash-verbatim %q", argv, bashVerbatim)
+	}
+	if needle != bashVerbatim {
+		t.Errorf("argvContains needle = %q, want bash-verbatim %q", needle, bashVerbatim)
+	}
+	if argv != needle {
+		t.Errorf("argv (%q) != needle (%q) — cross-liveness would desync", argv, needle)
+	}
+	// premise: filepath.Join really does clean the trailing slash (the F1 trap).
+	if filepath.Join(CBUSDir(), ch, al, "inbox.jsonl") == bashVerbatim {
+		t.Fatal("premise broken: filepath.Join did not clean '//' — test would be vacuous")
+	}
+}
+
 // TestTailArgvInboxSubstring is the Decision 2 test: the re-exec'd follower's argv
 // carries the inbox path VERBATIM as the value after --inbox, so a bash-era
 // `ps -o args= | grep -qF -- "$inbox"` recognizes this Go follower. Pins the whole
@@ -334,6 +366,39 @@ func TestFollowRotationRecreate(t *testing.T) {
 	waitFor(t, func() bool {
 		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "after recreate"))
 	}, "post-recreate reopen delivers new content")
+}
+
+// TestFollowDirDeletionNeverExits (ruled at P2.4 review): removing the WHOLE alias dir
+// (not just the inbox file) under a running follower must NOT self-exit — it keeps the
+// unlinked fd and polls (os.Stat -> ENOENT -> continue), then reopens once the dir +
+// inbox are recreated (reopenUntilSuccess retries os.Open while the parent dir is
+// absent). Complements TestFollowRotationRecreate (file-only rm).
+func TestFollowDirDeletionNeverExits(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ch", "al")
+	inbox := writeInbox(t, dir)
+	appendLine(t, inbox, "ch/orch", "ch/al", "before dirdel")
+	buf, running, stopJoin := startFollow(t, inbox, ReplayFromStart)
+	defer stopJoin()
+	waitFor(t, func() bool {
+		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "before dirdel"))
+	}, "pre-dirdel line")
+
+	if err := os.RemoveAll(dir); err != nil { // remove the WHOLE alias dir
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if !running() {
+		t.Fatal("follower self-exited on whole-dir deletion — must keep polling")
+	}
+	// recreate dir + inbox (new inode under a re-made parent) and append.
+	inbox2 := writeInbox(t, dir)
+	appendLine(t, inbox2, "ch/orch", "ch/al", "after dirdel")
+	waitFor(t, func() bool {
+		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "after dirdel"))
+	}, "post-dirdel reopen delivers new content")
+	if !running() {
+		t.Fatal("follower died after recreate")
+	}
 }
 
 // ---- arm: meta record + tri-state decision ---------------------------------------

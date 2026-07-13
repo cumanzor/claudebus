@@ -81,14 +81,33 @@ func MetaListenerAlive(metaPath string) bool {
 	if !ok || m.ListenerPid == 0 || !pidAlive(m.ListenerPid) {
 		return false
 	}
-	inbox := filepath.Join(filepath.Dir(metaPath), "inbox.jsonl")
-	if !argvContains(m.ListenerPid, inbox) {
+	if !argvContains(m.ListenerPid, metaInboxNeedle(metaPath)) {
 		return false
 	}
 	if m.OwnerPid == 0 {
 		return true
 	}
 	return pidAlive(m.OwnerPid)
+}
+
+// metaInboxNeedle is the inbox path argvContains greps for — the SECOND Decision 2
+// compat surface (F1). It MUST be the raw bash inbox_path() spelling so it matches a
+// live follower's --inbox argv under ANY CBUS_DIR spelling: bash writes and greps the
+// raw spelling, so a filepath.Join(dir,"inbox.jsonl") needle (cleaned) would miss a
+// live bash follower under a trailing-slash CBUS_DIR, and a bash needle would miss a
+// live Go follower. Rebuilt from the RAW CBUS_DIR + the peer's subpath (recovered by
+// stripping the cleaned CBUS_DIR prefix off the cleaned meta dir), NOT from the
+// already-cleaned metaPath — so the CBUS_DIR spelling is preserved. Handles legacy v1
+// ($CBUS_DIR/<ch>/meta.json, rel="/<ch>") and v2 ($CBUS_DIR/<ch>/<al>/meta.json,
+// rel="/<ch>/<al>") alike; for a v2 peer it equals compatInboxPath(CBUS_DIR, ch, al),
+// the same string the arm puts in the follower's argv.
+func metaInboxNeedle(metaPath string) string {
+	dir := filepath.Dir(metaPath)
+	rel := strings.TrimPrefix(dir, filepath.Clean(CBUSDir()))
+	if rel == dir { // metaPath not under CBUS_DIR (shouldn't happen) — best-effort raw
+		return dir + "/inbox.jsonl"
+	}
+	return CBUSDir() + rel + "/inbox.jsonl"
 }
 
 // pidAlive is `kill -0`: the process exists (EPERM still means it exists).

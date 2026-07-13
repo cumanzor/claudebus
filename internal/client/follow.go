@@ -55,14 +55,25 @@ const (
 	tailFlagFrom  = "--from"
 )
 
-// InboxPath is a peer's inbox file: $CBUS_DIR/<ch>/<al>/inbox.jsonl, byte-equal to
-// bash inbox_path() (bin/cbus:27) for the same CBUS_DIR spelling. It does NOT resolve
-// symlinks or absolutize (no EvalSymlinks/Abs): the exact string is the Decision 2
-// compat surface — it goes verbatim into the follower's argv where bash greps it —
-// and it must also equal the needle MetaListenerAlive builds (filepath.Join off the
-// meta dir), so both Go and bash liveness read a Go follower as alive.
+// compatInboxPath is bash inbox_path() VERBATIM (bin/cbus:27): dir + "/" + ch + "/" +
+// al + "/inbox.jsonl", with NO filepath.Clean. This spelling is the Decision 2
+// liveness compat surface and MUST match bash's raw `printf '%s/%s/%s/inbox.jsonl'`
+// byte-for-byte, because it is used on the two grep surfaces — the follower's
+// --inbox argv (what bash's meta_listener_alive greps) AND Go's own argvContains
+// needle (metaInboxNeedle). filepath.Join CLEANS: a trailing-slash CBUS_DIR ("/x/")
+// yields a single-slash Join path but a double-slash bash path, so bash would read a
+// live Go follower "off" and prune reap it (F1) — and Go would misread a live bash
+// follower symmetrically. All four reader/writer directions converge on this raw
+// spelling. File I/O is spelling-agnostic (the kernel collapses '//'), so open/stat
+// may use it directly.
+func compatInboxPath(dir, ch, al string) string {
+	return dir + "/" + ch + "/" + al + "/inbox.jsonl"
+}
+
+// InboxPath is a peer's inbox in the compat spelling under the live CBUS_DIR — the
+// exact string the follower carries in its --inbox argv (and opens).
 func InboxPath(ch, al string) string {
-	return filepath.Join(CBUSDir(), ch, al, "inbox.jsonl")
+	return compatInboxPath(CBUSDir(), ch, al)
 }
 
 // TailArgv is the re-exec'd follower's argv: `<self> tail --inbox <inbox> --from
