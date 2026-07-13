@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestReadPeerMeta(t *testing.T) {
@@ -71,5 +72,56 @@ func TestMetaListenerAlive(t *testing.T) {
 	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"ownerPid":%d}`, live.Process.Pid, deadPid))
 	if MetaListenerAlive(mp) {
 		t.Error("a dead owner must make it off (crash-orphan guard)")
+	}
+}
+
+func TestPeerDead(t *testing.T) {
+	dir := t.TempDir()
+	mp := filepath.Join(dir, "meta.json")
+	inbox := filepath.Join(dir, "inbox.jsonl")
+	_ = os.WriteFile(inbox, nil, 0o644)
+	write := func(body string) { _ = os.WriteFile(mp, []byte(body), 0o644) }
+	setMtime := func(ago time.Duration) {
+		ts := time.Now().Add(-ago)
+		_ = os.Chtimes(mp, ts, ts)
+	}
+	utc := func(ago time.Duration) string { return time.Now().Add(-ago).UTC().Format("2006-01-02T15:04:05Z") }
+
+	live := exec.Command("tail", "-f", inbox)
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Process.Kill() }()
+	dead := exec.Command("true")
+	_ = dead.Run()
+
+	write(fmt.Sprintf(`{"listenerPid":%d}`, live.Process.Pid))
+	if PeerDead(mp) {
+		t.Error("armed + live listener must NOT be dead")
+	}
+	write(fmt.Sprintf(`{"listenerPid":%d}`, dead.Process.Pid))
+	if !PeerDead(mp) {
+		t.Error("armed + dead listener must be dead")
+	}
+	write(`{"listenerPid":null}`)
+	setMtime(1 * time.Minute)
+	if PeerDead(mp) {
+		t.Error("never-armed within the grace window must NOT be dead")
+	}
+	write(`{"listenerPid":null}`)
+	setMtime(11 * time.Minute)
+	if !PeerDead(mp) {
+		t.Error("never-armed past the grace window must be dead")
+	}
+	// lastActivity field wins over mtime (D3)
+	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(0)))
+	setMtime(30 * time.Minute)
+	if PeerDead(mp) {
+		t.Error("a fresh lastActivity must win over an old mtime")
+	}
+	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(20*time.Minute)))
+	setMtime(1 * time.Minute)
+	if !PeerDead(mp) {
+		t.Error("an old lastActivity must be dead despite a fresh mtime")
 	}
 }
