@@ -2,7 +2,9 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,18 +46,46 @@ func writeMeta(dir string, m peerMeta) error {
 	return os.Rename(tmp, filepath.Join(dir, "meta.json"))
 }
 
-// pickAlias returns "main" if free, else the lowest free "fork-N" (bin/cbus:387-392).
-func pickAlias(ch string) string {
+// pickAlias returns "main" if free, else the lowest free "fork-N" (bin/cbus:387-392),
+// skipping any alias in exclude (claimed by a concurrent sibling this invocation).
+func pickAlias(ch string, exclude map[string]bool) string {
 	root := CBUSDir()
-	if !fileExists(filepath.Join(root, ch, "main", "meta.json")) {
+	if !exclude["main"] && !fileExists(filepath.Join(root, ch, "main", "meta.json")) {
 		return "main"
 	}
 	for n := 1; ; n++ {
 		a := "fork-" + strconv.Itoa(n)
-		if !fileExists(filepath.Join(root, ch, a, "meta.json")) {
+		if !exclude[a] && !fileExists(filepath.Join(root, ch, a, "meta.json")) {
 			return a
 		}
 	}
+}
+
+// claimAlias atomically claims a free alias via bare-mkdir (EEXIST = lost to a
+// concurrent sibling). It REMEMBERS EEXIST-failed aliases and excludes them from
+// later picks, so it converges in one extra round rather than burning all its
+// retries inside a sibling's mkdir→meta window (F1: bash's ~ms subshell pick was an
+// accidental backoff; the Go µs loop needs explicit exclusion — reviewer repro'd
+// 8 concurrent joins losing 3). The Class-B contract is a unique alias per joiner;
+// exact fork-N numbering under concurrency was never deterministic.
+func claimAlias(ch string) (alias, dir string, err error) {
+	root := CBUSDir()
+	if err := os.MkdirAll(filepath.Join(root, ch), 0o755); err != nil {
+		return "", "", err
+	}
+	exclude := map[string]bool{}
+	for tries := 0; tries < 50; tries++ {
+		alias = pickAlias(ch, exclude)
+		dir = filepath.Join(root, ch, alias)
+		e := os.Mkdir(dir, 0o755)
+		if e == nil {
+			return alias, dir, nil
+		}
+		if errors.Is(e, fs.ErrExist) {
+			exclude[alias] = true
+		}
+	}
+	return "", "", fmt.Errorf("cannot claim an alias in %q", ch)
 }
 
 func cwd() string {
@@ -89,20 +119,8 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	root := CBUSDir()
 	var dir string
 	if alias == "" {
-		// bare mkdir is the atomic claim: it fails EEXIST if a concurrently-joining
-		// sibling picked the same alias first, so nobody truncates another's inbox.
-		if err := os.MkdirAll(filepath.Join(root, ch), 0o755); err != nil {
+		if alias, dir, err = claimAlias(ch); err != nil {
 			return "", false, err
-		}
-		for tries := 0; ; tries++ {
-			alias = pickAlias(ch)
-			dir = filepath.Join(root, ch, alias)
-			if os.Mkdir(dir, 0o755) == nil {
-				break
-			}
-			if tries >= 49 {
-				return "", false, fmt.Errorf("cannot claim an alias in %q", ch)
-			}
 		}
 	} else {
 		if !core.ValidName(alias) {
