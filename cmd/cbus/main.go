@@ -65,8 +65,21 @@ func run(args []string) int {
 	case "channels":
 		return runChannels()
 
-	// Phase 2 (local transport + harness) — not in the Go client during P1.
-	case "join", "register", "prune", "leave", "hook-exit", "unregister", "rename", "bootstrap", "branch":
+	case "join":
+		return runJoin(args[1:])
+	case "register": // deprecated: v1 alias for the global channel
+		return runJoin(append([]string{"global"}, args[1:]...))
+	case "leave":
+		return runLeave(args[1:])
+	case "rename":
+		return runRename(args[1:])
+	case "unregister":
+		return runUnregister(args[1:])
+	case "prune":
+		return runPrune(args[1:])
+
+	// Phase 2 harness layer — still landing (P2.5).
+	case "hook-exit", "bootstrap", "branch":
 		return notImplemented(verb)
 
 	default:
@@ -329,6 +342,119 @@ func runInbox(args []string) int {
 		return die("use <channel>/<alias>")
 	}
 	fmt.Print(filepath.Join(client.CBUSDir(), ch, al, "inbox.jsonl"))
+	return 0
+}
+
+func runJoin(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus join <channel> [alias]")
+	}
+	ch := args[0]
+	alias := ""
+	if len(args) > 1 {
+		alias = args[1]
+	}
+	chosen, already, err := client.Join(ch, alias)
+	if err != nil {
+		return die("%v", err)
+	}
+	if already {
+		fmt.Printf("already joined \"%s\" as \"%s\"\n", ch, chosen)
+		fmt.Printf("listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", ch, chosen)
+		return 0
+	}
+	sid := client.SessionID()
+	if sid == "" {
+		sid = "none"
+	}
+	fmt.Printf("joined channel \"%s\" as \"%s\" (session %s)\n", ch, chosen, sid)
+	fmt.Printf("address: %s/%s\n", ch, chosen)
+	fmt.Printf("now arm the Monitor tool (NOT Bash — `cbus tail` execs a follower that never exits, so a Bash call blocks forever) on: cbus tail %s/%s\n", ch, chosen)
+	return 0
+}
+
+func runLeave(args []string) int {
+	if len(args) > 0 && client.IsRemote(args[0]) {
+		ch, host, _, err := client.ParseRemote(args[0])
+		if err != nil {
+			return die("%v", err)
+		}
+		if err := client.LeaveRemote(host, ch); err != nil {
+			return die("%v", err)
+		}
+		fmt.Printf("left %s@%s (this session's marker removed; queued mail stays on the relay)\n", ch, host)
+		return 0
+	}
+	ch := ""
+	if len(args) > 0 {
+		ch = args[0]
+	}
+	left, err := client.Leave(ch)
+	if err != nil {
+		return die("%v", err)
+	}
+	for _, l := range left {
+		fmt.Printf("left %s\n", l)
+	}
+	return 0
+}
+
+func runRename(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus rename <new-alias> [channel]")
+	}
+	if client.IsRemote(args[0]) {
+		return die("rename is local-only — remote (@host) aliases are relay-side (see cbus leave/tail)")
+	}
+	newAlias := args[0]
+	wantCh := ""
+	if len(args) > 1 {
+		wantCh = args[1]
+	}
+	ch, old, already, err := client.Rename(newAlias, wantCh)
+	if err != nil {
+		return die("%v", err)
+	}
+	if already {
+		fmt.Printf("already named \"%s/%s\"\n", ch, old)
+		return 0
+	}
+	fmt.Printf("renamed %s/%s -> %s/%s\n", ch, old, ch, newAlias)
+	fmt.Printf("re-arm the Monitor tool (old tail is now stale; NOT Bash — `cbus tail` blocks forever in a shell): cbus tail %s/%s\n", ch, newAlias)
+	return 0
+}
+
+func runUnregister(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus unregister <channel>/<alias>")
+	}
+	ch, al, err := client.ParseLocal(args[0])
+	if err != nil {
+		return die("%v", err)
+	}
+	if ch == "" {
+		return die("use <channel>/<alias>")
+	}
+	if err := client.Unregister(ch, al); err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("unregistered %s/%s\n", ch, al)
+	return 0
+}
+
+func runPrune(args []string) int {
+	chosen := ""
+	if len(args) > 0 {
+		chosen = args[0]
+	}
+	msgs := client.Prune(chosen)
+	if len(msgs) == 0 {
+		fmt.Println("nothing to prune")
+		return 0
+	}
+	for _, m := range msgs {
+		fmt.Println(m)
+	}
 	return 0
 }
 
