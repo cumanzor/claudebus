@@ -87,6 +87,14 @@ func (f *flexString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MaxMessageBytes caps a single message so the local send line size shares ONE
+// invariant with the relay's POST /send body cap (main.go:163,
+// http.MaxBytesReader(1<<20)). The bash client has an unguarded stdio size cliff
+// where a very large line can tear; the port REJECTS past this limit with a hard
+// error instead — a deliberate delta (torn JSON is the corruption the single-write
+// invariant exists to prevent).
+const MaxMessageBytes = 1 << 20
+
 // SendReq is the POST /send request body (relay main.go:145-151). channel/alias
 // must pass ValidName; text is required non-empty; from defaults to "unknown"
 // server-side; ts is optional (server fills RFC3339 when omitted, else stores the

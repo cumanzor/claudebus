@@ -46,6 +46,12 @@ import (
 //     emit(go-marshaled) == emit(python-marshaled) == corpus.golden, byte-exact.
 //     Proves bash-era consumers frame Go-marshaled lines identically during
 //     coexistence (empirically upholds ruling D8).
+//   - D8 PRESENCE CROSS-PARSE (P2.2 rider, 2026-07-13): the D8 extension to presence
+//     lines, proven the same way. A go-canonical {from,to,ts,kind,event,text} line
+//     and its python-marshaled equivalent, both framed via emit(), are BYTE-IDENTICAL
+//     — including the "kind=presence" header (event is stored, never rendered). So a
+//     canonical-Go presence line delivers identically to bash's; the raw-line D8
+//     ruling stands for the local presence path too.
 
 // TestGoldenCorpusParity walks the golden message-by-message, asserting each block
 // equals Reframe(line)+"\n".

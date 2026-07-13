@@ -106,7 +106,46 @@ func runSend(args []string) int {
 	if client.IsRemote(args[0]) {
 		return runSendRemote(args)
 	}
-	return notImplemented("send (local delivery is Phase 2)")
+	return runSendLocal(args)
+}
+
+func runSendLocal(args []string) int {
+	target := args[0]
+	rest := args[1:]
+	from, fromSet, force := "", false, false
+	i := 0
+loop:
+	for i < len(rest) {
+		switch rest[i] {
+		case "--from":
+			if i+1 >= len(rest) {
+				return die("missing value for --from")
+			}
+			from, fromSet = rest[i+1], true
+			i += 2
+		case "--force":
+			force = true
+			i++
+		default:
+			break loop
+		}
+	}
+	if fromSet && from == "" {
+		return die("--from: value must not be empty")
+	}
+	text := strings.Join(rest[i:], " ")
+	if text == "" {
+		return die("empty message")
+	}
+	resolved, resolvedFrom, warn, err := client.LocalSend(target, from, force, text)
+	if err != nil {
+		return die("%v", err)
+	}
+	if warn {
+		fmt.Fprintf(os.Stderr, "cbus: warning: %q is not listening — sending anyway\n", resolved)
+	}
+	fmt.Printf("sent to %s (from %s)\n", resolved, resolvedFrom)
+	return 0
 }
 
 func runSendRemote(args []string) int {
