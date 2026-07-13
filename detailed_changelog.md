@@ -1,5 +1,48 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:21:30 UTC] [Port/Go] Phase 1 (1/N) — cbus-go skeleton + front-door/endpoint resolution; conformance rig hardened
+
+[Attempt #1]
+
+First Phase 1 milestone: the client binary skeleton and its first ported
+module (M7 front-door/endpoint resolution), plus reviewer's m5
+conformance-rig hardening (finding F1: test-cache staleness).
+
+[Files Changed]
+
+- `cmd/cbus/main.go` (new) — verb-dispatch skeleton for the ported client
+  (installs as `cbus-go`): `--help`, honest not-implemented stubs for every
+  verb, unknown verb → exit 1.
+- `internal/client/endpoint.go`, `endpoint_test.go` (new) — `SiteURL` (built-in
+  `nuc` host table + `CBUS_SITE_<HOST>_URL` env-mangling, keeping the
+  strip-one-trailing-underscore quirk; unknown host promoted to a hard typed
+  error per the approved P1 soft→hard ruling); `ResolveFrontDoor` (0.3s
+  loopback `/healthz` probe, exact-`ok` line → local mode/no CF Access, else
+  public); `WSURL` scheme swap (empty string on non-http(s) schemes, matching
+  bash). Unit-tested: env-mangling table, WSURL table, local-vs-public
+  selection via `httptest` (never binds real `:8090`, per the hermeticity
+  ruling).
+- `relay/internal/conformance/conformance_test.go`, `doc.go` — reviewer F1
+  rider: `trackSources` reads `relay/` + `internal/core` sources at test
+  start so `go test`'s cache invalidates whenever the runtime-built relay
+  changes (verified empirically: a `main.go` edit now re-runs the rig
+  instead of returning a stale cached PASS); the caching gotcha is
+  documented in `doc.go`. Added negative-path assertions: bad bearer → 401,
+  invalid channel name → 400.
+- The standing `TestGofmtClean` gate (m4) caught and required a fix for a
+  formatting slip in the new test files — its first live save.
+
+[Possible Ripple Effects]
+
+- None functional yet — `cmd/cbus` is a stub binary, no verb does real work.
+- One finding from review: the front-door probe doesn't yet pin
+  redirect-following behavior against curl's defaults — rides P1.2.
+
+[Testing Notes]
+
+- `go test ./...` green; conformance rig re-verified to actually invalidate
+  its cache on relay changes (previously a silent staleness risk).
+
 ## [2026-07-13 01:05:20 UTC] [Port/Go] Phase 0 (5/N) — wire conformance rig + m4 riders + relay wire-struct adoption — PHASE 0 CLOSED
 
 [Attempt #1]
