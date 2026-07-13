@@ -19,18 +19,10 @@ import (
 	"claudebus/internal/core"
 )
 
-const usage = `cbus-go — message bus between live Claude Code sessions (transitional Go port)
-
-During P1, cbus-go is installed as cbus-go alongside the bash cbus and shares its
-$CBUS_DIR and credential store. Verbs are ported incrementally; unimplemented
-verbs print a notice and exit non-zero. Use the bash cbus for anything not yet
-ported.
-
-  cbus-go --help                   this message
-
-env: CBUS_DIR (default ~/.claude-bus), CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL
-     (relay endpoints)
-`
+// version is stamped at build time via -ldflags "-X main.version=<git describe>".
+// A readiness delta (bash cbus has no version verb) — provenance for the installed
+// binary during coexistence and cutover.
+var version = "dev"
 
 func main() { os.Exit(run(os.Args[1:])) }
 
@@ -42,6 +34,9 @@ func run(args []string) int {
 	switch verb {
 	case "", "-h", "--help":
 		fmt.Print(usage)
+		return 0
+	case "--version", "version":
+		fmt.Printf("cbus-go %s\n", version)
 		return 0
 
 	case "auth":
@@ -86,7 +81,9 @@ func run(args []string) int {
 		return runBranch(args[1:])
 
 	default:
-		fmt.Fprintf(os.Stderr, "cbus: unknown command %q (cbus-go --help)\n", verb)
+		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
+		// pure swap (bin/cbus:913).
+		fmt.Fprintf(os.Stderr, "cbus: unknown command '%s' (cbus --help)\n", verb)
 		return 1
 	}
 }
