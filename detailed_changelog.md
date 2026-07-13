@@ -1,5 +1,129 @@
 # Changelog (detailed)
 
+## [2026-07-13 19:46:44 UTC] [Port/Go] Phase 2 (5/N) — harness layer + real flag parser (P2.5) — CLOSED
+
+[Attempt #2]
+
+The Claude Code harness integration layer (M10) plus a real CLI flag
+parser (M9's frozen-verb-set surface). Closed after one confirmed
+finding and its fix — a live iTerm2 launch regression traced back to a
+mischaracterization in this project's own port-map.md, corrected
+separately (`618d171`) before this fix landed. Phase 2 now stands at
+5/6 milestones.
+
+[Files Changed — original submission, f393158]
+
+- `internal/client/harness.go`, `harness_test.go` (new) — four
+  components:
+  - **hook-exit**: `runHookExit` reads `{session_id}` off stdin (env
+    fallback), leaves only this session's LOCAL registrations
+    (broadcasting presence `left` per channel), and ALWAYS exits 0 — a
+    SessionEnd hook must never fail the session regardless of what
+    `leave` does internally. Remote `.remote` markers are left alone —
+    the relay has no leave endpoint, so they only die via the ownerPid
+    sweep, matching bash exactly.
+  - **bootstrap**: `BootstrapPrompt` ships the canonical fork-child
+    prompt embedded in the binary, extracted BYTE-EXACT from
+    `bin/cbus:832` with provenance recorded in a comment (the
+    anti-drift property port-map.md flags as worth keeping — a
+    binary-embedded prompt can't drift out of sync with a
+    hand-copied skill file). `$ch`/`$parent` substitution via
+    `strings.NewReplacer`.
+  - **branch**: `Branch` absorbs `cc-branch.sh` natively behind a
+    pluggable `TerminalForker` interface. The essential function — ENV
+    REPLICATION (`PATH`, `CLAUDE_CONFIG_DIR`, `cwd`) — is modeled as a
+    `ForkSpec` and unit-testable via a fake forker with no real
+    terminal involved. `OSAForker` drives iTerm2 (`osascript`) and
+    tmux. **As originally submitted, this built the iTerm2 command
+    with native Go quoting and removed bash's mktemp/`%q`
+    self-deleting-launcher shim entirely** — this is the decision
+    Finding F1 (below) reverses.
+  - **flag parser**: `splitVerbArgs` replaces the ad-hoc per-verb
+    parsing loops for `send` (both local and remote), with two ruled
+    deltas over bash: a `--` terminator ends option parsing (so a
+    message body may legitimately start with `-`), and `noExtra` makes
+    trailing junk after a fixed-arity verb's arguments a hard error
+    where bash silently discarded it. The frozen verb set and every
+    output string are unchanged. `auth-set` deliberately keeps its
+    existing ordered flag loop rather than moving to the map-based
+    parser — ordered, repeatable flags with stdin side effects
+    (`--token -` draining stdin) don't fit that shape cleanly.
+- Explicitly **no cutover wiring** in this milestone — no
+  `settings.json` hook registration, no `install.sh` retargeting.
+  That's `P2.6`, and is user-gated (a human decides when to point their
+  actual environment at the Go binary).
+
+[Finding F1 — OSAForker iTerm2 tokenizer break, and its root cause]
+
+- **What broke**: iTerm2's AppleScript `command` parameter is tokenized
+  by **iTerm2 itself**, not by a shell — it does not honor POSIX-style
+  quoting. The quoted one-liner the native-Go-quoting approach handed
+  it (`/bin/bash -c '...'`) was mis-tokenized and launched nothing.
+  Reviewer proved this live against real iTerm2, twice.
+- **Why it happened**: this project's own `docs/architecture/port-map.md`
+  §4 item 12 characterized the bash mktemp launcher shim as a
+  bash-only workaround for "nested osascript quoting" that a port
+  could simply delete by building argv natively. That characterization
+  was **wrong** — the shim exists because of iTerm2's own tokenizer,
+  not bash's quoting rules — and coder followed that doc's guidance in
+  good faith when writing `f393158`.
+  - This mischaracterization was independently caught and corrected in
+    the docs (both `docs/architecture/port-map.md` here, commit
+    `618d171`, and the dev-docs canonical copy) **before** this code fix
+    landed — the doc correction and this code fix converged on the same
+    true rationale from two directions (a documentation audit and a
+    live reviewer probe) without one causing the other.
+
+[Fix — d114688]
+
+- Restores the launcher-script shim, natively: `osaForkITerm` writes a
+  `0700` self-deleting launcher script (env exports + `cd` + `rm` self +
+  `exec`, all POSIX-quoted) to a temp path, and hands iTerm2 a **bare**
+  `/bin/bash <tmpfile>` command — bypassing iTerm2's tokenizer entirely
+  by giving it nothing to mis-tokenize. `launcherScript` is a pure
+  `(spec, scriptPath) -> script content` function, byte-for-byte
+  testable without touching iTerm2.
+- `tmux` is unchanged — it execs through `/bin/sh`, which honors
+  POSIX quoting correctly, so it never had this problem.
+- **A load-bearing comment records the true rationale and the probe
+  reference directly in the code**, specifically so a future pass
+  doesn't "clean up" the shim again based on the same wrong assumption
+  that just caused this regression.
+
+[Testing Notes]
+
+- `f393158`: hook-exit (stdin/env precedence, stdin-beats-env, no-op
+  cases, remote-marker survival), bootstrap substitution, branch env
+  replication (ccs-profile and bare-claude launch, bad-target error)
+  via a fake forker, shell/AppleScript quoting unit tests,
+  `splitVerbArgs` (`--` handling, strict/non-strict, missing value),
+  `noExtra` + end-to-end trailing-junk rejection + `send --` body
+  parsing. Differential vs bash: bootstrap byte-identical across 4
+  cases plus the trailing newline; hook-exit exit-0 + empty stdout +
+  local-leave + remote-marker survival, matching bash exactly.
+- `d114688`: `launcherScript` byte-exact test (injected path),
+  `iterm2Command`'s bare-command shape, and
+  `TestLauncherScriptExecutes` — actually runs the generated script via
+  `/bin/bash <tmpfile>` and proves PATH/CLAUDE_CONFIG_DIR/cwd
+  replication, self-delete, and the final exec all happen correctly
+  end-to-end. The iTerm2-tokenizer leg specifically is reviewer's live
+  probe harness (not reproducible in a hermetic unit test, since it
+  requires the real iTerm2 application).
+- **Reviewer re-verification against real iTerm2**: a "nasty-spec"
+  probe (deliberately awkward env values / paths chosen to stress the
+  quoting) confirmed the generated launcher script's content byte-exact
+  and confirmed the self-delete behavior actually occurs.
+- `go test -race -count=1 ./...` green on both commits.
+
+[Possible Ripple Effects]
+
+- None beyond the fix's scope — `tmux` path untouched; only the iTerm2
+  `OSAForker` backend changed.
+- The load-bearing comment is the primary safeguard against
+  regression; there is no automated test that can fail if a future
+  editor removes the shim again believing it to be dead code (short of
+  the reviewer's live-iTerm2 probe, which is not part of CI).
+
 ## [2026-07-13 19:12:32 UTC] [Port/Go] P2.4-F1 fix confirmed — P2.4 closed fully
 
 [Attempt #1]
