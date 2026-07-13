@@ -1,5 +1,62 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:48:02 UTC] [Port/Go] Phase 1 (4/N) — remote send/list client (M7), explicit timeouts, no retry
+
+[Attempt #1]
+
+Fourth Phase 1 milestone: the remote HTTP client (M7) and its first live
+proof against the real relay. Approved clean — reviewer independently
+re-ran the live differential and got byte-identical output.
+
+[Files Changed]
+
+- `internal/client/remote.go`, `remote_test.go` (new) — in-process
+  `net/http` client with explicit timeouts (4s connect, 20s total) and NO
+  retry (`POST /send` is non-idempotent and unkeyed — no idempotency token
+  exists on the wire to dedup a retry against; Go's transport never retries
+  a POST regardless). `ResolveRemote` builds the front door URL plus auth
+  headers: `Authorization: Bearer` always; the `CF-Access-Client-Id/Secret`
+  pair only in public mode (local/loopback mode skips it, matching the
+  relay's asymmetric auth model). Missing credentials are hard errors
+  pointing at `cbus auth set <host> ...`. `RemoteSend` wraps `POST /send`
+  with `core.SendReq`; `RemoteList` wraps `GET /peers` into
+  `core.PeersResponse`.
+- `internal/client/identity.go` — `RemoteFromDefault` (session marker →
+  `<shorthost>-<ppid>` fallback chain) and `ShortHostname`. Deliberately
+  never consults local registrations, matching bash's split from-default
+  chains (protocol.md §7.1/§3.1) — a by-design remote/local asymmetry, not
+  an oversight.
+- `cmd/cbus/main.go`, `main_test.go` — `send <ch@host/al>
+  [--from|--force] TEXT` (`--force` accepted and ignored remotely — the
+  spool always queues) and `list [<ch>]@<host>` (sorted rows: listen/off,
+  queued count, lastSeen — RFC3339Nano round-trip verified); `active`
+  reproduces the remote dead-quirk (no active-only remote view exists,
+  matching bash's structurally-dead `active ch@host`).
+
+[Testing Notes]
+
+- Hermetic `httptest`-driven tests via `CBUS_SITE_<TESTHOST>_URL` (never
+  binds real `:8090`): public mode sends CF headers, local mode skips them,
+  missing creds error correctly, `/peers` decodes.
+- Reviewer's double-`-` drain-once rider pinned as a test (a second `-`
+  value in one `auth set` invocation must not silently drain stdin twice).
+- **First live public-mode differential test**: ran `list p1diff@nuc` and
+  `send --from EQ ...` through both bash `cbus` and `cbus-go` against the
+  real NUC relay — byte-identical output on both. Leaves throwaway
+  `p1diff` channel residue on the relay (no spool GC exists, §11 of
+  protocol.md — expected, not a bug).
+- Incidental proof of contract A6 (credential store locations): the test
+  run read real Keychain-stored creds successfully via the injectable
+  runner path.
+
+[Possible Ripple Effects]
+
+- None functional — read/send paths only, no state-mutating verbs
+  (join/tail/prune/etc.) exist yet.
+- Ruled fix, riding P1.5: an explicit `--from ""` (empty but present) must
+  be a hard error, not silently fall through the from-default chain — parity
+  with bash's intent over a silent, surprising fallback.
+
 ## [2026-07-13 01:37:47 UTC] [Port/Go] Phase 1 (3/N) — auth set/status credential store (M8)
 
 [Attempt #1]
