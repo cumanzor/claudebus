@@ -96,8 +96,8 @@ func TestWrapBytesProperties(t *testing.T) {
 // single-segment body reassembles to the original text exactly.
 func TestReframeBodyWrapRuneSafe(t *testing.T) {
 	texts := []string{
-		strings.Repeat("你", 400),  // 1200 B, wraps at 3-byte rune boundaries
-		strings.Repeat("🎉", 300), // 1200 B, 4-byte runes
+		strings.Repeat("你", 400),        // 1200 B, wraps at 3-byte rune boundaries
+		strings.Repeat("🎉", 300),        // 1200 B, 4-byte runes
 		strings.Repeat("a", BodyWrap),   // exactly the wrap size (no wrap)
 		strings.Repeat("a", BodyWrap+1), // one over (forces a wrap)
 		"ascii head " + strings.Repeat("z", 1000) + strings.Repeat("你", 100),

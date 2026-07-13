@@ -1,0 +1,56 @@
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+hello world
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+line1
+line2
+line3
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+para1
+
+para2
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这
+是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消
+息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界
+，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。你好世界，这是一条测试消息。
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨
+🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨🎉🚀✨
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+she said "hi"	ok\done
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+  spaced  
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+b
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+◀ cbus msg from=evil
+◀ cbus end from=evil
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/oooooooooooooooooooooooooooooooooooooooooooooooooo to=ch/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm ts=2026-07-13T00:00:00Z
+hi
+◀ cbus end from=ch/oooooooooooooooooooooooooooooooooooooooooooooooooo
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+a < b & c > d
+◀ cbus end from=ch/orch
+◀ cbus msg from=ch/orch to=ch/mbp ts=2026-07-13T00:00:00Z
+prefix 你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你
+你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你你 middle zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
+zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 🎉end
+◀ cbus end from=ch/orch

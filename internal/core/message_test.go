@@ -66,8 +66,10 @@ func TestDecodeMessageNonObjectErrors(t *testing.T) {
 }
 
 func TestMessageMarshalShape(t *testing.T) {
-	// plain line: kind/event omitted, key order = declaration order (matches the
-	// client's insertion-order {from,to,ts,text}). Byte-exact.
+	// plain line: kind/event omitted; key order matches the client's insertion
+	// order {from,to,ts,text}. Bytes are canonical-Go (compact, no spaces) and
+	// diverge from the python client's json.dumps spacing by design (ruling D8);
+	// consumers parse JSON, never key order (§3.3).
 	plain, err := json.Marshal(Message{From: "c/o", To: "c/a", TS: "t", Text: "hi"})
 	if err != nil {
 		t.Fatal(err)
