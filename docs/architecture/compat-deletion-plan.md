@@ -6,6 +6,12 @@ during the side-by-side window. When bash `cbus` is fully retired — the P3
 "structural liveness" homogenization, *after* every machine has cut over — these
 delete in one commit. This is the inventory.
 
+**Status 2026-07-13:** cutover executed on the MBP and NUC — item 5's rename
+happened (the Go binary is installed as `cbus`). Items 1–4 stay until no bash-era
+follower can be armed anywhere (P3 homogenization); item 6's bash files remain
+in-repo as the rollback artifact (`install.sh` = the rollback procedure); item 7
+stays frozen. The logos/WSL node (`cbus-dc5`) starts on the port directly.
+
 | # | What | Where | Why it exists | Deletes to |
 |---|------|-------|---------------|------------|
 | 1 | **Decision 2 re-exec** — the follower `syscall.Exec`s itself so its argv carries `--inbox <path>` | `follow.go` `ArmLocalTail`, `TailArgv`, `ParseTailFollower` | bash-era `meta_listener_alive` greps `ps -o args=` for the inbox path; a Go follower must put it in argv to read alive to bash | run the follower in-process (no re-exec, no `--inbox`); liveness moves to a structural registry (pidfile / lock) |

@@ -1,8 +1,14 @@
 # Cutover decision package — bash `cbus` → Go `cbus-go`
 
+> **CUTOVER EXECUTED 2026-07-13.** The per-machine swap in "What changes at cutover"
+> was performed on the MBP and the NUC — `~/.local/bin/cbus` on both is now the Go
+> binary (verify: `cbus --version`). This package is preserved as the decision
+> record; the rollback procedure below remains valid until P3 deletes the bash
+> artifacts.
+
 Prepared at P2.6 (cutover **readiness**; zero cutover executed). This is the summary
-to decide the per-machine binary swap. **Cutover is user-gated** — nothing here has
-been executed.
+that decided the per-machine binary swap. It was prepared pre-cutover; the cutover has
+since been executed (see status above).
 
 ## Recommendation
 
