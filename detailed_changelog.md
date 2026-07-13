@@ -1,5 +1,52 @@
 # Changelog (detailed)
 
+## [2026-07-13 01:37:47 UTC] [Port/Go] Phase 1 (3/N) — auth set/status credential store (M8)
+
+[Attempt #1]
+
+Third Phase 1 milestone: the credential store (M8) and the `auth
+set`/`auth status` verbs. Approved clean — reviewer re-ran the keychain
+integration test himself and confirmed the leak checks are negative.
+
+[Files Changed]
+
+- `internal/client/cred.go`, `cred_test.go` (new) — `CredStore` over a
+  platform backend: macOS shells to `security(1)` (service
+  `cbus-relay-<host>`, account = field name; the secret rides `security -i`
+  stdin, never argv, matching bash exactly) or Linux XDG files (`0600`,
+  parent dir `0700`, no trailing newline). Deliberately keeps shelling to
+  `security(1)` rather than an in-process Keychain API — defers the native
+  ACL re-auth prompt (port-map.md open question #4). The security runner is
+  injectable so unit tests assert the exact argv/stdin without ever
+  executing `security`.
+- `cmd/cbus/main.go`, `main_test.go` — `auth set <host>
+  [--token|--cf-id|--cf-secret V]` (`V='-'` drains stdin once per
+  invocation; all whitespace stripped) and `auth status [host]` (masked
+  last-4 per field). `auth status`'s host argument is now validated —
+  closing the bash gap where an unvalidated host let a Linux `../` path
+  traverse the credential dir (behavior.md §2.5/§12); recorded as a
+  documented, deliberate Class-C delta rather than bug-compatible
+  reproduction.
+
+[Testing Notes]
+
+- Mock-runner tests assert exact argv/stdin for every field/host
+  combination, including the explicit-keychain path.
+- File backend: permission bits and round-trip verified in a tempdir.
+- `StripWhitespace`/`MaskTail` unit tests; `auth set`/`status` handlers
+  tested end-to-end via a file store.
+- An opt-in integration test (env-gated `CBUS_KEYCHAIN_IT`, skipped by
+  default) round-trips through the real `security(1)` binary against an
+  explicit temp keychain path on every call — never the login keychain or
+  the default search list — and deletes the keychain on cleanup; skips
+  cleanly if `security` is absent. Ran once: PASS, search list unchanged,
+  no entry leaked into the login keychain. Reviewer independently re-ran it
+  with the same result.
+
+[Possible Ripple Effects]
+
+- None functional yet — still no verb wired to real network I/O.
+
 ## [2026-07-13 01:27:53 UTC] [Port/Go] Phase 1 (2/N) — address resolution (M2) + bare-alias resolution; probe no-redirect fix
 
 [Attempt #1]
