@@ -10,6 +10,37 @@ This documents behavior **as-is** at HEAD `f213e26`. Source anchors are
 **quirk** — they are part of the current contract and are catalogued for the
 planned port (preserve or rethink deliberately, never change silently).
 
+> **STATUS (2026-07-13): bash-era reference spec.** The installed `cbus` on every
+> machine is now the Go port (`cmd/cbus`), differentially verified byte-identical
+> against this document (27/27 verbs, both platforms — see
+> [cutover-decision-package.md](cutover-decision-package.md)). This reference remains
+> the behavioral contract; `bin/cbus:N` anchors point at the retired bash
+> implementation, kept in-repo until P3
+> ([compat-deletion-plan.md](compat-deletion-plan.md)). Intended deltas shipped by
+> the port:
+>
+> 1. Unknown relay hosts and invalid channel/alias/host names are **hard errors** (bash: a
+>    non-fatal stderr message from a die-in-substitution; `tail ch@bogus/al` even exited 0).
+> 2. Remote HTTP calls have **timeouts: 4 s connect / 20 s total, no retry** (bash: none —
+>    a wedged origin hung the Bash tool call).
+> 3. `cbus auth status` **validates its host argument** (bash: the one unvalidated
+>    `auth_get` path; Linux `../` read traversal).
+> 4. An empty `--from` value is an error.
+> 5. A `--` **flag terminator** is supported.
+> 6. **Trailing junk is an error on fixed-arity verbs** (bash silently discarded it, e.g.
+>    `cbus whoami junk`).
+> 7. `--help` no longer lists the obsolete `CC_BRANCH` env line (branch is native). The
+>    `CBUS_PYTHON (default python3)` help line is still printed for byte-parity
+>    (COMPAT(P3 #4)) but the Go client ignores it.
+> 8. New verb: `cbus --version` (prints the build stamp; bash had no version verb).
+> 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
+> 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
+>     relay's `/send` body cap.
+>
+> §11 (cc-branch.sh) and §12 (install.sh) describe retired components: `branch` is
+> native in the Go client (TerminalForker), and `install.sh` is now the rollback
+> installer.
+
 Related docs: [`prior-art-and-cc-internals.md`](../prior-art-and-cc-internals.md)
 (design rationale), the repo [`README.md`](../../README.md) and
 [`CHEATSHEET.md`](../../CHEATSHEET.md) (operator-facing; some sections lag the
