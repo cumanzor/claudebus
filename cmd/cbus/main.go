@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,9 +58,12 @@ func run(args []string) int {
 	case "tail":
 		return runTail(args[1:])
 
-	// P1 verbs still landing (whoami, inbox, channels, read-only list).
-	case "channels", "whoami", "inbox":
-		return notImplemented(verb)
+	case "whoami":
+		return runWhoami()
+	case "inbox":
+		return runInbox(args[1:])
+	case "channels":
+		return runChannels()
 
 	// Phase 2 (local transport + harness) — not in the Go client during P1.
 	case "join", "register", "prune", "leave", "hook-exit", "unregister", "rename", "bootstrap", "branch":
@@ -182,7 +187,158 @@ func runList(args []string) int {
 	if len(args) > 0 && client.IsRemote(args[0]) {
 		return runListRemote(args[0])
 	}
-	return notImplemented("list (read-only local is P1.6)")
+	active, chosen := false, ""
+	for _, a := range args {
+		switch a {
+		case "--active", "-a":
+			active = true
+		default:
+			chosen = a // last non-flag wins (bash overwrite semantics)
+		}
+	}
+	return runListLocal(active, chosen)
+}
+
+// runListLocal renders local peers with listen/off + pid + host + cwd
+// (bin/cbus:589-611); --active shows only live listeners.
+func runListLocal(active bool, chosen string) int {
+	root := client.CBUSDir()
+	channels, _ := os.ReadDir(root)
+	any := false
+	for _, chE := range channels {
+		if !chE.IsDir() || strings.HasPrefix(chE.Name(), ".") {
+			continue
+		}
+		ch := chE.Name()
+		if chosen != "" && ch != chosen {
+			continue
+		}
+		chDir := filepath.Join(root, ch)
+		if fileExists(filepath.Join(chDir, "meta.json")) { // legacy v1 entry
+			if active {
+				continue
+			}
+			any = true
+			fmt.Printf("%-7s %-28s legacy v1 entry — run: cbus prune\n", "off   ", ch)
+			continue
+		}
+		aliases, _ := os.ReadDir(chDir)
+		for _, alE := range aliases {
+			if !alE.IsDir() || strings.HasPrefix(alE.Name(), ".") {
+				continue
+			}
+			metaPath := filepath.Join(chDir, alE.Name(), "meta.json")
+			if !fileExists(metaPath) {
+				continue
+			}
+			live := "off   "
+			if client.MetaListenerAlive(metaPath) {
+				live = "listen"
+			}
+			if active && live == "off   " {
+				continue
+			}
+			any = true
+			m, _ := client.ReadPeerMeta(metaPath)
+			pid := "?"
+			if m.ListenerPid != 0 {
+				pid = strconv.Itoa(m.ListenerPid)
+			}
+			fmt.Printf("%-7s %-28s pid=%-7s %s  %s\n", live, ch+"/"+alE.Name(), pid, orQ(m.Host), orQ(m.Cwd))
+		}
+	}
+	if !any {
+		if active {
+			fmt.Println("no active listeners")
+		} else {
+			fmt.Println("no peers registered")
+		}
+	}
+	return 0
+}
+
+func runChannels() int {
+	root := client.CBUSDir()
+	channels, _ := os.ReadDir(root)
+	any := false
+	for _, chE := range channels {
+		if !chE.IsDir() || strings.HasPrefix(chE.Name(), ".") {
+			continue
+		}
+		chDir := filepath.Join(root, chE.Name())
+		if fileExists(filepath.Join(chDir, "meta.json")) { // legacy v1, not a channel
+			continue
+		}
+		aliases, _ := os.ReadDir(chDir)
+		total, live := 0, 0
+		for _, alE := range aliases {
+			if !alE.IsDir() || strings.HasPrefix(alE.Name(), ".") {
+				continue
+			}
+			metaPath := filepath.Join(chDir, alE.Name(), "meta.json")
+			if !fileExists(metaPath) {
+				continue
+			}
+			total++
+			if client.MetaListenerAlive(metaPath) {
+				live++
+			}
+		}
+		if total == 0 {
+			continue
+		}
+		any = true
+		fmt.Printf("%-20s %d peers (%d listening)\n", chE.Name(), total, live)
+	}
+	if !any {
+		fmt.Println("no channels")
+	}
+	return 0
+}
+
+// runWhoami prints this session's local registrations (channel/alias) and remote
+// from-default markers; exits 1 when the session has neither (bin/cbus:775-792).
+func runWhoami() int {
+	any := false
+	for _, reg := range client.ResolveSelf() {
+		fmt.Printf("%s/%s\n", reg.Channel, reg.Alias)
+		any = true
+	}
+	for _, m := range client.SessionMarkers() {
+		fmt.Printf("%s@%s/%s (remote from-default — reachability: cbus list @%s)\n", m.Channel, m.Host, m.Alias, m.Host)
+		any = true
+	}
+	if !any {
+		fmt.Println("not joined in this session")
+		return 1
+	}
+	return 0
+}
+
+// runInbox prints a peer's inbox path (no trailing newline, matching
+// bin/cbus:27,794-798); a bare alias is refused.
+func runInbox(args []string) int {
+	if len(args) == 0 {
+		return die("usage: cbus inbox <channel>/<alias>")
+	}
+	ch, al, err := client.ParseLocal(args[0])
+	if err != nil {
+		return die("%v", err)
+	}
+	if ch == "" {
+		return die("use <channel>/<alias>")
+	}
+	fmt.Print(filepath.Join(client.CBUSDir(), ch, al, "inbox.jsonl"))
+	return 0
+}
+
+func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
+
+func orQ(s string) string {
+	if s == "" {
+		return "?"
+	}
+	return s
 }
 
 func runListRemote(target string) int {

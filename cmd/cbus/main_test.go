@@ -112,6 +112,105 @@ func TestAuthSetDoubleStdinDrainsOnce(t *testing.T) {
 	}
 }
 
+func seedPeer(t *testing.T, root, ch, al, metaJSON string) {
+	t.Helper()
+	dir := filepath.Join(root, ch, al)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(metaJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "inbox.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWhoami(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
+	seedPeer(t, root, "dev", "me", `{"sessionId":"SID"}`)
+	seedPeer(t, root, "dev", "other", `{"sessionId":"OTHER"}`)
+	if err := os.MkdirAll(filepath.Join(root, ".remote", "nuc", "dev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".remote", "nuc", "dev", "SID"), []byte(`{"alias":"mbp"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if rc := runWhoami(); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	if !strings.Contains(out, "dev/me\n") {
+		t.Errorf("missing local registration: %q", out)
+	}
+	if !strings.Contains(out, "dev@nuc/mbp (remote from-default — reachability: cbus list @nuc)") {
+		t.Errorf("missing remote marker line: %q", out)
+	}
+	if strings.Contains(out, "dev/other") {
+		t.Errorf("another session's registration leaked: %q", out)
+	}
+}
+
+func TestWhoamiEmptyExits1(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
+	var rc int
+	out := captureStdout(t, func() { rc = runWhoami() })
+	if rc != 1 {
+		t.Errorf("empty whoami rc=%d, want 1", rc)
+	}
+	if strings.TrimSpace(out) != "not joined in this session" {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestInboxPathNoNewline(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	out := captureStdout(t, func() {
+		if rc := runInbox([]string{"dev/mbp"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	if want := filepath.Join(root, "dev", "mbp", "inbox.jsonl"); out != want {
+		t.Errorf("inbox = %q, want %q (exact, no trailing newline)", out, want)
+	}
+	if rc := runInbox([]string{"bare"}); rc == 0 {
+		t.Error("a bare alias must be refused")
+	}
+}
+
+func TestChannelsAndListLocal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	seedPeer(t, root, "dev", "mbp", `{"listenerPid":null,"host":"mbp","cwd":"/w"}`)
+	seedPeer(t, root, "dev", "nuc", `{"listenerPid":null,"host":"nuc","cwd":"/x"}`)
+
+	ch := captureStdout(t, func() { runChannels() })
+	if !strings.Contains(ch, "dev") || !strings.Contains(ch, "2 peers (0 listening)") {
+		t.Errorf("channels = %q", ch)
+	}
+
+	li := captureStdout(t, func() { runListLocal(false, "") })
+	if !strings.Contains(li, "dev/mbp") || !strings.Contains(li, "pid=?") || !strings.HasPrefix(li, "off   ") {
+		t.Errorf("list = %q", li)
+	}
+
+	act := captureStdout(t, func() { runListLocal(true, "") })
+	if strings.TrimSpace(act) != "no active listeners" {
+		t.Errorf("--active with no live listeners = %q", act)
+	}
+
+	empty := captureStdout(t, func() { runListLocal(false, "nonexistent") })
+	if strings.TrimSpace(empty) != "no peers registered" {
+		t.Errorf("empty list = %q", empty)
+	}
+}
+
 func TestSendRemoteEmptyFromDies(t *testing.T) {
 	// explicit --from "" must die (bash ${2:?}), before any network call
 	if rc := runSendRemote([]string{"c@testhost/a", "--from", "", "hello"}); rc == 0 {

@@ -68,6 +68,51 @@ func ResolveSelf() []LocalReg {
 	return out
 }
 
+// RemoteReg is one of this session's remote identity markers.
+type RemoteReg struct {
+	Channel string
+	Host    string
+	Alias   string
+}
+
+// SessionMarkers returns this session's remote from-default markers
+// (.remote/<host>/<channel>/<sessionId> with a non-empty alias), in host-major
+// then channel glob order (bin/cbus:781-790).
+func SessionMarkers() []RemoteReg {
+	sid := markerSID()
+	root := filepath.Join(CBUSDir(), ".remote")
+	hosts, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []RemoteReg
+	for _, h := range hosts {
+		if !h.IsDir() || strings.HasPrefix(h.Name(), ".") {
+			continue
+		}
+		chans, err := os.ReadDir(filepath.Join(root, h.Name()))
+		if err != nil {
+			continue
+		}
+		for _, c := range chans {
+			if !c.IsDir() || strings.HasPrefix(c.Name(), ".") {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(root, h.Name(), c.Name(), sid))
+			if err != nil {
+				continue
+			}
+			var m struct {
+				Alias string `json:"alias"`
+			}
+			if json.Unmarshal(b, &m) == nil && m.Alias != "" {
+				out = append(out, RemoteReg{Channel: c.Name(), Host: h.Name(), Alias: m.Alias})
+			}
+		}
+	}
+	return out
+}
+
 // FindPeerChannel resolves a bare alias to the first of THIS session's channels
 // (glob order) that holds a peer with that alias (bin/cbus:107-114).
 func FindPeerChannel(alias string) (string, bool) {
