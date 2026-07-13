@@ -1,5 +1,89 @@
 # Changelog (detailed)
 
+## [2026-07-13 00:51:45 UTC] [Port/Go] Phase 0 (4/N) — golden framer parity corpus + oversize flip-point + gofmt gate
+
+[Attempt #1]
+
+Phase 0 golden gate pinning `core.Reframe` byte-for-byte to the bash follower's
+`emit()`/`wrap()` (bin/cbus:515-551), closing m3's two conditional findings (F1
+gofmt, F2 oversize flip-point) in the same milestone. Reviewer independently
+reproduced both the live-follower capture and the D8 cross-parse assertion
+byte-identically.
+
+[Files Changed]
+
+- `internal/core/testdata/emit_golden.py` (new) — verbatim lift of the bash
+  follower's `wrap()`/`emit()` plus a stdin driver, used only to generate the
+  golden corpus (no runtime dependency).
+- `internal/core/testdata/gen_corpus.py` (new) — builds `corpus.jsonl` the way
+  the client does (python `json.dumps`), covering the plain tool-authored
+  shapes where local `emit()` and relay `reframe()` agree.
+- `internal/core/testdata/corpus.jsonl`, `corpus.golden` (new, 56 lines/6861B)
+  — the pinned input/output pair.
+- `internal/core/golden_test.go` (new) — `TestGoldenCorpusParity` asserts
+  `golden == Reframe(line)+"\n"` per message. Header records two one-time
+  validations: (1) the python lift matches a live hermetic `cbus tail`
+  follower byte-for-byte (no env/encoding drift); (2) the D8 cross-parse
+  assertion — `emit()` frames Go-marshaled lines identically to
+  python-marshaled ones, so canonical-Go bytes hold safely during
+  coexistence.
+- `internal/core/frame_test.go` — added `TestReframeOversizeFlipPoint`,
+  pinning the protocol.md §4.4 header-less-total quirk (warn fires at total
+  > `WSFrameSafe`, header excluded from the count) so a future
+  header-counting fix can't silently change the threshold.
+- `internal/core/name_test.go`, `frame_test.go` — `gofmt -w`; new standing
+  `TestGofmtClean` gate over the module (closes F1).
+- `internal/core/message.go`, `message_test.go` — D8 comment fixes:
+  `flexString` swallows objects/arrays as raw text (not just numbers/null);
+  bytes are canonical-Go, not python-identical.
+
+[Possible Ripple Effects]
+
+- None functional — test/tooling-only commit. `reframe_test.go` remains
+  byte-unchanged.
+- The golden corpus is now the trip-wire for any future framer change on the
+  plain-shape domain; degenerate-input divergences stay pinned separately in
+  `frame_test.go` (m3).
+
+[Testing Notes]
+
+- `go test ./...` green; reviewer independently reran the live-follower
+  capture and the D8 cross-parse check and reproduced both byte-identically.
+- One provenance rider (byte-exact `◀` U+25C0 restoration + a declared
+  argv-line omission in the generator's BEGIN marker) plus two nits are
+  deferred to m5.
+
+## [2026-07-13 00:37:30 UTC] [Port/Go] Phase 0 (3/N) — degenerate-input matrix + rune-safe 440B wrap property tests
+
+[Attempt #1]
+
+Third Phase 0 milestone: pins the relay-side framer divergence matrix
+(protocol.md §4.5) as table tests, plus property tests for the rune-safe
+440-byte body wrap. Conditionally approved by reviewer — findings F1 (gofmt)
+and F2 (oversize flip-point pin) were folded into m4 and are closed there.
+
+[Files Changed]
+
+- `internal/core/frame_test.go` (new) — 8-case degenerate-input matrix
+  against `core.Reframe`: empty/missing/non-string/null `text` and any
+  non-string field all assert byte-identical passthrough; missing `from`/`to`
+  frames with empty routing fields; `kind` is dropped on the relay path.
+  Property tests for the rune-safe wrap across 1/3/4-byte runes x lengths
+  0-300 x limits {1,3,4,7,440}: byte-exact reassembly, valid UTF-8 per piece,
+  no over-limit multi-rune piece (a lone over-limit rune is the sole
+  exception). Full-framer rune-safety test at 440B.
+
+[Possible Ripple Effects]
+
+- None — test-only commit, no production changes.
+
+[Testing Notes]
+
+- All new tests green; `reframe_test.go` untouched.
+- Reviewer's two findings (gofmt formatting on this file + `name_test.go`;
+  the oversize flip-point wasn't yet pinned as its own test) were addressed
+  in m4 rather than a follow-up commit — see the m4 entry above.
+
 ## [2026-07-13 00:33:32 UTC] [Port/Go] Phase 0 (2/N) — shared domain types + single-sourced ValidName
 
 [Attempt #1]
