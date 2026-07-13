@@ -139,7 +139,7 @@ func TestWhoami(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if rc := runWhoami(); rc != 0 {
+		if rc := runWhoami(nil); rc != 0 {
 			t.Fatalf("rc=%d", rc)
 		}
 	})
@@ -159,7 +159,7 @@ func TestWhoamiEmptyExits1(t *testing.T) {
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
 	var rc int
-	out := captureStdout(t, func() { rc = runWhoami() })
+	out := captureStdout(t, func() { rc = runWhoami(nil) })
 	if rc != 1 {
 		t.Errorf("empty whoami rc=%d, want 1", rc)
 	}
@@ -190,7 +190,7 @@ func TestChannelsAndListLocal(t *testing.T) {
 	seedPeer(t, root, "dev", "mbp", `{"listenerPid":null,"host":"mbp","cwd":"/w"}`)
 	seedPeer(t, root, "dev", "nuc", `{"listenerPid":null,"host":"nuc","cwd":"/x"}`)
 
-	ch := captureStdout(t, func() { runChannels() })
+	ch := captureStdout(t, func() { runChannels(nil) })
 	if !strings.Contains(ch, "dev") || !strings.Contains(ch, "2 peers (0 listening)") {
 		t.Errorf("channels = %q", ch)
 	}
