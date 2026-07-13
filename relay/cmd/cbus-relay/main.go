@@ -29,12 +29,6 @@ const (
 	pongGrace      = 90 * time.Second
 )
 
-type presence struct {
-	Connected bool      `json:"connected"`
-	LastSeen  time.Time `json:"lastSeen"`
-	Queued    int       `json:"queued"`
-}
-
 // hub tracks the single active tail per peer plus last-seen times.
 type hub struct {
 	mu    sync.Mutex
@@ -135,14 +129,6 @@ func (s *server) subprotoOK(r *http.Request) string {
 	return ""
 }
 
-type sendReq struct {
-	Channel string `json:"channel"`
-	Alias   string `json:"alias"`
-	From    string `json:"from"`
-	Text    string `json:"text"`
-	TS      string `json:"ts,omitempty"`
-}
-
 func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -152,7 +138,7 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	var req sendReq
+	var req core.SendReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
@@ -320,13 +306,13 @@ func (s *server) handlePeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	connected, seen := s.hub.snapshot()
-	out := map[string]presence{}
+	out := map[string]core.PeersEntry{}
 	for k, n := range queued {
-		out[k] = presence{Connected: connected[k], LastSeen: seen[k], Queued: n}
+		out[k] = core.PeersEntry{Connected: connected[k], LastSeen: seen[k], Queued: n}
 	}
 	for k := range connected {
 		if _, ok := out[k]; !ok {
-			out[k] = presence{Connected: true, LastSeen: seen[k]}
+			out[k] = core.PeersEntry{Connected: true, LastSeen: seen[k]}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
