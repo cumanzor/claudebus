@@ -1,5 +1,57 @@
 # Changelog (detailed)
 
+## [2026-07-13 02:06:41 UTC] [Port/Go] Phase 1 (6/N) — read-only local verbs (whoami/inbox/channels/list) — PHASE 1 CLOSED
+
+[Attempt #1]
+
+Sixth and final Phase 1 milestone: the read-only local verb set plus the
+full differential closeout proving cbus-go/bash parity end-to-end. Phase 1
+closed six-for-six: 40c82f0..b474c0d, all six milestones reviewer-approved.
+
+[Files Changed]
+
+- `internal/client/liveness.go`, `liveness_test.go` (new) —
+  `MetaListenerAlive`, the three-clause liveness predicate (listenerPid
+  alive + its argv references the inbox path via `ps -ww` + ownerPid alive
+  if recorded), faithful to bash's `meta_listener_alive`. `ReadPeerMeta`
+  tolerantly reads listenerPid/ownerPid/host/cwd (torn-read tolerant,
+  matching `jget`'s exception-swallowing).
+- `internal/client/identity.go` — `SessionMarkers` (this session's remote
+  from-default markers, feeding `whoami`'s second line class).
+- `cmd/cbus/main.go`, `main_test.go` — `whoami` (local channel/alias
+  registrations + remote marker lines; exit 1 when neither exists, matching
+  bash's probe semantics); `inbox <ch>/<al>` (prints the path, no trailing
+  newline, bare alias refused); `channels` (peer count + listening count per
+  channel); read-only local `list` (listen/off + pid + host + cwd; `--active`
+  filter; legacy-v1 entry line). `active`/`peers` aliases wired.
+
+[Testing Notes]
+
+- `MetaListenerAlive` tested against real processes: a live `tail -f` with
+  the inbox path in its argv reads `listen`; null pid, dead pid,
+  argv-mismatch, and dead-owner cases all read `off`.
+- `ReadPeerMeta` tolerance test; verb tests over a seeded `$CBUS_DIR`.
+- **MBP seeded differential**: `whoami`/`inbox`/`channels`/`list`/`list
+  dev`/`list --active` all byte-identical between cbus-go and bash cbus.
+- **NUC live local-mode differential**: coder cross-compiled a temp
+  `cbus-go` binary, ran it directly on the NUC against real state, confirmed
+  byte-identical output, then deleted the temp binary (no install).
+  Reviewer did not independently reproduce this leg — it crosses a
+  permission boundary the reviewer doesn't have (no NUC shell access) — and
+  accepted coder's session transcript as the evidence of record. This is
+  expected, correct behavior for the review setup, not a gap.
+- A1/A3/A5/A6 contract-class evidence bundle now complete for everything
+  Phase 1 touches.
+
+[Possible Ripple Effects]
+
+- None functional — read-only verbs only; no local join/tail/send/prune
+  yet (Phase 2).
+
+**Phase 1 complete: cbus-go remote+read-only client side-by-side with bash,
+6 commits (40c82f0, e98834b, c9464e1, d0150ab, 0273f41, b474c0d), all
+reviewer-approved, installed at ~/.local/bin/cbus-go.**
+
 ## [2026-07-13 01:57:22 UTC] [Port/Go] Phase 1 (5/N) — remote tail arm-spec (A5) + .remote identity markers (A3); --from "" now dies
 
 [Attempt #1]
