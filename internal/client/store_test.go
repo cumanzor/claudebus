@@ -6,10 +6,44 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"claudebus/internal/core"
 )
+
+// TestConcurrentClaimUniqueAliases pins F1: N concurrent auto-pick claims must all
+// succeed with unique aliases. The pre-fix µs loop burned its retries in a
+// sibling's mkdir→meta window and lost claims; the EEXIST-exclusion converges.
+func TestConcurrentClaimUniqueAliases(t *testing.T) {
+	setupStore(t)
+	const N = 24
+	var wg sync.WaitGroup
+	aliases := make([]string, N)
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			aliases[i], _, errs[i] = claimAlias("cc")
+		}(i)
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for i := 0; i < N; i++ {
+		if errs[i] != nil {
+			t.Errorf("claim %d failed: %v", i, errs[i])
+			continue
+		}
+		if seen[aliases[i]] {
+			t.Errorf("duplicate alias %q", aliases[i])
+		}
+		seen[aliases[i]] = true
+	}
+	if len(seen) != N {
+		t.Errorf("got %d unique aliases from %d concurrent claims, want %d", len(seen), N, N)
+	}
+}
 
 func setupStore(t *testing.T) string {
 	root := t.TempDir()
