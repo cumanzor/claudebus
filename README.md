@@ -9,7 +9,9 @@ handoff doc you carry over by hand.
 
 It's built entirely from **supported primitives** — the `Monitor` tool plus plain
 files — so it doesn't depend on any undocumented internals and works across
-terminal windows, tabs, tmux, and CCS profiles.
+terminal windows, tabs, tmux, and CCS profiles. The client is a single Go binary
+(`cmd/cbus`); the retired bash implementation is kept in `bin/` as the rollback
+artifact until P3.
 
 Peers are organized into **named channels**. A parent/fork pair working on a repo
 gets its own channel (named after the repo by default), so aliases stay short and
@@ -41,9 +43,9 @@ Each participating session **joins a channel** and **arms a listener**:
   **auto-prunes dead peers first** so alias numbers get recycled instead of
   growing forever.
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
-  **Monitor** tool (persistent). It `exec`s a small python follower in place so
-  *its own pid* becomes the liveness signal (its argv carries the inbox path, which
-  `meta_listener_alive` checks). The follower reframes each stored message into a
+  **Monitor** tool (persistent). It re-`exec`s itself as a small follower process so
+  *its own pid* becomes the liveness signal (its argv carries the inbox path via
+  `--inbox`, which the liveness check matches). The follower reframes each stored message into a
   short `◀ cbus msg from=… to=… ts=…` header + the text soft-wrapped at ~440 bytes
   + a `◀ cbus end` marker. Why: the Monitor truncates any single stdout line at
   **500 chars**, so a raw 1-line JSON event forces the receiver into a second inbox
@@ -53,21 +55,24 @@ Each participating session **joins a channel** and **arms a listener**:
   Remote `@host` tails get the identical framing — the **relay** reframes each
   message server-side into one multiline ws frame (a multiline frame is capped
   per-line at 500, not 500 total), so long cross-machine messages arrive whole
-  too. Both paths share a ~2800-char per-notification ceiling; past it the
-  header carries a `⚠truncated~<N>B` notice rather than silently cutting.
+  too. Both paths share a ~2800-char per-notification ceiling. Past it, remote frames carry an
+  in-band `⚠truncated~<N>B` header notice; on the local path the harness itself appends a
+  `...(truncated)` marker — visible on both paths, by different mechanisms.
 - **Send** — `cbus send <channel>/<alias> "text"` appends a line to the target's
   inbox. Within your own channel a bare alias works: `cbus send fork-1 "text"`.
-  The sender's `from` is resolved automatically from `$CLAUDE_CODE_SESSION_ID`.
+  The sender's `from` is resolved automatically (this
+  session's own registration where possible; unjoined senders fall back to an unroutable
+  `hostname-PID`).
 
 ### Design details worth knowing
 
 - **No lost messages during setup.** `join` truncates the inbox and the *first*
-  arm replays from line 1 (`tail -n +1 -F`), so anything sent between *join* and
+  arm replays the whole inbox from the start, so anything sent between *join* and
   *arming the Monitor* is still delivered — `send` accepts a joined-but-not-yet-
   armed peer for exactly this reason. A *re*-arm follows from the end of the
   inbox instead, so old messages are never redelivered.
 - **Liveness is a real process, not a stale flag.** The tracked `listenerPid` *is*
-  the `tail` process. When a window closes or the Monitor is stopped, the peer flips
+  the follower process. When a window closes or the Monitor is stopped, the peer flips
   to `off` on its own, and `cbus send` refuses to message a dead window (override
   with `--force`, which queues the line best-effort — a re-arm follows from the
   end of the inbox, so it may never be delivered). Two edge cases are hardened:
@@ -75,10 +80,10 @@ Each participating session **joins a channel** and **arms a listener**:
     reference this peer's inbox, so an unrelated process that inherited the number
     doesn't read as a false `listen`.
   - *crash-orphaned listener* — on arm, cbus also records `ownerPid`, the owning
-    `claude` process. If the session is hard-killed (crash, `kill -9`), the `tail`
+    `claude` process. If the session is hard-killed (crash, `kill -9`), the follower
     can survive as an orphan with a live pid — but its `ownerPid` is gone, so the
     peer still reads `off`. (On a *clean* exit Claude Code stops the Monitor, which
-    kills the tail directly; this covers the abnormal path.)
+    kills the follower directly; this covers the abnormal path.)
 - **Self-cleaning registry.** `join` prunes dead peers in its channel before
   picking an alias; empty channels are removed. A peer that joined but hasn't
   armed its Monitor yet gets a 10-minute grace window so it can't be swept
@@ -86,27 +91,33 @@ Each participating session **joins a channel** and **arms a listener**:
 
 ## Install
 
+The client is a single static Go binary — no runtime dependencies (python3 is no
+longer needed). Build and install it as `cbus`:
+
 ```sh
-./install.sh          # copy into ~/.local/bin and ~/.claude/
-./install.sh --link   # symlink instead, so `git pull` updates in place
+go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
+  -o ~/.local/bin/cbus ./cmd/cbus
 ```
 
-This places:
+Then place the slash commands (copy `commands/*.md` into `~/.claude/commands/`):
 
 | file | destination | purpose |
 |---|---|---|
-| `bin/cbus` | `~/.local/bin/cbus` | the message-bus CLI |
-| `bin/cc-branch.sh` | `~/.claude/bin/cc-branch.sh` | session fork helper (only needed for `/bus-branch`) |
-| `commands/bus-join.md` | `~/.claude/commands/bus-join.md` | slash command to join a channel |
-| `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | slash command to fork + auto-join both sides |
-| `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | slash command to rename this session's alias |
+| `commands/bus-join.md` | `~/.claude/commands/bus-join.md` | join a channel |
+| `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | fork + auto-join both sides |
+| `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | rename this session's alias |
 
-Make sure `~/.local/bin` is on your `PATH`.
+Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's installed.
 
-> **Paths:** `cbus branch` finds the fork helper at `~/.claude/bin/cc-branch.sh`
-> (override with `CC_BRANCH=/path`). `cc-branch.sh` itself relaunches through
-> `ccs <profile>` when it detects a CCS config dir — drop that branch if you don't use
-> CCS and just call `claude` directly.
+> **Legacy installers** (kept until P3 homogenization deletes the bash artifacts —
+> see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)):
+> `./install.sh` installs the **retired bash client** over `~/.local/bin/cbus` —
+> running it is the rollback procedure, so don't run it casually. `./install-cbus-go.sh`
+> is the transitional side-by-side installer (builds the Go client as `cbus-go`).
+
+> **Forking:** `cbus branch` forks natively (iTerm2 window/tab via osascript, or
+> tmux) and relaunches through `ccs <profile>` when it detects a CCS config dir. The
+> old `bin/cc-branch.sh` helper is no longer consulted.
 
 ## Usage
 
@@ -118,8 +129,8 @@ Make sure `~/.local/bin` is on your `PATH`.
 ```
 
 Runs `cbus branch <target> [channel]` — a single command that joins the parent
-to the channel and forks the conversation into a new terminal (via
-`cc-branch.sh`) with the canonical bootstrap turn — then arms the parent's
+to the channel and forks the conversation into a new terminal (natively — iTerm2
+window/tab or tmux) with the canonical bootstrap turn — then arms the parent's
 listener. The child self-joins the same channel, arms its own listener, and
 announces itself to the parent, reporting results back with `cbus send` instead
 of a handoff doc.
@@ -169,10 +180,20 @@ A channel is an N-way registry, not a pair. Every session that joins the same
 channel can message every other; aliases are auto-assigned and recycled
 (`main`, then `fork-1`, `fork-2`, … reusing freed slots).
 
+### Presence & session-end announcements
+
+`join` / `leave` / `rename` / `departed` events are broadcast automatically to every
+non-dead peer in the channel as `kind=presence` messages (replayed at a
+joined-but-unarmed peer's first arm). Presence is **local-only** — it does not cross
+the relay. A SessionEnd hook (`cbus hook-exit`, wired manually in
+`~/.claude/settings.json`) announces graceful exits immediately; hard kills fall back
+to the lazy prune's `departed` broadcast.
+
 ## Networked relay (NUC)
 
 `relay/` holds `cbus-relay`, a std-lib-only Go daemon that extends the bus across
-machines (epic in progress; the cbus client side lands separately):
+machines (shipped; the client speaks to it via `<channel>@<host>` addresses —
+see below):
 
 - **`POST /send`** (bearer token) appends `{from,to,ts,text}` — the exact local
   inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
@@ -185,7 +206,8 @@ machines (epic in progress; the cbus client side lands separately):
 - Runs as systemd unit `cbus-relay` on the NUC, loopback `127.0.0.1:8090`,
   fronted by the CF tunnel. Deploy with `relay/deploy.sh` (builds on the NUC).
 - One active tail per peer: a new `/tail` displaces the old (per-message
-  displacement checks — no duplicate delivery on handover).
+  displacement checks; delivery is at-least-once — a narrow handover race can deliver
+  one in-flight message to both tails).
 
 ### Using remote channels from cbus
 
@@ -239,14 +261,18 @@ cbus send <target> [opts] TEXT   append a message to a peer's inbox;
                                  <alias> within your own channel(s)
      --from <ch/alias>           override sender (default: auto-resolved)
      --force                     send even if target's listener died (best effort)
+                                 (local only — ignored on @host targets: the relay spool always queues)
 cbus list [--active] [channel]   peers with listen/off state, host, cwd
 cbus active [channel]            only peers currently listening (= list --active)
 cbus channels                    channels with peer counts
-cbus whoami                      this session's channel/alias memberships
+cbus whoami                      local memberships + remote identity markers (exit 1 if none)
 cbus inbox <channel>/<alias>     print inbox path
 cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
 cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
-cbus prune [channel]             remove dead peers (and empty channels)
+cbus prune [channel]             remove dead peers (and empty channels); a bare
+                                 `cbus prune` also sweeps dead remote identity markers
+cbus hook-exit                   SessionEnd hook target: announce departure (always exit 0)
+cbus --version                   print the installed client version
 
 remote (relay-backed) — address form <channel>@<host>/<alias>:
 cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
@@ -259,9 +285,12 @@ cbus leave [channel]             leave channel(s) this session joined
 cbus rename <new-alias> [channel]  rename this session's local alias (re-arm after)
 cbus unregister <channel>/<alias>  force-remove any peer
 
-env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),
-     CC_BRANCH (fork helper path, default ~/.claude/bin/cc-branch.sh)
+env: CBUS_DIR (default ~/.claude-bus); CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL
+     (relay endpoint overrides); CBUS_ALIAS (last-resort local from)
 ```
+
+`--help` still prints a vestigial `CBUS_PYTHON` line for byte-parity with the bash client; the
+Go client ignores it. A `--` terminator ends flag parsing; flags must precede message text.
 
 `cbus register <alias>` is kept as a deprecated v1 alias for `cbus join global <alias>`.
 
@@ -310,7 +339,9 @@ design is honest about that line.
   interrupting it. Corollary: a peer message can trigger action while you're away,
   which is why incoming messages are treated as untrusted peer requests.
 - **No broadcast primitive.** `cbus send` targets one peer; message N times to reach N peers.
-- **Requires `python3`** (used only for robust JSON read/write) and a BSD/GNU `tail` with `-F`.
+- **No runtime dependencies.** The client is a single static Go binary (the bash-era
+  python3 and `tail -F` requirements are gone).
+- **Message size cap:** messages over 1 MiB are rejected, matching the relay's `/send` cap.
 
 ## Why not the built-in teammate mailbox?
 

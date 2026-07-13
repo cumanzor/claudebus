@@ -28,7 +28,7 @@ cbus send fork-1 --force "queued"        # send even if peer isn't listening
 cbus list [channel]                      # peers + listen/off state
 cbus active [channel]                    # only peers currently listening
 cbus channels                            # channels with peer counts
-cbus whoami                              # my channel/alias memberships
+cbus whoami                              # my memberships + remote markers (exit 1 if none)
 cbus prune                               # sweep dead peers everywhere
 cbus rename <new-alias> [channel]        # rename my local alias (re-arm tail after)
 cbus leave [channel]                     # leave (default: all my channels)
@@ -46,8 +46,9 @@ lands whole in one event — no second inbox read):
 
 Reply with `cbus send <from> "..."` using the `from=` in the header. Remote
 `@host` tails get the same framed block (the relay reframes server-side), so
-long cross-machine messages also arrive whole — up to a shared ~2800-char
-ceiling, past which the header carries a `⚠truncated~<N>B` notice.
+long cross-machine messages also arrive whole — up to a
+shared ~2800-char ceiling; past it remote frames carry a `⚠truncated~<N>B` header notice
+(local over-limit messages get the harness's own `...(truncated)` marker).
 
 ## Cross-machine (relay-backed) channels
 
@@ -65,7 +66,9 @@ cbus list @nuc                     # relay peers: connected/queued/lastSeen
 cbus leave dev@nuc                 # drop THIS session's identity marker
 ```
 
-- Endpoint autodetects: loopback on the relay host, else `wss://bus.example.com` + CF Access.
+- Endpoint autodetects: loopback on the relay host, else `wss://bus.example.com`. The ws leg
+  authenticates via the token subprotocol only (no CF Access headers); CF credentials are
+  used by the HTTP send/list legs.
 - Remote receive = the session arms `Monitor {ws:}` from the printed spec.
 - Arm a tail first: it records THIS session's identity so `send`'s `from` is
   routable. Markers are session-scoped (no cross-session alias inheritance) and
@@ -82,12 +85,12 @@ Pick a channel + two explicit aliases (e.g. `bridge`, `mbp`, `nuc`):
 
 ```sh
 # --- on the NUC (ssh nuc, then launch `claude`; detached `tmux` for an autonomous peer) ---
-cbus tail bridge@nuc/nuc          # prints ws://localhost:8090 arm spec (loopback, no CF Access)
+cbus tail bridge@nuc/nuc          # prints ws://127.0.0.1:8090 arm spec (loopback, no CF Access)
 #   → arm the Monitor tool from that spec
 cbus send bridge@nuc/mbp "hello from the NUC"
 
 # --- on the Mac ---
-cbus tail bridge@nuc/mbp          # prints wss://bus.example.com arm spec (+ CF Access)
+cbus tail bridge@nuc/mbp          # prints wss://bus.example.com arm spec (token subprotocol auth; no CF headers on the ws leg)
 #   → arm the Monitor tool from that spec
 cbus send bridge@nuc/nuc "hello from the MBP"
 ```
@@ -110,6 +113,8 @@ cbus bootstrap <channel> [parent] # canonical fork-child prompt
 cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-branch runs)
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
+cbus hook-exit                   # SessionEnd hook target (announces departure)
+cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ```
 
@@ -123,13 +128,14 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
   re-arms follow from the end, no redelivery).
 - Reply targets must be `channel/alias` — a `hostname-PID` sender is unjoined and
   has no inbox to reply to.
-- **Liveness** = the real `tail` pid, cross-checked against its inbox args (no
-  false `listen` from a recycled pid) and the owning `claude` pid (a crash-orphaned
-  tail still reads `off`). A clean exit kills the tail via the Monitor.
+- **Liveness** = the real follower pid, cross-checked against its inbox-path argv
+  (no false `listen` from a recycled pid) and the owning `claude` pid (a crash-orphaned
+  follower still reads `off`). A clean exit kills the follower via the Monitor.
 - A freshly-joined peer that hasn't armed its Monitor yet has a **10-min grace
   window** before prune can sweep it.
 - **Remote ws drops on sleep** — a cross-machine `cbus:<ch>@<host>` Monitor closes
   with **1006** when the laptop sleeps or the network blips (local file-bus tails
   survive). Re-arm on the close event: re-run `cbus tail <ch>@<host>/<alias>` and arm
-  the fresh spec; the relay replays queued mail on reconnect, so nothing is lost.
+  the fresh spec; the relay replays mail queued while no tail was attached — but mail
+  sent in the ~90–120 s window before the relay notices a silent drop can still be lost.
 - **No broadcast** — send once per target. **No auth** — don't expose `~/.claude-bus`.
