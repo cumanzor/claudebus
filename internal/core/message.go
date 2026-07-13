@@ -77,7 +77,11 @@ func (f *flexString) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		*f = flexString(s)
-	default: // number / bool / other bare literal — keep the raw token
+	default:
+		// number, bool, or even a bare object/array — swallowed as its raw JSON
+		// text (lenient by design: a structured value becomes its literal source,
+		// e.g. {"a":1} -> `{"a":1}`, [1,2] -> `[1,2]`). Rejection is deliberately
+		// NOT added — that would narrow the tolerance foreign lines rely on.
 		*f = flexString(b)
 	}
 	return nil
