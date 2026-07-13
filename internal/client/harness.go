@@ -166,33 +166,94 @@ func forkReplicatedEnv() map[string]string {
 }
 
 // OSAForker is the real TerminalForker: iTerm2 (osascript) for window/tab, tmux for
-// tmux. It builds the child command string with native Go quoting — the bash shim's
-// mktemp self-deleting launcher (there only to dodge nested osascript/shell quoting)
-// is gone.
+// tmux. window/tab go through a self-deleting launcher SCRIPT (osaForkITerm); tmux
+// runs a quoted one-liner (terminalCommand) — see each for the per-surface rationale.
 type OSAForker struct{}
 
 func (OSAForker) Fork(spec ForkSpec) error {
-	run := terminalCommand(spec)
 	switch spec.Target {
-	case "window":
-		return runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
-	case "tab":
-		return runOsascript("tell application \"iTerm2\"\n  tell current window to create tab with default profile command " + appleScriptStr(run) + "\nend tell")
+	case "window", "tab":
+		return osaForkITerm(spec)
 	case "tmux":
 		if os.Getenv("TMUX") == "" {
 			return fmt.Errorf("not inside a tmux session")
 		}
-		return exec.Command("tmux", "new-window", "-n", "cc-branch", run).Run()
+		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
+		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
+		return exec.Command("tmux", "new-window", "-n", "cc-branch", terminalCommand(spec)).Run()
 	default:
 		return fmt.Errorf("unknown target %q", spec.Target)
 	}
 }
 
+// osaForkITerm launches the child in a new iTerm2 window/tab through a self-deleting
+// launcher script.
+//
+// CRITICAL — do NOT "simplify" this into a direct command string. iTerm2's AppleScript
+// `command` parameter is tokenized by iTERM2 ITSELF and does NOT understand POSIX
+// quoting; a quoted one-liner (e.g. `/bin/bash -c '…'`) is mis-tokenized and launches
+// NOTHING — probe-verified live, twice, in the P2.5 go-port review. The launcher
+// indirection is that tokenizer workaround, NOT quoting cruft: port-map §4.12's "the
+// mktemp shim is quoting cruft" rationale was wrong. We write a 0700 self-deleting
+// script holding the real (POSIX-quoted, /bin/sh-dialect) env exports + cd + exec, and
+// hand iTerm2 only the BARE, whitespace-tokenized command `/bin/bash <tmpfile>`.
+func osaForkITerm(spec ForkSpec) error {
+	f, err := os.CreateTemp("", "cc-branch.*.sh")
+	if err != nil {
+		return err
+	}
+	path := f.Name()
+	_, werr := io.WriteString(f, launcherScript(spec, path))
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return err
+	}
+	run := iterm2Command(path) // bare `/bin/bash <tmpfile>` — tokenizer-proof
+	switch spec.Target {
+	case "window":
+		return runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
+	default: // tab
+		return runOsascript("tell application \"iTerm2\"\n  tell current window to create tab with default profile command " + appleScriptStr(run) + "\nend tell")
+	}
+}
+
+// iterm2Command is the bare command handed to iTerm2: `/bin/bash <tmpfile>` with NO
+// quoting (mktemp paths carry no whitespace), so iTerm2's own tokenizer splits it into
+// exactly two args. It exists so the tokenizer never sees POSIX quoting (see
+// osaForkITerm).
+func iterm2Command(scriptPath string) string { return "/bin/bash " + scriptPath }
+
+// launcherScript is the self-deleting launcher iTerm2 runs. Inside the script ordinary
+// /bin/sh quoting (shQuote) applies — the layer iTerm2's tokenizer bypasses. It
+// replicates PATH/CLAUDE_CONFIG_DIR + cwd, rm's itself, then execs the child. Kept a
+// pure function of (spec, scriptPath) so it is byte-for-byte unit-testable.
+func launcherScript(spec ForkSpec, scriptPath string) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/bash\n")
+	for _, k := range sortedKeys(spec.Env) {
+		b.WriteString("export " + k + "=" + shQuote(spec.Env[k]) + "\n")
+	}
+	b.WriteString("cd " + shQuote(spec.Dir) + "\n")
+	b.WriteString("rm -f " + shQuote(scriptPath) + "\n")
+	b.WriteString("exec")
+	for _, a := range spec.Argv {
+		b.WriteString(" " + shQuote(a))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 func runOsascript(script string) error { return exec.Command("osascript", "-e", script).Run() }
 
-// terminalCommand renders a ForkSpec into a single shell command the terminal runs:
-// `/bin/bash -c 'cd <dir> && exec env <K=V…> <argv…>'`, everything POSIX-quoted. This
-// is the direct, temp-file-free replacement for cc-branch.sh's launcher script.
+// terminalCommand renders a ForkSpec into one /bin/sh command line — used for tmux,
+// which execs through a POSIX shell. window/tab CANNOT use this (iTerm2 mis-tokenizes
+// POSIX quoting — see osaForkITerm).
 func terminalCommand(spec ForkSpec) string {
 	return "/bin/bash -c " + shQuote(forkShellCommand(spec))
 }
