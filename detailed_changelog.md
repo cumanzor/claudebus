@@ -1,5 +1,58 @@
 # Changelog (detailed)
 
+## [2026-07-13 02:30:12 UTC] [Port/Go] Phase 2 (1/N) — liveness off ps-spawns (sysctl/procfs) + peer_dead
+
+[Attempt #1]
+
+First Phase 2 milestone: moves the three-clause liveness predicate and
+`find_owner_pid` off `ps` subprocess spawns onto native syscalls (Decision
+1a — procfs/libproc rather than `ps`, per the D1 ruling, still keeping the
+argv-fingerprint contract through Phase 2). Conditionally approved — one
+confirmed finding, fix binds at P2.2.
+
+[Files Changed]
+
+- `internal/client/procinfo_darwin.go` (new) — reads argv via `sysctl
+  KERN_PROCARGS2` and ppid/comm via `proc_pidinfo(PROC_PIDTBSDINFO)`.
+- `internal/client/procinfo_linux.go` (new) — reads argv via
+  `/proc/<pid>/cmdline` and ppid/comm via `/proc/<pid>/stat`.
+- `internal/client/liveness.go` — `argvContains` returns `false` on ANY read
+  error (ESRCH/EPERM/zombie) so the argv clause reads DEAD with no invented
+  leniency (preserves condition (iii) / edge D1 exactly). `pidAlive` stays
+  `kill -0`. `PeerDead`: never-armed peers get the 10-min grace, preferring a
+  dual-written `lastActivity` field over meta mtime (D3 — the mtime fallback
+  drops in Phase 3); armed peers are dead iff `!alive`. Removed the
+  `ps`-shelling helpers entirely.
+- `internal/client/marker.go` — `OwnerPID` now goes through the new
+  `procParent` walk instead of shelling to `ps`.
+
+[Testing Notes]
+
+- Validated on BOTH platforms: self-parse `procArgs(self) == os.Args`
+  (condition (i)) on MBP darwin and NUC linux; the real-process liveness
+  tests (`tail -f` with the inbox path in argv) run through the new
+  sysctl/procfs path (condition (ii)); a dead/nonexistent pid reads as an
+  error, which reads as dead.
+- **CONFIRMED FINDING (reviewer-reproduced empirically): darwin zombie
+  liveness inversion.** `KERN_PROCARGS2` serves a zombie process's *cached*
+  argv (the kernel doesn't clear it at defunct), so a zombie listener would
+  read `alive` under the new path — inverted from bash's `ps`-based check,
+  where a defunct process's args column reads empty and the predicate
+  correctly reads it as dead. The fix (detect zombie state explicitly,
+  probably via the same `proc_pidinfo` call's status field) is scheduled to
+  land at the top of P2.2.
+- Offsets and struct layouts for both platforms were otherwise statically
+  verified (matching kernel headers); the live differential (real listener
+  processes, both platforms) was byte-identical to bash cbus outside the
+  zombie edge case.
+
+[Possible Ripple Effects]
+
+- Until the P2.2 fix lands, a killed-but-not-reaped listener process
+  (zombie) on darwin would be misread as alive by the liveness predicate —
+  scoped entirely to that edge case; normal kill/exit/crash paths are
+  unaffected (confirmed by the real-process test matrix).
+
 ## [2026-07-13 02:06:41 UTC] [Port/Go] Phase 1 (6/N) — read-only local verbs (whoami/inbox/channels/list) — PHASE 1 CLOSED
 
 [Attempt #1]
