@@ -39,8 +39,9 @@ Run from a live session's Bash tool (the production `/bus-branch` context), real
 - **Tmux leg** — a `cc-branch` tmux window was created and ran the launcher, spawning
   the same live `ccs`→`claude` fork; launch + env replication identical (verified via
   the fork's `ps -wwE`: `CLAUDE_CONFIG_DIR=~/.ccs/instances/personal`, replicated PATH).
-- **Child boots + joins the channel (d)** — corroborated by Carlos's hands-on manual
-  runs on a normal-sized session (both peers visible in `cbus list`).
+- **Child boots + joins the channel (d)** — USER-CONFIRMED: Carlos's manual `cbus-go
+  branch` runs (normal-transcript context, both window and tmux surfaces) showed BOTH
+  parent and child in `cbus list` — the child boots, joins, and registers.
 
 **Diagnosis note (on record).** An earlier smoke attempt used a fast-exit *probe* as
 the launch target; a probe exits immediately, so iTerm2 reported "a session ended very
@@ -100,7 +101,7 @@ last machine cuts over.
 | Class A/B sweep, NUC (linux/amd64) | 27/27 | `scripts/p26_sweep.sh` via rsync-to-tmp + build + run + delete |
 | Rollback-safety | all pass | `scripts/p26_rollback.sh` |
 | `/bus-branch` smoke, window + tmux | live fork + launch + env replication recorded | real `ccs` fork (this session) |
-| `/bus-branch` child boots + joins | corroborated | Carlos's normal-session manual runs |
+| `/bus-branch` child boots + joins | user-confirmed (both peers in `cbus list`) | Carlos's normal-session manual runs (window + tmux) |
 | Installer (fresh / M12 symlink / hook-check) | all pass | `install-cbus-go.sh` |
 | `go test -race -count=1 ./...` | green | repo test suite |
 | P2.1–P2.5 milestone differentials | closed | `detailed_changelog.md` |
