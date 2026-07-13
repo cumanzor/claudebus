@@ -16,6 +16,13 @@ rsync -a --delete \
   "$root/go.mod" "$root/internal" "$root/relay" \
   "$HOST:$DEST/src/"
 
+# migration cleanup: the pre-restructure layout kept cmd/ and cbus-relay.service
+# at $DEST/src/ top level. `rsync --delete` only prunes WITHIN the dirs it
+# transfers (internal/, relay/), never the parent, so those two would linger —
+# and the stale cmd/ still compiles under the new module, muddying forensics.
+# Remove them explicitly. Idempotent; safe to delete once every node is rebuilt.
+ssh "$HOST" "rm -rf ${DEST:?}/src/cmd ${DEST:?}/src/cbus-relay.service"
+
 echo "== build on $HOST =="
 ssh "$HOST" "cd $DEST/src && go build -o $DEST/cbus-relay ./relay/cmd/cbus-relay && go build -o $DEST/wstail ./relay/cmd/wstail && $DEST/cbus-relay -h 2>&1 | head -1 || true"
 

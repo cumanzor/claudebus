@@ -1,5 +1,57 @@
 # Changelog (detailed)
 
+## [2026-07-13 00:33:32 UTC] [Port/Go] Phase 0 (2/N) — shared domain types + single-sourced ValidName
+
+[Attempt #1]
+
+Second Phase 0 milestone: the shared type layer both the relay and the future Go
+client build on (port-map.md §5 A1/A3 wire+line shapes). Types-first was ratified by
+the orchestrator (the golden harness constructs Messages, so they are a prerequisite).
+
+[Files Changed]
+
+- `internal/core/message.go` (new) — `Message{From,To,TS,Text,Kind,Event}`, the domain
+  shape of a local inbox line / relay stored line / presence variant. Decoding is
+  key-order-agnostic (JSON) and lenient via a `flexString` shadow type: a JSON number
+  or null in any string field decodes to its literal / "" instead of erroring — the
+  "json.Number for legacy int aliases" tolerance from the brief, applied to typed
+  string fields (Decoder.UseNumber only reaches interface{}). Marshal emits the
+  plain-line shape `{from,to,ts,text}` with kind/event omitted unless set (presence).
+  Non-object JSON still errors (caller treats as "not a message", mirroring the framer
+  gate). Plus wire structs `SendReq` (POST /send body) and `PeersEntry`/`PeersResponse`
+  (GET /peers), matching the relay verbatim.
+- `internal/core/name.go` (new) — `ValidName`, the one name rule shared verbatim by the
+  client (bin/cbus:24) and the relay, with the §1.1 property quirks documented.
+- `internal/core/{name,message}_test.go` (new) — ValidName property table (all-digit /
+  leading-dot / leading-hyphen accepted; "."/".."/empty/separators rejected);
+  lenient-decode matrix (number→string, null→"", key-order, missing fields, presence);
+  marshal byte-shapes; /peers decode incl. the zero-time sentinel.
+- `relay/cmd/cbus-relay/main.go` — adopted `core.ValidName` at both call sites
+  (handleSend, handleTail); removed the private `nameRe`/`validName` and the now-unused
+  `regexp` import. Name validation is now single-sourced (parity is a compile-time fact,
+  not a hand-synced regex).
+- `relay/deploy.sh` — reviewer note n1: added a guarded `rm -rf` of the pre-restructure
+  `$DEST/src/cmd` and `cbus-relay.service`, which `rsync --delete`'s per-directory scope
+  leaves stale on the NUC (and the stale cmd/ still compiles under the new module).
+- `internal/core/frame.go` — reviewer note n2: qualified the `main.go:207/239/204`
+  constant anchors as "(pre-extraction anchor)" so they don't read as live refs; the
+  package doc's claim of types/wire-structs/validation is now accurate (they landed).
+
+[Possible Ripple Effects]
+
+- `relay/cmd/cbus-relay/reframe_test.go` remains byte-unchanged and green; the relay test
+  package still passes (validName behavior is identical through core.ValidName).
+- `core.SendReq`/`PeersEntry` are defined to MATCH the relay wire structs, but the relay
+  still uses its own for now; the Phase 0 conformance rig (a later milestone) will
+  cross-check them against the live binary, after which they can be single-sourced too.
+- No wire / on-disk / behavior change; the relay's validation is byte-identical.
+
+[Testing Notes]
+
+- `go build ./...`, `go vet ./...`, `go test ./...` pass (core 0.360s, relay 0.548s).
+- deploy.sh simulation re-run after the main.go change: native + `GOOS=linux
+  GOARCH=amd64` builds both OK from the rsync'd self-contained layout.
+
 ## [2026-07-13 00:23:31 UTC] [Port/Go] Phase 0 (1/N) — root module promotion + shared framer extraction
 
 [Attempt #1]

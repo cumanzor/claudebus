@@ -14,7 +14,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +28,6 @@ const (
 	pingEvery      = 30 * time.Second
 	pongGrace      = 90 * time.Second
 )
-
-var nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-func validName(s string) bool {
-	return s != "." && s != ".." && nameRe.MatchString(s)
-}
 
 type presence struct {
 	Connected bool      `json:"connected"`
@@ -164,7 +157,7 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if !validName(req.Channel) || !validName(req.Alias) {
+	if !core.ValidName(req.Channel) || !core.ValidName(req.Alias) {
 		http.Error(w, "bad channel/alias", http.StatusBadRequest)
 		return
 	}
@@ -207,7 +200,7 @@ func reframe(payload []byte) []byte { return core.Reframe(payload) }
 func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("channel")
 	alias := r.URL.Query().Get("alias")
-	if !validName(channel) || !validName(alias) {
+	if !core.ValidName(channel) || !core.ValidName(alias) {
 		http.Error(w, "bad channel/alias", http.StatusBadRequest)
 		return
 	}
