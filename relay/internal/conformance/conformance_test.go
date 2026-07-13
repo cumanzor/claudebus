@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +31,7 @@ func TestWireConformance(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
+	trackSources(t) // make the go test cache track the relay we build at runtime
 
 	const token = "conformancetoken00" // subprotocol-safe: no = , / space
 
@@ -148,6 +151,64 @@ func TestWireConformance(t *testing.T) {
 	}
 	if m.From != req.From || m.To != "conf/rig" || m.TS != req.TS || m.Text != req.Text {
 		t.Fatalf("core.Message did not round-trip the stored line: %+v", m)
+	}
+
+	// --- negative assertions: the relay's auth + name gates -------------------
+	// wrong bearer -> 401
+	if code := postStatus(t, base, "Bearer wrongtoken", body); code != http.StatusUnauthorized {
+		t.Errorf("POST /send with a bad bearer: status=%d, want 401", code)
+	}
+	// good bearer, invalid channel name -> 400
+	invalid, _ := json.Marshal(core.SendReq{Channel: "..", Alias: "rig", From: "x", Text: "hi"})
+	if code := postStatus(t, base, "Bearer "+token, invalid); code != http.StatusBadRequest {
+		t.Errorf("POST /send with an invalid channel name: status=%d, want 400", code)
+	}
+}
+
+// postStatus POSTs body to /send with the given Authorization header and returns
+// the status code.
+func postStatus(t *testing.T, base, auth string, body []byte) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, base+"/send", bytes.NewReader(body))
+	req.Header.Set("Authorization", auth)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /send: %v", err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// trackSources reads every .go file under the relay and shared-core trees so the
+// go test cache invalidates this package's result whenever the relay we build and
+// run at RUNTIME changes. Without it, editing relay/cmd/cbus-relay/main.go leaves
+// this test binary unchanged and `go test` serves a stale PASS (the relay is
+// exec'd here, not imported) — the caching gotcha documented in doc.go. The file
+// opens are what the test cache records.
+func trackSources(t *testing.T) {
+	t.Helper()
+	root := filepath.Join("..", "..", "..") // repo root, from relay/internal/conformance
+	for _, tree := range []string{
+		filepath.Join(root, "relay"),
+		filepath.Join(root, "internal", "core"),
+	} {
+		err := filepath.WalkDir(tree, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() && d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			if strings.HasSuffix(path, ".go") {
+				if _, err := os.ReadFile(path); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("track sources under %s: %v", tree, err)
+		}
 	}
 }
 
