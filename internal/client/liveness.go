@@ -102,8 +102,8 @@ func pidAlive(pid int) bool {
 
 // argvContains reports whether pid's argv contains needle, read via the platform
 // procArgs (sysctl KERN_PROCARGS2 on darwin, /proc/<pid>/cmdline on linux — no ps
-// spawn). A read error — ESRCH/EPERM, or a darwin zombie (which procArgs reports
-// as an error since KERN_PROCARGS2 would otherwise return stale cached argv; F1) —
+// spawn). A read error — ESRCH/EPERM, or a darwin zombie (whose args EINVAL out of
+// KERN_PROCARGS2 on current kernels; procZombie is a belt-and-braces hedge, F1) —
 // returns false, so the argv clause reads DEAD with no invented leniency, matching
 // `ps -o args=` going empty / "<defunct>" (Decision 1 condition iii, edge D1).
 func argvContains(pid int, needle string) bool {
