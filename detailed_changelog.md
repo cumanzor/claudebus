@@ -1,5 +1,62 @@
 # Changelog (detailed)
 
+## [2026-07-14 03:20:41 UTC] [Port/Go] New `cbus spawn` + `/bus-spawn` — fresh session joined to a channel
+
+[Attempt #1]
+
+First post-cutover feature addition: a Go-native verb implementing `cbus-ijx.2`
+(peer lifecycle — spawn a blank peer, as distinct from `branch`'s fork). Ships
+with its own slash command and is the first deliberate `--help` addition since
+the port achieved bash byte-parity.
+
+[Files Changed]
+
+- `internal/client/spawn.go`, `spawn_test.go` (new) — `Spawn` launches a
+  **blank** Claude Code session (no `--resume <sid>`, no `--fork-session` —
+  unlike `Branch`, which continues this session's transcript) into a new
+  terminal. The opening prompt carries everything the child needs to
+  self-wire: for a local channel, join instructions + the Monitor-arm
+  reminder; for a remote `channel@host`, the ws arm-spec instructions plus
+  the 1006 re-arm doctrine baked directly into the prompt text (so a
+  spawned remote peer starts already knowing the recovery procedure, not
+  just the happy path). The spawning session itself does nothing beyond
+  launching the terminal — no join, no arm, no bootstrap print on this
+  side, since the child does all of that itself. Reuses `ForkSpec`,
+  `TerminalForker`, and the iTerm2 launcher-shim mechanism (the same one
+  P2.5-F1 fixed for the tokenizer issue) wholesale — no new terminal-launch
+  code path. Local channel resolution: this session's own registration →
+  git-repo-derived name → `global`. Remote `channel@host` must be explicit
+  with no alias component — the spawned child picks its own alias, matching
+  bash's existing remote-alias convention (aliases are always explicit
+  remotely; there's no remote registry to auto-pick from). Validation
+  (target/channel well-formedness) happens **before** the fork, so a bad
+  argument fails fast without ever opening a terminal.
+- `cmd/cbus/main.go` — wires the `spawn` verb.
+- `cmd/cbus/usage.go` — `--help` now documents `spawn` — the first
+  deliberate addition to the help text beyond matching bash's frozen
+  strings (every prior help-text change was either byte-parity or a
+  documented ruled delta; this is new surface bash never had).
+- `commands/bus-spawn.md` (new) — the `/bus-spawn [window|tab|tmux]
+  [channel|ch@host]` slash command: asks via `AskUserQuestion` only if the
+  target is omitted, defaults the channel the same way the underlying verb
+  does, and tells the model there is nothing to arm on the spawning side
+  (the child self-arms) — verify membership afterward via `cbus list`.
+
+[Testing Notes]
+
+- 6 new unit tests (exact scope not itemized in the commit message beyond
+  count).
+- **Deployed**: both the MBP and NUC `cbus` binaries rebuilt at this
+  commit; `commands/bus-spawn.md` copied to `~/.claude/commands/` on both
+  machines.
+- **Live-validated**: a spawned session joined and armed `claudebus/main`
+  successfully on the first attempt.
+
+[Possible Ripple Effects]
+
+- None to existing verbs — `spawn` is additive; `branch`'s fork behavior
+  and its tests are untouched.
+
 ## [2026-07-13 22:02:54 UTC] [Docs] Post-cutover documentation pass (17 files)
 
 [Attempt #1]
