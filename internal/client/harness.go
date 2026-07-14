@@ -76,11 +76,16 @@ type TerminalForker interface {
 // (channel, alias). bin/cbus:803-822 + cc-branch.sh, natively — cc-branch.sh's env
 // replication becomes the ForkSpec, and its mktemp/%q self-deleting-launcher shim is
 // gone (Go builds the spec directly; the forker escapes natively).
-func Branch(target, channel string, forker TerminalForker) (ch, alias string, err error) {
+func Branch(target, channel, model string, forker TerminalForker) (ch, alias string, err error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
 		return "", "", fmt.Errorf("target must be window|tab|tmux")
+	}
+	// leading '-' is ValidName-legal but would be parsed as a flag by the child CLI
+	// (an instant-close window) — reject the shape here.
+	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
+		return "", "", fmt.Errorf("bad model %q", model)
 	}
 	ch = channel
 	if ch == "" {
@@ -103,7 +108,7 @@ func Branch(target, channel string, forker TerminalForker) (ch, alias string, er
 	}
 	spec := ForkSpec{
 		Target: target,
-		Argv:   forkLaunchArgv(SessionID(), BootstrapPrompt(ch, alias)),
+		Argv:   forkLaunchArgv(SessionID(), model, BootstrapPrompt(ch, alias)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
@@ -140,13 +145,19 @@ func keepNameChars(s string) string {
 // forkLaunchArgv builds the child launch command, replicating cc-branch.sh: relaunch
 // through `ccs <profile>` when running under a CCS instance config dir (so the child
 // gets the right profile/config/PATH), else a bare `claude`; always --resume <sid>
-// --fork-session, with the bootstrap prompt as the final positional turn when non-empty.
-func forkLaunchArgv(sid, prompt string) []string {
+// --fork-session, an optional --model override, with the bootstrap prompt as the
+// final positional turn when non-empty. The model token is passed through verbatim
+// (the CLI validates the actual model set) — a bad value makes the child window die
+// at launch, so callers pre-screen the token shape via core.ValidName.
+func forkLaunchArgv(sid, model, prompt string) []string {
 	var argv []string
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
 		argv = []string{"ccs", filepath.Base(cfg), "--resume", sid, "--fork-session"}
 	} else {
 		argv = []string{"claude", "--resume", sid, "--fork-session"}
+	}
+	if model != "" {
+		argv = append(argv, "--model", model)
 	}
 	if prompt != "" {
 		argv = append(argv, prompt)
