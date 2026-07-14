@@ -1,5 +1,44 @@
 # Changelog (detailed)
 
+## [2026-07-14 04:05:15 UTC] [CLI] `--model` on branch/spawn — child sessions on a chosen model
+
+[Attempt #1]
+
+Small post-cutover feature (user-requested): `cbus branch` and `cbus spawn` accept
+`--model <m>`, forwarded to the child launch as the CLI's `--model` flag so a fork
+or fresh spawn starts on a specific model (sonnet / opus / fable today).
+
+[Files Changed]
+
+- `internal/client/harness.go` — `Branch` gains a model param; `forkLaunchArgv`
+  inserts `--model <m>` after `--fork-session`, before the prompt positional.
+- `internal/client/spawn.go` — `Spawn`/`freshLaunchArgv` likewise.
+- Both validate the token shape only (`core.ValidName` + a leading-`-` rejection):
+  the real model set is the CLI's to validate, so future models pass through — but a
+  flag-shaped token would be swallowed as an option by the child CLI and die as an
+  instant-close window (the P2.6 smoke lesson), so that shape is rejected pre-fork.
+- `cmd/cbus/main.go` — `extractModel` pulls `--model <v>` from anywhere in the verb
+  args (leading or trailing), then the existing positional parsing applies.
+- `cmd/cbus/usage.go` — `--model` sub-lines under branch/spawn; header comment
+  extends the fenced post-bash-divergence list.
+- `commands/bus-{branch,spawn}.md` — skills pass `--model` when the user mentions a
+  model; argument-hints updated.
+- `internal/client/spawn_test.go` — model-in-argv placement, ccs+claude paths,
+  flag-shaped rejection (both verbs); existing call sites updated for the new
+  signatures.
+
+[Possible Ripple Effects]
+
+- None to wire/state — launch-argv construction only. Per-role model defaults
+  (e.g. documenter→sonnet) deliberately deferred to cbus-vj9 role prompts.
+
+[Testing Notes]
+
+- `go test -race -count=1 ./...` green; gofmt clean. Deployed to MBP + NUC
+  (cbus-go 1a5821d), skills scp'd to both `~/.claude/commands/`. Smoke: bad model
+  `-bad` rejected with no window spawned.
+
+
 ## [2026-07-14 03:20:41 UTC] [Port/Go] New `cbus spawn` + `/bus-spawn` — fresh session joined to a channel
 
 [Attempt #1]
