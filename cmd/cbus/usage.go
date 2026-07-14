@@ -8,7 +8,8 @@ package main
 // with ONE ruled delta: the obsolete `CC_BRANCH (fork helper path…)` env line is
 // dropped — cbus-go's `branch` is native (P2.5 TerminalForker), so CC_BRANCH is no
 // longer consulted (port-map delta table). Self-id stays `cbus` (Option X): cutover
-// is a pure binary swap. Everything else matches bash byte-for-byte.
+// is a pure binary swap. Post-cutover additions with no bash counterpart: the
+// `spawn` block (cbus-ijx.2). Everything else matches bash byte-for-byte.
 const usage = `cbus — message bus between live Claude Code sessions, in named channels
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
@@ -33,6 +34,11 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
                                    (target: window|tab|tmux; channel auto-derives
                                    from the git repo name; arm the Monitor after)
+  cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
+                                   a fork) that joins + arms the channel on its
+                                   own (target: window|tab|tmux; local channel
+                                   auto-derives; channel@host must be explicit,
+                                   no alias — the child picks its own)
   cbus prune [channel]             remove dead peers (and empty channels)
   cbus leave [channel]             leave channel(s) this session joined
   cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +

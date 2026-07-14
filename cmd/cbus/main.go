@@ -79,6 +79,8 @@ func run(args []string) int {
 		return runBootstrap(args[1:])
 	case "branch":
 		return runBranch(args[1:])
+	case "spawn": // post-cutover Go-native verb (cbus-ijx.2) — no bash counterpart
+		return runSpawn(args[1:])
 
 	default:
 		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
@@ -266,6 +268,31 @@ func runBranch(args []string) int {
 	}
 	fmt.Printf("parent: %s/%s (child will announce itself on the bus)\n", rch, alias)
 	fmt.Printf("arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", rch, alias)
+	return 0
+}
+
+func runSpawn(args []string) int {
+	if err := noExtra(args, 2, "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>]"); err != nil {
+		return die("%v", err)
+	}
+	target := "window"
+	if len(args) > 0 {
+		target = args[0]
+	}
+	addr := ""
+	if len(args) > 1 {
+		addr = args[1]
+	}
+	rAddr, err := client.Spawn(target, addr, client.OSAForker{})
+	if err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("spawned: fresh session -> %s (%s); it joins and arms itself\n", rAddr, target)
+	if client.IsRemote(rAddr) {
+		fmt.Printf("verify: cbus list @%s\n", rAddr[strings.Index(rAddr, "@")+1:])
+	} else {
+		fmt.Printf("verify: cbus list %s\n", rAddr)
+	}
 	return 0
 }
 
