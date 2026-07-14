@@ -129,7 +129,7 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/home/u/.ccs/instances/personal")
 
 	f := &fakeForker{}
-	ch, alias, err := Branch("tab", "mychan", f)
+	ch, alias, err := Branch("tab", "mychan", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestBranchNonCCSUsesClaude(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	f := &fakeForker{}
-	if _, _, err := Branch("window", "ch", f); err != nil {
+	if _, _, err := Branch("window", "ch", "", f); err != nil {
 		t.Fatal(err)
 	}
 	if f.spec.Argv[0] != "claude" {
@@ -184,7 +184,7 @@ func TestBranchNonCCSUsesClaude(t *testing.T) {
 // TestBranchBadTarget: an invalid target is rejected before any join/fork.
 func TestBranchBadTarget(t *testing.T) {
 	f := &fakeForker{}
-	if _, _, err := Branch("popup", "ch", f); err == nil {
+	if _, _, err := Branch("popup", "ch", "", f); err == nil {
 		t.Fatal("expected target validation error")
 	}
 	if f.called {

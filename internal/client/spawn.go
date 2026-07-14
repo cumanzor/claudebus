@@ -35,11 +35,15 @@ func SpawnPrompt(address string) string {
 // derives like branch when omitted (own registration first, then git toplevel, then
 // global); a remote address (channel@host — NO alias, the child picks its own) must
 // be explicit.
-func Spawn(target, address string, forker TerminalForker) (string, error) {
+func Spawn(target, address, model string, forker TerminalForker) (string, error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
 		return "", fmt.Errorf("target must be window|tab|tmux")
+	}
+	// see Branch: reject the flag-shaped model token pre-fork (instant-close trap).
+	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
+		return "", fmt.Errorf("bad model %q", model)
 	}
 	addr := address
 	if addr == "" {
@@ -62,7 +66,7 @@ func Spawn(target, address string, forker TerminalForker) (string, error) {
 	}
 	spec := ForkSpec{
 		Target: target,
-		Argv:   freshLaunchArgv(SpawnPrompt(addr)),
+		Argv:   freshLaunchArgv(model, SpawnPrompt(addr)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
@@ -82,14 +86,17 @@ func spawnDefaultAddress() string {
 }
 
 // freshLaunchArgv builds a BLANK-session launch — forkLaunchArgv minus the
-// --resume/--fork-session pair: `ccs <profile> <prompt>` under a CCS instance
-// config dir, else `claude <prompt>`.
-func freshLaunchArgv(prompt string) []string {
+// --resume/--fork-session pair: `ccs <profile> [--model m] <prompt>` under a CCS
+// instance config dir, else `claude [--model m] <prompt>`.
+func freshLaunchArgv(model, prompt string) []string {
 	var argv []string
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
 		argv = []string{"ccs", filepath.Base(cfg)}
 	} else {
 		argv = []string{"claude"}
+	}
+	if model != "" {
+		argv = append(argv, "--model", model)
 	}
 	if prompt != "" {
 		argv = append(argv, prompt)
