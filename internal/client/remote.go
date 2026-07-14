@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -119,6 +120,35 @@ func RemoteTailSpec(base, token, channel, host, alias string) string {
 		"  description: cbus:" + addr + "/" + alias + "   (persistent: true)\n" +
 		"identity recorded for THIS session: sends to " + addr + "/* default to from=" + addr + "/" + alias + "\n" +
 		"note: the protocols entry carries the relay token — expected; it IS the auth.\n"
+}
+
+// RemotePrune POSTs to <base>/prune (optionally scoped to one channel) and returns
+// the "<channel>/<alias>" keys the relay removed from its spool. Non-idempotent in
+// name only — re-running is safe (already-gone peers just aren't in the result).
+func RemotePrune(e RemoteEndpoint, channel string) ([]string, error) {
+	u := e.Base + "/prune"
+	if channel != "" {
+		u += "?channel=" + url.QueryEscape(channel)
+	}
+	httpReq, err := http.NewRequest(http.MethodPost, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	e.apply(httpReq)
+	resp, err := newHTTPClient().Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("relay prune failed (%s %s): %w", e.Mode(), e.Base, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("relay prune failed (%s %s): %d %s", e.Mode(), e.Base, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var out core.PruneResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Pruned, nil
 }
 
 // RemoteList GETs <base>/peers into a core.PeersResponse.

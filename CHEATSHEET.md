@@ -63,6 +63,8 @@ op read 'op://…/cf-secret'    | cbus auth set nuc --cf-secret -
 cbus send dev@nuc/nuc "ping"       # queues if peer offline; replay on connect
 cbus tail dev@nuc/mbp              # prints Monitor {ws:} arm spec + claims identity
 cbus list @nuc                     # relay peers: connected/queued/lastSeen
+cbus prune @nuc                    # reap off relay peers with no queued mail (server-side)
+cbus prune dev@nuc                 # same, scoped to one channel
 cbus leave dev@nuc                 # drop THIS session's identity marker
 ```
 

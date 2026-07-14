@@ -614,7 +614,10 @@ func runUnregister(args []string) int {
 }
 
 func runPrune(args []string) int {
-	if err := noExtra(args, 1, "usage: cbus prune [channel]"); err != nil {
+	if len(args) > 0 && client.IsRemote(args[0]) {
+		return runPruneRemote(args[0])
+	}
+	if err := noExtra(args, 1, "usage: cbus prune [channel | [channel]@host]"); err != nil {
 		return die("%v", err)
 	}
 	chosen := ""
@@ -628,6 +631,37 @@ func runPrune(args []string) int {
 	}
 	for _, m := range msgs {
 		fmt.Println(m)
+	}
+	return 0
+}
+
+// runPruneRemote reaps off/no-mail peers from a relay's spool. It is channel-scoped
+// like local prune: "<channel>@host" prunes one channel, "@host" prunes them all. A
+// trailing "/alias" is rejected — prune never targets a single peer (a footgun on a
+// destructive op), unlike list which silently ignores it.
+func runPruneRemote(target string) int {
+	ch, host, al, err := client.ParseRemote(target)
+	if err != nil {
+		return die("%v", err)
+	}
+	if al != "" {
+		return die("prune is channel-scoped: use <channel>@%s or @%s", host, host)
+	}
+	ep, err := client.ResolveRemote(client.NewCredStore(), host)
+	if err != nil {
+		return die("%v", err)
+	}
+	pruned, err := client.RemotePrune(ep, ch)
+	if err != nil {
+		return die("%v", err)
+	}
+	if len(pruned) == 0 {
+		fmt.Println("nothing to prune")
+		return 0
+	}
+	for _, key := range pruned {
+		c, a, _ := strings.Cut(key, "/")
+		fmt.Printf("pruned %s@%s/%s\n", c, host, a)
 	}
 	return 0
 }

@@ -1,5 +1,90 @@
 # Changelog (detailed)
 
+## [2026-07-14 06:50:11 UTC] [Relay/CLI] Server-side relay prune — `cbus prune [<ch>]@<host>`
+
+[Attempt #1]
+
+Carlos asked how to prune the relay: local `cbus prune` works but nothing reaches
+the `@nuc` relay. Root cause: the relay's `/peers` view is the union of the
+in-memory hub (ephemeral, self-cleans on WS disconnect) and the on-disk maildir
+spool, and the spool is **append-only** — `spool.ensure` creates a peer's
+`<ch>/<al>/{tmp,new,cur}` on its first queued write and nothing ever removes it.
+So any peer that ever received one message shows up in `cbus list @host` forever
+as `off / queued 0`. Local prune keys on `listenerPid` liveness; the relay holds
+no pid and lives on another host, so prune structurally cannot reap it. There was
+no relay prune endpoint and no client subcommand. This adds both.
+
+Contract: a spool peer is pruned iff it has **no live tail in the hub** AND **no
+queued mail in new/**. A peer with pending mail is always kept (nothing
+undelivered is lost); a connected peer is always kept. Channel-scoped like local
+prune — `<ch>@host` prunes one channel, bare `@host` sweeps all.
+
+[Files Changed]
+
+- internal/core/message.go — new `PruneResponse{Pruned []string}` (POST /prune
+  body; `json:"pruned"`, always a slice, never null).
+- relay/internal/spool/spool.go — added `strings` import. `Peers` now skips
+  dot-prefixed entries at BOTH channel and alias levels (matches the local
+  store's convention; also shields Remove's transient `.prune.*` claim dir from
+  being misread as a peer). New `Remove(channel, alias) (bool, error)`: claims the
+  peer dir via an atomic same-parent rename to `.prune.<pid>.<seq>` (EXDEV-proof,
+  dot-hidden), rechecks `new/` in the claimed copy, and RESTORES the peer if a
+  message raced in between the caller's snapshot and the claim — so a concurrent
+  `Write` is either fully spooled (peer kept) or fails its final `new/` rename
+  (surfaced to the sender), never silently dropped. rmdir's the channel once
+  empty. Missing peer = (false, nil), not an error.
+- relay/cmd/cbus-relay/main.go — added `sort` import. New `handlePrune`: POST-only,
+  bearer-auth (same gate as /peers), optional `?channel=` (ValidName-checked, 400
+  on bad). Enumerates `store.Peers()`, filters to `queued==0 && !connected` (via
+  `hub.snapshot()`), calls `store.Remove`, returns sorted `PruneResponse`.
+  Registered `mux.HandleFunc("/prune", …)`.
+- internal/client/remote.go — added `net/url` import. New `RemotePrune(e, channel)`
+  → POST `<base>/prune[?channel=…]`, decodes `PruneResponse.Pruned`. Mirrors
+  RemoteList's error/timeout handling (no retry).
+- cmd/cbus/main.go — `runPrune` gets a remote branch (`client.IsRemote(args[0])`);
+  new `runPruneRemote`: parses `<ch>@host`, REJECTS a trailing `/alias`
+  (channel-scoped only — footgun guard on a destructive op, whereas `runListRemote`
+  silently ignores the alias), resolves creds, calls RemotePrune, prints
+  `pruned <ch>@<host>/<al>` per key or `nothing to prune`.
+- cmd/cbus/usage.go, README.md, CHEATSHEET.md — documented the local `[channel]@host`
+  form and the remote-section `cbus prune [<ch>]@<host>` line; README gains a
+  "relay peers are append-only" bullet explaining why local prune can't reach them.
+- Tests: relay/internal/spool/spool_test.go (Remove keeps-mail / removes-idle /
+  rmdir-channel, RemoveMissing no-op, Peers skips dot-dirs); relay/cmd/cbus-relay/
+  prune_test.go (handlePrune: channel scope, connected-keep, mail-keep, unscoped
+  sweep, then auth 401 / no-auth 401 / GET 405 / bad-channel 400).
+
+[Possible Ripple Effects]
+
+- `spool.Peers` no longer reports dot-prefixed peers. `core.ValidName` permits
+  leading-dot names (documented quirk), so a peer literally named e.g. `.foo`
+  would now be invisible to `/peers` and un-prunable via this path. Nobody creates
+  such names (branch/spawn/join produce main/fork-N or user names); the local
+  store already skips them. Acceptable, and noted in the code comment.
+- A concurrent `cbus send` to a peer being pruned can now fail its `new/` rename
+  (ENOENT) and return an error to the sender instead of silently spooling into a
+  dir that's about to be deleted — strictly better (sender can retry) and rare.
+- No wire-compat break: /prune is a new route; /send, /tail, /peers, /healthz
+  unchanged. Old clients simply never call it.
+
+[Testing Notes]
+
+- `go build ./... && go vet ./...` clean. `go test ./...` green (the one
+  `TestSiteURL` failure is a pre-existing env leak — `CBUS_SITE_NUC_URL` is set in
+  Carlos's shell; `env -u CBUS_SITE_NUC_URL go test ./...` is fully green — and it
+  exercises endpoint.go, untouched here).
+- Live HTTP smoke against a loopback relay (127.0.0.1:18090, temp spool+token):
+  seeded c/idle (delivered→empty new/), c/pending (queued 1), other/idle
+  (delivered). `POST /prune?channel=c` → `["c/idle"]`; c/pending + other/idle
+  survive. `POST /prune` → `["other/idle"]`; c/pending survives. `POST
+  /prune?channel=c` again → `[]`. On disk the fully-drained `other` channel dir
+  was rmdir'd (only `c` left). Client `cbus prune foo@nuc/bar` → `prune is
+  channel-scoped: use <channel>@nuc or @nuc`, exit 1, BEFORE any keychain/network
+  touch.
+- NOT redeployed to the NUC. The relay binary there is pinned (orchestrator quiesce
+  handoff — binaries at 1a5821d until the pre-push window); ship this in that same
+  window via the Go cross-compile + scp path (never install.sh).
+
 ## [2026-07-14 06:22:09 UTC] [Docs] Redact prior-art-and-cc-internals.md (declassified aesthetic)
 
 [Attempt #1]

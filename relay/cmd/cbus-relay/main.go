@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -319,6 +320,50 @@ func (s *server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+// handlePrune drops spool peers with no queued mail and no live tail — the relay
+// counterpart to the client's local `cbus prune`. The spool tree is append-only
+// (a peer dir is born on its first queued write and never GC'd), so off peers
+// accumulate in /peers forever; this reaps them. An optional ?channel= scopes it
+// to one channel. A live tail (in the hub) or any queued message in new/ keeps a
+// peer. Returns the removed "<channel>/<alias>" keys, sorted.
+func (s *server) handlePrune(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.bearerOK(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	channel := r.URL.Query().Get("channel")
+	if channel != "" && !core.ValidName(channel) {
+		http.Error(w, "bad channel", http.StatusBadRequest)
+		return
+	}
+	queued, err := s.store.Peers()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	connected, _ := s.hub.snapshot()
+	pruned := []string{}
+	for key, n := range queued {
+		c, a, _ := strings.Cut(key, "/")
+		if channel != "" && c != channel {
+			continue
+		}
+		if n > 0 || connected[key] {
+			continue // pending mail or a live listener — keep it
+		}
+		if ok, _ := s.store.Remove(c, a); ok {
+			pruned = append(pruned, key)
+		}
+	}
+	sort.Strings(pruned)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(core.PruneResponse{Pruned: pruned})
+}
+
 func main() {
 	listen := flag.String("listen", "127.0.0.1:8090", "listen address (loopback; CF tunnel fronts it)")
 	spoolDir := flag.String("spool", "spool", "maildir spool root")
@@ -345,6 +390,7 @@ func main() {
 	mux.HandleFunc("/send", s.handleSend)
 	mux.HandleFunc("/tail", s.handleTail)
 	mux.HandleFunc("/peers", s.handlePeers)
+	mux.HandleFunc("/prune", s.handlePrune)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
 
 	log.Printf("cbus-relay listening on %s (spool %s)", *listen, *spoolDir)
