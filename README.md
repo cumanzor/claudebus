@@ -356,3 +356,12 @@ boundary is exactly what claudebus provides: an open, file-based channel any pro
 window, or CCS profile can append to, built from stable documented primitives with a
 liveness-aware registry. The two compose: SendMessage for in-session fan-out, cbus for
 session-to-session.
+
+## License
+
+[MIT](LICENSE) — © 2026 Carlos Umanzor.
+
+A fun, single-operator personal project. Fork it, read it, take ideas from it — that's
+what it's here for. MIT only asks that you keep the copyright line. If it ends up in
+something commercial, a little attribution is appreciated (not required). No support,
+warranty, or contribution process is implied — see the *bespoke by design* note at the top.
