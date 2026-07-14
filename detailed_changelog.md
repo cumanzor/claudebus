@@ -1,5 +1,41 @@
 # Changelog (detailed)
 
+## [2026-07-14 06:22:09 UTC] [Docs] Redact prior-art-and-cc-internals.md (declassified aesthetic)
+
+[Attempt #1]
+
+Carlos-directed cosmetic redaction of docs/prior-art-and-cc-internals.md into a
+"declassified document" look using █ (U+2588) full-block bars. (Black bars via
+CSS/HTML don't survive GitHub's sanitizer, and a literal `<redacted>` is parsed
+as an unknown HTML tag and stripped — so full-block chars are the portable trick.)
+
+[Files Changed]
+- docs/prior-art-and-cc-internals.md — §1 sibling project names / GitHub handles /
+  star counts / version blacked (CCS deliberately KEPT: it is claudebus's own
+  runtime, named openly in README + code + the §2/§5 `~/.ccs/` paths); §2 title
+  kept, entire body blacked (SendMessage included); §3 & §4 a scattered "sprinkle"
+  of redactions plus all six §4 decision-log commit-hash refs; §5 the internal
+  bd-dashboard-bug bullet + both `scratchpad/` file paths (cbus-foc / cbus-oq9
+  epic IDs left readable).
+
+[Possible Ripple Effects]
+- Style, not secrecy: the CC-internals findings are still stated openly in README
+  ("Why not the built-in teammate mailbox") and overview.md, so the blackout hides
+  nothing. The "see prior-art" pointers in overview.md / command-reference.md /
+  port-map.md now lead to a redacted doc — accepted as-is per Carlos (aesthetic);
+  a full docs reconciliation pass is planned in a separate session before the push.
+- HISTORY: deferred to the pre-push quiesce window as op #4 of the filter-repo
+  pass — a `--blob-callback` keyed on the doc's *enumerated blob-ID set* (via
+  `git log --follow`, not a title signature, so an early differently-titled version
+  cannot slip through unredacted) swaps every historical version for the redacted
+  bytes.
+
+[Testing Notes]
+- Doc-only; no build/test impact. Verified: zero remaining occurrences of the
+  targeted sibling names/handles, `SendMessage`, `bdx-xk1`, or `scratchpad/` paths
+  in the tip; CCS-as-runtime references (README + §2 + §5) intact; §3 and §5 (`## 3.`,
+  `## 5.`) section titles preserved.
+
 ## [2026-07-14 05:07:23 UTC] [CLI] branch/spawn children titled by ALIAS — parent-side reservation
 
 [Attempt #1]
