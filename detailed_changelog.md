@@ -1,5 +1,53 @@
 # Changelog (detailed)
 
+## [2026-07-14 04:50:45 UTC] [Port/Go] Generalize relay-host resolution — drop the built-in `nuc`
+
+[Attempt #1]
+
+Part of the push-review / public-readiness work (cbus-kt3). To keep a personal
+relay hostname out of the shipped code before the repo can go public, the built-in
+host table is removed: every `@host` now resolves ONLY through its
+`CBUS_SITE_<HOST>_URL` env override, and an unset override is a hard
+`UnknownHostError` (previously `nuc` fell through to a hardcoded base).
+
+First deliberate modification to bin/cbus since the cutover — the retired bash
+client is the rollback artifact, and it now depends on the env var exactly like
+the Go client, so a rollback also requires `CBUS_SITE_NUC_URL` to be set (already
+provisioned on the MBP; the NUC is loopback-served and needs it only as insurance).
+
+[Files Changed]
+- internal/client/endpoint.go — `SiteURL` loses the `switch host { case "nuc" }`
+  built-in; returns the env override or `UnknownHostError`. Doc comment updated.
+- bin/cbus — `site_public_url` loses the `nuc)` case; falls straight to `die`.
+  Comment updated ("no built-in hosts").
+- internal/client/endpoint_test.go — `TestSiteURL` now asserts nuc-without-override
+  is `UnknownHostError` (not a base) plus the override + unknown-host cases;
+  `TestResolveFrontDoor` sets `CBUS_SITE_NUC_URL` so the public-mode branch resolves.
+- docs/architecture/{command-reference,overview,protocol}.md — the "built-in table:
+  only nuc" claims annotated as the since-retired port-verified behavior.
+- README.md — new "cross-machine requires a relay / adding a machine" note; the
+  address-form + endpoint-autodetect prose reworded to env-based resolution.
+- (cmd/cbus/usage.go help line "no built-in hosts" already landed in e353af2, which
+  shared the file with the --name hunks; this commit makes that text accurate.)
+
+[Possible Ripple Effects]
+- Any client that addressed `@nuc` via the built-in now REQUIRES
+  `CBUS_SITE_NUC_URL` in its environment. Running sessions carry their start-time
+  env (the var is unset there), so the LIVE binaries are intentionally NOT rebuilt
+  yet — current builtin binaries (1a5821d) stay on both machines until the
+  pre-push quiesce window, when rebuild+redeploy + a coordinated restart happen
+  together.
+- The relay host itself is unaffected (the loopback probe short-circuits before
+  `SiteURL`, so it never needs the override).
+- The bin/cbus rollback path now also needs the env var (documented above).
+
+[Testing Notes]
+- `go build ./...` clean; `go test ./...` green (client pkg incl. the reworked
+  endpoint tests).
+- The git-history scrub of the personal relay hostname to a placeholder, and the
+  author-email rewrite, are DEFERRED to a single Carlos-scheduled `git-filter-repo`
+  pass in the pre-push quiesce window; this commit only generalizes the tip.
+
 ## [2026-07-14 04:42:50 UTC] [CLI] `--name` on branch/spawn — children launch pre-titled
 
 [Attempt #1]

@@ -44,8 +44,9 @@ func siteEnvVar(host string) string {
 	return "CBUS_SITE_" + strings.TrimSuffix(b.String(), "_") + "_URL"
 }
 
-// SiteURL resolves a host to its public relay base: the CBUS_SITE_<HOST>_URL
-// override wins, else the built-in table (only nuc), else an error.
+// SiteURL resolves a host to its public relay base from its CBUS_SITE_<HOST>_URL
+// override. There are no built-in hosts — every host is configured via its env
+// override, so an unset override is an error.
 //
 // Divergence from bash (approved P1 delta): the bash client's `die` for an
 // unknown host fires inside a command substitution and is only a non-fatal
@@ -56,12 +57,7 @@ func SiteURL(host string) (string, error) {
 	if u := os.Getenv(v); u != "" {
 		return u, nil
 	}
-	switch host {
-	case "nuc":
-		return "https://bus.example.com", nil
-	default:
-		return "", &UnknownHostError{Host: host, EnvVar: v}
-	}
+	return "", &UnknownHostError{Host: host, EnvVar: v}
 }
 
 // UnknownHostError is returned by SiteURL for a host with no built-in or override.

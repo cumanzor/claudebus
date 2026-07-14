@@ -195,6 +195,18 @@ to the lazy prune's `departed` broadcast.
 machines (shipped; the client speaks to it via `<channel>@<host>` addresses —
 see below):
 
+> **Cross-machine messaging requires a relay.** The local file bus (see *How it
+> works*) never leaves one machine; anything crossing a machine boundary goes
+> through a `cbus-relay` daemon, which is the shared rendezvous point. **One relay
+> serves every participating machine** — you don't run one per host. Adding a
+> machine to the mesh means pointing it at the *existing* relay, not standing up a
+> new one: set `CBUS_SITE_<HOST>_URL` to the relay's base and `cbus auth set
+> <host>` with its bearer (plus CF Access service-token if it's behind a tunnel),
+> then address `<channel>@<host>/<alias>`. A machine only needs its *own* relay if
+> you want other machines to address channels *hosted on it* (`@that-host`) —
+> uncommon. The relay host itself reaches its channels over loopback and needs no
+> `CBUS_SITE_*` override; every other client does.
+
 - **`POST /send`** (bearer token) appends `{from,to,ts,text}` — the exact local
   inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
 - **`GET /tail?channel=&alias=`** upgrades to WebSocket, authed via
@@ -212,7 +224,8 @@ see below):
 ### Using remote channels from cbus
 
 The client speaks to the relay through the `<channel>@<host>/<alias>` address
-form (one host today: `nuc`):
+form. Each `<host>` resolves from its `CBUS_SITE_<HOST>_URL` env var — there are
+no built-in hosts (the examples below use `nuc`):
 
 ```sh
 # seed the macOS Keychain — ONE credential per invocation (each '-' reads ALL of stdin,
@@ -233,7 +246,8 @@ Details that matter:
   keeps one active tail per peer (your Monitor visibly drops if displaced).
 - **Endpoint autodetects**: a session on the relay host probes
   `127.0.0.1:8090/healthz` and talks loopback with no CF Access; everyone else
-  goes through `https://bus.example.com` with CF Access service-token headers.
+  goes through the host's `CBUS_SITE_<HOST>_URL` (e.g. `https://bus.example.com`)
+  with CF Access service-token headers.
 - **Credentials are never in code**: `cbus auth` stores them in the macOS
   Keychain (`security(1)`) or, on Linux, 0600 files under `~/.config/cbus/`.
 - **Receive is Monitor-native**: remote `tail` prints the `Monitor {ws:}` arm

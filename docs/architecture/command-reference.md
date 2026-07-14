@@ -239,7 +239,9 @@ flowchart TD
     F -- no --> H["stderr: cbus: unknown relay host\nbase = '' — command continues\n(usually dies next at credential lookup)"]
 ```
 
-- **Built-in table:** only `nuc → https://bus.example.com`.
+- **Built-in table:** none — the `nuc` built-in was removed; every host now
+  resolves solely via `CBUS_SITE_<HOST>_URL`. The flowchart's built-in-table
+  branch records the (since-retired) port-verified behavior.
 - **Env override:** `CBUS_SITE_<HOST>_URL` where `<HOST>` = host uppercased,
   non-`[A-Z0-9]` → `_`, then **one** trailing `_` stripped (host `my-nas` →
   `CBUS_SITE_MY_NAS_URL`). Distinct hosts can collide on one var (`a-b` and

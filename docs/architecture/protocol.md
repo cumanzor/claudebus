@@ -932,7 +932,9 @@ fsync and retention was a reviewed, deliberate v1 decision.*
 
 ### 12.1 Host → URL
 
-- Built-in table: **only** `nuc → https://bus.example.com` (bin/cbus:140-143).
+- Built-in table: **none** — the `nuc` built-in was removed; hosts resolve solely
+  via the `CBUS_SITE_<HOST>_URL` override below (this records the since-retired
+  port-verified default).
 - Env override/extension: `CBUS_SITE_<HOST>_URL`, where `<HOST>` is the host
   uppercased, every non-`[A-Z0-9]` mapped to `_`, then **one** trailing `_` stripped
   (`my-nas` → `CBUS_SITE_MY_NAS_URL`; distinct hosts can collide on one var). *quirk.*

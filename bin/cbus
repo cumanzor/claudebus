@@ -131,16 +131,13 @@ split_remote() { # <channel>@<host>[/<alias>]  (empty channel allowed for list)
   [ -z "$R_AL" ] || valid_name "$R_AL" || die "bad alias \"$R_AL\""
 }
 
-site_public_url() { # <host> — env CBUS_SITE_<HOST>_URL overrides the built-in
+site_public_url() { # <host> — resolves via env CBUS_SITE_<HOST>_URL (no built-in hosts)
   # any non-alphanumeric in the host (dots allowed by valid_name) maps to _
   # so the constructed name is always a valid identifier under set -eu
   local var="CBUS_SITE_$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_' | sed 's/_$//')_URL"
   local v="${!var:-}"
   if [ -n "$v" ]; then printf '%s' "$v"; return; fi
-  case "$1" in
-    nuc) printf 'https://bus.example.com' ;;
-    *) die "unknown relay host \"$1\" (set $var)" ;;
-  esac
+  die "unknown relay host \"$1\" (set $var)"
 }
 
 # front-door pick: a session ON the relay host reaches it at loopback (no CF
@@ -900,7 +897,7 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 
   aliases are explicit — pick a short hostname/role (e.g. mbp, nuc). endpoint
   autodetects: loopback :8090 on the relay host, else the public CF hostname.
-  known hosts: nuc (override/add via CBUS_SITE_<HOST>_URL).
+  no built-in hosts: point each relay host at its base via CBUS_SITE_<HOST>_URL.
 
 convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.

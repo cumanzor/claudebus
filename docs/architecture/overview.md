@@ -143,8 +143,8 @@ NUC: cbus-relay on 127.0.0.1:8090 ──► Maildir spool ──► ws push to t
 ```
 
 - **Addressing**: remote targets are `<channel>@<host>/<alias>`. The `@host` maps to *which relay
-  site to talk to* (host table: `nuc → https://bus.example.com`, extendable via
-  `CBUS_SITE_<HOST>_URL`); the relay itself has no notion of hosts — its namespace is flat
+  site to talk to* (each host resolved via its `CBUS_SITE_<HOST>_URL` env var — no built-in
+  hosts); the relay itself has no notion of hosts — its namespace is flat
   `channel/alias`.
 - **Endpoint autodetect**: every remote command first probes
   `http://127.0.0.1:8090/healthz` with a 0.3 s timeout. A session *on the relay host* gets

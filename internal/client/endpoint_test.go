@@ -25,23 +25,23 @@ func TestSiteEnvVar(t *testing.T) {
 }
 
 func TestSiteURL(t *testing.T) {
-	// built-in
-	if u, err := SiteURL("nuc"); err != nil || u != "https://bus.example.com" {
-		t.Errorf("SiteURL(nuc) = %q, %v", u, err)
-	}
-	// env override wins
-	t.Setenv("CBUS_SITE_NUC_URL", "https://override.example")
-	if u, err := SiteURL("nuc"); err != nil || u != "https://override.example" {
-		t.Errorf("SiteURL(nuc) override = %q, %v", u, err)
-	}
-	// unknown host -> hard error (the promoted soft->hard delta)
-	_, err := SiteURL("mystery")
+	// no built-in hosts: an unset override is a hard error, even for nuc
+	// (the promoted soft->hard delta)
 	var uh *UnknownHostError
+	if _, err := SiteURL("nuc"); !errors.As(err, &uh) {
+		t.Errorf("SiteURL(nuc) with no override should be *UnknownHostError, got %v", err)
+	}
+	_, err := SiteURL("mystery")
 	if !errors.As(err, &uh) {
 		t.Fatalf("SiteURL(mystery) err = %v, want *UnknownHostError", err)
 	}
 	if uh.EnvVar != "CBUS_SITE_MYSTERY_URL" {
 		t.Errorf("UnknownHostError.EnvVar = %q", uh.EnvVar)
+	}
+	// env override resolves the host
+	t.Setenv("CBUS_SITE_NUC_URL", "https://override.example")
+	if u, err := SiteURL("nuc"); err != nil || u != "https://override.example" {
+		t.Errorf("SiteURL(nuc) override = %q, %v", u, err)
 	}
 }
 
@@ -63,6 +63,8 @@ func TestWSURL(t *testing.T) {
 // TestResolveFrontDoor covers local-vs-public SELECTION in-process (per the m5
 // hermeticity ruling: never bind :8090; drive the probe with httptest).
 func TestResolveFrontDoor(t *testing.T) {
+	// no built-in host: the public-mode branch resolves nuc via its env override
+	t.Setenv("CBUS_SITE_NUC_URL", "https://bus.example.com")
 	healthz := func(body string, status int) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/healthz" {
