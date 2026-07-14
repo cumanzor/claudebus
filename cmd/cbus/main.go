@@ -229,10 +229,11 @@ func runHookExit() int {
 }
 
 func runBootstrap(args []string) int {
+	const use = "usage: cbus bootstrap <channel> [parent-alias] [child-alias]"
 	if len(args) == 0 {
-		return die("usage: cbus bootstrap <channel> [parent-alias]")
+		return die(use)
 	}
-	if err := noExtra(args, 2, "usage: cbus bootstrap <channel> [parent-alias]"); err != nil {
+	if err := noExtra(args, 3, use); err != nil {
 		return die("%v", err)
 	}
 	ch := args[0]
@@ -245,6 +246,13 @@ func runBootstrap(args []string) int {
 	}
 	if !core.ValidName(parent) {
 		return die("bad alias %q", parent)
+	}
+	if len(args) > 2 { // reserved-alias variant (what branch actually sends) — print-only, no reservation
+		if !core.ValidName(args[2]) {
+			return die("bad alias %q", args[2])
+		}
+		fmt.Println(client.BootstrapPromptAliased(ch, parent, args[2]))
+		return 0
 	}
 	fmt.Println(client.BootstrapPrompt(ch, parent))
 	return 0
@@ -295,11 +303,11 @@ func runBranch(args []string) int {
 	if len(args) > 1 {
 		ch = args[1]
 	}
-	rch, alias, err := client.Branch(target, ch, model, name, client.OSAForker{})
+	rch, alias, child, err := client.Branch(target, ch, model, name, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
-	fmt.Printf("parent: %s/%s (child will announce itself on the bus)\n", rch, alias)
+	fmt.Printf("parent: %s/%s; child: %s/%s (alias reserved + session titled — it joins as it boots)\n", rch, alias, rch, child)
 	fmt.Printf("arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", rch, alias)
 	return 0
 }
@@ -321,11 +329,15 @@ func runSpawn(args []string) int {
 	if len(args) > 1 {
 		addr = args[1]
 	}
-	rAddr, err := client.Spawn(target, addr, model, name, client.OSAForker{})
+	rAddr, child, err := client.Spawn(target, addr, model, name, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
-	fmt.Printf("spawned: fresh session -> %s (%s); it joins and arms itself\n", rAddr, target)
+	if child != "" {
+		fmt.Printf("spawned: fresh session -> %s/%s (%s, alias fixed + session titled); it joins and arms itself\n", rAddr, child, target)
+	} else {
+		fmt.Printf("spawned: fresh session -> %s (%s); it joins and arms itself (picks its own alias)\n", rAddr, target)
+	}
 	if client.IsRemote(rAddr) {
 		fmt.Printf("verify: cbus list @%s\n", rAddr[strings.Index(rAddr, "@")+1:])
 	} else {

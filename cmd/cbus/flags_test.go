@@ -76,7 +76,7 @@ func TestTrailingJunkRejectedByVerbs(t *testing.T) {
 		{"inbox", "ch/al", "junk"},
 		{"join", "ch", "al", "junk"},
 		{"prune", "ch", "junk"},
-		{"bootstrap", "ch", "parent", "junk"},
+		{"bootstrap", "ch", "parent", "child", "junk"},
 	}
 	for _, args := range cases {
 		if rc := run(args); rc == 0 {
