@@ -16,9 +16,11 @@ defaults to this session's own channel, else the repo-derived name.
 
 If the user mentions a model anywhere (e.g. "spawn a sonnet worker",
 "use opus"), append `--model <m>` — valid values today: sonnet, opus, fable.
-If the user gives the child a title (e.g. "name it worker3"), append
-`--name <n>`; otherwise the child auto-titles with the channel address
-(shows in the session picker and terminal title).
+If the user names the child (e.g. "name it worker3"), append `--name <n>` —
+it becomes the child's bus alias AND session title (alias charset:
+[A-Za-z0-9._-]). Omitted: a local channel auto-reserves an alias (main/fork-N)
+and titles the child with it; a remote channel leaves the child to pick its
+own alias, titling it with the address.
 
 One step: run `cbus spawn <target> [channel] [--model m] [--name n]` and report its
 output in one line. The child joins and arms ITSELF — its launch prompt carries the join +

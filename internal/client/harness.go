@@ -72,34 +72,36 @@ type TerminalForker interface {
 }
 
 // Branch is the one-shot parent side of /bus-branch: derive the channel, join
-// idempotently, and fork a bootstrapped child through forker. Returns the resolved
-// (channel, alias). bin/cbus:803-822 + cc-branch.sh, natively — cc-branch.sh's env
+// idempotently, reserve the child's alias, and fork a bootstrapped child through
+// forker. The child's session title IS its reserved alias (--name at launch);
+// `name` fixes both, "" auto-picks. Returns the resolved (channel, parent alias,
+// child alias). bin/cbus:803-822 + cc-branch.sh, natively — cc-branch.sh's env
 // replication becomes the ForkSpec, and its mktemp/%q self-deleting-launcher shim is
 // gone (Go builds the spec directly; the forker escapes natively).
-func Branch(target, channel, model, name string, forker TerminalForker) (ch, alias string, err error) {
+func Branch(target, channel, model, name string, forker TerminalForker) (ch, alias, childAlias string, err error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
-		return "", "", fmt.Errorf("target must be window|tab|tmux")
+		return "", "", "", fmt.Errorf("target must be window|tab|tmux")
 	}
 	// leading '-' is ValidName-legal but would be parsed as a flag by the child CLI
 	// (an instant-close window) — reject the shape here.
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
-		return "", "", fmt.Errorf("bad model %q", model)
+		return "", "", "", fmt.Errorf("bad model %q", model)
 	}
-	// name is free text (a display title), but a flag-shaped value is the same trap.
-	if strings.HasPrefix(name, "-") {
-		return "", "", fmt.Errorf("bad name %q", name)
+	// name IS the child's alias now, so it must be alias-legal (and not flag-shaped).
+	if name != "" && (!core.ValidName(name) || strings.HasPrefix(name, "-")) {
+		return "", "", "", fmt.Errorf("bad name %q", name)
 	}
 	ch = channel
 	if ch == "" {
 		ch = branchChannelFromGit()
 	}
 	if !core.ValidName(ch) {
-		return "", "", fmt.Errorf("bad channel %q", ch)
+		return "", "", "", fmt.Errorf("bad channel %q", ch)
 	}
 	if _, _, jerr := Join(ch, ""); jerr != nil {
-		return "", "", jerr
+		return "", "", "", jerr
 	}
 	for _, reg := range ResolveSelf() { // requires this session's id — empty => "failed to join"
 		if reg.Channel == ch {
@@ -108,21 +110,22 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 		}
 	}
 	if alias == "" {
-		return "", "", fmt.Errorf("failed to join %q", ch)
+		return "", "", "", fmt.Errorf("failed to join %q", ch)
 	}
-	if name == "" {
-		name = ch // default: child titled after the channel it joins
+	if childAlias, err = ReserveAlias(ch, name); err != nil {
+		return "", "", "", err
 	}
 	spec := ForkSpec{
 		Target: target,
-		Argv:   forkLaunchArgv(SessionID(), model, name, BootstrapPrompt(ch, alias)),
+		Argv:   forkLaunchArgv(SessionID(), model, childAlias, BootstrapPromptAliased(ch, alias, childAlias)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
 	if err := forker.Fork(spec); err != nil {
-		return "", "", err
+		Unreserve(ch, childAlias)
+		return "", "", "", err
 	}
-	return ch, alias, nil
+	return ch, alias, childAlias, nil
 }
 
 // branchChannelFromGit derives the default channel from the git toplevel basename,

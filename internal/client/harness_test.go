@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -129,12 +130,15 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/home/u/.ccs/instances/personal")
 
 	f := &fakeForker{}
-	ch, alias, err := Branch("tab", "mychan", "", "", f)
+	ch, alias, child, err := Branch("tab", "mychan", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ch != "mychan" || alias == "" {
 		t.Fatalf("branch resolved ch=%q alias=%q", ch, alias)
+	}
+	if child == "" || child == alias {
+		t.Fatalf("child alias must be reserved and distinct: parent=%q child=%q", alias, child)
 	}
 	if !f.called {
 		t.Fatal("forker was not invoked")
@@ -158,8 +162,11 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 		}
 	}
 	last := f.spec.Argv[len(f.spec.Argv)-1]
-	if !strings.Contains(last, "cbus join mychan") {
-		t.Errorf("last argv should be the bootstrap prompt: %q", last)
+	if !strings.Contains(last, "cbus join mychan "+child) {
+		t.Errorf("last argv should be the aliased bootstrap prompt: %q", last)
+	}
+	if i := slices.Index(f.spec.Argv, "--name"); i < 0 || f.spec.Argv[i+1] != child {
+		t.Errorf("--name must carry the reserved child alias: %v", f.spec.Argv)
 	}
 }
 
@@ -170,7 +177,7 @@ func TestBranchNonCCSUsesClaude(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	f := &fakeForker{}
-	if _, _, err := Branch("window", "ch", "", "", f); err != nil {
+	if _, _, _, err := Branch("window", "ch", "", "", f); err != nil {
 		t.Fatal(err)
 	}
 	if f.spec.Argv[0] != "claude" {
@@ -184,7 +191,7 @@ func TestBranchNonCCSUsesClaude(t *testing.T) {
 // TestBranchBadTarget: an invalid target is rejected before any join/fork.
 func TestBranchBadTarget(t *testing.T) {
 	f := &fakeForker{}
-	if _, _, err := Branch("popup", "ch", "", "", f); err == nil {
+	if _, _, _, err := Branch("popup", "ch", "", "", f); err == nil {
 		t.Fatal("expected target validation error")
 	}
 	if f.called {

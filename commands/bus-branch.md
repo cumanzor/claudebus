@@ -15,12 +15,13 @@ Two steps, no more:
 
 1. Run `cbus branch <target> [channel]` — one shot: joins this session to the
    channel (idempotent; channel auto-derives from the git repo name if omitted),
-   forks the conversation with the canonical bootstrap prompt, and prints the
-   parent `channel/alias`. If the user mentions a model (e.g. "fork with
-   sonnet"), append `--model <m>` — valid values today: sonnet, opus, fable.
-   If the user gives the child a title (e.g. "call it tester2"), append
-   `--name <n>`; otherwise the child auto-titles with the channel name
-   (shows in the session picker and terminal title).
+   reserves the child's alias, forks the conversation with the canonical
+   bootstrap prompt, and prints BOTH addresses (parent + reserved child). The
+   child's session title is its alias (picker + terminal title). If the user
+   mentions a model (e.g. "fork with sonnet"), append `--model <m>` — valid
+   values today: sonnet, opus, fable. If the user names the child (e.g. "call
+   it tester2"), append `--name <n>` — it becomes the child's alias AND title
+   (alias charset: [A-Za-z0-9._-]); otherwise one is auto-picked (fork-N).
 2. Arm the parent's listener with the **Monitor** tool, persistent:
    `cbus tail <channel>/<parent-alias>` — description
    `cbus:<channel>/<parent-alias>`. Skip if this session already has a cbus
@@ -28,9 +29,10 @@ Two steps, no more:
    never to Bash — it execs a follower that never exits, so a Bash call blocks
    forever and receives nothing.
 
-Then confirm in one line: channel, parent alias, and target. The child
-announces its own alias via the bus when it boots; the user can then
-`cbus send <channel>/<child-alias> "..."` (I'll do it when asked).
+Then confirm in one line: channel, parent alias, child alias, and target. The
+child's alias is known up front (reserved), so `cbus send
+<channel>/<child-alias> "..."` works as soon as its join presence event
+arrives (I'll send when asked).
 
 Note: the child resumes this session's transcript at boot, so it will see the
 parent's live Monitor as a "no completion record" background-task note. This is

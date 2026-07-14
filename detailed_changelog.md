@@ -1,5 +1,79 @@
 # Changelog (detailed)
 
+## [2026-07-14 05:07:23 UTC] [CLI] branch/spawn children titled by ALIAS — parent-side reservation
+
+[Attempt #1]
+
+Follow-up superseding the channel-default half of the previous --name entry, per
+Carlos's ruling ("the name should actually be set to the alias of the new session")
++ the orchestrator handoff spec (--name sets title AND bus alias, parent pre-picks).
+The blocker was that a child self-picks its alias at join, after the --name flag is
+already burned into the launch argv. Resolution: the PARENT claims the alias first.
+
+[Files Changed]
+
+- `internal/client/store.go` — new `ReserveAlias(ch, want)`: claims an alias for a
+  not-yet-booted child. want="" runs the same atomic claimAlias mkdir dance as Join
+  (sibling-excluding, collision-safe); explicit want mirrors explicit-join rules
+  (ValidName, live-listener refusal, stale reclaim) plus an own-alias guard (the
+  reclaim would eat the parent's registration). Writes a placeholder meta —
+  sessionId "reserved", null pids, fresh lastActivity — that (a) the child's
+  explicit `cbus join ch alias` reclaims (a reservation is never listener-alive),
+  (b) PruneChannel spares for the 10-min unarmed grace, (c) dies via that sweep if
+  the child never boots. No presence broadcast (the child's join announces). New
+  `Unreserve` drops the placeholder when the terminal fork itself fails.
+- `internal/client/bootstrap_prompt.go` — `bootstrapPromptAliased` +
+  `BootstrapPromptAliased(ch, parent, child)`: join line becomes `cbus join $ch
+  $alias` (reclaims the reservation), tail/description addresses concretized. The
+  canonical auto-pick template stays byte-exact for `cbus bootstrap ch parent`.
+- `internal/client/spawn.go` — `spawnPromptLocalAliased` / `spawnPromptRemoteAliased`
+  + `SpawnPromptAliased`. Spawn returns (addr, childAlias): local always reserves
+  (auto or --name) and titles = alias; remote with --name pre-assigns the relay
+  alias in the prompt (no reservation — the relay has none); remote without keeps
+  child-picks + address-as-title. Doc contract updated honestly: the spawning side
+  no longer "mutates NOTHING" — it reserves.
+- `internal/client/harness.go` — Branch reserves after the parent join, returns
+  (ch, parentAlias, childAlias), forks with the aliased bootstrap + --name=child;
+  Unreserve on fork failure.
+- Validation shift: --name is an ALIAS now — core.ValidName + leading-dash reject
+  (the free-text titles e353af2 allowed are gone; a space in --name errors).
+- `cmd/cbus/main.go` — runBranch prints parent AND child addresses; runSpawn prints
+  `addr/child` when fixed, the picks-its-own note when remote+unnamed;
+  `cbus bootstrap <channel> [parent] [child-alias]` prints the aliased variant
+  (print-only, no reservation).
+- `cmd/cbus/usage.go` — branch/spawn/bootstrap help updated to the new semantics.
+- `commands/bus-{branch,spawn}.md` — --name = alias+title, child address known up
+  front (no more "announces its own alias"), remote-unnamed fallback documented.
+- Tests: spawn_test.go largely rewritten (all local-spawn tests now need a temp
+  CBUS_DIR — they write reservations), TestSpawnNameFixesAlias,
+  TestSpawnAutoReservesAlias (main then fork-1, placeholder meta shape),
+  TestBranchNameFixesAliasAndDefault (explicit join in prompt, own-alias refusal),
+  TestSpawnPromptAliasedContent, TestReserveAliasReclaimAndUnreserve (join-over-
+  reservation reclaim, Unreserve rmdir); harness_test asserts child≠parent and
+  --name=child; flags_test bootstrap junk case shifted to arg 4.
+
+[Possible Ripple Effects]
+
+- `cbus list` shows a reservation as an unarmed peer (host/cwd accurate — the child
+  inherits the parent's cwd) for the seconds until the child joins; sends to it
+  before the join are DELETED by the child's truncate-at-join reclaim — same as any
+  explicit-join reclaim, and peers shouldn't message before the join presence event.
+- Two parents explicitly reserving the SAME --name can still race (second reclaims
+  the first's reservation — explicit names are the caller's to manage, mirroring
+  explicit-join semantics); the auto-pick path is mkdir-atomic and collision-safe.
+- Behavior change: `--name "runner 2"` (free text) now errors — was legal for ~25
+  minutes on e353af2; nothing shipped that used it.
+
+[Testing Notes]
+
+- `go test -race -count=1 ./...` green; gofmt clean. Smoke via scratchpad binary:
+  aliased bootstrap prints the reclaiming join line; `--name "bad name"` rejected
+  pre-fork. Live child-boot validation deferred: the DEPLOYED binaries stay pinned
+  at 1a5821d until the quiesce window (rebuilding now would break @nuc for live
+  sessions lacking CBUS_SITE_NUC_URL), so a real fork would exercise the old
+  binary anyway. Validate child join-reclaim live after the window's redeploy.
+
+
 ## [2026-07-14 04:50:45 UTC] [Port/Go] Generalize relay-host resolution — drop the built-in `nuc`
 
 [Attempt #1]

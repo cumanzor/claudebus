@@ -152,6 +152,63 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	return alias, false, nil
 }
 
+// ReserveAlias claims an alias in ch on behalf of a NOT-YET-BOOTED child session
+// (branch/spawn title children with their alias, which the child cannot know before
+// boot — so the parent claims it and bakes it into the launch prompt). The
+// placeholder meta carries sessionId "reserved" and null pids: the child's explicit
+// `cbus join <ch> <alias>` reclaims it (a reservation is never listener-alive), an
+// abandoned reservation dies via the unarmed grace sweep like any joined-never-armed
+// peer, and no presence is broadcast (the child's own join announces). want=""
+// auto-picks via the same atomic claim dance as Join.
+func ReserveAlias(ch, want string) (alias string, err error) {
+	if !core.ValidName(ch) {
+		return "", fmt.Errorf("channel must be [A-Za-z0-9._-]")
+	}
+	PruneChannel(ch)
+	root := CBUSDir()
+	var dir string
+	if want == "" {
+		if alias, dir, err = claimAlias(ch); err != nil {
+			return "", err
+		}
+	} else {
+		if !core.ValidName(want) {
+			return "", fmt.Errorf("alias must be [A-Za-z0-9._-]")
+		}
+		for _, reg := range ResolveSelf() { // reclaim below would eat our own registration
+			if reg.Channel == ch && reg.Alias == want {
+				return "", fmt.Errorf("%q is this session's own alias", ch+"/"+want)
+			}
+		}
+		alias = want
+		dir = filepath.Join(root, ch, alias)
+		metaPath := filepath.Join(dir, "meta.json")
+		if fileExists(metaPath) && MetaListenerAlive(metaPath) {
+			return "", fmt.Errorf("%q is taken by a live listener", ch+"/"+alias)
+		}
+		_ = os.RemoveAll(dir) // reclaim a stale/dead peer holding the name
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+	}
+	now := Now()
+	m := peerMeta{
+		Alias: alias, Channel: ch, SessionID: "reserved", Cwd: cwd(),
+		ListenerPid: jsonNull, OwnerPid: jsonNull,
+		Host: ShortHostname(), TS: now, LastActivity: now,
+	}
+	if err := writeMeta(dir, m); err != nil {
+		return "", err
+	}
+	return alias, nil
+}
+
+// Unreserve drops a reservation (fork failed after the claim) — best-effort.
+func Unreserve(ch, alias string) {
+	_ = os.RemoveAll(filepath.Join(CBUSDir(), ch, alias))
+	_ = os.Remove(filepath.Join(CBUSDir(), ch)) // rmdir if empty
+}
+
 // Leave removes this session's registration(s) — all, or only in ch — broadcasting
 // a leave BEFORE removal (bin/cbus:662-673).
 func Leave(ch string) (left []string, err error) {

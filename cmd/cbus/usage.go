@@ -31,22 +31,27 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus channels                    channels with peer counts
   cbus whoami                      this session's channel/alias registrations
   cbus inbox <channel>/<alias>     print inbox path
-  cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
+  cbus bootstrap <channel> [parent] [child-alias]  print the canonical fork-child
+                                   prompt (child-alias: the reserved-alias variant)
   cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
                                    (target: window|tab|tmux; channel auto-derives
-                                   from the git repo name; arm the Monitor after)
+                                   from the git repo name; arm the Monitor after;
+                                   the child's alias is reserved at fork time and
+                                   its session title matches it)
        --model <m>                 launch the child on a specific model
                                    (e.g. sonnet, opus, fable)
-       --name <n>                  child session display name — picker + terminal
-                                   title (default: the channel)
+       --name <n>                  fix the child's alias AND session title
+                                   (default: auto-pick — main, fork-N)
   cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
                                    a fork) that joins + arms the channel on its
                                    own (target: window|tab|tmux; local channel
-                                   auto-derives; channel@host must be explicit,
-                                   no alias — the child picks its own)
+                                   auto-derives — child alias reserved + titled
+                                   like branch; channel@host must be explicit)
        --model <m>                 launch the child on a specific model
-       --name <n>                  child session display name (default: the
-                                   channel or channel@host)
+       --name <n>                  fix the child's alias AND session title
+                                   (remote: pre-assigns the relay alias; omitted
+                                   on remote, the child picks and the title is
+                                   the address)
   cbus prune [channel]             remove dead peers (and empty channels)
   cbus leave [channel]             leave channel(s) this session joined
   cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
