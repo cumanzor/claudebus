@@ -85,11 +85,15 @@ func frameBody(text, from string) []string {
 	return append(lines, markerEnd+" from="+from)
 }
 
-// Reframe rewrites a stored {from,to,ts,text} JSON line into the same framed,
-// line-wrapped block the local tail follower emits, so a long message survives
-// the Monitor's per-line cap and arrives whole in one ws frame. A non-JSON /
-// text-less payload passes through unchanged (defensive). The relay path DROPS
-// `kind` (presence renders only locally) — see LocalEmit for the local counterpart.
+// Reframe rewrites a stored {from,to,ts,text[,kind]} JSON line into the same
+// framed, line-wrapped block the local tail follower emits, so a long message
+// survives the Monitor's per-line cap and arrives whole in one ws frame. A
+// non-JSON / text-less payload passes through unchanged (defensive). It renders
+// ` kind=<k>` in the header when the stored line carries a kind — the relay's
+// server-side presence fan-out (cbus-ijx.5) writes presence events as ordinary
+// spool lines with kind=presence, so remote peers see them just like local ones.
+// A kind-ABSENT line renders byte-identically to before (the golden parity
+// domain is untouched), converging this framer with LocalEmit on the kind axis.
 //
 // The returned bytes carry NO trailing newline: on the relay path the block is
 // sent as one ws OpText frame; the local follower is responsible for appending
@@ -107,6 +111,7 @@ func Reframe(payload []byte) []byte {
 		To   string `json:"to"`
 		TS   string `json:"ts"`
 		Text string `json:"text"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(payload, &m); err != nil || m.Text == "" {
 		return payload
@@ -117,6 +122,9 @@ func Reframe(payload []byte) []byte {
 		total += len(l) + 1
 	}
 	head := frameHead(m.From, m.To, m.TS)
+	if m.Kind != "" { // same position as LocalEmit, so both framers agree on kind lines
+		head += " kind=" + m.Kind
+	}
 	if total > WSFrameSafe { // warn in the header (which survives) so it's not silent
 		head += fmt.Sprintf(" ⚠truncated~%dB", len(m.Text))
 	}

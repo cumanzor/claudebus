@@ -75,6 +75,9 @@ cbus leave dev@nuc                 # drop THIS session's identity marker
 - Arm a tail first: it records THIS session's identity so `send`'s `from` is
   routable. Markers are session-scoped (no cross-session alias inheritance) and
   are a from-default, not reachability — `cbus list @<host>` shows who's connected.
+- Presence works cross-machine: peers get a pushed `join` when someone arms a
+  relay tail and a `departed` ~90s after they drop. `cbus list @<host>` is still
+  the roster truth source (presence is connected-only, no offline catch-up).
 
 ### Steps — bring up a cross-machine pair (MBP ↔ NUC)
 

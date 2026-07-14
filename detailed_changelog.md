@@ -1,5 +1,113 @@
 # Changelog (detailed)
 
+## [2026-07-14 23:36:41 UTC] [Relay/Presence] Remote presence MVP — join/departed cross the relay (cbus-ijx.5)
+
+[Attempt #1]
+
+Carlos noticed presence notifications don't fire on relay channels and disliked the
+local/relay asymmetry. Root cause (from a source + git + docs dig): presence was a
+shared-filesystem primitive (BroadcastPresence appends to peer inbox files); the relay,
+built 5 days earlier as a pure message transport, has no shared filesystem and no `kind`
+on its wire, so presence had no path across it. The bridge was filed as cbus-ijx.5 the
+day presence landed and deliberately deferred as "wire-touching, needs relay+client
+lockstep + protocol versioning."
+
+Key insight that unfroze it: the CORE (join + departed) is doable relay-only, no wire
+break, no mandatory client code change — presence on a relay channel is a
+connection-lifecycle fact the relay already owns (hub.attach/detach), and the relay can
+pre-render the frame server-side (Reframe with kind=presence) so an unmodified client
+renders it. Scoped with a Fable 5 session (adversarial design review) which replaced my
+first mechanism (a per-tail push channel) with spool-mediated fan-out: write presence as
+an ordinary spool line to each connected recipient + poke, the same path /send uses —
+FIFO-preserving, no new concurrency, durable across the enqueue/drain race.
+
+Then a SECOND Fable review of the implementation caught a real bug (see below), fixed
+before any deploy.
+
+[Files Changed]
+
+- internal/core/frame.go — Reframe decodes an optional `kind` and appends ` kind=<k>` to
+  the header (same position as LocalEmit, before the oversize check so kind never
+  perturbs the WSFrameSafe math). Kind-absent lines render byte-identically (golden
+  corpus.jsonl has 0 kind lines); this converges Reframe with LocalEmit instead of adding
+  a third framer. Reversed the doc comment ("relay path DROPS kind" → renders it).
+- internal/core/frame_test.go — the divergence-matrix case that asserted "kind dropped"
+  now asserts `kind=presence` rendered (the deliberate contract reversal).
+- relay/cmd/cbus-relay/main.go:
+  - New const presenceGrace=90s (DISTINCT from pongGrace, commented: keepalive vs UX
+    debounce) + a `-presence-grace` flag (tuning/live-testing).
+  - hub gained present/departWait(map[string]uint64)/departSeq/grace/pending/wake +
+    presenceEvent type; dropped the first cut's departTimers/departGen/onDepart.
+  - attach returns (t, joined) and ENQUEUES a `join` under mu when present flips
+    false→true; a reconnect deletes departWait[key] (invalidates the pending departed);
+    displacement keeps present=true (not a join).
+  - detach returns displaced (tails[key] != t) so only a real disconnect schedules a
+    departed.
+  - scheduleDepart arms time.AfterFunc(grace) stamped with a global-monotonic seq; on
+    fire, under mu, iff still-gone + still-present + seq matches, it deletes present +
+    departWait (self-cleaning, no leak) and ENQUEUES `departed`.
+  - fanoutPresence(channel,actor,event,text): snapshot() → for each connected peer on the
+    channel except the actor, marshal {from,to,ts,text,kind:"presence",event} → store.Write
+    + poke. No lock held across the writes.
+  - presenceDrainer goroutine: grabs the whole pending batch under a brief lock, resets it
+    (drops the consumed backing array), fans out each in order. presenceText renders honest
+    wording ("connected as <alias>" / "departed (connection lost)").
+  - handleTail: `t,_ := attach(key)` (attach enqueues the join); defer `if !detach(key,t)
+    { scheduleDepart(key) }`. main(): `s.hub.grace = *graceFlag; go s.presenceDrainer()`.
+- relay/cmd/cbus-relay/presence_test.go — 10 tests (see Testing).
+- docs/architecture/protocol.md — reversed the three "presence never crosses the relay" /
+  "relay strips kind" / "kind only on the local path" statements to describe the new
+  relay-generated join/departed. README.md + CHEATSHEET.md gained a relay-presence note.
+
+[The bug Fable caught — BUG #1, fixed]
+
+First cut committed the departure UNDER hub.mu (present=false) then fanned out OFF the
+lock (an onDepart callback). Interleaving: (1) timer fires, sets present=false, unlocks;
+(2) before onDepart runs, the peer reconnects — attach reads present=false, decides a
+FRESH join, fans out "join"; (3) onDepart resumes, fans out "departed". Peers see
+join-then-departed for a currently-connected peer, present ends true but the last event is
+departed and nothing re-announces → the peer is PERSISTENTLY shown as departed until it
+really disconnects and returns. Advisory-only (send ignores presence) but persistent, and
+its trigger is exactly the sleep/wake reconnect presence exists for. `-race` green did not
+catch it (logical event-ordering race, not a data race). Fix: decide AND enqueue under mu,
+one drainer emits in enqueue order, so decide-order == emit-order — a departed decided
+before a join is emitted before it, and the last event a returning peer shows is the join.
+Also fixed the map leaks (present now deleted on fire; departWait/global-seq replaces the
+leaking departGen/departTimers) and moved the join fan-out off handleTail.
+
+[Possible Ripple Effects]
+
+- Contract reversal: Reframe now renders kind. Only presence lines carry kind today; the
+  no-kind (message) path is byte-identical, so the golden corpus and all message framing
+  are unaffected. A stored relay line gaining kind/event is relay-internal — nothing reads
+  spool bytes but Reframe; not client-visible wire, so no wire break and old clients render
+  presence frames as normal `kind=presence` blocks.
+- Departed latency for silent death is ~3-3.5 min (detach waits out pingEvery+pongGrace
+  ≈120s, THEN the 90s grace). Documented; do not shrink pongGrace to speed it up.
+- Relay restart wipes memory-only hub state → a join storm (O(N^2)) + any pre-restart death
+  never departs. Accepted at fleet size 2-5.
+- A presence line queued to a recipient that drops before draining counts as queued mail →
+  `cbus prune @host` keeps that peer until it drains. Narrow; a drain-time TTL is a later fix.
+- spawnPromptRemote's guidance (rely on `cbus list`) is now incomplete (peers also get
+  pushed presence). Not false, not harmful; a one-line client prompt update is a follow-up
+  needing a client rebuild.
+
+[Testing Notes]
+
+- go build ./... + go vet clean; gofmt-clean; full suite green with -race (5x on the
+  timing-sensitive presence tests). Relay presence tests: attach join decision, fan-out
+  routing (kind=presence, per-recipient to=, actor skip, channel scope), join delivered via
+  drainer, departed-after-grace, reconnect-cancels-departed, displacement-no-depart,
+  join-after-departed, BUG#1 ordering regression (enqueue [departed,join] → delivered in
+  that order), concurrent-hub stress (8×400 attach/detach/scheduleDepart/poke, -race clean,
+  no deadlock), e2e Reframe-over-spool (a fanned line renders kind=presence).
+- Live validation on a loopback relay (MBP, `-presence-grace 2s`, production NUC untouched):
+  bob joins → alice gets `kind=presence` "connected as bob"; bob drops → after grace alice
+  gets `kind=presence` "departed (connection lost)"; both in order.
+- NOT deployed to the NUC. The relay currently serves live `listen` sessions on
+  android-sdk; a restart would blip those four tails. Deploy in a quiet window via
+  relay/deploy.sh (build-on-NUC), backward-compatible, no client swap needed.
+
 ## [2026-07-14 06:50:11 UTC] [Relay/CLI] Server-side relay prune — `cbus prune [<ch>]@<host>`
 
 [Attempt #1]

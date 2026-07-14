@@ -10,8 +10,9 @@ import (
 // TestReframeDivergenceMatrix pins the relay-side column of the framer divergence
 // matrix (protocol.md §4.5). core.Reframe IS the relay framer, so these lock in its
 // all-or-nothing gate: any non-string field or empty/missing text => byte-identical
-// passthrough; only a well-formed object with a non-empty string text is framed, and
-// the relay path drops `kind`.
+// passthrough; only a well-formed object with a non-empty string text is framed. As
+// of cbus-ijx.5 the relay RENDERS `kind` (server-side presence fan-out) instead of
+// dropping it, matching LocalEmit; a kind-absent line is unchanged.
 func TestReframeDivergenceMatrix(t *testing.T) {
 	cases := []struct {
 		name string
@@ -38,18 +39,15 @@ func TestReframeDivergenceMatrix(t *testing.T) {
 		{"from/to missing, text ok -> framed with empty routing",
 			`{"ts":"t","text":"hi"}`,
 			"◀ cbus msg from= to= ts=t\nhi\n◀ cbus end from="},
-		{"kind present, text ok -> framed, kind dropped",
+		{"kind present, text ok -> framed with kind in header (cbus-ijx.5)",
 			`{"from":"c/o","to":"c/a","ts":"t","text":"hi","kind":"presence"}`,
-			"◀ cbus msg from=c/o to=c/a ts=t\nhi\n◀ cbus end from=c/o"},
+			"◀ cbus msg from=c/o to=c/a ts=t kind=presence\nhi\n◀ cbus end from=c/o"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := string(Reframe([]byte(c.in)))
 			if got != c.want {
 				t.Errorf("Reframe(%s)\n got  %q\n want %q", c.in, got, c.want)
-			}
-			if strings.Contains(c.name, "kind dropped") && strings.Contains(got, "kind=") {
-				t.Errorf("relay path must drop kind, got header with kind=: %q", got)
 			}
 		})
 	}
