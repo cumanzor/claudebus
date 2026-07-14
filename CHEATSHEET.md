@@ -63,6 +63,8 @@ hostname/role). One host today: `server`.
 cbus send dev@server/server "ping"       # queues if peer offline; replay on connect
 cbus tail dev@server/laptop              # prints Monitor {ws:} arm spec + claims identity
 cbus list @server                     # relay peers: connected/queued/lastSeen
+cbus prune @server                    # reap off relay peers with no queued mail (server-side)
+cbus prune dev@server                 # same, scoped to one channel
 cbus leave dev@server                 # drop THIS session's identity marker
 ```
 

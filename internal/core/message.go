@@ -120,3 +120,10 @@ type PeersEntry struct {
 
 // PeersResponse is the whole GET /peers body: channel/alias -> entry.
 type PeersResponse map[string]PeersEntry
+
+// PruneResponse is the POST /prune response body: the "<channel>/<alias>" keys the
+// relay dropped from its spool — peers with no queued mail and no live tail. An
+// empty slice (never null) means nothing was eligible.
+type PruneResponse struct {
+	Pruned []string `json:"pruned"`
+}

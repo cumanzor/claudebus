@@ -52,7 +52,8 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    (remote: pre-assigns the relay alias; omitted
                                    on remote, the child picks and the title is
                                    the address)
-  cbus prune [channel]             remove dead peers (and empty channels)
+  cbus prune [channel]             remove dead peers (and empty channels);
+                                   [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined
   cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
                                    meta); re-arm the Monitor on the new address
@@ -69,6 +70,8 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
                                    protocols) and claim the alias as this
                                    machine's identity on that channel
   cbus list [<ch>]@<host>          peers known to the relay (connected/queued)
+  cbus prune [<ch>]@<host>         drop off relay peers with no queued mail
+                                   (channel-scoped; omit <ch> to sweep the host)
   cbus leave <ch>@<host>           drop THIS session's identity marker
   cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   (V='-'=stdin)
   cbus auth status [host]          credential state, masked

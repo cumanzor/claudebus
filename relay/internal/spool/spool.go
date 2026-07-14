@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -88,6 +89,9 @@ func (s Store) MarkDelivered(channel, alias, name string) error {
 }
 
 // Peers walks the spool tree and returns every channel/alias pair present.
+// Dot-prefixed entries are skipped at both levels: they are never valid peer
+// names the client produces (matching the local store's convention) and they
+// shield Prune's transient .prune.* claim dir from being misread as a peer.
 func (s Store) Peers() (map[string]int, error) {
 	out := map[string]int{}
 	channels, err := os.ReadDir(s.Root)
@@ -98,7 +102,7 @@ func (s Store) Peers() (map[string]int, error) {
 		return nil, err
 	}
 	for _, ch := range channels {
-		if !ch.IsDir() {
+		if !ch.IsDir() || strings.HasPrefix(ch.Name(), ".") {
 			continue
 		}
 		aliases, err := os.ReadDir(filepath.Join(s.Root, ch.Name()))
@@ -106,7 +110,7 @@ func (s Store) Peers() (map[string]int, error) {
 			continue
 		}
 		for _, al := range aliases {
-			if !al.IsDir() {
+			if !al.IsDir() || strings.HasPrefix(al.Name(), ".") {
 				continue
 			}
 			queued, err := s.ListNew(ch.Name(), al.Name())
@@ -117,4 +121,32 @@ func (s Store) Peers() (map[string]int, error) {
 		}
 	}
 	return out, nil
+}
+
+// Remove drops a peer's spool dir, but ONLY if it holds no queued mail. It claims
+// the dir with an atomic same-parent rename to a dot-prefixed temp (EXDEV-proof,
+// invisible to Peers), rechecks new/ in the claimed copy, and restores the peer if
+// a message raced in between the caller's snapshot and the claim — so a concurrent
+// send is either fully spooled (peer kept) or surfaced to the sender as a failed
+// new/ rename, never silently dropped. Returns whether the peer was removed; the
+// channel dir is rmdir'd once it goes empty. A missing peer (already gone, or lost
+// to a concurrent pruner) is not an error — it returns (false, nil).
+func (s Store) Remove(channel, alias string) (bool, error) {
+	base := s.peerDir(channel, alias)
+	tmp := filepath.Join(s.Root, channel, fmt.Sprintf(".prune.%d.%d", os.Getpid(), seq.Add(1)))
+	if err := os.Rename(base, tmp); err != nil {
+		return false, nil
+	}
+	entries, _ := os.ReadDir(filepath.Join(tmp, "new"))
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			_ = os.Rename(tmp, base) // mail raced in — restore, keep the peer
+			return false, nil
+		}
+	}
+	if err := os.RemoveAll(tmp); err != nil {
+		return false, err
+	}
+	_ = os.Remove(filepath.Join(s.Root, channel)) // rmdir if now empty
+	return true, nil
 }

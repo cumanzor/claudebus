@@ -263,6 +263,13 @@ Details that matter:
   pid, so `cbus prune` sweeps them when their session dies. A marker is a
   from-default, **not** proof of reachability — `cbus list <ch>@<host>` is the
   truth source for who is actually connected.
+- **Relay peers are append-only** — the spool creates a peer's maildir on its
+  first queued message and never GCs it, so an off peer lingers in
+  `cbus list <ch>@<host>` forever (`off`, `queued 0`). The relay holds no pid to
+  test liveness on, so local `cbus prune` can't reach it. `cbus prune <ch>@<host>`
+  (or bare `@<host>`) reaps those from the server side: it drops every peer that
+  has no live tail **and** no queued mail — a peer with pending mail is always
+  kept, so nothing undelivered is lost.
 
 ## CLI reference
 
@@ -292,6 +299,8 @@ remote (relay-backed) — address form <channel>@<host>/<alias>:
 cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
 cbus tail <ch>@<host>/<al>       print Monitor ws arm spec + claim identity
 cbus list [<ch>]@<host>          relay peers: connected / queued / lastSeen
+cbus prune [<ch>]@<host>         reap off relay peers with no queued mail
+                                 (channel-scoped; omit <ch> to sweep the host)
 cbus leave <ch>@<host>           drop THIS session's identity marker
 cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   ('-' = stdin)
 cbus auth status [host]          credential state, masked
