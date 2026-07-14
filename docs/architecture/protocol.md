@@ -281,9 +281,13 @@ lines (main.go:181-187):
 
 plus a trailing `\n`. Key order is Go-map **alphabetical** (`from,text,to,ts`) versus
 the client's insertion order — **consumers must parse JSON, never pattern-match key
-order**. There is no `kind` field anywhere on the relay path: `sendReq` doesn't decode
-it and `reframe` doesn't emit it — **presence never crosses the relay** (tracked as
-cbus-ijx.5).
+order**. `sendReq` still decodes only `{channel,alias,from,text,ts}`, but as of
+cbus-ijx.5 the relay's server-side presence fan-out writes presence events as ordinary
+spool lines carrying `kind`/`event`, and `reframe` renders ` kind=<k>` in the header —
+so **relay-generated presence (join/departed) now crosses the relay**. Origination is
+connection-lifecycle, not a client command: `join` fires on ws attach, `departed` on
+detach after a grace window. Client-originated `leave`/`rename` over the wire (which
+would need `kind` on the inbound `sendReq`) stay Phase 2.
 
 Empty `from` defaults to `"unknown"` on the relay (main.go:175-177) — a different
 "unroutable sender" spelling than the client's `hostname-PID`. *quirk.*
@@ -323,7 +327,8 @@ Each well-formed message is delivered as one multi-line block:
   **≤440 UTF-8 bytes** per line. Wrapping is byte-aware and never splits a
   codepoint (client `wrap()` bin/cbus:522-531; relay `wrapBytes` main.go:208-221).
   Empty text segments are preserved as empty lines.
-- ` kind=<kind>` appears **only on the local path** (presence events).
+- ` kind=<kind>` appears on **both paths** (presence events): the local follower
+  always, and the relay since cbus-ijx.5 (server-side join/departed fan-out).
 - ` ⚠truncated~<N>B` appears **only on the relay path** (§4.4).
 - The framed block is **load-bearing wire format**: receivers are instructed to parse
   `from=` out of the header to construct replies (commands/bus-join.md). Frame markers
@@ -620,7 +625,13 @@ kind=presence` + text + end marker.
 
 Properties to preserve or consciously rethink:
 
-- **Local-only**: the relay strips `kind` — remote peers never see presence (cbus-ijx.5).
+- **Relay presence (cbus-ijx.5)**: the relay now renders `kind` and GENERATES
+  join/departed from the ws lifecycle (attach → join; detach + ~90s grace → departed),
+  fanned to connected peers via the spool. Semantics differ from local: it is
+  connection-presence, not registration, so `/peers` is the state truth source and the
+  pushed events are edge notifications. Header text is honest to that (`connected as
+  <alias>` / `departed (connection lost)`). Client-originated `leave`/`rename` and
+  durable offline catch-up are Phase 2.
 - `departed`/`leave` events carry an unroutable `from` (the subject's dir is gone) —
   receivers must treat presence `from=` as informational, not a reply target.
 - Presence lines persist in inboxes like any message: they replay on first arm

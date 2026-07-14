@@ -263,6 +263,13 @@ Details that matter:
   pid, so `cbus prune` sweeps them when their session dies. A marker is a
   from-default, **not** proof of reachability — `cbus list <ch>@<host>` is the
   truth source for who is actually connected.
+- **Relay presence** — the relay pushes `join`/`departed` presence to connected
+  peers on a channel (server-side, cbus-ijx.5), so a session tailing a relay
+  channel is notified when a peer arms or drops, like on a local channel. It is
+  connection-lifecycle, not registration: `join` fires on ws attach, `departed`
+  ~90s after a tail drops (a grace window that debounces sleep/wake re-arms).
+  `/peers` stays the state truth source; the pushed events are edge notifications.
+  Delivery is connected-only — offline roster catch-up stays `cbus list`.
 - **Relay peers are append-only** — the spool creates a peer's maildir on its
   first queued message and never GCs it, so an off peer lingers in
   `cbus list <ch>@<host>` forever (`off`, `queued 0`). The relay holds no pid to

@@ -28,14 +28,39 @@ const (
 	subprotoPrefix = "bearer.cbus."
 	pingEvery      = 30 * time.Second
 	pongGrace      = 90 * time.Second
+	// presenceGrace debounces ws flap (the Monitor drops 1006 on sleep and re-arms)
+	// before a detach becomes a `departed` presence event. Intentionally == pongGrace
+	// TODAY but a DISTINCT constant: pongGrace is a transport keepalive measurement,
+	// this is a UX debounce — coupling them would let a keepalive retune silently move
+	// presence semantics. Note the departed floor is pingEvery+pongGrace (detach) PLUS
+	// this (~3.5 min for silent death); do not shrink pongGrace to speed it up.
+	presenceGrace = 90 * time.Second
 )
 
-// hub tracks the single active tail per peer plus last-seen times.
+// hub tracks the single active tail per peer plus last-seen times, and drives the
+// presence state machine (cbus-ijx.5). `present` is whether a join has been emitted for
+// a key without a matching departed. A detach schedules a departed after `grace` unless
+// the peer reattaches; `departWait[key]` holds the seq (a global-monotonic `departSeq`)
+// of the currently-valid timer, so a reconnect just deletes it and any already-fired
+// timer sees the seq mismatch and no-ops — no lingering-Timer bookkeeping, no map leak.
+// CRUCIALLY presence events are DECIDED and ENQUEUED onto `pending` under `mu` (in
+// attach and in the departed timer), and a single drainer emits them in that order — so
+// a join deciding exactly as a departed is mid-emit can never reorder into a stuck
+// departed for a live peer: decide-order == emit-order closes that race (BUG the Fable
+// review caught in the first cut, which committed under lock but fanned out off it).
 type hub struct {
-	mu    sync.Mutex
-	tails map[string]*tail // key channel/alias
-	seen  map[string]time.Time
+	mu         sync.Mutex
+	tails      map[string]*tail // key channel/alias
+	seen       map[string]time.Time
+	present    map[string]bool
+	departWait map[string]uint64 // key -> seq of the valid pending departed timer
+	departSeq  uint64            // global-monotonic timer generation
+	grace      time.Duration
+	pending    []presenceEvent // ordered emit queue, drained by (*server).presenceDrainer
+	wake       chan struct{}   // cap-1 drainer nudge (lost-wakeup-proof, like poke)
 }
+
+type presenceEvent struct{ channel, actor, event string }
 
 type tail struct {
 	notify chan struct{}
@@ -43,29 +68,81 @@ type tail struct {
 }
 
 func newHub() *hub {
-	return &hub{tails: map[string]*tail{}, seen: map[string]time.Time{}}
+	return &hub{
+		tails: map[string]*tail{}, seen: map[string]time.Time{},
+		present: map[string]bool{}, departWait: map[string]uint64{},
+		grace: presenceGrace, wake: make(chan struct{}, 1),
+	}
 }
 
-// attach registers a new tail for a peer, displacing any existing one.
-func (h *hub) attach(key string) *tail {
+// enqueue appends a presence event and nudges the drainer. Caller MUST hold mu so the
+// append order equals the decision order (the drainer emits in that order).
+func (h *hub) enqueue(channel, actor, event string) {
+	h.pending = append(h.pending, presenceEvent{channel, actor, event})
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+// attach registers a new tail for a peer, displacing any existing one, and enqueues a
+// `join` iff this is a genuinely NEW presence. A reconnect within grace invalidates the
+// pending departed (delete departWait) and is not a new join; a displacement keeps
+// present=true so it is not a join either. Returns joined for the caller's logging/tests.
+func (h *hub) attach(key string) (t *tail, joined bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if old, ok := h.tails[key]; ok {
 		close(old.done)
 	}
-	t := &tail{notify: make(chan struct{}, 1), done: make(chan struct{})}
+	t = &tail{notify: make(chan struct{}, 1), done: make(chan struct{})}
 	h.tails[key] = t
 	h.seen[key] = time.Now()
-	return t
+	delete(h.departWait, key) // reconnect: invalidate any pending departed
+	joined = !h.present[key]
+	h.present[key] = true
+	if joined {
+		c, a, _ := strings.Cut(key, "/")
+		h.enqueue(c, a, "join")
+	}
+	return t, joined
 }
 
-func (h *hub) detach(key string, t *tail) {
+// detach drops a peer's tail unless it was already displaced by a newer tail, and
+// reports displaced so the caller only schedules a departed for a real disconnect
+// (a displaced tail leaving is a takeover, not a departure).
+func (h *hub) detach(key string, t *tail) (displaced bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.tails[key] == t {
+	displaced = h.tails[key] != t
+	if !displaced {
 		delete(h.tails, key)
 	}
 	h.seen[key] = time.Now()
+	return displaced
+}
+
+// scheduleDepart arms a grace timer stamped with a fresh seq; when it fires it enqueues
+// a departed iff the key is still gone, still present, and still the valid seq (a
+// reconnect deleted departWait[key]; a re-schedule replaced the seq). Decision + enqueue
+// are under mu, so they order correctly against a concurrent attach's join.
+func (h *hub) scheduleDepart(key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.departSeq++
+	seq := h.departSeq
+	h.departWait[key] = seq
+	time.AfterFunc(h.grace, func() {
+		h.mu.Lock()
+		_, connected := h.tails[key]
+		if !connected && h.present[key] && h.departWait[key] == seq {
+			delete(h.present, key)
+			delete(h.departWait, key)
+			c, a, _ := strings.Cut(key, "/")
+			h.enqueue(c, a, "departed")
+		}
+		h.mu.Unlock()
+	})
 }
 
 func (h *hub) poke(key string) {
@@ -184,6 +261,58 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 // by the extraction (pure refactor).
 func reframe(payload []byte) []byte { return core.Reframe(payload) }
 
+// fanoutPresence writes a presence event (cbus-ijx.5) into the spool of every
+// CURRENTLY-CONNECTED peer on the channel except the actor, then pokes them — the
+// identical path /send uses. Spool-mediated (not a direct ws push) so presence keeps
+// FIFO order with messages, needs no per-tail plumbing, holds no lock across the
+// writes (recipients come from a snapshot), and survives a drop between enqueue and
+// drain. Offline peers are not queued to: roster catch-up stays `cbus list @host`.
+// The stored line carries kind/event; only Reframe's rendered output crosses the wire.
+func (s *server) fanoutPresence(channel, actor, event, text string) {
+	connected, _ := s.hub.snapshot()
+	ts := time.Now().UTC().Format(time.RFC3339)
+	for key := range connected {
+		c, a, ok := strings.Cut(key, "/")
+		if !ok || c != channel || a == actor {
+			continue
+		}
+		line, err := json.Marshal(map[string]string{
+			"from": channel + "/" + actor, "to": channel + "/" + a,
+			"ts": ts, "text": text, "kind": "presence", "event": event,
+		})
+		if err != nil {
+			continue
+		}
+		if _, err := s.store.Write(channel, a, append(line, '\n')); err == nil {
+			s.hub.poke(key)
+		}
+	}
+}
+
+// presenceDrainer emits queued presence events in decision order, one at a time and OFF
+// the hub lock. It grabs the whole pending batch under a brief lock then resets it (keeps
+// enqueue order == emit order, and drops the consumed backing array). Started once in main.
+func (s *server) presenceDrainer() {
+	for range s.hub.wake {
+		s.hub.mu.Lock()
+		batch := s.hub.pending
+		s.hub.pending = nil
+		s.hub.mu.Unlock()
+		for _, ev := range batch {
+			s.fanoutPresence(ev.channel, ev.actor, ev.event, presenceText(ev.event, ev.actor))
+		}
+	}
+}
+
+// presenceText renders honest connection-lifecycle wording (the relay observes ws
+// attach/detach, not a client join/leave command).
+func presenceText(event, actor string) string {
+	if event == "departed" {
+		return "departed (connection lost)"
+	}
+	return "connected as " + actor
+}
+
 func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("channel")
 	alias := r.URL.Query().Get("alias")
@@ -203,8 +332,12 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.WriteTimeout = 10 * time.Second // a wedged client can't stall the loop
 	key := channel + "/" + alias
-	t := s.hub.attach(key)
-	defer s.hub.detach(key, t)
+	t, _ := s.hub.attach(key) // attach enqueues the join; the drainer emits it in order
+	defer func() {
+		if !s.hub.detach(key, t) { // a real disconnect (not a takeover) may become departed
+			s.hub.scheduleDepart(key)
+		}
+	}()
 	log.Printf("tail %s: connected", key)
 
 	lastPong := time.Now()
@@ -368,6 +501,7 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8090", "listen address (loopback; CF tunnel fronts it)")
 	spoolDir := flag.String("spool", "spool", "maildir spool root")
 	tokenFile := flag.String("token-file", "token", "file holding the app token")
+	graceFlag := flag.Duration("presence-grace", presenceGrace, "grace before a dropped tail becomes a `departed` presence event")
 	flag.Parse()
 
 	token := strings.TrimSpace(os.Getenv("CBUS_RELAY_TOKEN"))
@@ -386,6 +520,8 @@ func main() {
 	}
 
 	s := &server{store: spool.Store{Root: *spoolDir}, hub: newHub(), token: token}
+	s.hub.grace = *graceFlag
+	go s.presenceDrainer() // emits queued join/departed events in decision order
 	mux := http.NewServeMux()
 	mux.HandleFunc("/send", s.handleSend)
 	mux.HandleFunc("/tail", s.handleTail)
