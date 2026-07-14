@@ -1,6 +1,6 @@
 ---
 description: Fork this session into a new window, both joined to a cbus channel
-argument-hint: "[window|tab|tmux] [channel]"
+argument-hint: "[window|tab|tmux] [channel] [--model m]"
 allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion
 ---
 
@@ -16,7 +16,8 @@ Two steps, no more:
 1. Run `cbus branch <target> [channel]` — one shot: joins this session to the
    channel (idempotent; channel auto-derives from the git repo name if omitted),
    forks the conversation with the canonical bootstrap prompt, and prints the
-   parent `channel/alias`.
+   parent `channel/alias`. If the user mentions a model (e.g. "fork with
+   sonnet"), append `--model <m>` — valid values today: sonnet, opus, fable.
 2. Arm the parent's listener with the **Monitor** tool, persistent:
    `cbus tail <channel>/<parent-alias>` — description
    `cbus:<channel>/<parent-alias>`. Skip if this session already has a cbus
