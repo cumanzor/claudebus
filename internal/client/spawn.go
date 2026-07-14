@@ -35,7 +35,7 @@ func SpawnPrompt(address string) string {
 // derives like branch when omitted (own registration first, then git toplevel, then
 // global); a remote address (channel@host — NO alias, the child picks its own) must
 // be explicit.
-func Spawn(target, address, model string, forker TerminalForker) (string, error) {
+func Spawn(target, address, model, name string, forker TerminalForker) (string, error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
@@ -44,6 +44,10 @@ func Spawn(target, address, model string, forker TerminalForker) (string, error)
 	// see Branch: reject the flag-shaped model token pre-fork (instant-close trap).
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
 		return "", fmt.Errorf("bad model %q", model)
+	}
+	// name is free text (a display title), but a flag-shaped value is the same trap.
+	if strings.HasPrefix(name, "-") {
+		return "", fmt.Errorf("bad name %q", name)
 	}
 	addr := address
 	if addr == "" {
@@ -64,9 +68,12 @@ func Spawn(target, address, model string, forker TerminalForker) (string, error)
 	} else if !core.ValidName(addr) {
 		return "", fmt.Errorf("bad channel %q", addr)
 	}
+	if name == "" {
+		name = addr // default: child titled after the address it joins
+	}
 	spec := ForkSpec{
 		Target: target,
-		Argv:   freshLaunchArgv(model, SpawnPrompt(addr)),
+		Argv:   freshLaunchArgv(model, name, SpawnPrompt(addr)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
@@ -86,9 +93,9 @@ func spawnDefaultAddress() string {
 }
 
 // freshLaunchArgv builds a BLANK-session launch — forkLaunchArgv minus the
-// --resume/--fork-session pair: `ccs <profile> [--model m] <prompt>` under a CCS
-// instance config dir, else `claude [--model m] <prompt>`.
-func freshLaunchArgv(model, prompt string) []string {
+// --resume/--fork-session pair: `ccs <profile> [--model m] [--name n] <prompt>`
+// under a CCS instance config dir, else `claude [--model m] [--name n] <prompt>`.
+func freshLaunchArgv(model, name, prompt string) []string {
 	var argv []string
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
 		argv = []string{"ccs", filepath.Base(cfg)}
@@ -97,6 +104,9 @@ func freshLaunchArgv(model, prompt string) []string {
 	}
 	if model != "" {
 		argv = append(argv, "--model", model)
+	}
+	if name != "" {
+		argv = append(argv, "--name", name)
 	}
 	if prompt != "" {
 		argv = append(argv, prompt)

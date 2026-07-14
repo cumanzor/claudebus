@@ -1,6 +1,6 @@
 ---
 description: Open a fresh session in a new window, joined to a cbus channel
-argument-hint: "[window|tab|tmux] [channel|ch@host] [--model m]"
+argument-hint: "[window|tab|tmux] [channel|ch@host] [--model m] [--name n]"
 allowed-tools: Bash(cbus:*), AskUserQuestion
 ---
 
@@ -16,8 +16,11 @@ defaults to this session's own channel, else the repo-derived name.
 
 If the user mentions a model anywhere (e.g. "spawn a sonnet worker",
 "use opus"), append `--model <m>` — valid values today: sonnet, opus, fable.
+If the user gives the child a title (e.g. "name it worker3"), append
+`--name <n>`; otherwise the child auto-titles with the channel address
+(shows in the session picker and terminal title).
 
-One step: run `cbus spawn <target> [channel] [--model m]` and report its
+One step: run `cbus spawn <target> [channel] [--model m] [--name n]` and report its
 output in one line. The child joins and arms ITSELF — its launch prompt carries the join +
 Monitor-arming instructions, so there is nothing to arm on this side and no
 bootstrap to print. Verify membership when asked: `cbus list <channel>`

@@ -1,6 +1,6 @@
 ---
 description: Fork this session into a new window, both joined to a cbus channel
-argument-hint: "[window|tab|tmux] [channel] [--model m]"
+argument-hint: "[window|tab|tmux] [channel] [--model m] [--name n]"
 allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion
 ---
 
@@ -18,6 +18,9 @@ Two steps, no more:
    forks the conversation with the canonical bootstrap prompt, and prints the
    parent `channel/alias`. If the user mentions a model (e.g. "fork with
    sonnet"), append `--model <m>` — valid values today: sonnet, opus, fable.
+   If the user gives the child a title (e.g. "call it tester2"), append
+   `--name <n>`; otherwise the child auto-titles with the channel name
+   (shows in the session picker and terminal title).
 2. Arm the parent's listener with the **Monitor** tool, persistent:
    `cbus tail <channel>/<parent-alias>` — description
    `cbus:<channel>/<parent-alias>`. Skip if this session already has a cbus
