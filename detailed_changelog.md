@@ -1,5 +1,67 @@
 # Changelog (detailed)
 
+## [2026-07-14 04:42:50 UTC] [CLI] `--name` on branch/spawn — children launch pre-titled
+
+[Attempt #1]
+
+Follow-on to `--model` (same shape, user-requested): `cbus branch` and `cbus spawn`
+accept `--name <n>`, forwarded to the child launch as the CC CLI's `--name` flag
+(v-current: "Set a display name for this session (picker, and terminal title)").
+This is the programmatic `/rename` equivalent — verified against `claude --help`,
+code.claude.com/docs/en/sessions.md, and the CC changelog before wiring (session
+COLOR, by contrast, has no flag/SDK/persistence — interactive `/color` only, so it
+cannot be automated). Removes the "child runs /rename by hand" step from bus flows.
+
+Defaults ON: when `--name` is omitted, branch children title as the channel they
+join, spawn children as the channel (local) or channel@host (remote). The child's
+bus ALIAS is not known at fork time (it self-picks at join), so the address is the
+most specific deterministic title the parent can stamp; explicit `--name` covers
+role-titling (orchestrator spawning "tester2" etc.).
+
+[Files Changed]
+
+- `internal/client/harness.go` — `Branch` gains a name param (defaulted to ch after
+  derivation); `forkLaunchArgv` inserts `--name <n>` after `--model`, before the
+  prompt positional.
+- `internal/client/spawn.go` — `Spawn`/`freshLaunchArgv` likewise (default: resolved
+  addr, so remote children title as `ch@host`).
+- Validation differs from --model deliberately: a name is free text (a display
+  title — spaces legal, shQuote handles them through the launcher script), so only
+  the flag-shaped leading-`-` trap is rejected pre-fork; no core.ValidName.
+- `cmd/cbus/main.go` — `extractModel` generalized to `extractFlag(args, flag)` +
+  `extractForkFlags` (pulls `--model` and `--name` in one call); usage strings
+  extended on both verbs.
+- `cmd/cbus/usage.go` — `--name` sub-lines under branch/spawn; header comment's
+  post-bash-divergence list now reads "--model/--name flags".
+- `commands/bus-{branch,spawn}.md` — argument-hints + body: pass `--name` when the
+  user titles the child, note the channel-default otherwise.
+- `internal/client/spawn_test.go` — TestSpawnNameFlagAndDefault (explicit name w/
+  space, remote default = ch@host, bad-name rejection, prompt stays final
+  positional), TestBranchNameFlagAndDefault (explicit, default = channel, bad-name);
+  existing Spawn/Branch call sites updated for the new signatures.
+- `internal/client/harness_test.go` — call-site signature updates only.
+
+[Possible Ripple Effects]
+
+- Every branch/spawn child now carries a title where before it had none — visible
+  in the CC resume picker, prompt bar, and terminal tab. Cosmetic-only; no wire or
+  state change. Multiple children on one channel share the default title (the alias
+  isn't knowable at fork time) — distinguish via explicit `--name`.
+- `ccs <profile>` passthrough assumed for `--name` exactly as already proven for
+  `--model`/`--resume` (same argv tail).
+
+[Testing Notes]
+
+- `go test -race ./...` green (client + cmd suites; new tests exercise both verbs'
+  argv placement + defaults). Smoke via scratchpad binary: `--name` missing value
+  dies with usage, `--name -x` dies `bad name "-x"`, both pre-fork (no window).
+  Full `--help` block renders both new sub-lines.
+- Committed after Carlos released the hold (push-review was waiting on THIS
+  commit; orchestrator notified with the hash on go-port@nuc). NUC propagation
+  still pending: cross-compile + scp per the post-cutover doctrine, commands/
+  copied by hand.
+
+
 ## [2026-07-14 04:05:15 UTC] [CLI] `--model` on branch/spawn — child sessions on a chosen model
 
 [Attempt #1]

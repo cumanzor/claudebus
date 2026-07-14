@@ -76,7 +76,7 @@ type TerminalForker interface {
 // (channel, alias). bin/cbus:803-822 + cc-branch.sh, natively — cc-branch.sh's env
 // replication becomes the ForkSpec, and its mktemp/%q self-deleting-launcher shim is
 // gone (Go builds the spec directly; the forker escapes natively).
-func Branch(target, channel, model string, forker TerminalForker) (ch, alias string, err error) {
+func Branch(target, channel, model, name string, forker TerminalForker) (ch, alias string, err error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
@@ -86,6 +86,10 @@ func Branch(target, channel, model string, forker TerminalForker) (ch, alias str
 	// (an instant-close window) — reject the shape here.
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
 		return "", "", fmt.Errorf("bad model %q", model)
+	}
+	// name is free text (a display title), but a flag-shaped value is the same trap.
+	if strings.HasPrefix(name, "-") {
+		return "", "", fmt.Errorf("bad name %q", name)
 	}
 	ch = channel
 	if ch == "" {
@@ -106,9 +110,12 @@ func Branch(target, channel, model string, forker TerminalForker) (ch, alias str
 	if alias == "" {
 		return "", "", fmt.Errorf("failed to join %q", ch)
 	}
+	if name == "" {
+		name = ch // default: child titled after the channel it joins
+	}
 	spec := ForkSpec{
 		Target: target,
-		Argv:   forkLaunchArgv(SessionID(), model, BootstrapPrompt(ch, alias)),
+		Argv:   forkLaunchArgv(SessionID(), model, name, BootstrapPrompt(ch, alias)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
@@ -145,11 +152,12 @@ func keepNameChars(s string) string {
 // forkLaunchArgv builds the child launch command, replicating cc-branch.sh: relaunch
 // through `ccs <profile>` when running under a CCS instance config dir (so the child
 // gets the right profile/config/PATH), else a bare `claude`; always --resume <sid>
-// --fork-session, an optional --model override, with the bootstrap prompt as the
-// final positional turn when non-empty. The model token is passed through verbatim
-// (the CLI validates the actual model set) — a bad value makes the child window die
-// at launch, so callers pre-screen the token shape via core.ValidName.
-func forkLaunchArgv(sid, model, prompt string) []string {
+// --fork-session, an optional --model override, an optional --name session title,
+// with the bootstrap prompt as the final positional turn when non-empty. The model
+// token is passed through verbatim (the CLI validates the actual model set) — a bad
+// value makes the child window die at launch, so callers pre-screen the token shape
+// via core.ValidName.
+func forkLaunchArgv(sid, model, name, prompt string) []string {
 	var argv []string
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
 		argv = []string{"ccs", filepath.Base(cfg), "--resume", sid, "--fork-session"}
@@ -158,6 +166,9 @@ func forkLaunchArgv(sid, model, prompt string) []string {
 	}
 	if model != "" {
 		argv = append(argv, "--model", model)
+	}
+	if name != "" {
+		argv = append(argv, "--name", name)
 	}
 	if prompt != "" {
 		argv = append(argv, prompt)

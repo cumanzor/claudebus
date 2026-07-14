@@ -9,8 +9,8 @@ package main
 // dropped — cbus-go's `branch` is native (P2.5 TerminalForker), so CC_BRANCH is no
 // longer consulted (port-map delta table). Self-id stays `cbus` (Option X): cutover
 // is a pure binary swap. Post-cutover additions with no bash counterpart: the
-// `spawn` block (cbus-ijx.2) and the `--model` flag on branch/spawn. Everything
-// else matches bash byte-for-byte.
+// `spawn` block (cbus-ijx.2) and the `--model`/`--name` flags on branch/spawn.
+// Everything else matches bash byte-for-byte.
 const usage = `cbus — message bus between live Claude Code sessions, in named channels
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
@@ -37,12 +37,16 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    from the git repo name; arm the Monitor after)
        --model <m>                 launch the child on a specific model
                                    (e.g. sonnet, opus, fable)
+       --name <n>                  child session display name — picker + terminal
+                                   title (default: the channel)
   cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
                                    a fork) that joins + arms the channel on its
                                    own (target: window|tab|tmux; local channel
                                    auto-derives; channel@host must be explicit,
                                    no alias — the child picks its own)
        --model <m>                 launch the child on a specific model
+       --name <n>                  child session display name (default: the
+                                   channel or channel@host)
   cbus prune [channel]             remove dead peers (and empty channels)
   cbus leave [channel]             leave channel(s) this session joined
   cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
@@ -66,7 +70,7 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 
   aliases are explicit — pick a short hostname/role (e.g. mbp, nuc). endpoint
   autodetects: loopback :8090 on the relay host, else the public CF hostname.
-  known hosts: nuc (override/add via CBUS_SITE_<HOST>_URL).
+  no built-in hosts: point each relay host at its base via CBUS_SITE_<HOST>_URL.
 
 convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.

@@ -250,26 +250,37 @@ func runBootstrap(args []string) int {
 	return 0
 }
 
-// extractModel pulls a `--model <value>` pair out of args wherever it appears
-// (branch/spawn take it trailing or leading), returning the remaining positionals.
-func extractModel(args []string) (model string, rest []string, err error) {
+// extractFlag pulls a `<flag> <value>` pair out of args wherever it appears
+// (branch/spawn take flags trailing or leading), returning the remaining positionals.
+func extractFlag(args []string, flag string) (val string, rest []string, err error) {
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--model" {
+		if args[i] == flag {
 			if i+1 >= len(args) {
-				return "", nil, fmt.Errorf("--model: missing value")
+				return "", nil, fmt.Errorf("%s: missing value", flag)
 			}
-			model = args[i+1]
+			val = args[i+1]
 			i++
 			continue
 		}
 		rest = append(rest, args[i])
 	}
-	return model, rest, nil
+	return val, rest, nil
+}
+
+// extractForkFlags pulls the branch/spawn-shared `--model` and `--name` pairs.
+func extractForkFlags(args []string) (model, name string, rest []string, err error) {
+	if model, rest, err = extractFlag(args, "--model"); err != nil {
+		return "", "", nil, err
+	}
+	if name, rest, err = extractFlag(rest, "--name"); err != nil {
+		return "", "", nil, err
+	}
+	return model, name, rest, nil
 }
 
 func runBranch(args []string) int {
-	const use = "usage: cbus branch [window|tab|tmux] [channel] [--model m]"
-	model, args, merr := extractModel(args)
+	const use = "usage: cbus branch [window|tab|tmux] [channel] [--model m] [--name n]"
+	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
 	}
@@ -284,7 +295,7 @@ func runBranch(args []string) int {
 	if len(args) > 1 {
 		ch = args[1]
 	}
-	rch, alias, err := client.Branch(target, ch, model, client.OSAForker{})
+	rch, alias, err := client.Branch(target, ch, model, name, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -294,8 +305,8 @@ func runBranch(args []string) int {
 }
 
 func runSpawn(args []string) int {
-	const use = "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>] [--model m]"
-	model, args, merr := extractModel(args)
+	const use = "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>] [--model m] [--name n]"
+	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
 	}
@@ -310,7 +321,7 @@ func runSpawn(args []string) int {
 	if len(args) > 1 {
 		addr = args[1]
 	}
-	rAddr, err := client.Spawn(target, addr, model, client.OSAForker{})
+	rAddr, err := client.Spawn(target, addr, model, name, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
