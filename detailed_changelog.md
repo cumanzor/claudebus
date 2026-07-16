@@ -1,5 +1,110 @@
 # Changelog (detailed)
 
+## [2026-07-16 19:21:15 UTC] [Client/Formations] Apply: launch the missing peers and prove they answered (M5)
+
+[Attempt #1]
+
+Fifth milestone of formations v1: apply, approved with one class-C
+(non-blocking) finding. This entry covers b57511d and 1cbdec3 together, plus
+a refactor and a note connecting back to M4's record, per the
+hold-for-verdict rule.
+
+1cbdec3 adds the apply engine and its CLI. Launch is sequential and
+anchor-first, so a formation whose members expect an orchestrator to already
+be listening gets one before anyone else starts. The whole plan is decided
+before anything launches (M4's contribution) — a refusal must not arrive
+halfway through a fleet. Convergence is a round-trip and nothing else: each
+kickoff carries a nonce and asks for it back, and apply reads its own inbox
+for the answers with a bounded file read against a deadline — never an exec
+of the tail follower, which would block forever. Reading is non-destructive,
+so the applier's own Monitor still sees every frame. A peer that never
+answers is reported failed, because launched is not converged and a roster
+marker would otherwise be trusted when it has lied in both directions before
+(the B31 and presence-smoke history this design keeps citing). The three
+modes launch three different ways: resume continues a session as itself and
+must not carry `--fork-session`; kickoffs tell a peer what it IS — a fork is
+warned it is not the original and must not act on its parent's unfinished
+work, and a peer degraded to template is told it lost the history it was
+meant to have. Nothing launches when nothing is launchable: an empty fleet
+reporting success is how a restore that did nothing gets read as one that
+worked, so that case is a failure, not a quiet no-op. `--dry-run`, `--only`,
+and `--wait` ship here; kickoffs follow design section 5.3 with D15's
+advisory rolefile pins.
+
+b57511d, a D11 self-find folded into the same milestone: the applier is
+never itself a peer to launch. An orchestrator that saved a formation is
+normally in it and is the one running apply — it cannot be missing, it is
+here. Without this fix, an applier whose Monitor had died planned a relaunch
+of its own alias and then failed on its own reservation, so the common case
+(the orchestrator applying its own formation) could not work. The fix lives
+in the plan rather than in apply itself, so `--dry-run` rehearses the same
+play that actually runs — this peer's liveness cannot lie, because it is the
+one executing the check. A second D11 in the same range: a duplicate
+no-escalation line in template kickoffs, caught not by a unit test but by
+reading a rendered 7.6KB kickoff end to end; now emitted exactly once per
+mode.
+
+Reviewer live dry-ran apply against the real formations channel (this
+formation, its own peers). Honest mechanism note carried for the record: a
+whole-store diff between before/after snapshots is racy on a live bus — the
+reviewer's first residue check flagged ordinary inbox traffic as leftover
+residue, a false positive, and was replaced with a narrower, scoped check
+instead of a whole-store comparison. Trap for the record, unrelated to the
+plan's correctness: the test suite's role fixtures were shadowed by this
+repo's own real `roles/*.md` files, because `LoadRole` checks the git
+toplevel before the test's intended fixture directory — a test was passing
+for the wrong reason. Fixtures were renamed to names that don't collide with
+shipping roles. No live smoke (an actual formation launch) has run yet; that
+stays orchestrator-gated.
+
+a5b8b72, a small refactor riding the same range: extracts the shared
+child-launch prefix (the CCS-instance detection that `branch` and `spawn`
+each rebuilt inline, and that apply now needs a third time with the profile
+overridden per peer) into one place. Behavior is unchanged for both existing
+callers — an empty profile still resolves to the caller's own, which is what
+they passed implicitly before.
+
+Connects back to M4's record: 68f81ed (the c1 precedence pin, already
+written into M4's entry) sits inside this same commit range; the reviewer
+independently re-ran its own mutation test on that pin to reconfirm it while
+reviewing M5, rather than take the earlier confirmation on faith.
+
+[Files Changed]
+- internal/client/formation_apply.go (new) + formation_apply_test.go (new):
+  the apply engine, convergence, and the failed/converged/degraded reporting.
+- internal/client/formation_kickoff.go (new) + formation_kickoff_test.go
+  (new): per-mode kickoff composition (resume/fork/template), D15 advisory
+  pins, the no-escalation line.
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go, cmd/cbus/usage.go:
+  apply dispatch, `--dry-run`/`--only`/`--wait`.
+- internal/client/formation_plan.go (b57511d): the applier-exclusion rule.
+- internal/client/harness.go, internal/client/spawn.go (a5b8b72): shared
+  child-launch prefix extraction.
+
+[Possible Ripple Effects]
+- Convergence now depends on a bounded inbox read with a deadline; a very
+  slow or wedged peer reads as failed rather than hanging apply.
+- The shared launch-prefix helper is now a single point of change for
+  branch, spawn, and apply's per-peer profile override alike.
+- Test fixtures for role resolution must keep avoiding real `roles/*.md`
+  names going forward, or the shadowing trap recurs silently.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Reviewer live dry-run against the real formations channel (this
+  formation's own peers), scoped-diff residue check after the whole-store
+  diff proved racy on a live bus.
+- Fixture-shadowing trap caught and fixed before it could hide a real
+  resolution-order bug.
+
+Class-C c2 folds in without a separate re-review: payload references must
+render in the envelope's own order, not sorted — reading order is the point
+of M1's hand-edit preservation guarantee, so sorting it away here would
+undercut that. Commit hash pending; appends the same way c1 did.
+
+Record-only: n12 — one convergence poll tick costs O(inbox size); bounded
+and fine at formation scale, revisit only if inboxes grow very large.
+
 ## [2026-07-16 19:05:44 UTC] [Client/Formations] The apply plan (M4): every decision made before anything launches
 
 [Attempt #1]
