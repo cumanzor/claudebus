@@ -1,5 +1,91 @@
 # Changelog (detailed)
 
+## [2026-07-16 07:42:19 UTC] [Docs/Roles] Role prompts for cbus formations — orchestrator, coder, reviewer, documenter
+
+[Attempt #1]
+
+A multi-session formation (four peers on a shared channel, one per role) distilled
+the go-port formation's live dispatches into committed role prompts. The prior
+formation's process rules — propose-then-code, facts-not-changelogs, verdict format,
+verify-don't-trust, stage-before-verdict, milestone-hash reporting — existed only as
+messages typed live by an orchestrator each time a new peer spawned. The design
+constraint was the one alignment failure that motivated the work: a successor coder
+once wrote its own changelog commit because a handoff carried the technical spec and
+dropped the process rule that forbade it. So the shared standing-doctrines block is
+duplicated byte-identical across all four files instead of factored out, and no file
+references another — a role prompt has to survive being pasted alone into a fresh
+window with nothing else loaded.
+
+Base commit (411c083) landed four files: a mission, the doctrine block, role-specific
+process rules, a literal report/verdict template, escalation guidance, and anti-patterns
+per role, plus a MODEL: line giving `spawn` a per-role default (orchestrator fable,
+coder opus, reviewer fable, documenter sonnet).
+
+An independent reviewer session then read the four files cold against the source
+transcripts and returned CONDITIONAL APPROVE: one binding fidelity fix plus riders.
+The binding fix (F1): doctrine 2 claimed "anything queued while you were dark replays
+on the next arm," true only on the relay path. Locally, only the first arm replays —
+every re-arm seeks to end, so messages queued while a listener was dead are skipped
+silently. As originally written, a local peer would trust replay and never think to
+ask for a resend; the fix scopes the claim per path and tells the local case to assume
+loss and ask. Riders folded into the same follow-up commit (4e0a497): doctrine 10
+gained the same treatment (a rename orphans the old alias; a send to it fails silently
+only on the relay path, dies loud locally), orchestrator.md gained a dispatch-anatomy
+rule (a confirmable first reply, since an ack alone proves nothing) plus kickoff and
+review-request templates, coder.md gained a ruling-request form (lettered options,
+explicit recommendation, what proceeds meanwhile) and dropped "one milestone, one
+commit" as a wrong absolute — a milestone may legitimately span several commits; the
+real invariant is that two milestones never share one. A polarity rule also went into
+orchestrator.md: two peers deadlocked earlier in the effort because a mutual dependency
+was framed with opposite polarity to each of them, and each was correctly following
+what it had been told.
+
+Re-review of 4e0a497 came back APPROVED with one class-C note (n5): doctrine 10's new
+wording still said sends to a stale address fail silently without naming which path,
+the same error class as F1 one commit earlier. Class-C semantics let the coder fold it
+without a further review round; b3a806e scopes the claim explicitly to the remote path
+and re-verifies the doctrine block is still byte-identical across all four files.
+
+Notable process finding: a blind extraction cross-check compared what the coder session
+and the reviewer session each independently flagged as gaps against the source
+transcripts. Zero overlap — the two passes were complementary (one mined peer behavior,
+the other mined artifact claims), which is itself evidence for running review as a
+second, independently-sourced pass rather than a checklist against the same material.
+
+[Files Changed]
+
+- `roles/orchestrator.md` — mission, doctrine block, dispatch-anatomy rule, kickoff +
+  review-request templates, polarity rule.
+- `roles/coder.md` — mission, doctrine block, ruling-request form, milestone/commit
+  invariant correction.
+- `roles/reviewer.md` — mission, doctrine block, verdict format, class-C fold semantics.
+- `roles/documenter.md` — mission, doctrine block, changelog/tracker-write process rules.
+
+(429 lines across three commits: 411c083 adds all four files; 4e0a497 and b3a806e are
+scoped follow-ups touching the same four.)
+
+[Possible Ripple Effects]
+
+- Prompts only — no `spawn --role` plumbing yet, so nothing currently consumes the
+  MODEL: line or auto-attaches these files to a spawned peer.
+- The doctrine block is intentionally duplicated, not shared. Any future edit to a
+  standing doctrine has to be applied to all four files by hand; the files carry no
+  cross-reference to enforce that, by design.
+- Two remaining gaps noted but not folded (record-only, deferred to a future pass):
+  reviewer.md doesn't mention staged-confirmation harnesses or declaring one's own
+  loopback traffic, and lacks a tracker-reference line analogous to the other three.
+
+[Testing Notes]
+
+- Reviewed end to end by an independently-sourced reviewer session against the go-port
+  transcripts, not against the coder's own summary of them.
+- Verdict classes exercised live: CONDITIONAL APPROVE (411c083, binding fix required),
+  APPROVED + class-C (4e0a497, self-fold without re-review).
+- Two live template dogfoods during the same effort: the review-request template (F2)
+  was used for the real review request that produced this verdict; the ruling-request
+  form (F4) was used for actual ruling requests before it was formally codified in
+  coder.md.
+
 ## [2026-07-14 23:36:41 UTC] [Relay/Presence] Remote presence MVP — join/departed cross the relay (cbus-ijx.5)
 
 [Attempt #1]
