@@ -52,6 +52,12 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    (remote: pre-assigns the relay alias; omitted
                                    on remote, the child picks and the title is
                                    the address)
+       --role <r>                  append the committed role prompt roles/<r>.md
+                                   (spawn cwd's repo, else $CBUS_DIR/roles) to
+                                   the child's first turn; defaults --name to the
+                                   role and --model to its MODEL: line
+                                   (spawn-only — a fork inherits its parent's
+                                   intent, so branch refuses --role)
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined

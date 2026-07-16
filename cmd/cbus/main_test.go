@@ -250,3 +250,21 @@ func TestRenderRemoteList(t *testing.T) {
 		t.Errorf("empty render = %q", empty)
 	}
 }
+
+// TestBranchRefusesRole: roles are spawn-only; branch dies before any side
+// effect (a fork inherits its parent's intent).
+func TestBranchRefusesRole(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	for _, args := range [][]string{
+		{"tab", "rolechan", "--role", "coder"},
+		{"--role", "coder"},
+		{"tab", "rolechan", "--role"},
+	} {
+		if rc := runBranch(args); rc == 0 {
+			t.Fatalf("runBranch(%v) = 0, want refusal", args)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(client.CBUSDir(), "rolechan")); err == nil {
+		t.Fatal("refusal must precede any reservation")
+	}
+}
