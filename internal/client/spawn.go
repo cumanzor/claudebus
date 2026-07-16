@@ -54,12 +54,29 @@ func SpawnPromptAliased(address, alias string) string {
 // git toplevel, then global); a remote address (channel@host) must be explicit —
 // there `name` pre-assigns the child's relay alias, or the child picks its own and
 // the title falls back to the address (the relay has no reservations).
+// A non-empty `role` appends the committed role prompt (LoadRole) to the child's
+// first turn and defaults name to the role and model to the file's MODEL: line.
+// Roles are spawn-only by design: a fork inherits its parent's intent, so the CLI
+// refuses --role on branch.
 // Returns the resolved address and the fixed child alias ("" = remote self-pick).
-func Spawn(target, address, model, name string, forker TerminalForker) (addr, childAlias string, err error) {
+func Spawn(target, address, model, name, role string, forker TerminalForker) (addr, childAlias string, err error) {
 	switch target {
 	case "window", "tab", "tmux":
 	default:
 		return "", "", fmt.Errorf("target must be window|tab|tmux")
+	}
+	var roleBody string
+	if role != "" {
+		var roleDefault string
+		if roleBody, roleDefault, err = LoadRole(role); err != nil {
+			return "", "", err
+		}
+		if model == "" {
+			model = roleDefault
+		}
+		if name == "" {
+			name = role
+		}
 	}
 	// see Branch: reject the flag-shaped model token pre-fork (instant-close trap).
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
@@ -99,6 +116,11 @@ func Spawn(target, address, model, name string, forker TerminalForker) (addr, ch
 			return "", "", err
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)
+	}
+	if roleBody != "" {
+		// role brief rides AFTER the join/arm instructions, matching how briefs
+		// were dispatched manually; the file is designed to be pasted alone.
+		prompt = prompt + "\n\n" + strings.TrimSpace(roleBody)
 	}
 	spec := ForkSpec{
 		Target: target,

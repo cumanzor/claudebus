@@ -12,7 +12,7 @@ func TestSpawnFreshArgvCCSProfile(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/Users/x/.ccs/instances/personal")
 	t.Setenv("PATH", "/usr/bin:/bin")
 	f := &fakeForker{}
-	addr, child, err := Spawn("window", "dev", "", "", f)
+	addr, child, err := Spawn("window", "dev", "", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestSpawnFreshArgvBareClaude(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	f := &fakeForker{}
-	if _, _, err := Spawn("tab", "dev", "", "", f); err != nil {
+	if _, _, err := Spawn("tab", "dev", "", "", "", f); err != nil {
 		t.Fatal(err)
 	}
 	if f.spec.Argv[0] != "claude" {
@@ -56,7 +56,7 @@ func TestSpawnFreshArgvBareClaude(t *testing.T) {
 
 func TestSpawnRemoteAddress(t *testing.T) {
 	f := &fakeForker{}
-	addr, child, err := Spawn("tab", "dev@nuc", "", "", f)
+	addr, child, err := Spawn("tab", "dev@nuc", "", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSpawnRejectsAliasAndBadNames(t *testing.T) {
 		{"window", "dev@", `bad host ""`},
 		{"window", "@nuc", `bad channel ""`},
 	} {
-		if _, _, err := Spawn(tc.target, tc.addr, "", "", f); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+		if _, _, err := Spawn(tc.target, tc.addr, "", "", "", f); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 			t.Fatalf("Spawn(%q,%q) err = %v, want %q", tc.target, tc.addr, err, tc.wantErr)
 		}
 	}
@@ -135,7 +135,7 @@ func TestSpawnDefaultDerivesGlobalOutsideGit(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Chdir(t.TempDir())
 	f := &fakeForker{}
-	addr, _, err := Spawn("window", "", "", "", f)
+	addr, _, err := Spawn("window", "", "", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestSpawnModelFlag(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "/Users/x/.ccs/instances/personal")
 	f := &fakeForker{}
-	_, child, err := Spawn("window", "dev", "sonnet", "", f)
+	_, child, err := Spawn("window", "dev", "sonnet", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestBranchModelFlagAndBadModel(t *testing.T) {
 	if _, _, _, err := Branch("tab", "modelchan", "bad model", "", f); err == nil || !strings.Contains(err.Error(), `bad model "bad model"`) {
 		t.Fatalf("bad model err = %v", err)
 	}
-	if _, _, err := Spawn("tab", "dev", "-x", "", f); err == nil || !strings.Contains(err.Error(), `bad model "-x"`) {
+	if _, _, err := Spawn("tab", "dev", "-x", "", "", f); err == nil || !strings.Contains(err.Error(), `bad model "-x"`) {
 		t.Fatalf("spawn bad model err = %v", err)
 	}
 }
@@ -191,7 +191,7 @@ func TestSpawnNameFixesAlias(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	f := &fakeForker{}
-	_, child, err := Spawn("window", "dev", "", "runner", f)
+	_, child, err := Spawn("window", "dev", "", "runner", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestSpawnNameFixesAlias(t *testing.T) {
 	}
 	// remote with --name: pre-assigned, no local reservation
 	f = &fakeForker{}
-	_, child, err = Spawn("tab", "dev@nuc", "", "mbp2", f)
+	_, child, err = Spawn("tab", "dev@nuc", "", "mbp2", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestSpawnNameFixesAlias(t *testing.T) {
 		t.Fatal("remote spawn must not create local state")
 	}
 	for _, bad := range []string{"runner 2", "-x"} {
-		if _, _, err := Spawn("window", "dev", "", bad, f); err == nil || !strings.Contains(err.Error(), "bad name") {
+		if _, _, err := Spawn("window", "dev", "", bad, "", f); err == nil || !strings.Contains(err.Error(), "bad name") {
 			t.Fatalf("bad name %q err = %v", bad, err)
 		}
 	}
@@ -233,11 +233,11 @@ func TestSpawnAutoReservesAlias(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	f := &fakeForker{}
-	_, first, err := Spawn("window", "dev", "", "", f)
+	_, first, err := Spawn("window", "dev", "", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, second, err := Spawn("window", "dev", "", "", f)
+	_, second, err := Spawn("window", "dev", "", "", "", f)
 	if err != nil {
 		t.Fatal(err)
 	}

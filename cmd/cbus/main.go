@@ -292,6 +292,11 @@ func runBranch(args []string) int {
 	if merr != nil {
 		return die("%v (%s)", merr, use)
 	}
+	// roles are spawn-only: a fork inherits its parent's intent, and forking
+	// across roles is the documented anti-pattern (ghost orchestration).
+	if role, rest, rerr := extractFlag(args, "--role"); rerr != nil || role != "" || len(rest) != len(args) {
+		return die("--role rides fresh spawns only (a fork inherits its parent's intent) — use: cbus spawn ... --role <r>")
+	}
 	if err := noExtra(args, 2, use); err != nil {
 		return die("%v", err)
 	}
@@ -313,10 +318,14 @@ func runBranch(args []string) int {
 }
 
 func runSpawn(args []string) int {
-	const use = "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>] [--model m] [--name n]"
+	const use = "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>] [--model m] [--name n] [--role r]"
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
+	}
+	role, args, rerr := extractFlag(args, "--role")
+	if rerr != nil {
+		return die("%v (%s)", rerr, use)
 	}
 	if err := noExtra(args, 2, use); err != nil {
 		return die("%v", err)
@@ -329,12 +338,16 @@ func runSpawn(args []string) int {
 	if len(args) > 1 {
 		addr = args[1]
 	}
-	rAddr, child, err := client.Spawn(target, addr, model, name, client.OSAForker{})
+	rAddr, child, err := client.Spawn(target, addr, model, name, role, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
 	if child != "" {
-		fmt.Printf("spawned: fresh session -> %s/%s (%s, alias fixed + session titled); it joins and arms itself\n", rAddr, child, target)
+		brief := ""
+		if role != "" {
+			brief = " + role brief"
+		}
+		fmt.Printf("spawned: fresh session -> %s/%s (%s, alias fixed + session titled%s); it joins and arms itself\n", rAddr, child, target, brief)
 	} else {
 		fmt.Printf("spawned: fresh session -> %s (%s); it joins and arms itself (picks its own alias)\n", rAddr, target)
 	}
