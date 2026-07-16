@@ -13,7 +13,7 @@ import (
 // formationUsage advertises only the verbs that exist. save/apply/bootstrap land
 // in later milestones and are absent on purpose — a help text that promises a verb
 // the binary does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation list | show <name> | rm <name>"
+const formationUsage = "usage: cbus formation save <name> [channel] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -22,6 +22,8 @@ func runFormation(args []string) int {
 		args = args[1:]
 	}
 	switch sub {
+	case "save":
+		return runFormationSave(args)
 	case "list":
 		return runFormationList(args)
 	case "show":
@@ -30,6 +32,73 @@ func runFormation(args []string) int {
 		return runFormationRm(args)
 	default:
 		return die(formationUsage)
+	}
+}
+
+func runFormationSave(args []string) int {
+	const use = "usage: cbus formation save <name> [channel]"
+	if len(args) == 0 {
+		return die(use)
+	}
+	if err := noExtra(args, 2, use); err != nil {
+		return die("%v", err)
+	}
+	name := args[0]
+	ch := ""
+	if len(args) > 1 {
+		ch = args[1]
+	}
+	if ch == "" {
+		var err error
+		if ch, err = ownChannel(); err != nil {
+			return die("%v (%s)", err, use)
+		}
+	}
+	f, rep, err := client.SaveFormation(name, ch)
+	if err != nil {
+		return die("%v", err)
+	}
+	path, _ := client.FormationPath(name)
+	state := "refreshed"
+	if rep.New {
+		state = "new"
+	}
+	fmt.Printf("saved formation %q (%s, %s)\n", name, path, state)
+	var parts []string
+	if len(rep.Added) > 0 {
+		parts = append(parts, fmt.Sprintf("+%d new (%s)", len(rep.Added), strings.Join(rep.Added, ", ")))
+	}
+	if len(rep.Updated) > 0 {
+		parts = append(parts, fmt.Sprintf("%d refreshed (%s)", len(rep.Updated), strings.Join(rep.Updated, ", ")))
+	}
+	if len(rep.Kept) > 0 {
+		parts = append(parts, fmt.Sprintf("%d kept, not on the channel now (%s)", len(rep.Kept), strings.Join(rep.Kept, ", ")))
+	}
+	fmt.Printf("  channel %q: %s\n", f.Channel, strings.Join(parts, "; "))
+	if len(rep.Added) > 0 {
+		fmt.Println("  captured alias/sessionId/cwd/machine — the store records nothing else;")
+		fmt.Println("  model, rolefile/role, origin and profile are yours to fill in")
+	}
+	fmt.Printf("  check it: cbus formation show %s\n", name)
+	return 0
+}
+
+// ownChannel resolves the channel to save when none was given: this session's own.
+// It refuses to guess between several rather than silently taking the first, the
+// same way rename does.
+func ownChannel() (string, error) {
+	regs := client.ResolveSelf()
+	switch len(regs) {
+	case 0:
+		return "", fmt.Errorf("not joined to a channel in this session — pass one")
+	case 1:
+		return regs[0].Channel, nil
+	default:
+		names := make([]string, 0, len(regs))
+		for _, r := range regs {
+			names = append(names, r.Channel)
+		}
+		return "", fmt.Errorf("joined to %d channels (%s) — pass one", len(regs), strings.Join(names, ", "))
 	}
 }
 

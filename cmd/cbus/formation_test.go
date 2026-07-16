@@ -141,6 +141,73 @@ func TestFormationShowUncheckedNotStale(t *testing.T) {
 	}
 }
 
+// plantMeta writes a peer registration so the save verb reads a real roster.
+func plantMeta(t *testing.T, dir, ch, alias, sid string) {
+	t.Helper()
+	pdir := filepath.Join(dir, ch, alias)
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"alias":"` + alias + `","channel":"` + ch + `","sessionId":"` + sid + `",` +
+		`"cwd":"/Users/dev/repos/AI/claudebus","listenerPid":null,"ownerPid":null,` +
+		`"host":"carlos-mbp","ts":"2026-07-16T18:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(pdir, "meta.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFormationSaveVerb(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+	plantMeta(t, dir, "roles", "coder", "sid-coder")
+
+	// channel omitted: resolved from this session's own registration
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"save", "roles"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
+		"model, rolefile/role, origin and profile are yours to fill in", "cbus formation show roles"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("save output missing %q:\n%s", want, out)
+		}
+	}
+
+	// a re-save is a refresh, and says so
+	out = captureStdout(t, func() {
+		if rc := runFormation([]string{"save", "roles", "roles"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	if !strings.Contains(out, "refreshed") || strings.Contains(out, "+2 new") {
+		t.Errorf("re-save should refresh, not re-add:\n%s", out)
+	}
+}
+
+func TestFormationSaveChannelResolution(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-me")
+
+	// not joined anywhere and no channel given: refuse rather than guess
+	if rc := runFormation([]string{"save", "x"}); rc == 0 {
+		t.Error("want a refusal when the session is not joined and no channel is given")
+	}
+	// joined to two channels: refuse rather than silently take the first
+	plantMeta(t, dir, "one", "me", "sid-me")
+	plantMeta(t, dir, "two", "me", "sid-me")
+	if rc := runFormation([]string{"save", "x"}); rc == 0 {
+		t.Error("want a refusal when the session is joined to several channels")
+	}
+	// explicit channel resolves it
+	if rc := runFormation([]string{"save", "x", "one"}); rc != 0 {
+		t.Error("an explicit channel should save")
+	}
+}
+
 func TestFormationVerbErrors(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
@@ -150,8 +217,11 @@ func TestFormationVerbErrors(t *testing.T) {
 	}{
 		{"no subverb", []string{}},
 		{"unknown subverb", []string{"frobnicate"}},
-		{"save is not built yet", []string{"save", "x"}},
 		{"apply is not built yet", []string{"apply", "x"}},
+		{"save with no name", []string{"save"}},
+		{"save trailing junk", []string{"save", "a", "b", "c"}},
+		{"save bad name", []string{"save", "a/b", "roles"}},
+		{"save unknown channel", []string{"save", "x", "ghostchannel"}},
 		{"show with no name", []string{"show"}},
 		{"show trailing junk", []string{"show", "a", "b"}},
 		{"show missing", []string{"show", "ghost"}},
@@ -197,8 +267,14 @@ func TestFormationDispatch(t *testing.T) {
 	if !strings.Contains(out, "no formations saved") {
 		t.Errorf("dispatch = %q", out)
 	}
-	if strings.Contains(formationUsage, "save") || strings.Contains(formationUsage, "apply") {
-		t.Errorf("usage advertises an unbuilt verb: %q", formationUsage)
+	// the help must advertise what exists and nothing else
+	if !strings.Contains(formationUsage, "save") {
+		t.Errorf("usage omits a built verb: %q", formationUsage)
+	}
+	for _, unbuilt := range []string{"apply", "bootstrap"} {
+		if strings.Contains(formationUsage, unbuilt) {
+			t.Errorf("usage advertises an unbuilt verb %q: %s", unbuilt, formationUsage)
+		}
 	}
 	if !strings.Contains(usage, "cbus formation list") || !strings.Contains(usage, "cbus formation show") {
 		t.Error("cbus --help does not mention the formation verbs")
