@@ -70,6 +70,10 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
        --only a,b                  only these peers
        --wait <dur>                how long to wait for each peer to answer its
                                    kickoff (default 90s; 0 = launch and return)
+  cbus formation bootstrap <name> <alias> [--brief TEXT]
+                                   print ONE peer's first-turn prompt to paste
+                                   by hand (the path for a peer apply will not
+                                   launch — e.g. one recorded on another machine)
   cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles

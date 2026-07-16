@@ -14,7 +14,7 @@ import (
 // formationUsage advertises only the verbs that exist. bootstrap lands in a later
 // milestone and is absent on purpose — a help text that promises a verb the binary
 // does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | list | show <name> | rm <name>"
+const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -27,6 +27,8 @@ func runFormation(args []string) int {
 		return runFormationSave(args)
 	case "apply":
 		return runFormationApply(args)
+	case "bootstrap":
+		return runFormationBootstrap(args)
 	case "list":
 		return runFormationList(args)
 	case "show":
@@ -176,6 +178,40 @@ func renderApplyReport(f *client.Formation, rep *client.ApplyReport, opts client
 	if opts.Wait > 0 && !rep.Converged() {
 		fmt.Println("  NOT converged: a peer never answered. apply reconciles — fix the cause and re-run it.")
 	}
+}
+
+// runFormationBootstrap prints one peer's first-turn prompt and nothing else — the
+// paste-it-yourself path for when a peer is launched by hand, or when apply cannot
+// (another machine), or when someone wants to READ what a peer would be told before
+// a fleet is opened.
+//
+// It composes through the same KickoffPrompt apply uses. A second renderer would
+// drift, and the two drifting silently is how a peer gets briefed differently
+// depending on who started it.
+func runFormationBootstrap(args []string) int {
+	const use = "usage: cbus formation bootstrap <name> <alias> [--brief TEXT]"
+	if len(args) < 2 {
+		return die(use)
+	}
+	name, alias := args[0], args[1]
+	p, err := splitVerbArgs(args[2:], map[string]bool{"--brief": true}, nil, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
+		return die("%v", err)
+	}
+	brief, _ := p.has("--brief")
+	f, err := client.LoadFormation(name)
+	if err != nil {
+		return die("%v", err)
+	}
+	prompt, err := client.BootstrapPeer(f, alias, brief)
+	if err != nil {
+		return die("%v", err)
+	}
+	fmt.Println(prompt)
+	return 0
 }
 
 // ownChannel resolves the channel to save when none was given: this session's own.
