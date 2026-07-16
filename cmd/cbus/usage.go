@@ -63,6 +63,13 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    existing file, preserving hand-edited fields
                                    (model/role/origin/profile are hand-maintained
                                    — the store records none of them)
+  cbus formation apply <name>      relaunch a formation's MISSING peers on this
+                                   host (sequential, anchor first); join the
+                                   channel first — peers are briefed to answer you
+       --dry-run                   print the plan, launch nothing
+       --only a,b                  only these peers
+       --wait <dur>                how long to wait for each peer to answer its
+                                   kickoff (default 90s; 0 = launch and return)
   cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles

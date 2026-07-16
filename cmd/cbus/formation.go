@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"claudebus/internal/client"
 )
 
-// formationUsage advertises only the verbs that exist. save/apply/bootstrap land
-// in later milestones and are absent on purpose — a help text that promises a verb
-// the binary does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation save <name> [channel] | list | show <name> | rm <name>"
+// formationUsage advertises only the verbs that exist. bootstrap lands in a later
+// milestone and is absent on purpose — a help text that promises a verb the binary
+// does not have is a bug report waiting to happen.
+const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -24,6 +25,8 @@ func runFormation(args []string) int {
 	switch sub {
 	case "save":
 		return runFormationSave(args)
+	case "apply":
+		return runFormationApply(args)
 	case "list":
 		return runFormationList(args)
 	case "show":
@@ -81,6 +84,98 @@ func runFormationSave(args []string) int {
 	}
 	fmt.Printf("  check it: cbus formation show %s\n", name)
 	return 0
+}
+
+// defaultWait is how long apply waits for kickoff answers. A fresh session takes
+// tens of seconds to boot, load its role and answer; 90s clears that with room, and
+// a peer that misses it is reported as failed rather than silently assumed good.
+const defaultWait = 90 * time.Second
+
+func runFormationApply(args []string) int {
+	const use = "usage: cbus formation apply <name> [--only a,b] [--dry-run] [--wait 90s|0]"
+	if len(args) == 0 {
+		return die(use)
+	}
+	// name first, then flags — the shape `send` uses (splitVerbArgs scans LEADING
+	// options only, so the positional cannot sit behind them).
+	name := args[0]
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--only": true, "--wait": true},
+		map[string]bool{"--dry-run": true}, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
+		return die("%v", err)
+	}
+	opts := client.ApplyOptions{DryRun: p.flags["--dry-run"], Wait: defaultWait}
+	if v, ok := p.has("--only"); ok {
+		for _, a := range strings.Split(v, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				opts.Only = append(opts.Only, a)
+			}
+		}
+		if len(opts.Only) == 0 {
+			return die("--only: name at least one peer")
+		}
+	}
+	if v, ok := p.has("--wait"); ok {
+		d, derr := time.ParseDuration(v)
+		if derr != nil || d < 0 {
+			return die("--wait: want a duration like 90s or 2m (0 = do not wait), got %q", v)
+		}
+		opts.Wait = d
+	}
+	f, err := client.LoadFormation(name)
+	if err != nil {
+		return die("%v", err)
+	}
+	rep, err := client.Apply(f, opts, client.OSAForker{})
+	if rep != nil {
+		renderApplyReport(f, rep, opts)
+	}
+	if err != nil {
+		return die("%v", err)
+	}
+	if !rep.Converged() {
+		return 1
+	}
+	return 0
+}
+
+// renderApplyReport prints what happened per peer. Every non-launch carries its
+// reason: a skip or refusal with no stated cause is how an apply that did nothing
+// gets read as an apply that worked.
+func renderApplyReport(f *client.Formation, rep *client.ApplyReport, opts client.ApplyOptions) {
+	what := "apply"
+	if rep.DryRun {
+		what = "apply --dry-run (planned only; nothing was launched)"
+	}
+	fmt.Printf("%s: formation %q -> channel %q\n", what, f.Name, f.Channel)
+	for _, d := range rep.Drift {
+		fmt.Printf("  DRIFT %s: saved %s, now %s — the snapshot is a cache, the ground is live; not blocking\n",
+			d.Anchor, d.Saved, d.Now)
+	}
+	for _, r := range rep.Results {
+		line := fmt.Sprintf("  %-16s %s", r.Alias, r.Outcome)
+		if r.Detail != "" {
+			line += " — " + r.Detail
+		}
+		fmt.Println(line)
+		if r.Nonce != "" && !rep.DryRun {
+			if r.Answered {
+				fmt.Printf("  %-16s   answered its kickoff (round-trip verified)\n", "")
+			} else if r.Outcome != client.OutcomeFailed {
+				fmt.Printf("  %-16s   launched; not waiting for an answer (--wait 0)\n", "")
+			}
+		}
+	}
+	if rep.DryRun {
+		fmt.Println("  (re-run without --dry-run to launch; the plan is built the same way either time)")
+		return
+	}
+	if opts.Wait > 0 && !rep.Converged() {
+		fmt.Println("  NOT converged: a peer never answered. apply reconciles — fix the cause and re-run it.")
+	}
 }
 
 // ownChannel resolves the channel to save when none was given: this session's own.

@@ -230,7 +230,13 @@ func TestFormationVerbErrors(t *testing.T) {
 	}{
 		{"no subverb", []string{}},
 		{"unknown subverb", []string{"frobnicate"}},
-		{"apply is not built yet", []string{"apply", "x"}},
+		{"apply with no name", []string{"apply"}},
+		{"apply trailing junk", []string{"apply", "a", "b"}},
+		{"apply unknown flag", []string{"apply", "x", "--bogus"}},
+		{"apply bad wait", []string{"apply", "x", "--wait", "soon"}},
+		{"apply negative wait", []string{"apply", "x", "--wait", "-5s"}},
+		{"apply empty only", []string{"apply", "x", "--only", ","}},
+		{"apply missing formation", []string{"apply", "ghost"}},
 		{"save with no name", []string{"save"}},
 		{"save trailing junk", []string{"save", "a", "b", "c"}},
 		{"save bad name", []string{"save", "a/b", "roles"}},
@@ -284,12 +290,55 @@ func TestFormationDispatch(t *testing.T) {
 	if !strings.Contains(formationUsage, "save") {
 		t.Errorf("usage omits a built verb: %q", formationUsage)
 	}
-	for _, unbuilt := range []string{"apply", "bootstrap"} {
+	if !strings.Contains(formationUsage, "apply") {
+		t.Errorf("usage omits a built verb: %q", formationUsage)
+	}
+	for _, unbuilt := range []string{"bootstrap"} {
 		if strings.Contains(formationUsage, unbuilt) {
 			t.Errorf("usage advertises an unbuilt verb %q: %s", unbuilt, formationUsage)
 		}
 	}
 	if !strings.Contains(usage, "cbus formation list") || !strings.Contains(usage, "cbus formation show") {
 		t.Error("cbus --help does not mention the formation verbs")
+	}
+}
+
+// TestFormationApplyVerbRefusesUnjoined: apply briefs peers to answer THIS session,
+// so it must be a peer first. The error has to name the join, not just complain.
+func TestFormationApplyVerbRefusesUnjoined(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-outsider")
+	saveFixture(t, dir, "roles", fixtureRoles())
+	if rc := runFormation([]string{"apply", "roles"}); rc == 0 {
+		t.Error("apply from a session that is not on the channel must fail")
+	}
+}
+
+// TestFormationApplyDryRunVerb: the read-only path through the real CLI. It must
+// launch nothing, so it is safe to run anywhere — including here.
+func TestFormationApplyDryRunVerb(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+	saveFixture(t, dir, "roles", fixtureRoles())
+
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"apply", "roles", "--dry-run"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	for _, want := range []string{"nothing was launched", "orchestrator", "present", "coder",
+		"re-run without --dry-run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	// the applier is a peer of this formation and is running apply: never launched
+	if !strings.Contains(out, "running apply") {
+		t.Errorf("the applier should be reported as present because it IS apply:\n%s", out)
 	}
 }
