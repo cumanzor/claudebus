@@ -1,9 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -128,27 +128,42 @@ func parseRolefile(ref string) (name, pin string) {
 // interpreted: a string value prints as itself, anything else prints as the JSON it
 // is. cbus never follows a pointer inside it and never shells out to whatever store
 // it names — the peer reads them, the tool only carries them.
+//
+// Keys keep the ENVELOPE's order, never sorted. The order is authored: an
+// orchestrator writes work_state first and a trailing _comment last because that is
+// the order it wants read, and the envelope preserves hand-authored key order
+// precisely so it survives to here. Sorting would rewrite the author's emphasis on
+// the way into the brief — a map walk cannot carry order, so this walks the raw JSON.
 func payloadRefs(payload json.RawMessage) string {
 	if len(payload) == 0 || string(payload) == "null" {
 		return ""
 	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(payload, &obj) != nil {
-		return strings.TrimSpace(string(payload)) // not an object: hand it over as-is
+	asIs := strings.TrimSpace(string(payload))
+	dec := json.NewDecoder(bytes.NewReader(payload))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return asIs // not an object: hand it over exactly as written
 	}
-	keys := make([]string, 0, len(obj))
-	for k := range obj {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
 	var lines []string
-	for _, k := range keys {
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return asIs
+		}
+		key, ok := k.(string)
+		if !ok {
+			return asIs
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return asIs
+		}
 		var s string
-		if json.Unmarshal(obj[k], &s) == nil {
-			lines = append(lines, fmt.Sprintf("%s: %s", k, s))
+		if json.Unmarshal(raw, &s) == nil {
+			lines = append(lines, fmt.Sprintf("%s: %s", key, s))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%s: %s", k, string(obj[k])))
+		lines = append(lines, fmt.Sprintf("%s: %s", key, string(raw)))
 	}
 	return strings.Join(lines, "\n")
 }

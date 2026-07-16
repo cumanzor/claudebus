@@ -325,3 +325,25 @@ func TestKickoffSelfDescribeWhenNoRole(t *testing.T) {
 		t.Errorf("a role-less peer must be asked to self-describe:\n%s", got)
 	}
 }
+
+// TestPayloadRefsKeepsAuthoredOrder: the payload's key order is authored, and the
+// envelope preserves it precisely so it survives into the brief. work_state first
+// and a trailing _comment last is what the author wants read; sorting would put
+// _comment first and rewrite their emphasis.
+func TestPayloadRefsKeepsAuthoredOrder(t *testing.T) {
+	// deliberately NOT alphabetical: sorted output would be _comment, blockers, work_state
+	got := payloadRefs(json.RawMessage(`{"work_state":"read me first","blockers":"then me","_comment":"read LAST"}`))
+	want := "work_state: read me first\nblockers: then me\n_comment: read LAST"
+	if got != want {
+		t.Errorf("payload order not preserved:\n got %q\nwant %q", got, want)
+	}
+	// a longer authored order, to catch an accidental re-sort of a bigger object
+	got = payloadRefs(json.RawMessage(`{"z_last":"1","a_middle":"2","m_first":"3"}`))
+	if want := "z_last: 1\na_middle: 2\nm_first: 3"; got != want {
+		t.Errorf("payload order not preserved:\n got %q\nwant %q", got, want)
+	}
+	// malformed JSON is still the operator's text: hand it over rather than drop it
+	if got := payloadRefs(json.RawMessage(`{"a":`)); got != `{"a":` {
+		t.Errorf("torn payload = %q, want it handed over as-is", got)
+	}
+}
