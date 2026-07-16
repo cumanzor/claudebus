@@ -42,7 +42,8 @@ expected.
 
 Class-C c3 folds in without a separate re-review: the skill's frontmatter
 trigger hint omits `bootstrap` from the verbs it lists, a one-line fix.
-Commit hash pending; appends the same way c1 and c2 did.
+Closed in 52d7dc9: bootstrap added to the argument hint, with parity
+verified across the hint, body, and usage text for all six verbs.
 
 [Files Changed]
 - internal/client/formation_kickoff.go, formation_kickoff_test.go:
@@ -66,6 +67,22 @@ Record-only: n13 — a 3-line mode-mapping block is duplicated between apply
 and bootstrap; extract on next touch, not urgent now.
 
 v1 is fully reviewed as of this milestone: M1 through M6 all closed.
+
+Honest limits, stated by the coder at wrap rather than discovered later —
+carried here verbatim in substance because a limit named at wrap is worth
+more than one found after the fact:
+- Fork mode is permanently untested live, by choice: proving it live would
+  mean manufacturing the exact ghost-orchestrator scenario the design
+  forbids. It is exercised only through a fake forker in tests.
+- Origin is unknowable at save time. R1's refusal (never fork across roles)
+  depends entirely on a human having recorded the origin correctly; nothing
+  mechanically enforces it until a meta.json birth-record ships, which is
+  Carlos-gated and not built.
+- The alive-check proves "not alive on the bus", and nothing stronger — it
+  is not a claim about the process, only about what cbus can observe.
+- Rolefile pins stay advisory, not enforced, because the pending history
+  scrub will invalidate every recorded SHA (D15) — pin-honoring today would
+  orphan every formation saved before the scrub.
 
 ## [2026-07-16 19:21:15 UTC] [Client/Formations] Apply: launch the missing peers and prove they answered (M5)
 
