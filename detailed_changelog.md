@@ -100,7 +100,17 @@ reviewing M5, rather than take the earlier confirmation on faith.
 Class-C c2 folds in without a separate re-review: payload references must
 render in the envelope's own order, not sorted — reading order is the point
 of M1's hand-edit preservation guarantee, so sorting it away here would
-undercut that. Commit hash pending; appends the same way c1 did.
+undercut that. Closed in 8806efc: `payloadRefs` now walks the raw JSON in
+envelope order instead of sorting it. Root cause was representational —
+`map[string]RawMessage` cannot represent key order at all, so a sort had been
+added for determinism that the author's own order already provided. The
+class was chased rather than patched locally: `show` already preserved order
+correctly (it renders via `json.Indent`, which is order-preserving), and
+`drift_anchors` was confirmed to stay sorted deliberately — its keys are
+unordered facts, not authored prose, so sorting them is correct and not part
+of this class. Torn or non-object payloads pass through exactly as written,
+now pinned by a test. Mutation-verified via the reviewer's own
+`TestPayloadRefsKeepsAuthoredOrder`.
 
 Record-only: n12 — one convergence poll tick costs O(inbox size); bounded
 and fine at formation scale, revisit only if inboxes grow very large.
