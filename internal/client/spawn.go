@@ -2,8 +2,6 @@ package client
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"claudebus/internal/core"
@@ -150,12 +148,7 @@ func spawnDefaultAddress() string {
 // --resume/--fork-session pair: `ccs <profile> [--model m] [--name n] <prompt>`
 // under a CCS instance config dir, else `claude [--model m] [--name n] <prompt>`.
 func freshLaunchArgv(model, name, prompt string) []string {
-	var argv []string
-	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
-		argv = []string{"ccs", filepath.Base(cfg)}
-	} else {
-		argv = []string{"claude"}
-	}
+	argv := launchPrefix("")
 	if model != "" {
 		argv = append(argv, "--model", model)
 	}
