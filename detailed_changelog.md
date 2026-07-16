@@ -1,5 +1,72 @@
 # Changelog (detailed)
 
+## [2026-07-16 19:24:22 UTC] [Client/Formations] Bootstrap and the /bus-formation skill (M6) — v1's verb set is complete
+
+[Attempt #1]
+
+Sixth and final milestone of formations v1: 8317624, approved with one
+class-C (non-blocking) finding. This closes the verb set design section 9
+committed to — save, apply, bootstrap, list, show, rm — with nothing added
+beyond it.
+
+`bootstrap` prints one peer's first turn for a human to paste: the path for
+a peer apply will not launch (one recorded on another machine), or simply
+for reading what a peer would be told before opening a fleet. It composes
+through the same prompt builder apply uses — parity by construction, not by
+convention: `BootstrapPeer` returns `KickoffPrompt` directly, with a content
+test pinning the two paths to the same output. Two renderers that could
+drift apart, briefing a peer differently depending on who started it, is
+exactly the kind of divergence nobody notices until it matters.
+
+Because it consults no live state, bootstrap does not skip a peer on another
+machine the way apply does — that peer is exactly who bootstrap exists for.
+It still refuses what the file alone proves wrong: no world is needed to
+know a fork-born peer must not be resumed, and handing someone that prompt
+anyway reproduces the ghost-orchestrator failure with extra steps. The file-
+only refusals are exactly R1, R2, and D12, mode-gated the same way apply
+gates them. A peer with no recorded role is asked to describe itself in its
+first reply — the store cannot capture a role and save cannot invent one, so
+the peer is the only one who can say what it is. The skill (`commands/
+bus-formation.md`) surfaces exactly the verbs that exist and steers to
+`--dry-run` before a real launch.
+
+Live-verified: the rendered prompt for a real peer carries the D15 advisory
+rolefile-pin line and the no-escalation line exactly once. Layers-compose
+finding, record-worthy: the reviewer fed bootstrap a malformed fixture
+envelope, and it was refused by M1's load-time validation before bootstrap's
+own output logic ever ran — the milestones compose the way they were meant
+to, rather than each needing its own copy of the same guard. The shared
+self-describe line, added for this milestone, also closed a role-less-peer
+gap the reviewer had noticed independently one milestone earlier than
+expected.
+
+Class-C c3 folds in without a separate re-review: the skill's frontmatter
+trigger hint omits `bootstrap` from the verbs it lists, a one-line fix.
+Commit hash pending; appends the same way c1 and c2 did.
+
+[Files Changed]
+- internal/client/formation_kickoff.go, formation_kickoff_test.go:
+  BootstrapPeer, the shared-composer parity test.
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go, cmd/cbus/usage.go:
+  bootstrap dispatch and help text.
+- commands/bus-formation.md (new): the `/bus-formation` skill.
+
+[Possible Ripple Effects]
+- None to the wire or relay; local CLI and skill surface only.
+- bootstrap and apply now share one kickoff composer — a future change to
+  kickoff wording or gating affects both call sites at once, which is the
+  point.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Live-verified rendered prompt content (D15 pin line, single no-escalation
+  line) and the malformed-fixture refusal path.
+
+Record-only: n13 — a 3-line mode-mapping block is duplicated between apply
+and bootstrap; extract on next touch, not urgent now.
+
+v1 is fully reviewed as of this milestone: M1 through M6 all closed.
+
 ## [2026-07-16 19:21:15 UTC] [Client/Formations] Apply: launch the missing peers and prove they answered (M5)
 
 [Attempt #1]
