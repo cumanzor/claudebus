@@ -1,5 +1,62 @@
 # Changelog (detailed)
 
+## [2026-07-16 15:32:29 UTC] [Client/Spawn] spawn --role: committed role prompts ride the child's first turn
+
+[Attempt #1]
+
+Makes formations one command per peer. Until now, launching a role-carrying peer
+meant `spawn --name <alias> --model <m>` plus hand-pasting the role brief as the
+first dispatch; the role files shipped earlier (roles/*.md) were designed to be
+pasted alone, and this flag does exactly that mechanically. `cbus spawn tab ch
+--role documenter` now equals: reserve alias `documenter`, launch on the file's
+MODEL: default (sonnet), and deliver join/arm instructions followed by the full
+role prompt as the opening turn.
+
+Design decisions, per the task's open questions:
+- Resolution order: the spawn cwd's git-toplevel `roles/<r>.md` first (role files
+  ship with the repo they serve), then `$CBUS_DIR/roles/<r>.md` as the
+  machine-global fallback. Not-found errors list every path tried.
+- The role file is read before any alias is reserved, so failures are side-effect
+  free (verified: no channel dir created on a missing role).
+- `branch` refuses `--role` outright rather than warning. A fork inherits its
+  parent's intent; the B31 restore's ghost-orchestrator failure is the canonical
+  case. The refusal message points at spawn.
+- Recording the role in the child's meta.json is deferred to the formations work
+  (it belongs with the join-side --role/role-capture design there).
+
+[Files Changed]
+- internal/client/role.go (new): LoadRole (resolution + read) and roleModel
+  (first MODEL: line, screened like --model; flag-shaped tokens read as absent).
+- internal/client/spawn.go: Spawn gains a role param; fills model/name defaults
+  before the existing validation; appends the trimmed body to the prompt in both
+  the local-aliased and remote-aliased paths.
+- cmd/cbus/main.go: runSpawn extracts --role; runBranch refuses it before any
+  side effect; spawn's success line notes "+ role brief".
+- cmd/cbus/usage.go: --role documented under spawn, including the branch refusal.
+- internal/client/role_test.go (new), spawn_test.go, cmd/cbus/main_test.go:
+  MODEL parsing table, resolution fallback + repo-toplevel + not-found, alias and
+  model defaulting, explicit-flag override, remote pre-assign, fail-before-reserve,
+  branch refusal. Existing Spawn call sites gained the new parameter.
+- internal/client/endpoint_test.go (separate commit): TestSiteURL blanks
+  CBUS_SITE_NUC_URL so the suite passes in shells that configure the fleet.
+
+[Possible Ripple Effects]
+- Spawn's signature changed (new role param); all in-repo callers updated. The
+  wire, spool, and relay are untouched; no coexistence surface moved.
+- A role named like an existing reservation behaves exactly like --name with that
+  value (same ReserveAlias path, same live-collision refusal).
+- Remote spawns with --role always pre-assign the alias (a role implies a name),
+  so the self-pick remote path never carries a role brief. Intentional.
+
+[Testing Notes]
+- go build ./... && go vet ./... && go test ./... green; -race green on
+  internal/client and cmd/cbus.
+- Live: branch --role refused (rc=1, teaching message); spawn --role ghost lists
+  both tried paths, rc=1, no reservation; spawn tab roletest --role documenter
+  launched `ccs personal --model sonnet --name documenter` with the doctrine
+  block in the prompt argv, and the child self-joined + armed as
+  roletest/documenter (cbus list: listen). Test peer dismissed after.
+
 ## [2026-07-16 07:42:19 UTC] [Docs/Roles] Role prompts for cbus formations — orchestrator, coder, reviewer, documenter
 
 [Attempt #1]
