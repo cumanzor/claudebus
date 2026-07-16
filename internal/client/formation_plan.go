@@ -97,6 +97,7 @@ type PlanWorld struct {
 	GitHead       string            // current short HEAD; "" outside a repo
 	Roster        []RosterPeer      // who is on the channel right now
 	LiveSids      map[string]string // sid -> "channel/alias" of a LIVE-ARMED holder
+	Self          string            // this session's alias on the channel, if it is a peer
 	HasTranscript func(profile, sid string) bool
 }
 
@@ -108,11 +109,19 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 		return nil, err
 	}
 	head, _ := gitHead()
+	self := ""
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch {
+			self = reg.Alias
+			break
+		}
+	}
 	return &PlanWorld{
 		Host:          ShortHostname(),
 		GitHead:       head,
 		Roster:        roster,
 		LiveSids:      liveSids(),
+		Self:          self,
 		HasTranscript: func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
 	}, nil
 }
@@ -186,6 +195,15 @@ func decidePeer(p *FormationPeer, f *Formation, w *PlanWorld, live map[string]bo
 
 	if len(selected) > 0 && !selected[p.Alias] {
 		return PeerPlan{Peer: p, Action: ActionSkip, Reason: "not selected by --only"}
+	}
+	// The applier is never a peer to launch. It is running this code, so it is alive
+	// by definition — no marker needed, and this is the one peer whose liveness cannot
+	// lie. Without it, an applier that joined but never armed would plan a launch of
+	// its OWN alias: the reservation refuses (it is this session's name), and a
+	// formation whose orchestrator is in it could not be applied by that orchestrator,
+	// which is the normal case.
+	if p.Alias == w.Self {
+		return PeerPlan{Peer: p, Action: ActionPresent, Reason: "this session — it is running apply"}
 	}
 	// Reconcile only: a peer already on the channel is left alone. This trusts the
 	// listener marker, which is the only cheap signal available before launch — and
