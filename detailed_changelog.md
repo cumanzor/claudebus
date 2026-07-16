@@ -43,15 +43,16 @@ M4 ships no CLI by design (ruling D9's surface split): `--dry-run` and
 
 Class-C c1 folds in without a separate re-review: a precedence test-pin
 asserting the refusal-priority ordering (R2) on both claimants of a
-conflict, including one with `origin=fork`. Its commit hash is pending — the
-coder reports it separately, and it will be appended here (or split into its
-own line, documenter's call) once it arrives.
+conflict, including one with `origin=fork`. Closed and reorder-verified in
+68f81ed.
 
 [Files Changed]
 - internal/client/formation_plan.go (new): BuildPlan, GatherPlanWorld, and the
   refusal table (D12/D13/D14).
 - internal/client/formation_plan_test.go (new): the refusal-class table
   tests plus the live differential harness.
+- internal/client/formation_plan_test.go (68f81ed, c1): pins the
+  shared-sid refusal ahead of the per-peer ones, asserted on both claimants.
 
 [Possible Ripple Effects]
 - M5's apply executes exactly this plan; any change to a refusal's condition
