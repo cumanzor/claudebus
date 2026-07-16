@@ -161,12 +161,7 @@ func keepNameChars(s string) string {
 // value makes the child window die at launch, so callers pre-screen the token shape
 // via core.ValidName.
 func forkLaunchArgv(sid, model, name, prompt string) []string {
-	var argv []string
-	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); strings.Contains(cfg, "/.ccs/instances/") {
-		argv = []string{"ccs", filepath.Base(cfg), "--resume", sid, "--fork-session"}
-	} else {
-		argv = []string{"claude", "--resume", sid, "--fork-session"}
-	}
+	argv := append(launchPrefix(""), "--resume", sid, "--fork-session")
 	if model != "" {
 		argv = append(argv, "--model", model)
 	}
@@ -177,6 +172,22 @@ func forkLaunchArgv(sid, model, name, prompt string) []string {
 		argv = append(argv, prompt)
 	}
 	return argv
+}
+
+// launchPrefix is the head of every child launch command: `ccs <profile>` when this
+// session runs under a CCS instance config dir (so the child gets the right
+// profile/config/PATH), else a bare `claude`. profile "" means this session's own —
+// the only caller that passes one is formation apply, which relaunches a peer under
+// the profile the peer was recorded with, not the applier's.
+func launchPrefix(profile string) []string {
+	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
+	if !strings.Contains(cfg, "/.ccs/instances/") {
+		return []string{"claude"}
+	}
+	if profile == "" {
+		profile = filepath.Base(cfg)
+	}
+	return []string{"ccs", profile}
 }
 
 // forkReplicatedEnv is the env cc-branch.sh replicated verbatim: PATH always, plus
