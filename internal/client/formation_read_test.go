@@ -22,6 +22,9 @@ func TestPeerSidState(t *testing.T) {
 	live := "a26d120e-4d73-4d91-8550-498ab65a5107"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", live)
 	here := ShortHostname()
+	// foreign BY CONSTRUCTION: strictly longer than the host it derives from, so no
+	// real hostname can collide with it and invert the unchecked cases below.
+	elsewhere := here + "-elsewhere"
 
 	for _, tc := range []struct {
 		name string
@@ -33,8 +36,8 @@ func TestPeerSidState(t *testing.T) {
 		{"transcript present", FormationPeer{Alias: "a", SessionID: live}, SidPresent},
 		{"transcript gone", FormationPeer{Alias: "a", SessionID: "dead-dead-dead"}, SidStale},
 		{"gone but this machine", FormationPeer{Alias: "a", SessionID: "dead-dead-dead", Machine: here}, SidStale},
-		{"gone on another machine", FormationPeer{Alias: "a", SessionID: "dead-dead-dead", Machine: "nuc"}, SidUnchecked},
-		{"present beats a foreign machine tag", FormationPeer{Alias: "a", SessionID: live, Machine: "nuc"}, SidPresent},
+		{"gone on another machine", FormationPeer{Alias: "a", SessionID: "dead-dead-dead", Machine: elsewhere}, SidUnchecked},
+		{"present beats a foreign machine tag", FormationPeer{Alias: "a", SessionID: live, Machine: elsewhere}, SidPresent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, detail := tc.peer.SidState()

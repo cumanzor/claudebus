@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claudebus/internal/client"
 )
 
 // saveFixture plants an envelope directly, so the cmd tests do not depend on the
@@ -20,7 +22,17 @@ func saveFixture(t *testing.T, dir, name, body string) {
 	}
 }
 
-const fixtureRoles = `{
+// thisMachine / otherMachine build fixtures against the host the test is RUNNING
+// on. A literal hostname would make the suite pass on one developer's laptop and
+// fail everywhere else — including the NUC, where a release rebuild runs it.
+// otherMachine is foreign by construction (strictly longer than any hostname it is
+// derived from), so the "recorded elsewhere" case cannot invert on a host that
+// happens to be named like the fixture.
+func thisMachine() string  { return client.ShortHostname() }
+func otherMachine() string { return client.ShortHostname() + "-elsewhere" }
+
+func fixtureRoles() string {
+	return `{
   "schema": "cbus-formation/v1",
   "name": "roles",
   "channel": "roles",
@@ -32,12 +44,13 @@ const fixtureRoles = `{
   "payload": { "work_state": "see the tracker item" },
   "peers": [
     { "alias": "orchestrator", "model": "fable", "rolefile": "roles/orchestrator.md@b3a806e",
-      "origin": "joined", "mode": "template", "target": "tab", "machine": "carlos-mbp" },
+      "origin": "joined", "mode": "template", "target": "tab", "machine": "` + thisMachine() + `" },
     { "alias": "coder", "model": "opus", "origin": "fresh", "mode": "resume",
       "sessionId": "deadbeef-0000-0000-0000-000000000000", "onStale": "template",
-      "target": "tab", "machine": "carlos-mbp" }
+      "target": "tab", "machine": "` + thisMachine() + `" }
   ]
 }`
+}
 
 func TestFormationListVerb(t *testing.T) {
 	dir := t.TempDir()
@@ -52,7 +65,7 @@ func TestFormationListVerb(t *testing.T) {
 		t.Errorf("empty list = %q", out)
 	}
 
-	saveFixture(t, dir, "roles", fixtureRoles)
+	saveFixture(t, dir, "roles", fixtureRoles())
 	saveFixture(t, dir, "broken", `{"schema":"cbus-workspace-snapshot/v3-draft"}`)
 	out = captureStdout(t, func() {
 		if rc := runFormation([]string{"list"}); rc != 0 {
@@ -73,7 +86,7 @@ func TestFormationShowVerb(t *testing.T) {
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
 	t.Setenv("HOME", t.TempDir())
-	saveFixture(t, dir, "roles", fixtureRoles)
+	saveFixture(t, dir, "roles", fixtureRoles())
 
 	out := captureStdout(t, func() {
 		if rc := runFormation([]string{"show", "roles"}); rc != 0 {
@@ -119,10 +132,10 @@ func TestFormationShowUncheckedNotStale(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	// the name field must match the filename (a formation's identity is stated in
 	// both places and they have to agree)
-	body := strings.Replace(fixtureRoles, `"name": "roles",`, `"name": "far",`, 1)
+	body := strings.Replace(fixtureRoles(), `"name": "roles",`, `"name": "far",`, 1)
 	saveFixture(t, dir, "far", strings.Replace(body,
-		`"machine": "carlos-mbp" }
-  ]`, `"machine": "nuc" }
+		`"machine": "`+thisMachine()+`" }
+  ]`, `"machine": "`+otherMachine()+`" }
   ]`, 1))
 
 	out := captureStdout(t, func() {
@@ -130,7 +143,7 @@ func TestFormationShowUncheckedNotStale(t *testing.T) {
 			t.Fatalf("rc=%d", rc)
 		}
 	})
-	if !strings.Contains(out, "unchecked — recorded on nuc") {
+	if !strings.Contains(out, "unchecked — recorded on "+otherMachine()) {
 		t.Errorf("foreign-machine sid should read unchecked:\n%s", out)
 	}
 	if strings.Contains(out, "STALE") {
@@ -150,7 +163,7 @@ func plantMeta(t *testing.T, dir, ch, alias, sid string) {
 	}
 	body := `{"alias":"` + alias + `","channel":"` + ch + `","sessionId":"` + sid + `",` +
 		`"cwd":"/Users/dev/repos/AI/claudebus","listenerPid":null,"ownerPid":null,` +
-		`"host":"carlos-mbp","ts":"2026-07-16T18:00:00Z"}`
+		`"host":"` + thisMachine() + `","ts":"2026-07-16T18:00:00Z"}`
 	if err := os.WriteFile(filepath.Join(pdir, "meta.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +254,7 @@ func TestFormationVerbErrors(t *testing.T) {
 func TestFormationRmVerb(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
-	saveFixture(t, dir, "roles", fixtureRoles)
+	saveFixture(t, dir, "roles", fixtureRoles())
 	out := captureStdout(t, func() {
 		if rc := runFormation([]string{"rm", "roles"}); rc != 0 {
 			t.Fatalf("rc=%d", rc)
