@@ -205,6 +205,21 @@ func unknownKeys(b []byte, known map[string]bool) (map[string]json.RawMessage, e
 	return raw, nil
 }
 
+// marshalNoEscape marshals a value with encoding/json's HTML escaping OFF. The
+// default turns < > & into < > &, which is valid JSON and unreadable
+// prose — and this envelope is a file humans write in. A role brief saying "if a < b"
+// or a note with "A & B" would come back mangled from the tool that promised to
+// preserve it. The escaping buys nothing here: nobody embeds a formation in a <script>.
+func marshalNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil // Encode appends one
+}
+
 // marshalOrdered emits a compact JSON object: known fields in declaration order,
 // then unknown hand-edited keys sorted (deterministic, so a re-save converges to
 // the same bytes). Compact is deliberate — encoding/json re-indents a custom
@@ -224,7 +239,7 @@ func marshalOrdered(fields []jsonField, extra map[string]json.RawMessage) ([]byt
 		b.Write(raw)
 	}
 	for _, f := range fields {
-		raw, err := json.Marshal(f.val)
+		raw, err := marshalNoEscape(f.val)
 		if err != nil {
 			return nil, err
 		}
@@ -386,11 +401,17 @@ func (f *Formation) Save() error {
 	if err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
+	// NOT json.MarshalIndent: it would re-escape < > & on the way out, undoing
+	// marshalNoEscape. An Encoder carries the setting through, indents, and ends the
+	// file with a newline like the text file it is.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(f); err != nil {
 		return err
 	}
-	b = append(b, '\n') // the file is hand-edited; end it like a text file
+	b := buf.Bytes()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

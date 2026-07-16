@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -181,6 +182,54 @@ func TestFormationPayloadOpaque(t *testing.T) {
 	}
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("payload not passed through verbatim:\n got %s\nwant %s", back.Payload, f.Payload)
+	}
+}
+
+// TestFormationDoesNotEscapeHumanText: the envelope is a file people write briefs
+// and notes in. encoding/json escapes < > & by default, which would hand back
+// "if a < b" as "if a < b" — mangled by the tool that promised to preserve it.
+func TestFormationDoesNotEscapeHumanText(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	f := loadExample(t)
+	prose := "brief: if a < b && c > d, ask <the orchestrator> first"
+	f.Peers[0].Rolefile = ""
+	f.Peers[0].Role = strptr(prose)
+	f.Payload = json.RawMessage(`{"work_state":"see <tracker> for A & B"}`)
+	f.Extra = map[string]json.RawMessage{"_note": json.RawMessage(`"x < y"`)}
+	if err := f.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, formationsDir, "roles.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 0x5c,0x75 is the two-byte sequence backslash-u: any \uXXXX escape at all.
+	// Our text needs none, and the HTML escaping this guards against emits exactly
+	// this shape (< for '<'). Byte codes, so the assertion cannot be mangled by
+	// whatever edits this file next.
+	if bytes.Contains(b, []byte{0x5c, 0x75}) {
+		t.Errorf("a unicode escape survived — human text is being escaped:\n%s", b)
+	}
+	for _, want := range []string{prose, "see <tracker> for A & B", `"x < y"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("want %q verbatim in the file:\n%s", want, b)
+		}
+	}
+	back, err := LoadFormation("roles")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if *back.Peers[0].Role != prose {
+		t.Errorf("role round-trip: got %q want %q", *back.Peers[0].Role, prose)
+	}
+	// still converges with the unescaped text present
+	if err := back.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := os.ReadFile(filepath.Join(dir, formationsDir, "roles.json"))
+	if string(b) != string(b2) {
+		t.Errorf("not convergent with unescaped text:\n%s\n---\n%s", b, b2)
 	}
 }
 
