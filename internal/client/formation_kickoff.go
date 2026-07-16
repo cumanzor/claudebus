@@ -62,6 +62,12 @@ func KickoffPrompt(f *Formation, pp PeerPlan, self, nonce, brief string) string 
 			b.WriteString("\n\n(role loaded from the working tree; the formation recorded " + pin +
 				" — the pin is not resolved, so this text may differ from what was saved.)")
 		}
+	} else {
+		// The store records no role, and save cannot invent one — so the peer is the
+		// only one who can say what it is. Asking here is how the formation's role
+		// field ever gets filled (design §6's self-describe line).
+		b.WriteString("\n\n--- your role ---\nThe formation records no role for you. " +
+			"In your first reply, describe your role in one line so it can be recorded.")
 	}
 	if s := strings.TrimSpace(brief); s != "" {
 		b.WriteString("\n\n--- the effort ---\n")
@@ -145,4 +151,85 @@ func payloadRefs(payload json.RawMessage) string {
 		lines = append(lines, fmt.Sprintf("%s: %s", k, string(obj[k])))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// BootstrapPeer renders one peer's first-turn prompt for a human to paste: the
+// manual path for a peer apply will not launch (another machine), a peer being
+// started by hand, or simply reading what a peer would be told before opening a
+// fleet.
+//
+// It composes through the same KickoffPrompt apply uses — a second renderer would
+// drift, and a peer briefed differently depending on who started it is the kind of
+// divergence nobody notices until it matters.
+//
+// Unlike apply it consults no live state, so it does not skip a peer recorded on
+// another machine — that is precisely who it is for. It still refuses what the FILE
+// alone proves wrong: those facts do not depend on a world.
+func BootstrapPeer(f *Formation, alias, brief string) (string, error) {
+	var p *FormationPeer
+	for i := range f.Peers {
+		if f.Peers[i].Alias == alias {
+			p = &f.Peers[i]
+			break
+		}
+	}
+	if p == nil {
+		return "", fmt.Errorf("formation %q has no peer %q (it has: %s)", f.Name, alias, strings.Join(peerAliases(f), ", "))
+	}
+	self, err := bootstrapReplyTo(f)
+	if err != nil {
+		return "", err
+	}
+	mode := p.Mode
+	if mode == "" {
+		mode = defaultMode
+	}
+	if mode == ModeResume || mode == ModeFork {
+		if duplicateSids(f)[p.SessionID] {
+			return "", fmt.Errorf("session %s is recorded under more than one alias in this formation — "+
+				"one of them is wrong; fix the file", p.SessionID)
+		}
+		// the same prohibition apply enforces: a fork-born peer's sid is its parent's
+		// transcript, and a prompt telling someone to resume it by hand reproduces the
+		// ghost-orchestrator failure with extra steps.
+		if p.Origin == OriginFork {
+			return "", fmt.Errorf("origin=fork means session %s is the PARENT's transcript, not %q's; "+
+				"briefing it as %s would re-run the parent's intent — set mode=template", p.SessionID, alias, mode)
+		}
+		if p.Origin == "" {
+			return "", fmt.Errorf("mode=%s needs origin recorded (fresh|fork|joined) — the tool cannot know "+
+				"how %q was born, and a fork-born peer must never be resumed", mode, alias)
+		}
+	}
+	action := ActionTemplate
+	switch mode {
+	case ModeResume:
+		action = ActionResume
+	case ModeFork:
+		action = ActionFork
+	}
+	return KickoffPrompt(f, PeerPlan{Peer: p, Action: action}, self, kickoffNonce(alias), brief), nil
+}
+
+// bootstrapReplyTo is the address the bootstrapped peer answers: this session when
+// it is on the channel, else the formation's anchor. With neither there is nobody to
+// answer, and a first-reply demand pointing nowhere is worse than none.
+func bootstrapReplyTo(f *Formation) (string, error) {
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == f.Channel {
+			return reg.Channel + "/" + reg.Alias, nil
+		}
+	}
+	if f.AnchorAlias != "" {
+		return f.Channel + "/" + f.AnchorAlias, nil
+	}
+	return "", fmt.Errorf("nobody for the peer to answer: join %s yourself, or set anchorAlias in the formation", f.Channel)
+}
+
+func peerAliases(f *Formation) []string {
+	out := make([]string, 0, len(f.Peers))
+	for i := range f.Peers {
+		out = append(out, f.Peers[i].Alias)
+	}
+	return out
 }

@@ -237,6 +237,11 @@ func TestFormationVerbErrors(t *testing.T) {
 		{"apply negative wait", []string{"apply", "x", "--wait", "-5s"}},
 		{"apply empty only", []string{"apply", "x", "--only", ","}},
 		{"apply missing formation", []string{"apply", "ghost"}},
+		{"bootstrap with no args", []string{"bootstrap"}},
+		{"bootstrap with no alias", []string{"bootstrap", "roles"}},
+		{"bootstrap trailing junk", []string{"bootstrap", "roles", "coder", "junk"}},
+		{"bootstrap unknown flag", []string{"bootstrap", "roles", "coder", "--bogus"}},
+		{"bootstrap missing formation", []string{"bootstrap", "ghost", "coder"}},
 		{"save with no name", []string{"save"}},
 		{"save trailing junk", []string{"save", "a", "b", "c"}},
 		{"save bad name", []string{"save", "a/b", "roles"}},
@@ -293,10 +298,8 @@ func TestFormationDispatch(t *testing.T) {
 	if !strings.Contains(formationUsage, "apply") {
 		t.Errorf("usage omits a built verb: %q", formationUsage)
 	}
-	for _, unbuilt := range []string{"bootstrap"} {
-		if strings.Contains(formationUsage, unbuilt) {
-			t.Errorf("usage advertises an unbuilt verb %q: %s", unbuilt, formationUsage)
-		}
+	if !strings.Contains(formationUsage, "bootstrap") {
+		t.Errorf("usage omits a built verb: %q", formationUsage)
 	}
 	if !strings.Contains(usage, "cbus formation list") || !strings.Contains(usage, "cbus formation show") {
 		t.Error("cbus --help does not mention the formation verbs")
@@ -340,5 +343,31 @@ func TestFormationApplyDryRunVerb(t *testing.T) {
 	// the applier is a peer of this formation and is running apply: never launched
 	if !strings.Contains(out, "running apply") {
 		t.Errorf("the applier should be reported as present because it IS apply:\n%s", out)
+	}
+}
+
+// TestFormationBootstrapVerb: prints one peer's first turn and nothing else, so it
+// can be piped straight into a paste.
+func TestFormationBootstrapVerb(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+	saveFixture(t, dir, "roles", fixtureRoles())
+
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"bootstrap", "roles", "coder", "--brief", "Ship v1."}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	for _, want := range []string{"cbus join roles coder", "Monitor tool", "Ship v1.",
+		"cbus send roles/orchestrator", "provenance", "cbus-ok-coder-"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("bootstrap output missing %q:\n%s", want, out)
+		}
+	}
+	// an unknown peer names the real ones rather than just failing
+	if rc := runFormation([]string{"bootstrap", "roles", "nosuch"}); rc == 0 {
+		t.Error("unknown alias must fail")
 	}
 }

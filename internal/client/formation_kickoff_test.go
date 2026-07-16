@@ -196,3 +196,132 @@ func TestKickoffDoesNotRepeatItself(t *testing.T) {
 		})
 	}
 }
+
+// TestBootstrapPeerComposesLikeApply: bootstrap must render what apply renders —
+// one composer, so a peer cannot be briefed differently depending on who started it.
+func TestBootstrapPeerComposesLikeApply(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "ch", "orchestrator", "sid-orch")
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Role = strptr("You implement things.") }))
+	f.Payload = json.RawMessage(`{"work_state":"tracker ABC"}`)
+
+	got, err := BootstrapPeer(f, "coder", "Build the thing.")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, want := range []string{
+		"cbus join ch coder", "Monitor tool", "NEVER Bash",
+		"You implement things.", "Build the thing.", "work_state: tracker ABC",
+		"cbus send ch/orchestrator", // this session is on the channel, so it answers us
+		"provenance", "cbus-ok-coder-",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("bootstrap prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestBootstrapPeerDoesNotSkipOtherMachines: the cross-machine peer is exactly who
+// bootstrap exists for — apply will not launch it, so a human does.
+func TestBootstrapPeerDoesNotSkipOtherMachines(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "ch", "orchestrator", "sid-orch")
+	f := applyFixture(peer("remote", func(p *FormationPeer) { p.Machine = "some-far-host" }))
+	got, err := BootstrapPeer(f, "remote", "")
+	if err != nil {
+		t.Fatalf("bootstrap must serve the peer apply cannot launch: %v", err)
+	}
+	if !strings.Contains(got, "cbus join ch remote") {
+		t.Errorf("prompt = %s", got)
+	}
+}
+
+// TestBootstrapPeerRefusesWhatTheFileProvesWrong: no world is needed to know a
+// fork-born peer must not be resumed. Handing a human that prompt reproduces the
+// ghost-orchestrator failure with extra steps.
+func TestBootstrapPeerRefusesWhatTheFileProvesWrong(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "ch", "orchestrator", "sid-orch")
+
+	forkBorn := applyFixture(peer("ghost", func(p *FormationPeer) {
+		p.Mode = ModeFork
+		p.Origin = OriginFork
+		p.SessionID = "sid-parent"
+	}))
+	if _, err := BootstrapPeer(forkBorn, "ghost", ""); err == nil ||
+		!strings.Contains(err.Error(), "PARENT's transcript") {
+		t.Errorf("fork-born: want the R1 refusal, got %v", err)
+	}
+	// but as a template it is exactly what the design prescribes
+	forkBorn.Peers[0].Mode = ModeTemplate
+	if _, err := BootstrapPeer(forkBorn, "ghost", ""); err != nil {
+		t.Errorf("fork-born as template must bootstrap: %v", err)
+	}
+
+	noOrigin := applyFixture(peer("x", func(p *FormationPeer) { p.Mode = ModeResume; p.SessionID = "s1" }))
+	if _, err := BootstrapPeer(noOrigin, "x", ""); err == nil ||
+		!strings.Contains(err.Error(), "needs origin recorded") {
+		t.Errorf("unrecorded origin: want the D12 refusal, got %v", err)
+	}
+
+	dup := applyFixture(
+		peer("a", func(p *FormationPeer) { p.Mode = ModeResume; p.Origin = OriginFresh; p.SessionID = "shared" }),
+		peer("b", func(p *FormationPeer) { p.Mode = ModeResume; p.Origin = OriginFresh; p.SessionID = "shared" }),
+	)
+	if _, err := BootstrapPeer(dup, "a", ""); err == nil || !strings.Contains(err.Error(), "more than one alias") {
+		t.Errorf("duplicate sid: want the R2 refusal, got %v", err)
+	}
+}
+
+func TestBootstrapPeerErrors(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "ch", "orchestrator", "sid-orch")
+	f := applyFixture(peer("coder"), peer("reviewer"))
+	_, err := BootstrapPeer(f, "codr", "")
+	if err == nil || !strings.Contains(err.Error(), "no peer") {
+		t.Fatalf("unknown alias: %v", err)
+	}
+	// the error lists what IS there, so a typo is self-correcting
+	if !strings.Contains(err.Error(), "coder") || !strings.Contains(err.Error(), "reviewer") {
+		t.Errorf("error should list the real aliases: %v", err)
+	}
+}
+
+// TestBootstrapReplyTo: the peer answers this session when it is on the channel,
+// else the anchor. With neither, a first-reply demand would point nowhere.
+func TestBootstrapReplyTo(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
+	f := applyFixture(peer("coder"))
+	f.AnchorAlias = "orchestrator"
+	got, err := bootstrapReplyTo(f)
+	if err != nil || got != "ch/orchestrator" {
+		t.Errorf("not joined + anchor: got (%q,%v), want ch/orchestrator", got, err)
+	}
+	f.AnchorAlias = ""
+	if _, err := bootstrapReplyTo(f); err == nil || !strings.Contains(err.Error(), "nobody for the peer to answer") {
+		t.Errorf("no anchor, not joined: want a refusal, got %v", err)
+	}
+	// joined wins
+	plantPeer(t, "ch", "me", "sid-nobody")
+	if got, err := bootstrapReplyTo(f); err != nil || got != "ch/me" {
+		t.Errorf("joined: got (%q,%v), want ch/me", got, err)
+	}
+}
+
+// TestKickoffSelfDescribeWhenNoRole: save cannot capture a role, so the peer is the
+// only one who can say what it is — design §6's self-describe line is how the field
+// ever gets filled.
+func TestKickoffSelfDescribeWhenNoRole(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := applyFixture(peer("coder")) // no rolefile, no role text
+	got := kickoffFor(t, f, PeerPlan{Peer: &f.Peers[0], Action: ActionTemplate}, "")
+	if !strings.Contains(got, "records no role for you") || !strings.Contains(got, "describe your role in one line") {
+		t.Errorf("a role-less peer must be asked to self-describe:\n%s", got)
+	}
+}
