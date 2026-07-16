@@ -1,5 +1,80 @@
 # Changelog (detailed)
 
+## [2026-07-16 18:51:03 UTC] [Client/Formations] Formations envelope (M1): typed save/load, hand-edit preservation, and the identity-clobber fix
+
+[Attempt #1]
+
+First milestone of formations v1: a formation is a saved snapshot of a channel's
+shape, so a whole multi-session formation's peers and roles can be recreated on
+demand. This entry covers the milestone commit and its confirmed fix together,
+per the hold-for-verdict rule — the finding below is folded in, not appended
+separately.
+
+f4553ee adds the cbus-formation/v1 envelope: typed load/save at
+$CBUS_DIR/.formations/<name>.json, atomic temp+rename writes, validation, and an
+opaque by-reference payload the tool never interprets (a peer field is a pointer
+into whatever durable store the orchestrator already uses — bd, a markdown file,
+GitHub issues — never a contract cbus enforces). The file is meant to be
+hand-editable: unknown keys are retained and re-emitted, known fields in spec
+order with hand-edited keys sorted after them, and `fields()` single-sources both
+the emission order and the known-key set so the two can't drift apart — a
+reflection test fails the build if a struct field is ever added without a
+`fields()` entry. Re-saving a loaded envelope reproduces it byte for byte. Ruling
+D6: no converter for the old hand-authored v3-draft snapshots — loading an
+unsupported schema id refuses rather than guessing at a migration.
+
+Reviewer's verdict on f4553ee was CONDITIONAL APPROVE on one binding finding, C1:
+a formation's identity is stated twice, once in the filename and once in the
+`name` field, and `LoadFormation` didn't tie them together. Save derives its
+write path from the field, so a file loaded under one name while carrying
+another wrote itself over an unrelated formation — the reviewer's repro copied
+roles.json to backup.json and showed that touching the copy destroyed the
+original. 85207af closes it: refuse loudly, naming both remedies, rather than
+silently adopting the requested name at load (adopting would revert a
+hand-edited field, and surviving hand-edits is the envelope's whole premise). A
+rename is therefore two-half: set the field and move the file; either half alone
+is refused, because either half alone is where the clobber started. Reviewer
+confirmed the fix end-to-end through the CLI — roles.json's checksum held, and
+the guard caught the fix commit's own test fixture (far.json) as a live
+positive.
+
+An earlier framing floated mid-review — that a deliberate rename via the Name
+field alone still works — was retracted before it reached the record: a
+field-only edit is observationally identical to the clobber precursor, so intent
+isn't recoverable from the file alone. The library-level flow (load, mutate Name
+in memory, Save) survives the refuse-at-load guard, but that matters only to
+save/copy call sites internally; a hand-editor still needs both halves.
+
+[Files Changed]
+- internal/client/formation.go (new in f4553ee, +12 lines in 85207af): envelope
+  struct, fields(), atomic load/save, the reflection guard, and the C1
+  name/filename identity check.
+- internal/client/formation_test.go (new): 24 cases across load/save/validation/
+  convergence.
+- internal/client/formation_identity_test.go (new): the C1 repro and its
+  regression.
+- cmd/cbus/formation_test.go: adjusted for the identity check.
+
+[Possible Ripple Effects]
+- The identity refusal is a new failure mode for any future formation verb that
+  loads by path instead of by name; list/show/rm/save all need to route through
+  the same check rather than re-deriving it.
+- No wire or relay surface touched; this milestone is local file-format work
+  only.
+
+[Testing Notes]
+- go test ./... green repo-wide (24 focused formation cases plus the identity
+  regression).
+- Reviewer-verified live: roles.json checksum identical before/after a
+  load+save round trip; the name/filename guard fired on both the reviewer's
+  own far.json fixture and the constructed repro.
+
+Record-only, not independently re-verified by the documenter: a WriteFile
+failure can leave a temp file behind (cosmetic, no correctness impact);
+`drift_anchors` field order normalizes on first save; in the copy-then-mv-remedy
+case, following the guidance overwrites the original with the copy — that is the
+user's own `mv`, done in view, not tool behavior.
+
 ## [2026-07-16 15:32:29 UTC] [Client/Spawn] spawn --role: committed role prompts ride the child's first turn
 
 [Attempt #1]
