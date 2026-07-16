@@ -47,9 +47,10 @@ window, with no other file and no channel history.
 9. Stop and flag a contradiction; never improvise past it. If what you find
    disagrees with what you were told, that is a finding, not an obstacle.
 10. Re-check a peer's address before queueing to one you learned earlier. A
-    rename orphans the old alias: the send is accepted, lands in an inbox nobody
-    is arming, and fails silently from your side. `cbus list` is the source of
-    truth, not your memory of who was where.
+    rename orphans the old alias, and the paths differ: a remote send is
+    accepted, lands in an inbox nobody is arming, and fails silently from your
+    side; a local send to a vanished alias dies loud ("no such peer"). `cbus
+    list` is the source of truth, not your memory of who was where.
 
 ## Process rules
 
