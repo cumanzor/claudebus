@@ -1,5 +1,75 @@
 # Changelog (detailed)
 
+## [2026-07-16 19:05:44 UTC] [Client/Formations] The apply plan (M4): every decision made before anything launches
+
+[Attempt #1]
+
+Fourth milestone of formations v1: a03128a, approved with one class-C
+(non-blocking) finding. The B31 restore's failure was a bad decision (forking
+the wrong transcript), not a bad terminal, so this milestone puts every
+decision in a pure function: `BuildPlan` takes a formation plus a world
+snapshot and always yields the same plan; it launches nothing. That makes
+every prohibition a table test instead of a live rehearsal. `GatherPlanWorld`
+is the read-only counterpart that assembles the world snapshot.
+
+Refusals, each with its own message so failures stay legible: a fork-born
+peer resumed or forked would re-run its parent's intent under another name,
+and an unrecorded origin cannot prove it isn't that case (D12 — refuse over
+warn, per the B31 F1 lesson); one transcript claimed by two aliases means one
+of them is wrong; and resume on a session that is live-armed elsewhere is
+refused, never silently degraded to fork (D14 — names the live location and
+both remedies: kill or re-point the original, or a deliberate `mode=fork` for
+an intentional copy — closing design section 3's refuse-or-degrade either/or
+on the refuse side). Machine matching is strict equality (D13): a skip names
+both values, zero launchable peers is a failure rather than a quiet
+empty-fleet success, and an empty machine field means local. Drift is
+reported and never blocks — the snapshot is a cache, the ground is live.
+
+Reviewer live-reproduced the plan read-only against the real formations
+channel: CBUS_DIR shasums identical before and after, every refusal class
+fired on real data, including D14 refusing on the coder's own live session by
+name (launchable=1, refusals=3, zero CBUS_DIR writes). Record-worthy
+mechanism the reviewer surfaced: the D14 remedy line sent the coder back to
+re-read design section 3 and catch a bug in its own pre-commit build — it had
+gated `mode=fork` on liveness too, which would have refused the exact mode the
+design prescribes for a live original (a deliberate copy). The shipped guard
+is resume-only. Harness finding for whoever re-verifies this later: copying
+live peer registrations into a scratch CBUS_DIR to test against silently
+breaks liveness detection, because the argv needle is rebuilt from the
+scratch path rather than the original — false negatives, not a plan bug.
+
+M4 ships no CLI by design (ruling D9's surface split): `--dry-run` and
+`--only` reach users at M5, when apply itself lands.
+
+Class-C c1 folds in without a separate re-review: a precedence test-pin
+asserting the refusal-priority ordering (R2) on both claimants of a
+conflict, including one with `origin=fork`. Its commit hash is pending — the
+coder reports it separately, and it will be appended here (or split into its
+own line, documenter's call) once it arrives.
+
+[Files Changed]
+- internal/client/formation_plan.go (new): BuildPlan, GatherPlanWorld, and the
+  refusal table (D12/D13/D14).
+- internal/client/formation_plan_test.go (new): the refusal-class table
+  tests plus the live differential harness.
+
+[Possible Ripple Effects]
+- M5's apply executes exactly this plan; any change to a refusal's condition
+  or message here is a direct behavior change for apply, not just planning.
+- The scratch-CBUS_DIR liveness gotcha applies to any future test or review
+  harness that copies real registrations rather than joining fresh ones.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Live differential: real bus, read-only, byte-identical CBUS_DIR shasums;
+  every refusal class (fork-born resume/fork, dual-claimed transcript,
+  live-armed-elsewhere resume, machine mismatch, zero-launchable) reproduced
+  on real data.
+
+Record-only: anchor-first launch ordering is out of scope here and gates at
+M5 (n10); liveSids' limit is honestly scoped in the code as written, no
+follow-up needed (n11).
+
 ## [2026-07-16 19:00:29 UTC] [Client/Formations] Formations list/show/rm (M2), with the fixture-portability fix folded in
 
 [Attempt #1]
