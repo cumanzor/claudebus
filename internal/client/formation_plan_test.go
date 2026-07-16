@@ -203,19 +203,36 @@ func TestPlanRefusesUnrecordedOrigin(t *testing.T) {
 }
 
 // TestPlanRefusesDuplicateSid is R2: one transcript claimed by two aliases.
+//
+// The claimants deliberately ALSO trip R1 (origin=fork) and D12 (origin unrecorded),
+// which pins the precedence: R2 is checked first, so every claimant must report the
+// shared-sid reason. With claimants that only trip R2, the checks could be reordered
+// and no test would notice — the reviewer proved that by swapping them and watching
+// the suite stay green.
+//
+// R2 leads on purpose: a duplicate sid means the FILE is wrong, and the file has to
+// be fixed before any per-peer question about it means anything.
 func TestPlanRefusesDuplicateSid(t *testing.T) {
 	sid := "shared-transcript"
 	f := formationOf(
 		peer("orchestrator", func(p *FormationPeer) { p.Mode = ModeResume; p.Origin = OriginJoined; p.SessionID = sid }),
-		peer("console", func(p *FormationPeer) { p.Mode = ModeResume; p.Origin = OriginFresh; p.SessionID = sid }),
+		peer("console", func(p *FormationPeer) { p.Mode = ModeFork; p.Origin = OriginFork; p.SessionID = sid }),
+		peer("nomode", func(p *FormationPeer) { p.Mode = ModeResume; p.SessionID = sid }), // origin ""
 	)
 	plan := BuildPlan(f, withTranscripts(testWorld(), sid), nil)
+	if len(plan.Peers) != 3 {
+		t.Fatalf("want 3 peer plans, got %d", len(plan.Peers))
+	}
 	for _, pp := range plan.Peers {
 		if pp.Action != ActionRefuse {
 			t.Errorf("%s: action = %v, want refuse", pp.Peer.Alias, pp.Action)
 		}
 		if !strings.Contains(pp.Reason, "more than one alias") {
-			t.Errorf("%s: reason = %q", pp.Peer.Alias, pp.Reason)
+			t.Errorf("%s: want the shared-sid reason (R2 precedes R1/D12), got %q", pp.Peer.Alias, pp.Reason)
+		}
+		// the peers that also trip R1/D12 must NOT report those instead
+		if strings.Contains(pp.Reason, "PARENT's transcript") || strings.Contains(pp.Reason, "needs origin recorded") {
+			t.Errorf("%s: R2 must win the precedence, got %q", pp.Peer.Alias, pp.Reason)
 		}
 	}
 	if len(plan.Launchable()) != 0 {
