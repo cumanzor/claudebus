@@ -16,11 +16,14 @@ import (
 const unarmedGrace = 10 * time.Minute
 
 // PeerMeta is the subset of a peer's meta.json the read-only verbs render.
+// Alias/SessionID are read for formation save, which captures a channel's roster.
 type PeerMeta struct {
 	ListenerPid int // 0 if null/absent
 	OwnerPid    int // 0 if null/absent
 	Host        string
 	Cwd         string
+	Alias       string
+	SessionID   string
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -39,6 +42,8 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		OwnerPid:    rawInt(raw["ownerPid"]),
 		Host:        rawStr(raw["host"]),
 		Cwd:         rawStr(raw["cwd"]),
+		Alias:       rawStr(raw["alias"]),
+		SessionID:   rawStr(raw["sessionId"]),
 	}, true
 }
 

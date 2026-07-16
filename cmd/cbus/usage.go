@@ -58,6 +58,11 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    role and --model to its MODEL: line
                                    (spawn-only — a fork inherits its parent's
                                    intent, so branch refuses --role)
+  cbus formation save <name> [ch]  capture a channel's topology (channel
+                                   defaults to this session's); refreshes an
+                                   existing file, preserving hand-edited fields
+                                   (model/role/origin/profile are hand-maintained
+                                   — the store records none of them)
   cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles
