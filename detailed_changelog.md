@@ -1,5 +1,128 @@
 # Changelog (detailed)
 
+## [2026-07-16 19:00:29 UTC] [Client/Formations] Formations list/show/rm (M2), with the fixture-portability fix folded in
+
+[Attempt #1]
+
+Second milestone of formations v1: the read-side verbs against the M1 envelope.
+This entry covers 31f9501 and its confirmed fix b24cd70 together, per the
+hold-for-verdict rule.
+
+31f9501 adds `cbus formation list/show/rm`. `show` flags the two states that
+make a formation unusable as written: a recorded sid whose transcript is gone
+(STALE), and a peer with no brief to send (TODO). A peer tagged with another
+machine reads `unchecked` rather than `STALE` — this host cannot see that
+host's transcripts, and calling it stale would dress a guess as a finding.
+Transcripts are located by globbing the sid rather than rebuilding a project
+directory from a cwd: the munging rule would have to be duplicated and kept in
+sync, and a peer whose cwd moved since save would read as stale while
+`--resume` still worked. The sid and profile come from a hand-edited file, so
+both are screened before they reach a glob or a path. `rm` refuses path
+traversal. An unreadable envelope is listed with its error rather than skipped
+— the file is still on disk either way. Ruling D7 accepted
+`internal/client/transcript.go` as a 7th file in the formation surface: its
+live/stale/unchecked predicate is shared with M4's resume-liveness gating. The
+`mbp` vs `carlos-mbp` machine-value display convention is deferred to an M4
+ruling.
+
+Reviewer's verdict was CONDITIONAL APPROVE on one binding finding, C2,
+test-portability only (no product-code defect): the fixtures hard-coded one
+developer's hostname and expected STALE for it, and used a literal `"nuc"` as
+the foreign machine — so the suite failed on any host but that one laptop, and
+inverted on a host actually named nuc. b24cd70 fixes it: fixture machine
+values now derive from `ShortHostname()`, with the foreign value built by
+extending it so it structurally cannot collide with the host under test. The
+reviewer's own C2 citation missed a twin instance of the same bug in
+`internal/client/formation_read_test.go`; the fix's inclusion of that file was
+accepted as a valid scope extension, not scope creep — the reviewer recorded
+that its own citation missed those rows.
+
+[Files Changed]
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go, cmd/cbus/main.go,
+  cmd/cbus/usage.go: list/show/rm dispatch, flags, help text.
+- internal/client/formation.go: read-side helpers backing show/list.
+- internal/client/transcript.go (new) + transcript_test.go: the
+  live/stale/unchecked transcript predicate (D7).
+- internal/client/formation_read_test.go (new).
+- b24cd70: cmd/cbus/formation_test.go and
+  internal/client/formation_read_test.go — fixture hostnames derived from
+  ShortHostname(), foreign value built by extension so it cannot collide.
+
+[Possible Ripple Effects]
+- transcript.go's predicate is now a shared dependency for M4's resume-mode
+  liveness gating; changing its semantics later affects both surfaces.
+- The machine-value display convention (short vs full hostname) is still open,
+  deferred to M4 — list/show output may need a follow-up pass once that
+  ruling lands.
+
+[Testing Notes]
+- go test ./... green repo-wide after both commits.
+- Portability: the fixed suite passes independent of the running host's
+  hostname (previously passed on exactly one machine and inverted on a host
+  literally named nuc).
+
+Record-only: RoleTODO substring over-match is warning-only, not a hard
+failure; an invalid profile value skips the sibling root and reads STALE,
+which the reviewer noted is consistent with the predicate's overall framing.
+
+## [2026-07-16 19:00:29 UTC] [Client/Formations] Formations save (M3), with an M1 emission fix folded in
+
+[Attempt #1]
+
+Third milestone of formations v1: `cbus formation save`, approved outright,
+plus a self-found fix to M1's own emission code landing in the same commit
+range.
+
+61c25f9 adds save. The store records exactly four substrate facts per peer —
+alias, sessionId, cwd, host — and save owns only those; mode/onStale/
+target/addresses get declared defaults (template/template/tab/[]), and model,
+rolefile/role, origin, and profile are left blank for a human to fill in. A
+refresh updates the four captured facts and never overwrites anything else it
+finds, which is what makes re-saving at a milestone boundary safe. A peer
+that's in the file but no longer on the channel is kept, not dropped: a paused
+effort is the main thing a formation exists to hold, and it is paused
+precisely when its peers are gone. An unloadable envelope refuses rather than
+guessing at a rewrite, consistent with M1's refuse-over-guess posture.
+
+9b3d487, folded into this milestone rather than M1's: fixes a defect in M1's
+own `formation.go` emission. `encoding/json`'s default HTML-escaping mangled
+`<`, `>`, and `&` in hand-written text — a brief saying "if a < b" came back
+re-escaped — breaking the envelope's contract to preserve what a human wrote
+(the escaping exists to protect HTML embedding, which this file never does).
+Fixed by carrying `SetEscapeHTML(false)` through the custom marshalers;
+`MarshalIndent` would otherwise have re-escaped on the way out. The coder
+self-found this in its own already-delivered code. Retraction for the record:
+the reviewer had explicitly considered HTML-escaping at M1's review and
+classed it harmless; that judgment is retracted in substance now that real
+hand-written text is shown to hit it.
+
+[Files Changed]
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go, cmd/cbus/usage.go: save
+  dispatch and flags.
+- internal/client/formation_save.go (new) + formation_save_test.go: roster
+  capture, refresh-preserving merge.
+- internal/client/liveness.go: small addition supporting save's on-channel
+  check.
+- internal/client/formation.go + formation_test.go (9b3d487):
+  SetEscapeHTML(false) through the custom marshalers.
+
+[Possible Ripple Effects]
+- None to the wire or relay; local file-format and save-path work only.
+- The four-fields-refresh contract is now load-bearing for any future
+  formation verb that re-saves an existing envelope; deviating from it would
+  silently drop human-owned fields.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Live-proven: save exercised against this formation's own channel, capturing
+  its real (4-peer) roster.
+
+Record-only: object keys still HTML-escape after 9b3d487 — the fix covers
+values, a narrower edge case remains for keys; `drift_anchors.git_head`
+anchors the saver's own repo and is advisory only, apply reports drift loudly
+rather than trusting it; `SaveFormation`'s doc comment wording is ambiguous
+against the four refreshing facts (wording only, no behavior change).
+
 ## [2026-07-16 18:51:03 UTC] [Client/Formations] Formations envelope (M1): typed save/load, hand-edit preservation, and the identity-clobber fix
 
 [Attempt #1]
