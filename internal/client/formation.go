@@ -341,6 +341,13 @@ func FormationPath(name string) (string, error) {
 }
 
 // LoadFormation reads and validates a saved envelope.
+//
+// The filename and the name field must agree. They are two copies of one identity,
+// and Save derives its path from the field: a file loaded under one name while
+// carrying another would write itself over an unrelated formation (copy roles.json
+// to backup.json, load "backup", save — roles.json is gone). Refusing here is the
+// loud half of that fix; adopting the requested name instead would silently revert
+// a hand-edited field, which is the one thing this envelope promises never to do.
 func LoadFormation(name string) (*Formation, error) {
 	path, err := FormationPath(name)
 	if err != nil {
@@ -359,6 +366,11 @@ func LoadFormation(name string) (*Formation, error) {
 	}
 	if err := f.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	if f.Name != name {
+		return nil, fmt.Errorf("%s: records name %q — the filename and the name field must agree; "+
+			"to rename, set name to %q, or `mv %s.json %s.json` to keep the name field",
+			path, f.Name, name, name, f.Name)
 	}
 	return &f, nil
 }

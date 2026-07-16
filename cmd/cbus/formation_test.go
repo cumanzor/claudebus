@@ -117,7 +117,10 @@ func TestFormationShowUncheckedNotStale(t *testing.T) {
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
 	t.Setenv("HOME", t.TempDir())
-	saveFixture(t, dir, "far", strings.Replace(fixtureRoles,
+	// the name field must match the filename (a formation's identity is stated in
+	// both places and they have to agree)
+	body := strings.Replace(fixtureRoles, `"name": "roles",`, `"name": "far",`, 1)
+	saveFixture(t, dir, "far", strings.Replace(body,
 		`"machine": "carlos-mbp" }
   ]`, `"machine": "nuc" }
   ]`, 1))
