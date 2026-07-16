@@ -27,6 +27,7 @@ func TestSiteEnvVar(t *testing.T) {
 func TestSiteURL(t *testing.T) {
 	// no built-in hosts: an unset override is a hard error, even for server
 	// (the promoted soft->hard delta)
+	t.Setenv("CBUS_SITE_SERVER_URL", "") // isolate from shells that configure the fleet
 	var uh *UnknownHostError
 	if _, err := SiteURL("server"); !errors.As(err, &uh) {
 		t.Errorf("SiteURL(server) with no override should be *UnknownHostError, got %v", err)
