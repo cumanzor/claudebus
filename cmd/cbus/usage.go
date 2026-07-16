@@ -9,8 +9,8 @@ package main
 // dropped — cbus-go's `branch` is native (P2.5 TerminalForker), so CC_BRANCH is no
 // longer consulted (port-map delta table). Self-id stays `cbus` (Option X): cutover
 // is a pure binary swap. Post-cutover additions with no bash counterpart: the
-// `spawn` block (cbus-ijx.2) and the `--model`/`--name` flags on branch/spawn.
-// Everything else matches bash byte-for-byte.
+// `spawn` block (cbus-ijx.2), the `--model`/`--name` flags on branch/spawn, and the
+// `formation` block. Everything else matches bash byte-for-byte.
 const usage = `cbus — message bus between live Claude Code sessions, in named channels
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
@@ -58,6 +58,10 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    role and --model to its MODEL: line
                                    (spawn-only — a fork inherits its parent's
                                    intent, so branch refuses --role)
+  cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
+  cbus formation show <name>       one formation's peers, flagging stale sids
+                                   (recorded transcript gone) and TODO roles
+  cbus formation rm <name>         delete a saved formation
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined

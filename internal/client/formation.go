@@ -242,6 +242,96 @@ func marshalOrdered(fields []jsonField, extra map[string]json.RawMessage) ([]byt
 	return b.Bytes(), nil
 }
 
+// SidState classifies a peer's recorded transcript.
+type SidState int
+
+const (
+	SidNone      SidState = iota // nothing recorded to resume from
+	SidPresent                   // a transcript for this sid exists on this machine
+	SidStale                     // recorded, and no transcript found
+	SidUnchecked                 // recorded on another machine — not this host's to judge
+)
+
+// SidState reports whether the peer's recorded transcript still exists. A peer
+// tagged with another machine reads UNCHECKED, never stale: this host cannot see
+// that host's transcripts, so calling the sid stale would dress a guess as a
+// finding. "reserved" is the ReserveAlias placeholder, not a session.
+func (p *FormationPeer) SidState() (state SidState, detail string) {
+	if p.SessionID == "" || p.SessionID == "reserved" {
+		return SidNone, ""
+	}
+	if path, ok := TranscriptPath(p.Profile, p.SessionID); ok {
+		return SidPresent, path
+	}
+	if p.Machine != "" && p.Machine != ShortHostname() {
+		return SidUnchecked, "recorded on " + p.Machine
+	}
+	return SidStale, "no transcript found on this machine"
+}
+
+// RoleTODO reports a peer whose brief would be empty at apply time: no committed
+// rolefile, and no freeform role text — or text still carrying a TODO marker,
+// which is what a peer that was asked to self-describe and never did leaves behind.
+func (p *FormationPeer) RoleTODO() bool {
+	if p.Rolefile != "" {
+		return false
+	}
+	if p.Role == nil || strings.TrimSpace(*p.Role) == "" {
+		return true
+	}
+	return strings.Contains(strings.ToUpper(*p.Role), "TODO")
+}
+
+// FormationEntry is one saved envelope as `list` sees it: loaded, or the reason it
+// would not load. An unreadable file is listed WITH its error rather than skipped —
+// an envelope that quietly vanishes from the listing is worse than one that shows
+// up broken, because the file is still sitting there.
+type FormationEntry struct {
+	Name string
+	F    *Formation
+	Err  error
+}
+
+// ListFormations returns every saved envelope, name-sorted (os.ReadDir order). No
+// formations dir means none saved, which is not an error.
+func ListFormations() ([]FormationEntry, error) {
+	dir := filepath.Join(CBUSDir(), formationsDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []FormationEntry
+	for _, e := range entries {
+		// skip the .formation.tmp.<pid> write-in-progress and any dot file
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		f, lerr := LoadFormation(name)
+		out = append(out, FormationEntry{Name: name, F: f, Err: lerr})
+	}
+	return out, nil
+}
+
+// RemoveFormation deletes a saved envelope, returning the path it removed.
+func RemoveFormation(name string) (path string, err error) {
+	path, err = FormationPath(name)
+	if err != nil {
+		return "", err
+	}
+	if !fileExists(path) {
+		return "", fmt.Errorf("no formation %q (looked in %s)", name, filepath.Dir(path))
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	_ = os.Remove(filepath.Dir(path)) // rmdir if empty, like the channel dirs
+	return path, nil
+}
+
 // FormationPath is the envelope's path: $CBUS_DIR/.formations/<name>.json.
 func FormationPath(name string) (string, error) {
 	if !core.ValidName(name) {
