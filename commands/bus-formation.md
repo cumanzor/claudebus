@@ -1,6 +1,6 @@
 ---
 description: Save, inspect, or relaunch a cbus formation — a channel's saved peer topology
-argument-hint: "save <name> | show <name> | apply <name> [--dry-run] | list | rm <name>"
+argument-hint: "save <name> | show <name> | apply <name> [--dry-run] | bootstrap <name> <alias> | list | rm <name>"
 allowed-tools: Bash(cbus:*), Monitor
 ---
 
