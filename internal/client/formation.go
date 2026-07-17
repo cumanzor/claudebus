@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -332,12 +333,19 @@ func ListFormations() ([]FormationEntry, error) {
 }
 
 // RemoveFormation deletes a saved envelope, returning the path it removed.
+// RemoveFormation deletes a RUNTIME envelope. It never touches a committed template
+// (D22): a name that exists only in the repo gets a loud refusal pointing at git, so
+// rm cannot delete a version-controlled file out from under the working tree.
 func RemoveFormation(name string) (path string, err error) {
 	path, err = FormationPath(name)
 	if err != nil {
 		return "", err
 	}
 	if !fileExists(path) {
+		if dir, ok := repoFormationsDir(); ok && fileExists(filepath.Join(dir, name+".json")) {
+			return "", fmt.Errorf("%q is a committed template (%s), not a runtime formation — remove it via git, not cbus",
+				name, filepath.Join(dir, name+".json"))
+		}
 		return "", fmt.Errorf("no formation %q (looked in %s)", name, filepath.Dir(path))
 	}
 	if err := os.Remove(path); err != nil {
@@ -368,11 +376,20 @@ func LoadFormation(name string) (*Formation, error) {
 	if err != nil {
 		return nil, err
 	}
+	f, err := loadFormationFileAt(path, name)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("no formation %q (looked in %s)", name, filepath.Dir(path))
+	}
+	return f, err
+}
+
+// loadFormationFileAt reads one envelope file and validates it, enforcing name==
+// filename (C1) — in the repo root as well as the runtime store (H2). A missing file
+// returns the raw os error so a caller can distinguish not-found (fall through to
+// another root) from torn/invalid (stop, never silently skip a broken file).
+func loadFormationFileAt(path, name string) (*Formation, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no formation %q (looked in %s)", name, filepath.Dir(path))
-		}
 		return nil, err
 	}
 	var f Formation
@@ -388,6 +405,59 @@ func LoadFormation(name string) (*Formation, error) {
 			path, f.Name, name, name, f.Name)
 	}
 	return &f, nil
+}
+
+// repoFormationsDir is <git-toplevel>/formations, the committed-template root — the
+// same git-top discovery LoadRole and branch use. Absent outside a repo. No shell or
+// env expansion anywhere (H8): filepath.Join over a git-reported path and a
+// ValidName-screened name, never a user string passed to a shell.
+func repoFormationsDir() (string, bool) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", false
+	}
+	top := strings.TrimSpace(string(out))
+	if top == "" {
+		return "", false
+	}
+	return filepath.Join(top, formationsDirName), true
+}
+
+// formationsDirName is the repo subdir holding committed templates (sibling to
+// roles/, commands/). Distinct from formationsDir, the dot-prefixed runtime subdir.
+const formationsDirName = "formations"
+
+// ResolveFormation loads a formation by name, the runtime store FIRST, then the
+// repo's committed templates. Runtime wins on a name in both: a saved instance is the
+// user's own live state and shadows a committed starter of the same name (D20). This
+// is the OPPOSITE precedence from LoadRole (repo-first) on purpose — a role's
+// canonical home is the committed repo, an envelope's is the runtime store, and the
+// repo is only a starter source for envelopes. Returns a human label for the source
+// so a shadowed template is a stated behavior, not a surprise.
+func ResolveFormation(name string) (f *Formation, source string, err error) {
+	rt, err := FormationPath(name)
+	if err != nil {
+		return nil, "", err
+	}
+	f, err = loadFormationFileAt(rt, name)
+	if err == nil {
+		return f, "runtime store (" + rt + ")", nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, "", err // a torn/invalid runtime file stops here — never fall through to the repo
+	}
+	if dir, ok := repoFormationsDir(); ok {
+		rp := filepath.Join(dir, name+".json")
+		f, err = loadFormationFileAt(rp, name)
+		if err == nil {
+			return f, "committed template (" + rp + ")", nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("no formation %q (looked in the runtime store %s and the repo's %s/)",
+		name, filepath.Dir(rt), formationsDirName)
 }
 
 // Save writes the envelope atomically (sibling temp + rename, the writeMeta
