@@ -170,3 +170,74 @@ func TestSaveRepoBaseChannelInterplay(t *testing.T) {
 		t.Errorf("basing a dev-trio-channel template into 'un' must refuse the repoint, got %v", err)
 	}
 }
+
+// TestCommittedTemplatesArePureAndLoad guards the repo's committed templates: they
+// must reference rolefiles, never INLINE a prompt (reviewability + the canary, H5),
+// must carry no personal path or identifier (public-repo face, H4), and must load and
+// validate (H2 name==filename). The prompt markers are doctrine-block phrases that
+// only appear if a role body was pasted into template JSON.
+func TestCommittedTemplatesArePureAndLoad(t *testing.T) {
+	dir, ok := repoFormationsDir()
+	if !ok {
+		t.Skip("not in a repo")
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	if len(files) == 0 {
+		t.Skip("no committed templates")
+	}
+	promptMarkers := []string{"Arm your listener", "Monitor tool", "cbus tail", "Standing doctrines", "NEVER Bash", "first reply (required)"}
+	personalMarkers := []string{"/Users/", "carlos", ".ccs/", "carlos-mbp"}
+	for _, fp := range files {
+		b, err := os.ReadFile(fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(b)
+		for _, m := range promptMarkers {
+			if strings.Contains(body, m) {
+				t.Errorf("%s inlines prompt/doctrine text %q — templates must REFERENCE rolefiles, not embed them", filepath.Base(fp), m)
+			}
+		}
+		for _, m := range personalMarkers {
+			if strings.Contains(body, m) {
+				t.Errorf("%s carries a personal identifier %q — a committed template is the public-repo face", filepath.Base(fp), m)
+			}
+		}
+		name := strings.TrimSuffix(filepath.Base(fp), ".json")
+		if _, err := loadFormationFileAt(fp, name); err != nil {
+			t.Errorf("%s does not load/validate: %v", filepath.Base(fp), err)
+		}
+	}
+}
+
+// TestDevTrioStarterShape pins the starter's contents: four roles, all template, no
+// sids, no drift, models deferred (blank -> resolved from roles/*.md at apply).
+func TestDevTrioStarterShape(t *testing.T) {
+	dir, ok := repoFormationsDir()
+	if !ok {
+		t.Skip("not in a repo")
+	}
+	f, err := loadFormationFileAt(filepath.Join(dir, "dev-trio.json"), "dev-trio")
+	if err != nil {
+		t.Fatalf("dev-trio: %v", err)
+	}
+	if f.Channel != "dev-trio" || f.AnchorAlias != "orchestrator" || len(f.DriftAnchors) != 0 {
+		t.Errorf("dev-trio shape: channel=%q anchor=%q drift=%v", f.Channel, f.AnchorAlias, f.DriftAnchors)
+	}
+	want := map[string]string{"orchestrator": "roles/orchestrator.md", "coder": "roles/coder.md",
+		"reviewer": "roles/reviewer.md", "documenter": "roles/documenter.md"}
+	if len(f.Peers) != len(want) {
+		t.Fatalf("want %d peers, got %d", len(want), len(f.Peers))
+	}
+	for _, p := range f.Peers {
+		if p.Mode != ModeTemplate || p.SessionID != "" || p.Model != "" {
+			t.Errorf("%s: mode=%q sid=%q model=%q — want template, no sid, model deferred", p.Alias, p.Mode, p.SessionID, p.Model)
+		}
+		if p.Rolefile != want[p.Alias] {
+			t.Errorf("%s: rolefile=%q want %q", p.Alias, p.Rolefile, want[p.Alias])
+		}
+		if strings.Contains(p.Rolefile, "@") {
+			t.Errorf("%s: rolefile is pinned (%q) — a committed template must not pin (D15 scrub)", p.Alias, p.Rolefile)
+		}
+	}
+}
