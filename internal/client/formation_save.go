@@ -94,6 +94,20 @@ type SaveReport struct {
 	// envelope will accept (hand-corrupted meta), so it was NOT propagated. Surfaced,
 	// never silent (cbus-m9l G6).
 	SkippedBirth []string
+	// BasedOn is set when the refresh base came from a committed template rather than
+	// a prior runtime save, so the CLI can say the starter was inherited.
+	BasedOn string
+}
+
+// loadRepoTemplate reads a committed template as a save refresh base. It reads the
+// repo file, never writes it (H1): save always writes runtime. Not-found returns the
+// os error so the caller can start fresh; the name==filename rule applies (H2).
+func loadRepoTemplate(name string) (*Formation, error) {
+	dir, ok := repoFormationsDir()
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return loadFormationFileAt(filepath.Join(dir, name+".json"), name)
 }
 
 // SaveFormation captures ch's topology into the named envelope, refreshing an
@@ -120,19 +134,33 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 	rep := &SaveReport{}
 
 	var f *Formation
-	if fileExists(path) {
-		// An existing file may hold hours of hand-authored prose. If it will not
-		// load, that is a reason to stop, never a reason to replace it.
+	switch {
+	case fileExists(path):
+		// An existing runtime file may hold hours of hand-authored prose. If it will
+		// not load, that is a reason to stop, never a reason to replace it.
 		if f, err = LoadFormation(name); err != nil {
 			return nil, nil, fmt.Errorf("refusing to overwrite an envelope that will not load: %v", err)
 		}
-		if f.Channel != ch {
-			return nil, nil, fmt.Errorf("formation %q records channel %q, refusing to re-point it at %q "+
-				"(save it under a different name, or fix the channel field)", name, f.Channel, ch)
+	default:
+		// No runtime file. A committed template of the same name MAY serve as the
+		// refresh base, so an apply-then-save cycle inherits its hand-authored fields
+		// (rolefile refs survive). save still WRITES runtime only (H1) — the repo file
+		// is read, never touched. Absent even there, start fresh.
+		base, berr := loadRepoTemplate(name)
+		switch {
+		case berr == nil:
+			f = base
+			rep.BasedOn = "committed template"
+		case os.IsNotExist(berr):
+			f = &Formation{Schema: FormationSchema, Name: name, Channel: ch}
+		default:
+			return nil, nil, fmt.Errorf("cannot base on the committed template %q: %v", name, berr)
 		}
-	} else {
-		rep.New = true
-		f = &Formation{Schema: FormationSchema, Name: name, Channel: ch}
+		rep.New = true // a new runtime file either way
+	}
+	if f.Channel != ch {
+		return nil, nil, fmt.Errorf("formation %q records channel %q, refusing to re-point it at %q "+
+			"(save it under a different name, or fix the channel field)", name, f.Channel, ch)
 	}
 
 	byAlias := make(map[string]*FormationPeer, len(f.Peers))

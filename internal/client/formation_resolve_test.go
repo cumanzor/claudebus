@@ -107,3 +107,66 @@ func TestRemoveFormationRefusesRepoTemplate(t *testing.T) {
 		t.Errorf("rm deleted a committed template: %v", statErr)
 	}
 }
+
+const devTrioTemplate = `{"schema":"cbus-formation/v1","name":"dev-trio","channel":"dev-trio",` +
+	`"host":null,"anchorAlias":"orchestrator","peers":[` +
+	`{"alias":"orchestrator","rolefile":"roles/orchestrator.md","mode":"template"},` +
+	`{"alias":"coder","rolefile":"roles/coder.md","mode":"template"}]}`
+
+// TestSaveBasedOnRepoTemplate is the declared H3 choice + H1: with no runtime file,
+// save MAY read a committed template as its base (inheriting rolefile refs) but WRITES
+// runtime only — the repo file is never touched.
+func TestSaveBasedOnRepoTemplate(t *testing.T) {
+	root := tempRepoWithTemplate(t, "dev-trio", devTrioTemplate)
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "dev-trio", "orchestrator", "sid-orch") // a live peer on the template's default channel
+
+	repoPath := filepath.Join(root, "formations", "dev-trio.json")
+	repoBefore, _ := os.ReadFile(repoPath)
+
+	f, rep, err := SaveFormation("dev-trio", "dev-trio")
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if rep.BasedOn == "" {
+		t.Error("BasedOn must be set when the base is a committed template")
+	}
+	var orch *FormationPeer
+	for i := range f.Peers {
+		if f.Peers[i].Alias == "orchestrator" {
+			orch = &f.Peers[i]
+		}
+	}
+	if orch == nil || orch.Rolefile != "roles/orchestrator.md" {
+		t.Errorf("the template's rolefile ref was not inherited: %+v", orch)
+	}
+	if orch.SessionID != "sid-orch" {
+		t.Errorf("the live sid was not captured onto the inherited peer: %q", orch.SessionID)
+	}
+	// H1: the committed template file is byte-for-byte unchanged
+	repoAfter, _ := os.ReadFile(repoPath)
+	if string(repoBefore) != string(repoAfter) {
+		t.Errorf("save mutated the committed template (H1 violation):\n%s", repoAfter)
+	}
+	// the write landed in the runtime store
+	if !fileExists(filepath.Join(dir, formationsDir, "dev-trio.json")) {
+		t.Error("save did not write to the runtime store")
+	}
+}
+
+// TestSaveRepoBaseChannelInterplay: the template's default channel == its name, and
+// save keys on channel — so basing a save on a template while targeting a different
+// channel hits the repoint refusal. The channel-field interplay, pinned.
+func TestSaveRepoBaseChannelInterplay(t *testing.T) {
+	tempRepoWithTemplate(t, "dev-trio", devTrioTemplate) // channel "dev-trio"
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "un", "orchestrator", "sid-orch") // live on channel "un"
+
+	_, _, err := SaveFormation("dev-trio", "un")
+	if err == nil || !strings.Contains(err.Error(), "records channel") {
+		t.Errorf("basing a dev-trio-channel template into 'un' must refuse the repoint, got %v", err)
+	}
+}
