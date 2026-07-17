@@ -188,14 +188,28 @@ func applierAddress(ch string) (string, error) {
 // the fork for a fresh spawn (the child reclaims it on join), exactly as spawn does.
 func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker TerminalForker) error {
 	p := pp.Peer
-	if pp.Action == ActionTemplate {
-		// a template peer is a fresh session: claim its name before it boots so the
-		// window title and the alias agree, and so two applies cannot race for it.
-		// Birth-record left blank here (cbus-m9l signature propagation, behavior
-		// unchanged) pending a scope ruling on stamping fresh from the apply path.
-		if _, err := ReserveAlias(f.Channel, p.Alias, "", ""); err != nil {
+	// A template and a fork both launch a NOT-YET-EXISTENT session, so claim the alias
+	// before it boots — the title and alias agree, and two applies cannot race for it —
+	// and stamp the birth-record the reclaim will carry (cbus-m9l, D19). A template is
+	// fresh; a fork is fork-born, so recording origin=fork is what makes a LATER restore
+	// refuse to fork it again (R1) and template it instead. Both mint a new session id,
+	// so there is no preserved birth-record at that id to overwrite.
+	//
+	// resume does NOT reserve, and must not: it reuses the SAME session id, and a
+	// reservation placeholder would win over that id in birthForJoin and clobber the
+	// resumed peer's preserved origin. TestApplyResumeNeverReserves pins this.
+	reserved := false
+	switch pp.Action {
+	case ActionTemplate:
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, p.Model); err != nil {
 			return err
 		}
+		reserved = true
+	case ActionFork:
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, p.Model); err != nil {
+			return err
+		}
+		reserved = true
 	}
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
@@ -205,7 +219,7 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 		Dir:    launchDir(p.Cwd),
 	}
 	if err := forker.Fork(spec); err != nil {
-		if pp.Action == ActionTemplate {
+		if reserved {
 			Unreserve(f.Channel, p.Alias)
 		}
 		return err
