@@ -528,3 +528,34 @@ func TestApplyNeverLaunchesItself(t *testing.T) {
 		}
 	}
 }
+
+// TestApplyBriefReachesKickoff: the effort brief on ApplyOptions must land in the
+// delivered kickoff (design 5.3). Before this was wired, apply always sent an empty
+// brief while bootstrap carried one — the gap the live smoke surfaced.
+func TestApplyBriefReachesKickoff(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	applierOn(t, "ch", "applier")
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	fk := &recForker{}
+	brief := "Ship formations v1; answer the nonce then wait."
+	if _, err := applyWith(t, f, ApplyOptions{Brief: brief}, fk, nil); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := fk.specFor("coder")
+	if !ok {
+		t.Fatal("coder not launched")
+	}
+	prompt := spec.Argv[len(spec.Argv)-1]
+	if !strings.Contains(prompt, "--- the effort ---") || !strings.Contains(prompt, brief) {
+		t.Errorf("the brief did not reach the kickoff:\n%s", prompt)
+	}
+	// and with no brief, the section is absent (omitted-by-choice, not empty-by-accident)
+	fk2 := &recForker{}
+	if _, err := applyWith(t, f, ApplyOptions{}, fk2, nil); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := fk2.specFor("coder")
+	if strings.Contains(s2.Argv[len(s2.Argv)-1], "--- the effort ---") {
+		t.Error("no brief should mean no effort section")
+	}
+}

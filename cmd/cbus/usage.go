@@ -70,6 +70,7 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
        --only a,b                  only these peers
        --wait <dur>                how long to wait for each peer to answer its
                                    kickoff (default 90s; 0 = launch and return)
+       --brief TEXT                effort brief added to every peer's kickoff
   cbus formation bootstrap <name> <alias> [--brief TEXT]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not
