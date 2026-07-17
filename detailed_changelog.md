@@ -1,5 +1,139 @@
 # Changelog (detailed)
 
+## [2026-07-17 19:22:17 UTC] [Client/Formations] The starter template library (M8) — formations v1 complete
+
+[Attempt #1]
+
+Eighth and final milestone of formations v1, approved with one class-C
+finding (c5). This entry covers the M8 commit range (1ef6435 through
+8d38d6c, plus ace7dd0) and c5's fold-in (356cef5) together, and closes
+with the effort's ledger — this is the record's last write for
+formations v1.
+
+1ef6435 makes apply, show, and bootstrap resolve a formation by name
+runtime-first, then against repo-committed templates
+(`formations/*.json`). A runtime save of the same name shadows a
+committed starter — the user's live state wins, the opposite precedence
+from role files, whose canonical home is the repo (D20). The resolved
+source is printed, so a shadowed template is stated behavior, not a
+surprise discovered later. The name==filename identity rule (M1's C1)
+now guards repo templates too, and a torn runtime file stops the resolve
+rather than silently falling through to a template. `rm` stays
+runtime-only: a name that exists only in the repo gets a loud refusal
+pointing at git, so the tool can never delete a version-controlled file
+(D22).
+
+b816153 adds `--channel`, so a committed starter can be applied to
+whatever channel an effort actually uses without editing the file. The
+override is set once, in memory, before anything reads the channel, so
+every downstream read follows it: the applier-presence check, the roster
+and reconcile, the kickoff join lines and reply-to address, and the alias
+reservations. A test asserts structurally that nothing leaks onto the
+template's own channel, and that apply writes no envelope file — not a
+behavioral spot-check but a guarantee about where the seams are.
+
+ee6fdcd lets save read a committed template as its refresh base when no
+runtime file of the same name exists yet, so an apply-then-save cycle
+inherits the template's rolefile references instead of blanking them to
+TODO. save still writes the runtime store only, never the repo file — a
+test reads the committed file before and after a save and asserts it is
+byte-for-byte unchanged (H1). Basing on a template while targeting a
+different channel (the template's default channel equals its name) hits
+the existing repoint refusal from M1/M3; that interplay is pinned by a
+test rather than left to memory.
+
+5ffed2f: a dry-run needs no joined applier and no existing channel.
+Applying a template to a channel nobody has joined yet is the first thing
+a new user does, and previewing it should not require joining first. A
+dry-run skips the applier-presence check (it sends no kickoffs, so it
+needs no reply-to), and the plan treats an absent channel as an empty
+roster rather than an error, so every peer plans as missing. A real apply
+still requires a joined applier, and save still refuses to snapshot a
+channel that does not exist. Fragility rider carried for the record: this
+relaxed path is unreachable from a real apply by construction today —
+worth re-checking if that construction ever changes.
+
+ace7dd0 lets a peer defer its model to its role file at apply time:
+previously apply read only a peer's explicit model, so a template
+carrying no models launched everyone on the CLI default. It now falls
+back to the role file's `MODEL:` line when the peer sets none — the same
+defaulting `spawn --role` already does — so a template can leave models
+unset and inherit coder=opus, reviewer=fable, documenter=sonnet from
+roles/*.md (D21). The resolved model reaches both the launch and the
+reservation stamp, so a save after apply records the real model, never a
+blank.
+
+8d38d6c ships the payoff: `formations/dev-trio.json`, a committed
+four-role starter (orchestrator, coder, reviewer, documenter), all
+`mode=template`, no session ids, no drift anchor, no models — models
+defer to each role file's `MODEL:` line per ace7dd0. rolefile references
+are deliberately left unpinned, since a pin on a committed file rots at
+the coming history scrub (D15's logic, applied here to committed
+templates). Prompts are never inlined: the template references
+roles/*.md by path, and a canary test fails the build if any committed
+template contains doctrine-block text or a personal path — the
+public-repo-face rule and the reviewability rule, both pinned and
+verified to actually bite.
+
+c5, folded in via 356cef5: the `/bus-formation` skill had never learned
+M8. It now documents the `--channel` per-run override, the committed
+dev-trio starter applyable from any checkout, and that a runtime save
+shadows a committed starter of the same name (with apply printing which
+source it used). All four skill items were verified; c3's earlier skill
+entry (bootstrap in the argument hint) was confirmed intact; the doc's
+prose style choice was accepted as consistent with the rest of the file.
+
+[Files Changed]
+- internal/client/formation.go, formation_resolve_test.go: runtime-first
+  resolution, name==filename guard extended to repo templates, torn-file
+  handling (1ef6435).
+- cmd/cbus/formation.go (1ef6435, b816153, ee6fdcd): rm's git-pointing
+  refusal, `--channel` flag wiring, template-seeds-save wiring.
+- internal/client/formation_apply.go, formation_apply_test.go (b816153,
+  5ffed2f, ace7dd0): `--channel` override plumbing and its leak test,
+  dry-run's relaxed preconditions, role-file model fallback.
+- internal/client/formation_plan.go (5ffed2f): absent-channel-as-empty-
+  roster planning.
+- internal/client/formation_save.go (ee6fdcd): template-as-refresh-base,
+  runtime-only write, byte-identity test.
+- formations/dev-trio.json (new, 8d38d6c): the committed starter.
+- internal/client/formation_resolve_test.go (8d38d6c): the doctrine/
+  personal-path canary.
+- commands/bus-formation.md (356cef5, c5): `--channel` and starter-
+  template documentation.
+
+[Possible Ripple Effects]
+- Any future committed template must pass the canary (no doctrine text,
+  no personal paths) or the build fails — this is now a standing
+  constraint on `formations/*.json`, not just on this one file.
+- Runtime-shadows-repo precedence means a hand-saved formation with the
+  same name as a shipped starter silently takes over; the printed source
+  line is the only signal, so tooling or docs that don't surface it could
+  reintroduce the earlier "which one ran" confusion class.
+
+[Testing Notes]
+- go test ./... green repo-wide, `-race` clean, consistent with every
+  prior milestone in this effort.
+- Structural (not just behavioral) tests for the `--channel` isolation
+  and the save byte-identity guarantee.
+- Canary test verified to actually fail the build when a committed
+  template violates it (not just present, but proven to bite).
+
+Record-only: n16, n17 — two additional seams noted during review, neither
+load-bearing enough to change behavior here.
+
+## Formations v1 — effort ledger
+
+Closing this effort's record. M1 through M8 are all reviewer-approved.
+38 local commits span the effort, f4553ee through 356cef5. Nothing has
+been pushed — this repo has no remote until Carlos's quiesce window. The
+full test suite ran green under `-race` throughout, milestone by
+milestone, not just at the end. The build ships to installed `cbus` on
+the next Carlos-gated install, the same gate every prior client change in
+this repo has waited on.
+
+This is the documenter's last scheduled write for formations v1.
+
 ## [2026-07-17 18:48:40 UTC] [Client/Formations] The meta.json birth-record (M7) — honest-limit #2 closes
 
 [Attempt #1]
