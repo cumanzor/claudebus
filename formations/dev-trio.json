@@ -1,0 +1,73 @@
+{
+  "schema": "cbus-formation/v1",
+  "name": "dev-trio",
+  "channel": "dev-trio",
+  "host": null,
+  "anchorAlias": "orchestrator",
+  "savedAt": "",
+  "savedBy": "",
+  "drift_anchors": null,
+  "payload": null,
+  "peers": [
+    {
+      "alias": "orchestrator",
+      "model": "",
+      "rolefile": "roles/orchestrator.md",
+      "role": null,
+      "origin": "",
+      "mode": "template",
+      "sessionId": "",
+      "onStale": "",
+      "profile": "",
+      "cwd": "",
+      "target": "tab",
+      "machine": "",
+      "addresses": []
+    },
+    {
+      "alias": "coder",
+      "model": "",
+      "rolefile": "roles/coder.md",
+      "role": null,
+      "origin": "",
+      "mode": "template",
+      "sessionId": "",
+      "onStale": "",
+      "profile": "",
+      "cwd": "",
+      "target": "tab",
+      "machine": "",
+      "addresses": []
+    },
+    {
+      "alias": "reviewer",
+      "model": "",
+      "rolefile": "roles/reviewer.md",
+      "role": null,
+      "origin": "",
+      "mode": "template",
+      "sessionId": "",
+      "onStale": "",
+      "profile": "",
+      "cwd": "",
+      "target": "tab",
+      "machine": "",
+      "addresses": []
+    },
+    {
+      "alias": "documenter",
+      "model": "",
+      "rolefile": "roles/documenter.md",
+      "role": null,
+      "origin": "",
+      "mode": "template",
+      "sessionId": "",
+      "onStale": "",
+      "profile": "",
+      "cwd": "",
+      "target": "tab",
+      "machine": "",
+      "addresses": []
+    }
+  ]
+}
