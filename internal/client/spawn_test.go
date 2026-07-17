@@ -296,7 +296,7 @@ func TestBranchNameFixesAliasAndDefault(t *testing.T) {
 func TestReserveAliasReclaimAndUnreserve(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-reserve-test")
-	alias, err := ReserveAlias("resv", "kid")
+	alias, err := ReserveAlias("resv", "kid", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestReserveAliasReclaimAndUnreserve(t *testing.T) {
 	if _, err := Leave("resv"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReserveAlias("resv", "kid"); err != nil {
+	if _, err := ReserveAlias("resv", "kid", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	Unreserve("resv", "kid")
