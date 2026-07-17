@@ -81,8 +81,13 @@ func runFormationSave(args []string) int {
 	}
 	fmt.Printf("  channel %q: %s\n", f.Channel, strings.Join(parts, "; "))
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine — the store records nothing else;")
-		fmt.Println("  model, rolefile/role, origin and profile are yours to fill in")
+		fmt.Println("  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;")
+		fmt.Println("  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates")
+	}
+	// A birth-record the envelope would reject was NOT captured; say so at the
+	// terminal, not only in the report struct (C4) — a silent skip reads as a clean save.
+	for _, s := range rep.SkippedBirth {
+		fmt.Printf("  skipped a corrupted birth-record — %s\n", s)
 	}
 	fmt.Printf("  check it: cbus formation show %s\n", name)
 	return 0
