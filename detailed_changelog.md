@@ -119,8 +119,15 @@ prose style choice was accepted as consistent with the rest of the file.
 - Canary test verified to actually fail the build when a committed
   template violates it (not just present, but proven to bite).
 
-Record-only: n16, n17 — two additional seams noted during review, neither
-load-bearing enough to change behavior here.
+Record-only: n16 — a `--channel`-instantiated effort cannot inherit the
+template's rolefile refs via save, because repo-base seeding keys on a
+name+channel match and the override breaks that match; a `--based-on`
+flag could close this if it stings in practice, but it doesn't block
+anything today. n17 — `formation list` stays runtime-only, so a fresh
+user sees "no formations saved" while `apply dev-trio` already works
+against the committed starter; a discoverability seam, consistent with
+the runtime/repo split this milestone establishes, recorded here rather
+than fixed.
 
 ## Formations v1 — effort ledger
 
