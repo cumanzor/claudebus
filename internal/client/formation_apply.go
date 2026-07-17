@@ -95,9 +95,15 @@ func Apply(f *Formation, opts ApplyOptions, forker TerminalForker) (*ApplyReport
 	if err := overrideChannel(f, opts); err != nil {
 		return nil, err
 	}
-	self, err := applierAddress(f.Channel)
-	if err != nil {
-		return nil, err
+	// A dry-run sends no kickoffs, so it needs no reply-to and no joined applier: a
+	// new user can preview a template before joining anything. A real apply briefs
+	// peers to answer THIS session, so it must be a peer first.
+	var self string
+	if !opts.DryRun {
+		var err error
+		if self, err = applierAddress(f.Channel); err != nil {
+			return nil, err
+		}
 	}
 	if bad := UnknownAliases(f, opts.Only); len(bad) > 0 {
 		return nil, fmt.Errorf("--only names no such peer: %s", strings.Join(bad, ", "))

@@ -751,3 +751,34 @@ func TestApplyChannelOverrideRejectsBad(t *testing.T) {
 		t.Errorf("a bad --channel must be refused, got %v", err)
 	}
 }
+
+// TestApplyDryRunNeedsNoJoinNorChannel is the reviewer's H8 new-user path: a dry-run
+// of a template against a channel nobody has joined, from an empty store, must plan
+// (all peers missing -> templated), not error on a missing applier or absent channel.
+func TestApplyDryRunNeedsNoJoinNorChannel(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-newuser") // joined to NOTHING
+	f := &Formation{
+		Schema: FormationSchema, Name: "dev-trio", Channel: "dev-trio", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{
+			peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+			peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		},
+	}
+	rep, err := Apply(f, ApplyOptions{DryRun: true}, &recForker{})
+	if err != nil {
+		t.Fatalf("a dry-run from an empty store must not error: %v", err)
+	}
+	if len(rep.Results) != 2 {
+		t.Fatalf("want a plan for both peers, got %+v", rep.Results)
+	}
+	for _, r := range rep.Results {
+		if r.Outcome != OutcomeTemplated {
+			t.Errorf("%s: want templated on a fresh channel, got %v", r.Alias, r.Outcome)
+		}
+	}
+	// but a REAL apply from the same unjoined state still refuses (peers must answer it)
+	if _, err := Apply(f, ApplyOptions{DryRun: false, Wait: 0}, &recForker{}); err == nil {
+		t.Error("a real apply with no joined applier must still refuse")
+	}
+}
