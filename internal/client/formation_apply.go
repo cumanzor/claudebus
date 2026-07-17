@@ -198,15 +198,16 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	// resume does NOT reserve, and must not: it reuses the SAME session id, and a
 	// reservation placeholder would win over that id in birthForJoin and clobber the
 	// resumed peer's preserved origin. TestApplyResumeNeverReserves pins this.
+	model := peerModel(p) // resolved once: explicit, else the role file's MODEL: line
 	reserved := false
 	switch pp.Action {
 	case ActionTemplate:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, p.Model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model); err != nil {
 			return err
 		}
 		reserved = true
 	case ActionFork:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, p.Model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model); err != nil {
 			return err
 		}
 		reserved = true
@@ -214,7 +215,7 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
 		Target: launchTarget(p.Target),
-		Argv:   peerLaunchArgv(pp, prompt),
+		Argv:   peerLaunchArgv(pp, prompt, model),
 		Env:    peerEnv(p.Profile),
 		Dir:    launchDir(p.Cwd),
 	}
@@ -243,11 +244,28 @@ func launchDir(recorded string) string {
 	return cwd()
 }
 
+// peerModel resolves the model apply launches a peer on: an explicit peer.model
+// wins, else the committed role file's MODEL: line (the deferral that lets a template
+// carry no models and inherit them from roles/*.md, D21), else empty — the CLI's own
+// default. Same MODEL:-line defaulting spawn --role applies (cbus-ijx.9).
+func peerModel(p *FormationPeer) string {
+	if p.Model != "" {
+		return p.Model
+	}
+	if p.Rolefile != "" {
+		name, _ := parseRolefile(p.Rolefile)
+		if _, model, err := LoadRole(name); err == nil {
+			return model
+		}
+	}
+	return ""
+}
+
 // peerLaunchArgv builds the launch per mode. The distinction IS the feature:
 // resume continues the session as itself, fork checkpoints it into a copy, template
 // starts blank. --name fixes alias and window title at the only moment the tool
-// controls identity (spawn time); --model comes from the file, never a guess.
-func peerLaunchArgv(pp PeerPlan, prompt string) []string {
+// controls identity (spawn time); model is the resolved peerModel, never a guess.
+func peerLaunchArgv(pp PeerPlan, prompt, model string) []string {
 	p := pp.Peer
 	argv := launchPrefix(p.Profile)
 	switch pp.Action {
@@ -256,8 +274,8 @@ func peerLaunchArgv(pp PeerPlan, prompt string) []string {
 	case ActionFork:
 		argv = append(argv, "--resume", p.SessionID, "--fork-session")
 	}
-	if p.Model != "" {
-		argv = append(argv, "--model", p.Model)
+	if model != "" {
+		argv = append(argv, "--model", model)
 	}
 	argv = append(argv, "--name", p.Alias)
 	if prompt != "" {

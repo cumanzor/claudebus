@@ -620,3 +620,58 @@ func TestApplyReservationBirthPerMode(t *testing.T) {
 		t.Fatal("resume must NOT reserve — a reservation would clobber the resumed peer's preserved birth-record")
 	}
 }
+
+// TestPeerModelResolution is D21: an explicit peer.model wins, else the model defers
+// to the role file's MODEL: line, else empty. Fixture role uses a name the repo does
+// not ship so LoadRole resolves it from $CBUS_DIR, not a real roles/ file.
+func TestPeerModelResolution(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	roleFileIn(t, dir, "m8role", "# M8 Role\n\nMODEL: sonnet\n\nbody")
+
+	if got := peerModel(&FormationPeer{Rolefile: "roles/m8role.md@pin"}); got != "sonnet" {
+		t.Errorf("deferred model = %q, want sonnet from MODEL:", got)
+	}
+	if got := peerModel(&FormationPeer{Rolefile: "roles/m8role.md", Model: "opus"}); got != "opus" {
+		t.Errorf("explicit model must win, got %q", got)
+	}
+	if got := peerModel(&FormationPeer{}); got != "" {
+		t.Errorf("no rolefile, no model -> empty, got %q", got)
+	}
+	if got := peerModel(&FormationPeer{Rolefile: "roles/nonesuch.md"}); got != "" {
+		t.Errorf("unresolvable rolefile -> empty, got %q", got)
+	}
+}
+
+// TestApplyDeferredModelReachesLaunchAndReservation: a template peer carrying no
+// model but a rolefile launches with --model from MODEL:, and the reservation stamps
+// that resolved model, so a save after apply captures the real model.
+func TestApplyDeferredModelReachesLaunchAndReservation(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	roleFileIn(t, dir, "m8role", "# M8 Role\n\nMODEL: fable\n\nbody")
+	applierOn(t, "ch", "applier")
+	f := applyFixture(peer("worker", func(p *FormationPeer) {
+		p.Machine = ShortHostname()
+		p.Rolefile = "roles/m8role.md" // no model -> defers to MODEL: fable
+	}))
+	fk := &recForker{}
+	if _, err := applyWith(t, f, ApplyOptions{}, fk, nil); err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := fk.specFor("worker")
+	if !ok {
+		t.Fatal("worker not launched")
+	}
+	if j := strings.Join(spec.Argv, " "); !strings.Contains(j, "--model fable") {
+		t.Errorf("deferred model did not reach the launch: %v", spec.Argv)
+	}
+	// the reservation stamped the resolved model
+	b, err := os.ReadFile(filepath.Join(dir, "ch", "worker", "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"model": "fable"`) {
+		t.Errorf("reservation did not stamp the resolved model:\n%s", b)
+	}
+}
