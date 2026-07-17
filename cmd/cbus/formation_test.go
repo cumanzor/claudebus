@@ -330,7 +330,7 @@ func TestFormationApplyDryRunVerb(t *testing.T) {
 	saveFixture(t, dir, "roles", fixtureRoles())
 
 	out := captureStdout(t, func() {
-		if rc := runFormation([]string{"apply", "roles", "--dry-run"}); rc != 0 {
+		if rc := runFormation([]string{"apply", "roles", "--dry-run", "--brief", "ship it"}); rc != 0 {
 			t.Fatalf("rc=%d", rc)
 		}
 	})
