@@ -183,7 +183,7 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"model, rolefile/role, origin and profile are yours to fill in", "cbus formation show roles"} {
+		"rolefile/role and profile are yours to fill in", "cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
 		}
@@ -414,5 +414,42 @@ func TestFormationApplyBriefThroughCLI(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the --brief text did not reach any rendered kickoff through the CLI path")
+	}
+}
+
+// TestFormationSaveRendersSkippedBirth is C4: a birth-record the envelope would
+// reject is skipped, and the skip must be VISIBLE at the terminal — a silent skip
+// reads as a clean save.
+func TestFormationSaveRendersSkippedBirth(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	// a peer whose meta carries a garbage origin (hand-corrupted meta)
+	pdir := filepath.Join(dir, "roles", "coder")
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"alias":"coder","channel":"roles","sessionId":"sid-coder","cwd":"/x",` +
+		`"listenerPid":null,"ownerPid":null,"host":"` + thisMachine() + `","ts":"2026-07-17T00:00:00Z",` +
+		`"origin":"spawned-maybe","model":"--dangerous"}`
+	if err := os.WriteFile(filepath.Join(pdir, "meta.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"save", "roles", "roles"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	if !strings.Contains(out, "skipped a corrupted birth-record") {
+		t.Errorf("a skipped garbage birth-record must be shown at the terminal:\n%s", out)
+	}
+	// it names the peer and both offending fields
+	if !strings.Contains(out, "coder") || !strings.Contains(out, "origin") || !strings.Contains(out, "model") {
+		t.Errorf("the skip line must name the peer and fields:\n%s", out)
+	}
+	// the guidance line is truthful now (origin/model ARE captured when present)
+	if strings.Contains(out, "the store records nothing else") {
+		t.Errorf("the stale 'records nothing else' line must be gone:\n%s", out)
 	}
 }
