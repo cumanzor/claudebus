@@ -1,5 +1,58 @@
 # Changelog (detailed)
 
+## [2026-07-17 18:11:26 UTC] [Client/Formations] v1 live smoke: identity verification
+
+[Attempt #1]
+
+The first and only live smoke of formations v1: the frozen 10-step
+lifecycle, run for real rather than dry-run, to answer the one question no
+unit test can — does a resumed peer actually come back as itself, or does it
+come back as a fork wearing the original's name (the B31 ghost-orchestrator
+class this whole design exists to prevent).
+
+Setup: 3 windows, one child spawned as sonnet, formation name `fmsmoke`. The
+coder reported PASS with teardown proofs matched. The reviewer did not take
+that report on faith: it verified independently, and it verified FIRST,
+directly against the resumed peer's own transcript (sid-B) rather than
+against the coder's summary of it.
+
+Identity proof, the load-bearing claim: the resumed session, given no prompt
+to do so, quoted its own first-turn nonce back. That is only possible with
+real process continuity, not a fresh actor that was told what the nonce was.
+Structural proof, independent of either party's narrative: both the peer's
+original kickoff and its resume kickoff land in one session transcript file
+— a fork would have written a second, different sid's file, so a single file
+containing both is direct evidence of resume, not reconstruction. The
+reviewer grepped the full transcript for `--fork-session` and found zero
+occurrences. The reviewer's own independent nonce count matched the coder's
+reported count.
+
+Scope, stated precisely rather than inflated: exit codes and teardown
+cleanliness rest on the coder's summary alone — nothing in the identity
+verdict depends on them, and the record should not imply otherwise. Evidence
+epistemics for anyone re-reading this later: the session transcript is
+primary evidence; a reconstructed kickoff (typed out from memory or notes
+rather than read verbatim off disk) is corroboration only, never proof on
+its own.
+
+The smoke's real yield was a defect, not a formality: D17, apply's `--brief`
+flag was never wired — the plumbing existed but the CLI rejected the flag,
+so kickoff briefs went silently empty. This is a design-section-5.3 fidelity
+gap inside the already fully-reviewed M5, caught only because someone ran
+the real thing instead of trusting the review cycle that had already passed
+it. D17's fix rides its own commit and will fold into M5's record, same
+pattern as the class-C findings, once the reviewer confirms it.
+
+[Testing Notes]
+- Live, not simulated: 3 real windows, one real child process, the real
+  formations channel.
+- Reviewer verification order: transcript first, coder's summary second —
+  deliberately, to avoid anchoring on the report being verified.
+
+No files changed by this entry; it records a live verification run, not a
+code change. D17's fix commit is tracked separately and folds into M5 when
+its hash arrives.
+
 ## [2026-07-16 19:24:22 UTC] [Client/Formations] Bootstrap and the /bus-formation skill (M6) — v1's verb set is complete
 
 [Attempt #1]
