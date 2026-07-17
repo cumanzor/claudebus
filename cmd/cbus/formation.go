@@ -88,6 +88,11 @@ func runFormationSave(args []string) int {
 	return 0
 }
 
+// applyForker is the terminal apply launches peers through — the real iTerm/tmux
+// forker in production, a recorder in tests, so the CLI's --brief-to-kickoff path can
+// be exercised end to end without opening a window (the http.DefaultClient idiom).
+var applyForker client.TerminalForker = client.OSAForker{}
+
 // defaultWait is how long apply waits for kickoff answers. A fresh session takes
 // tens of seconds to boot, load its role and answer; 90s clears that with room, and
 // a peer that misses it is reported as failed rather than silently assumed good.
@@ -134,7 +139,7 @@ func runFormationApply(args []string) int {
 	if err != nil {
 		return die("%v", err)
 	}
-	rep, err := client.Apply(f, opts, client.OSAForker{})
+	rep, err := client.Apply(f, opts, applyForker)
 	if rep != nil {
 		renderApplyReport(f, rep, opts)
 	}

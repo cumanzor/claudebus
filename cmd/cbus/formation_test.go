@@ -371,3 +371,48 @@ func TestFormationBootstrapVerb(t *testing.T) {
 		t.Error("unknown alias must fail")
 	}
 }
+
+// cmdRecForker records launches so an apply driven through the CLI can be inspected
+// without opening a terminal.
+type cmdRecForker struct{ specs []client.ForkSpec }
+
+func (f *cmdRecForker) Fork(s client.ForkSpec) error { f.specs = append(f.specs, s); return nil }
+
+// TestFormationApplyBriefThroughCLI is the reviewer's user's-door requirement for
+// D17: the brief must reach a rendered kickoff through runFormationApply itself, not
+// only through a client-level shim. It drives the real CLI verb with --brief and a
+// recording forker, then reads the delivered kickoff.
+func TestFormationApplyBriefThroughCLI(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch") // the applier, present
+	saveFixture(t, dir, "roles", fixtureRoles())
+
+	rec := &cmdRecForker{}
+	prev := applyForker
+	applyForker = rec
+	defer func() { applyForker = prev }()
+
+	// --wait 0 so the CLI returns without polling for an answer the recorder can't give
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"apply", "roles", "--brief", "SHIP FORMATIONS V1", "--wait", "0"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	if len(rec.specs) == 0 {
+		t.Fatalf("apply launched nothing through the CLI:\n%s", out)
+	}
+	found := false
+	for _, s := range rec.specs {
+		prompt := s.Argv[len(s.Argv)-1]
+		if strings.Contains(prompt, "--- the effort ---") && strings.Contains(prompt, "SHIP FORMATIONS V1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the --brief text did not reach any rendered kickoff through the CLI path")
+	}
+}
