@@ -1,6 +1,6 @@
 ---
 description: Save, inspect, or relaunch a cbus formation — a channel's saved peer topology
-argument-hint: "save <name> | show <name> | apply <name> [--dry-run] | bootstrap <name> <alias> | list | rm <name>"
+argument-hint: "save <name> | show <name> | apply <name> [--channel ch] [--dry-run] | bootstrap <name> <alias> | list | rm <name>"
 allowed-tools: Bash(cbus:*), Monitor
 ---
 
@@ -39,6 +39,17 @@ It reports per peer: `present` (already live — left alone), `resumed`, `forked
 always carries its reason — relay it verbatim; those are the prohibitions that
 stop a peer being restored as the wrong session, and they are worth reading, not
 working around.
+
+**Starter templates and `--channel`.** A name resolves runtime-first, then the
+repo's committed `formations/*.json` starters. `cbus formation apply dev-trio`
+works from any checkout of this repo with an empty runtime store: dev-trio is a
+four-role starter (orchestrator, coder, reviewer, documenter) whose models come
+from the role files. Retarget a starter to the effort's channel with
+`--channel <ch>` — a per-run override that does not change the file. A runtime
+`save` of the same name shadows a committed starter (your live state wins); apply
+prints its source line, so relay it when a shadow is in play. `rm` and `save`
+touch the runtime store only — `rm` of a committed starter is refused (remove it
+via git), and a `save` that inherits a starter still writes runtime, never the repo.
 
 **bootstrap `<name> <alias>` [--brief TEXT]** — print ONE peer's first-turn prompt
 for the user to paste by hand. This is the path for a peer `apply` will not launch
