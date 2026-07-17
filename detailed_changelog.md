@@ -252,6 +252,43 @@ now pinned by a test. Mutation-verified via the reviewer's own
 Record-only: n12 — one convergence poll tick costs O(inbox size); bounded
 and fine at formation scale, revisit only if inboxes grow very large.
 
+D17 folded in: the v1 live smoke (recorded separately above) surfaced that
+apply's `--brief` flag was never wired, after this milestone had already
+passed a full review cycle. `ApplyOptions.Brief` flowed correctly into the
+kickoff builder, but no CLI flag ever set it, so apply always sent an empty
+effort brief while bootstrap (M6) carried one through the same builder — a
+design-section-5.3 fidelity gap. Fixed in two commits: 6c3ea2f wires `--brief`
+(the flag, `opts.Brief`, usage text, and a client-level render test), and
+2c5d2ea drives the flag through `runFormationApply` end to end to a rendered
+kickoff, via a new `applyForker` package-var seam (the `http.DefaultClient`
+idiom — a real terminal by default, swappable in tests; no parallel hazard
+since the cmd-level tests use `t.Setenv`). The reviewer re-ran the fix's own
+mutation: unwiring `opts.Brief` fails 2c5d2ea's test while every in-process
+test from the original milestone stays green — which is the whole story of
+how the gap survived review.
+
+Reviewer's self-report on the miss, carried here rather than smoothed over:
+this was a review miss, not only a live find. The reviewer had read both
+halves at M5's original review — the `Brief` plumbing and the
+flag-parsing allowlist — but never joined them, because the kickoff-content
+test in place at the time injected the brief in-process, bypassing the CLI
+path entirely; that is exactly how a dead CLI parameter stays invisible.
+6c3ea2f's own first-pass coverage repeated the same shape: parse-without-
+render, and render-without-CLI, never both at once. Distilled doctrine,
+reviewer's words in substance: a content gate for a user-reachable feature
+must enter through the user's door at least once. This is the third honest
+self-report of the effort (following the M1 HTML-escaping dismissal and the
+M2 C2 citation gap), and the closing commit embodies the doctrine directly,
+as a test that would have caught the original gap.
+
+[Files Changed, D17]
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go, cmd/cbus/usage.go
+  (6c3ea2f): `--brief` flag and wiring.
+- internal/client/formation_apply_test.go (6c3ea2f): client-level render
+  test.
+- cmd/cbus/formation.go, cmd/cbus/formation_test.go (2c5d2ea): the
+  `applyForker` seam and the CLI-path end-to-end test.
+
 ## [2026-07-16 19:05:44 UTC] [Client/Formations] The apply plan (M4): every decision made before anything launches
 
 [Attempt #1]
