@@ -102,11 +102,17 @@ type PlanWorld struct {
 }
 
 // GatherPlanWorld collects the live state. This is the I/O half; BuildPlan is the
-// decision half.
+// decision half. An ABSENT channel is an empty roster, not an error: applying a
+// template to a channel nobody has joined yet (the first thing a new user does) must
+// plan every peer as missing, not fail. ChannelRoster stays strict for save, which
+// genuinely cannot snapshot a channel that does not exist.
 func GatherPlanWorld(ch string) (*PlanWorld, error) {
-	roster, err := ChannelRoster(ch)
-	if err != nil {
-		return nil, err
+	var roster []RosterPeer
+	if dirExists(filepath.Join(CBUSDir(), ch)) {
+		var err error
+		if roster, err = ChannelRoster(ch); err != nil {
+			return nil, err
+		}
 	}
 	head, _ := gitHead()
 	self := ""
