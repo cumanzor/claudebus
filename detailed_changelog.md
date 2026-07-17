@@ -1,5 +1,111 @@
 # Changelog (detailed)
 
+## [2026-07-17 18:48:40 UTC] [Client/Formations] The meta.json birth-record (M7) — honest-limit #2 closes
+
+[Attempt #1]
+
+Seventh milestone of formations v1, approved with one class-C finding
+(C4). This entry covers cd71d43, 33a639a, and 9368480 together with C4's
+fold-in fix 311f86f, per the hold-for-verdict rule. It closes honest-limit
+#2 from the M6 wrap block: "origin is unknowable at save time... nothing
+mechanically enforces it until a meta.json birth-record ships." That
+birth-record ships here.
+
+cd71d43 does the reservation-side stamping. A session cannot know whether
+it was spawned fresh, forked, or joined on its own, but the launcher can,
+at reservation time, before the child even boots. `ReserveAlias` now
+stamps origin+model into the placeholder: `spawn` stamps `fresh`, `branch`
+stamps `fork` (the one place a forked transcript is actually made), and
+the child's own join carries those values into its real-sid meta. D18: a
+reservation-less join resolves origin by a three-way rule — a reservation
+placeholder's record is inherited; this session's own surviving meta is
+preserved (a resume-rejoin keeps its birth-record rather than flipping to
+`joined`); any other name is joined with an unknown model. Another
+session's record is never carried across, and a blank is never inferred
+into a value — the never-infer rule holds even for a torn reservation,
+which stays blank rather than guessed. The birth-record is deliberately
+read before the channel prune runs: a resumed peer's meta carries a dead
+listener, which prune would otherwise reap an instant before the record
+could be read, silently losing it on a restore. `origin` and `model` are
+`omitempty`, so rewriting a bash-era or pre-record meta stays
+byte-identical — pinned against 9 real metas, the same discipline
+`lastActivity` already follows.
+
+9368480 does the apply-side stamping: a templated peer is fresh and a
+forked peer is fork-born, so apply now reserves each with that origin and
+the peer's model, meaning a save after apply records what actually got
+launched. Recording a fork as fork-born is what makes a later restore
+refuse to fork it again and template it instead — the same rule `branch`
+already follows at the fork-creation site. Both modes mint a new session
+id, so there is no preserved birth-record to overwrite. Resume is the
+deliberate exception and stays reservation-free: it reuses the existing
+id, and a reservation placeholder would win over that id when the peer
+rejoins, blanking out its preserved origin. A test pins that resume
+reserves nothing, so adding one later fails the build.
+
+33a639a closes the loop on the save side: `ReadPeerMeta` now surfaces
+origin+model, and save fills them onto a peer by the same fill-once rule
+it uses for every field it touches — only when the envelope field is
+blank and the meta value is present, never over a hand-set value, never
+from a blank meta. A meta value the envelope would reject (an origin
+outside fresh|fork|joined, a flag-shaped model, the shape a
+hand-corrupted meta produces) is not propagated; it is skipped and
+surfaced in the report, so garbage cannot ride a birth-record into the
+file silently. Together with the reservation stamping, a spawn-born peer
+now saves with `origin=fresh` and its model already filled, so apply can
+resume it without a hand-edit — closing the manual step the smoke's step
+8 needed.
+
+C4, folded in via 311f86f: two things in save's output were wrong. The
+skip of a hand-corrupted birth-record lived only in the report struct,
+silent at the terminal — a run that skipped a corrupt value read as a
+clean save. It now prints, naming the peer and the offending value. And
+save's guidance line still claimed the store records nothing beyond
+alias/sessionId/cwd/machine at the exact moment save started reading
+origin/model from it too; it now tells the truth about what is captured
+versus what stays hand-maintained. The reviewer re-proved the fix with the
+exact command that found the original defect, and mutation-pinned the old
+wording absent so it can't silently return.
+
+Net effect, stated plainly: origin and model are now mechanical on every
+launcher-born peer (spawn, branch, apply's template and fork modes);
+resume needs no hand-edit to be recorded correctly; and R1's teeth (never
+fork across roles) are restored on tool-saved formations rather than
+resting on a human remembering to fill in a field by hand.
+
+[Files Changed]
+- internal/client/store.go (cd71d43): `ReserveAlias` origin+model
+  stamping, the D18 three-way join resolution, prune-order fix.
+- internal/client/harness.go, spawn.go, spawn_test.go (cd71d43): callers
+  updated for the new stamping.
+- internal/client/birth_test.go (new, cd71d43): the reservation-stamping
+  and never-infer test suite.
+- internal/client/formation_apply.go, formation_apply_test.go (9368480):
+  apply-side origin/model stamping, resume-reserves-nothing pin.
+- internal/client/formation_save.go, formation_save_test.go, liveness.go
+  (33a639a): save-side fill-once capture of origin/model, reject-and-report
+  for invalid meta values.
+- cmd/cbus/formation.go, formation_test.go (311f86f, C4): visible skip
+  reporting, corrected guidance line.
+
+[Possible Ripple Effects]
+- Every future launcher path (spawn, branch, apply) must route through
+  `ReserveAlias`'s stamping rather than writing meta directly, or a new
+  peer type will silently regress to unknown origin.
+- The prune-before-read ordering fix is a general reservation-store
+  correctness fix, not formations-specific; any other consumer of a
+  resumed peer's meta benefits from it too.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Byte-identity pinned against 9 real (non-synthetic) metas, including
+  bash-era and pre-record shapes.
+- Reviewer re-proved C4 with the exact command that originally found it;
+  the old (now-false) guidance wording is mutation-pinned absent.
+
+M8 (starter templates) is released in parallel and will be the effort's
+final entry.
+
 ## [2026-07-17 18:11:26 UTC] [Client/Formations] v1 live smoke: identity verification
 
 [Attempt #1]
