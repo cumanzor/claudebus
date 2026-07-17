@@ -80,6 +80,9 @@ func runFormationSave(args []string) int {
 		parts = append(parts, fmt.Sprintf("%d kept, not on the channel now (%s)", len(rep.Kept), strings.Join(rep.Kept, ", ")))
 	}
 	fmt.Printf("  channel %q: %s\n", f.Channel, strings.Join(parts, "; "))
+	if rep.BasedOn != "" {
+		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
+	}
 	if len(rep.Added) > 0 {
 		fmt.Println("  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;")
 		fmt.Println("  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates")
