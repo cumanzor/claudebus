@@ -110,7 +110,8 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 		if !core.ValidName(addr) {
 			return "", "", fmt.Errorf("bad channel %q", addr)
 		}
-		if childAlias, err = ReserveAlias(addr, name); err != nil {
+		// spawn is always a fresh, blank-transcript session (cbus-m9l birth-record).
+		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model); err != nil {
 			return "", "", err
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)

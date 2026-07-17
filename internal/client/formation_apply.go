@@ -191,7 +191,9 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	if pp.Action == ActionTemplate {
 		// a template peer is a fresh session: claim its name before it boots so the
 		// window title and the alias agree, and so two applies cannot race for it.
-		if _, err := ReserveAlias(f.Channel, p.Alias); err != nil {
+		// Birth-record left blank here (cbus-m9l signature propagation, behavior
+		// unchanged) pending a scope ruling on stamping fresh from the apply path.
+		if _, err := ReserveAlias(f.Channel, p.Alias, "", ""); err != nil {
 			return err
 		}
 	}

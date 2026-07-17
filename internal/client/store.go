@@ -27,6 +27,13 @@ type peerMeta struct {
 	Host         string          `json:"host"`
 	TS           string          `json:"ts"`
 	LastActivity string          `json:"lastActivity,omitempty"`
+	// Birth-record (cbus-m9l): how a peer was born and on what model, known to the
+	// LAUNCHER and stamped into the reservation, so formation save can capture what a
+	// session cannot know about itself. omitempty like lastActivity: a rewrite of a
+	// bash-era or pre-m9l meta that lacks them stays byte-identical, and an absent
+	// field reads as unknown/hand-maintained — never inferred.
+	Origin string `json:"origin,omitempty"`
+	Model  string `json:"model,omitempty"`
 }
 
 var jsonNull = json.RawMessage("null")
@@ -110,6 +117,15 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if !core.ValidName(ch) {
 		return "", false, fmt.Errorf("channel must be [A-Za-z0-9._-]")
 	}
+	// Birth-record (cbus-m9l): capture it BEFORE PruneChannel. A resume-rejoin's own
+	// meta carries a DEAD listener, so prune would reap it (and with it the origin) an
+	// instant before birthForJoin could read it — D18 case 1 would silently fail for
+	// any session that had armed. Reading up front preserves it through the reap. An
+	// auto-pick join has no prior meta and stays origin=joined, model unknown.
+	origin, model := OriginJoined, ""
+	if alias != "" && core.ValidName(alias) {
+		origin, model = birthForJoin(filepath.Join(CBUSDir(), ch, alias, "meta.json"), SessionID())
+	}
 	PruneChannel(ch)
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch {
@@ -144,12 +160,46 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: ShortHostname(), TS: now, LastActivity: now,
+		Origin: origin, Model: model,
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
 	}
 	BroadcastPresence(ch, alias, "join", "joined "+ch+" as "+alias, alias)
 	return alias, false, nil
+}
+
+// birthForJoin resolves the birth-record for an explicit-alias join against whatever
+// meta already sits at the name (cbus-m9l, D18 three-way). The identity of that meta
+// decides whose facts they are:
+//
+//   - sessionId "reserved": a reservation placeholder the launcher stamped — carry
+//     its origin/model through the reclaim (blank and all; a torn/pre-m9l reservation
+//     stays blank, never inferred to "joined").
+//   - sessionId == this session's own: a resume-rejoin (the process ended, the meta
+//     survived, the same session is coming back) — preserve its origin/model, our own
+//     facts, so a restore does not flip a fresh-born peer to joined and blank its
+//     model.
+//   - anything else, or no readable meta: a session joining under a name it did not
+//     reserve — origin=joined, model unknown. Another session's birth-record would be
+//     misattribution if carried.
+func birthForJoin(metaPath, selfSid string) (origin, model string) {
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		return OriginJoined, ""
+	}
+	var m struct {
+		SessionID string `json:"sessionId"`
+		Origin    string `json:"origin"`
+		Model     string `json:"model"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return OriginJoined, ""
+	}
+	if m.SessionID == "reserved" || (selfSid != "" && m.SessionID == selfSid) {
+		return m.Origin, m.Model
+	}
+	return OriginJoined, ""
 }
 
 // ReserveAlias claims an alias in ch on behalf of a NOT-YET-BOOTED child session
@@ -160,7 +210,12 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 // abandoned reservation dies via the unarmed grace sweep like any joined-never-armed
 // peer, and no presence is broadcast (the child's own join announces). want=""
 // auto-picks via the same atomic claim dance as Join.
-func ReserveAlias(ch, want string) (alias string, err error) {
+//
+// origin/model are the birth-record (cbus-m9l): the launcher knows how the child was
+// born (spawn=fresh, branch=fork) and on what model, and stamps them here so the
+// child's join can carry them into the real-sid meta. Blank when the caller does not
+// know (never a guess).
+func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 	if !core.ValidName(ch) {
 		return "", fmt.Errorf("channel must be [A-Za-z0-9._-]")
 	}
@@ -196,6 +251,7 @@ func ReserveAlias(ch, want string) (alias string, err error) {
 		Alias: alias, Channel: ch, SessionID: "reserved", Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: ShortHostname(), TS: now, LastActivity: now,
+		Origin: origin, Model: model,
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", err
