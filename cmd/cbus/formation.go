@@ -140,10 +140,11 @@ func runFormationApply(args []string) int {
 		}
 		opts.Wait = d
 	}
-	f, err := client.LoadFormation(name)
+	f, source, err := client.ResolveFormation(name)
 	if err != nil {
 		return die("%v", err)
 	}
+	fmt.Printf("resolved %q from the %s\n", name, source)
 	rep, err := client.Apply(f, opts, applyForker)
 	if rep != nil {
 		renderApplyReport(f, rep, opts)
@@ -215,7 +216,7 @@ func runFormationBootstrap(args []string) int {
 		return die("%v", err)
 	}
 	brief, _ := p.has("--brief")
-	f, err := client.LoadFormation(name)
+	f, _, err := client.ResolveFormation(name)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -277,10 +278,11 @@ func runFormationShow(args []string) int {
 	if err := noExtra(args, 1, use); err != nil {
 		return die("%v", err)
 	}
-	f, err := client.LoadFormation(args[0])
+	f, source, err := client.ResolveFormation(args[0])
 	if err != nil {
 		return die("%v", err)
 	}
+	fmt.Printf("source:    %s\n", source)
 	renderFormation(f)
 	return 0
 }
