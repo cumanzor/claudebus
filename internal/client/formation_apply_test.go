@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -557,5 +558,65 @@ func TestApplyBriefReachesKickoff(t *testing.T) {
 	s2, _ := fk2.specFor("coder")
 	if strings.Contains(s2.Argv[len(s2.Argv)-1], "--- the effort ---") {
 		t.Error("no brief should mean no effort section")
+	}
+}
+
+// TestApplyReservationBirthPerMode is D19: template reserves fresh, fork reserves
+// fork, resume reserves NOTHING. The resume assertion is the pinned invariant —
+// birthForJoin prioritizes a "reserved" placeholder over a session's own sid, so a
+// reservation on the resume path would silently clobber a resumed peer's preserved
+// birth-record. A future editor adding one must fail this test, not slip past review.
+func TestApplyReservationBirthPerMode(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	applierOn(t, "ch", "applier")
+	f := applyFixture(
+		peer("fresh1", func(p *FormationPeer) { p.Machine = ShortHostname(); p.Model = "opus" }), // template (default mode)
+		peer("clone1", func(p *FormationPeer) {
+			p.Machine = ShortHostname()
+			p.Model = "sonnet"
+			p.Mode = ModeFork
+			p.Origin = OriginFresh
+			p.SessionID = "sid-clone"
+		}),
+		peer("cont1", func(p *FormationPeer) {
+			p.Machine = ShortHostname()
+			p.Model = "fable"
+			p.Mode = ModeResume
+			p.Origin = OriginFresh
+			p.SessionID = "sid-cont"
+		}),
+	)
+	// clone1 and cont1 need transcripts to reach fork/resume instead of degrading.
+	has := func(_, sid string) bool { return sid == "sid-clone" || sid == "sid-cont" }
+	if _, err := applyWith(t, f, ApplyOptions{}, &recForker{}, has); err != nil {
+		t.Fatal(err)
+	}
+	readReservation := func(alias string) (map[string]any, bool) {
+		b, err := os.ReadFile(filepath.Join(CBUSDir(), "ch", alias, "meta.json"))
+		if err != nil {
+			return nil, false
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m, true
+	}
+
+	// template -> reservation stamped fresh + model
+	if m, ok := readReservation("fresh1"); !ok {
+		t.Error("template must reserve its alias")
+	} else if m["sessionId"] != "reserved" || m["origin"] != "fresh" || m["model"] != "opus" {
+		t.Errorf("template reservation = %v, want reserved+fresh+opus", m)
+	}
+	// fork -> reservation stamped fork + model (so a future restore R1-refuses it)
+	if m, ok := readReservation("clone1"); !ok {
+		t.Error("fork must reserve its alias")
+	} else if m["sessionId"] != "reserved" || m["origin"] != "fork" || m["model"] != "sonnet" {
+		t.Errorf("fork reservation = %v, want reserved+fork+sonnet", m)
+	}
+	// resume -> NO reservation (the pinned invariant)
+	if _, ok := readReservation("cont1"); ok {
+		t.Fatal("resume must NOT reserve — a reservation would clobber the resumed peer's preserved birth-record")
 	}
 }
