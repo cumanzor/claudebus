@@ -105,7 +105,9 @@ Then place the slash commands (copy `commands/*.md` into `~/.claude/commands/`):
 |---|---|---|
 | `commands/bus-join.md` | `~/.claude/commands/bus-join.md` | join a channel |
 | `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | fork + auto-join both sides |
+| `commands/bus-spawn.md` | `~/.claude/commands/bus-spawn.md` | open a fresh session, joined to a channel |
 | `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | rename this session's alias |
+| `commands/bus-formation.md` | `~/.claude/commands/bus-formation.md` | save/apply/bootstrap a [formation](#formations) |
 
 Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's installed.
 
@@ -139,6 +141,31 @@ The child resumes the parent's transcript at boot, so it sees the parent's live
 Monitor as one harmless "no completion record" background-task note. This is
 cosmetic and unavoidable — the transcript is read when the child starts, always
 after the parent armed — and the bootstrap prompt tells the child to ignore it.
+
+### Open a fresh session instead of forking
+
+```
+cbus spawn tab                              # fresh session, joins + arms itself
+cbus spawn tab mytask --model opus --name coder
+cbus spawn tab formations --role documenter  # role prompt rides the first turn
+```
+
+`spawn` is `branch`'s fresh-transcript sibling: same terminal launch
+(window/tab/tmux) and the same join-and-arm-on-its-own bootstrap, but the child
+starts blank instead of resuming the parent's conversation — the right choice
+when a peer shouldn't inherit the parent's history, such as a distinct role in
+a [formation](#formations). `--model` and `--name` fix the child's model and
+alias/title the same way they do on `branch`.
+
+`--role <r>` reads a committed role prompt from `roles/<r>.md` (the spawn
+cwd's git repo first, then `$CBUS_DIR/roles` as a machine-global fallback) and
+appends its body to the child's first turn, after the join/arm instructions.
+It defaults `--name` to the role name and `--model` to the file's `MODEL:`
+line; an explicit `--name`/`--model` still wins. An unknown role fails before
+any alias is reserved, listing every path it tried. `branch` refuses `--role`
+outright — a fork inherits its parent's intent, and handing a forked peer
+someone else's role prompt is exactly the ghost-orchestrator failure
+formations exist to prevent (see below).
 
 ### Put two already-open sessions on a channel
 
@@ -188,6 +215,84 @@ joined-but-unarmed peer's first arm). Presence is **local-only** — it does not
 the relay. A SessionEnd hook (`cbus hook-exit`, wired manually in
 `~/.claude/settings.json`) announces graceful exits immediately; hard kills fall back
 to the lazy prune's `departed` broadcast.
+
+## Formations
+
+A **formation** is a saved snapshot of a channel's shape: its peers, their
+roles and models, and how to relaunch them — so a whole multi-session fleet
+(an orchestrator plus a coder, reviewer, and documenter, say) can be brought
+back after a reboot, handed to a successor, or stamped out fresh for a new
+effort, instead of rebuilt by hand one `/bus-join` at a time.
+
+```sh
+cbus formation save myeffort              # snapshot this channel's peers
+cbus formation show myeffort              # inspect it — stale sids, TODO roles
+cbus formation apply myeffort --dry-run   # preview the relaunch plan
+cbus formation apply myeffort             # relaunch the peers that are missing
+cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt
+cbus formation list                       # every saved formation
+cbus formation rm myeffort                # delete a saved formation
+```
+
+- **`save`** records only what the bus actually knows about each peer — alias,
+  session id, cwd, machine — plus whatever the launcher recorded when the peer
+  was born (see *Birth records*, below). Everything else (a hand-picked role,
+  notes, narrative) is yours to fill in, and a later save never overwrites a
+  hand-edited field.
+- **`apply`** relaunches exactly the peers missing from the channel,
+  sequentially and anchor-first (the orchestrator comes up before anyone who
+  expects to reach it). Convergence is a round-trip, not a timer: each kickoff
+  carries a nonce and apply reads its own inbox for the answer, so a peer that
+  launches but never responds is reported `failed`, not silently counted as
+  up. `--dry-run` builds the exact same plan without launching anything;
+  `--only a,b` narrows it; `--channel <ch>` retargets a formation (including a
+  starter template, see below) at a different channel for one run without
+  touching the file; `--brief TEXT` adds an effort brief to every kickoff;
+  `--wait <dur>` sets how long to wait for each peer's answer (default 90s).
+- **`bootstrap`** prints one peer's first-turn prompt for you to paste by
+  hand — the path for a peer `apply` won't launch itself (recorded on another
+  machine; cross-machine launch isn't in v1) or for previewing a brief before
+  opening a fleet.
+- Three restore modes decide *how* a peer comes back, and the modes never
+  cross: a session resumed as itself continues its own transcript; a forked
+  peer is told plainly that it is not the original and must not act on
+  unfinished parent work; a peer whose transcript is gone comes back on a
+  fresh one, briefed from its role file. **A peer is never forked across
+  roles** — the clearest way to reproduce the original design mistake this
+  feature exists to fix (a restored session picking up a different role than
+  the one it was saved as, and acting on stale intent under someone else's
+  name).
+
+### Starter templates
+
+The repo ships `formations/dev-trio.json`, a four-role starter (orchestrator,
+coder, reviewer, documenter) with no session ids and no models — models come
+from each role file's `MODEL:` line at apply time. `cbus formation apply
+dev-trio --channel myeffort` works from any checkout with an empty local
+store. A formation name resolves against your own saved formations first,
+then the repo's committed starters — a runtime save shadows a committed
+starter of the same name, and `apply`/`show` print which source they used so
+a shadow is stated, not a surprise. `rm` and `save` only ever touch your
+local store: `rm` of a committed starter is refused (delete it with `git rm`
+instead), and a `save` that inherits fields from a starter template still
+writes your local copy, never the repo file.
+
+### Birth records
+
+`spawn` and `branch` stamp how a peer was born — `fresh` or `fork` — plus its
+model, into the peer's registry entry (`meta.json`) at launch time, before
+the child even boots. `formation save` picks these up automatically, so a
+spawn-born peer saves with its origin and model already filled in and can be
+resumed later with no hand-edit. This is deliberately launcher-side: a
+session cannot reliably know its own origin, but the process that launched it
+always does.
+
+### The `/bus-formation` skill
+
+`commands/bus-formation.md` wraps all of this in one slash command —
+`/bus-formation save myeffort`, `/bus-formation apply dev-trio --channel
+myeffort --dry-run`, and so on — for driving formations from inside a Claude
+Code session rather than shelling out directly.
 
 ## Networked relay (NUC)
 
@@ -297,6 +402,37 @@ cbus whoami                      local memberships + remote identity markers (ex
 cbus inbox <channel>/<alias>     print inbox path
 cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
 cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
+     --model <m>                 launch the child on a specific model
+     --name <n>                  fix the child's alias AND session title
+cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
+                                 a fork) that joins + arms itself
+     --model <m>                 launch the child on a specific model
+     --name <n>                  fix the child's alias AND session title
+     --role <r>                  append the committed role prompt roles/<r>.md
+                                 to the child's first turn; defaults --name to
+                                 the role and --model to its MODEL: line
+                                 (spawn-only — branch refuses --role)
+cbus formation save <name> [ch]  capture a channel's topology (model/role/
+                                 origin/profile are hand-maintained, except
+                                 origin+model when the launcher stamped them)
+cbus formation apply <name>      relaunch a formation's MISSING peers here;
+                                 name resolves runtime-first, then the repo's
+                                 formations/ starter templates
+     --channel ch                target ch for this run (a template serves
+                                 any effort; the envelope file is unchanged)
+     --dry-run                   print the plan, launch nothing
+     --only a,b                  only these peers
+     --wait <dur>                how long to wait for each peer to answer
+                                 (default 90s; 0 = launch and return)
+     --brief TEXT                effort brief added to every peer's kickoff
+cbus formation bootstrap <name> <alias> [--brief TEXT]
+                                 print ONE peer's first-turn prompt to paste
+                                 by hand (the path apply won't launch itself)
+cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
+cbus formation show <name>       one formation's peers, flagging stale sids
+                                 and TODO roles
+cbus formation rm <name>         delete a saved formation (runtime only —
+                                 a committed starter refuses: use git rm)
 cbus prune [channel]             remove dead peers (and empty channels); a bare
                                  `cbus prune` also sweeps dead remote identity markers
 cbus hook-exit                   SessionEnd hook target: announce departure (always exit 0)

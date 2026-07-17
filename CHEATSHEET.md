@@ -18,6 +18,20 @@ the reserved machine-wide channel for an orchestrator session.
 Aliases are auto-picked (`main`, then `fork-N`) and **recycled** — `join` prunes
 dead peers first, so numbers don't grow forever.
 
+## Spawn a fresh peer (or fork)
+
+```sh
+cbus branch tab                              # fork this session, same channel
+cbus branch tab --model opus --name coder    # fork, pinned model + alias
+cbus spawn tab formations --role documenter  # fresh session, role prompt on first turn
+```
+
+`branch` forks (the child resumes your transcript); `spawn` starts blank —
+use it when a peer shouldn't inherit your history. `--role <r>` reads
+`roles/<r>.md` and appends it to the child's first turn, defaulting
+`--name`/`--model` to the file; `branch` refuses `--role` (a fork inherits
+its parent's intent).
+
 ## Talk (ask Claude, or run directly)
 
 ```sh
@@ -108,6 +122,31 @@ connected; tear down per session with `cbus leave bridge@nuc` (drops only that s
   *fresh* session on the target box and join the shared channel, rather than forking your
   window onto another machine. Each side picks its own explicit alias; the address
   (`bridge@nuc/…`) plus a `127.0.0.1:8090/healthz` probe decides loopback vs tunnel automatically.
+
+## Formations — save/relaunch a channel's peers
+
+```sh
+cbus formation save myeffort                      # snapshot this channel's peers
+cbus formation show myeffort                       # inspect — stale sids, TODO roles
+cbus formation apply myeffort --dry-run             # preview the relaunch plan
+cbus formation apply myeffort --only coder,reviewer # narrow it
+cbus formation apply dev-trio --channel myeffort    # committed 4-role starter, any channel
+cbus formation bootstrap myeffort coder             # one peer's first-turn prompt, paste by hand
+cbus formation list                                 # every saved formation (yours + starters)
+cbus formation rm myeffort                          # delete (starters: use git rm instead)
+```
+
+- `apply` only launches MISSING peers, sequential + anchor-first; convergence
+  is a round-trip (nonce in, nonce back), so an unanswering peer reports
+  `failed` rather than counting as up.
+- Join the formation's channel and arm your Monitor **before** applying — a
+  peer can answer before apply returns.
+- A saved peer's origin (`fresh`/`fork`) and model are stamped automatically
+  at `spawn`/`branch` time and picked up by `save` — no hand-edit needed for
+  a launcher-born peer.
+- `formations/dev-trio.json` ships in the repo: apply it from any checkout
+  with `--channel <effort>`, no setup required.
+- `/bus-formation <verb> ...` wraps all of the above as a slash command.
 
 ## Under the hood (rarely needed)
 
