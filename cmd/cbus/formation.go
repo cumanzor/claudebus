@@ -104,14 +104,14 @@ var applyForker client.TerminalForker = client.OSAForker{}
 const defaultWait = 90 * time.Second
 
 func runFormationApply(args []string) int {
-	const use = "usage: cbus formation apply <name> [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]"
+	const use = "usage: cbus formation apply <name> [--channel ch] [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]"
 	if len(args) == 0 {
 		return die(use)
 	}
 	// name first, then flags — the shape `send` uses (splitVerbArgs scans LEADING
 	// options only, so the positional cannot sit behind them).
 	name := args[0]
-	p, err := splitVerbArgs(args[1:], map[string]bool{"--only": true, "--wait": true, "--brief": true},
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--only": true, "--wait": true, "--brief": true, "--channel": true},
 		map[string]bool{"--dry-run": true}, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
@@ -122,6 +122,9 @@ func runFormationApply(args []string) int {
 	opts := client.ApplyOptions{DryRun: p.flags["--dry-run"], Wait: defaultWait}
 	if v, ok := p.has("--brief"); ok {
 		opts.Brief = v // the effort brief carried into every kickoff (design 5.3)
+	}
+	if v, ok := p.has("--channel"); ok {
+		opts.Channel = v // per-run override; validated in client.Apply
 	}
 	if v, ok := p.has("--only"); ok {
 		for _, a := range strings.Split(v, ",") {
@@ -145,6 +148,9 @@ func runFormationApply(args []string) int {
 		return die("%v", err)
 	}
 	fmt.Printf("resolved %q from the %s\n", name, source)
+	if opts.Channel != "" && opts.Channel != f.Channel {
+		fmt.Printf("channel: %s -> %s (this run only; the %s file is untouched)\n", f.Channel, opts.Channel, name)
+	}
 	rep, err := client.Apply(f, opts, applyForker)
 	if rep != nil {
 		renderApplyReport(f, rep, opts)

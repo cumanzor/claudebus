@@ -65,7 +65,11 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    — the store records none of them)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); join the
-                                   channel first — peers are briefed to answer you
+                                   channel first — peers are briefed to answer you.
+                                   name resolves runtime-first, then the repo's
+                                   formations/ starter templates
+       --channel ch                target ch for this run (a template serves any
+                                   effort; the envelope file is not changed)
        --dry-run                   print the plan, launch nothing
        --only a,b                  only these peers
        --wait <dur>                how long to wait for each peer to answer its

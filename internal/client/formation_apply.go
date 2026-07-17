@@ -55,10 +55,28 @@ func (r *ApplyReport) Converged() bool {
 
 // ApplyOptions are the CLI's knobs.
 type ApplyOptions struct {
-	Only   []string
-	DryRun bool
-	Wait   time.Duration // how long to wait for kickoff answers; 0 = do not wait
-	Brief  string        // effort brief, verbatim into every kickoff
+	Only    []string
+	DryRun  bool
+	Wait    time.Duration // how long to wait for kickoff answers; 0 = do not wait
+	Brief   string        // effort brief, verbatim into every kickoff
+	Channel string        // per-run channel override (a template serves any effort); "" keeps the envelope's
+}
+
+// overrideChannel applies the per-run --channel override to the IN-MEMORY formation,
+// once, before anything reads f.Channel. Every downstream read — the applier-presence
+// check, the roster/liveSids gather, reconcile, the kickoff join lines and reply-to
+// address, the alias reservations — then targets the override, with no straggler on
+// the envelope's own channel (H6). The envelope file is never written, so the
+// override lasts exactly this run.
+func overrideChannel(f *Formation, opts ApplyOptions) error {
+	if opts.Channel == "" {
+		return nil
+	}
+	if !core.ValidName(opts.Channel) {
+		return fmt.Errorf("--channel must be [A-Za-z0-9._-], got %q", opts.Channel)
+	}
+	f.Channel = opts.Channel
+	return nil
 }
 
 // Apply reconciles a formation against the live channel: it launches the peers that
@@ -74,6 +92,9 @@ type ApplyOptions struct {
 // listen/off marker is never consulted for this: it has lied in both directions in
 // the field, which is the entire reason this rule exists.
 func Apply(f *Formation, opts ApplyOptions, forker TerminalForker) (*ApplyReport, error) {
+	if err := overrideChannel(f, opts); err != nil {
+		return nil, err
+	}
 	self, err := applierAddress(f.Channel)
 	if err != nil {
 		return nil, err
