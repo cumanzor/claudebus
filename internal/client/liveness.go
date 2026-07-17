@@ -24,6 +24,8 @@ type PeerMeta struct {
 	Cwd         string
 	Alias       string
 	SessionID   string
+	Origin      string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
+	Model       string
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -44,6 +46,8 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		Cwd:         rawStr(raw["cwd"]),
 		Alias:       rawStr(raw["alias"]),
 		SessionID:   rawStr(raw["sessionId"]),
+		Origin:      rawStr(raw["origin"]),
+		Model:       rawStr(raw["model"]),
 	}, true
 }
 

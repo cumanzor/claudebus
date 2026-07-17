@@ -27,13 +27,15 @@ const (
 // the human editing the file, who needs to see the blank that wants filling.
 const roleTODOMarker = "TODO: set rolefile to roles/<alias>.md@<commit>, or replace this with the peer's brief"
 
-// RosterPeer is one peer as the live store records it: the four facts save can
-// actually capture.
+// RosterPeer is one peer as the live store records it. Origin/Model are the m9l
+// birth-record — present only when the launcher stamped them, blank otherwise.
 type RosterPeer struct {
 	Alias     string
 	SessionID string
 	Cwd       string
 	Machine   string // meta.host, which is ShortHostname() on the writing machine
+	Origin    string
+	Model     string
 	Listening bool
 }
 
@@ -72,6 +74,8 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			SessionID: m.SessionID,
 			Cwd:       m.Cwd,
 			Machine:   m.Host,
+			Origin:    m.Origin,
+			Model:     m.Model,
 			Listening: MetaListenerAlive(metaPath),
 		})
 	}
@@ -86,6 +90,10 @@ type SaveReport struct {
 	Updated []string // in both — captured facts refreshed, hand-edits untouched
 	Kept    []string // in the file, not on the channel now — never dropped
 	New     bool     // the envelope did not exist before
+	// Skipped birth-record fills: a meta carried an origin/model outside what the
+	// envelope will accept (hand-corrupted meta), so it was NOT propagated. Surfaced,
+	// never silent (cbus-m9l G6).
+	SkippedBirth []string
 }
 
 // SaveFormation captures ch's topology into the named envelope, refreshing an
@@ -135,7 +143,7 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 	for _, r := range roster {
 		onChannel[r.Alias] = true
 		if p, ok := byAlias[r.Alias]; ok {
-			capturePeer(p, r) // captured facts only; hand-edits survive
+			capturePeer(p, r, rep) // captured facts only; hand-edits survive
 			rep.Updated = append(rep.Updated, r.Alias)
 			continue
 		}
@@ -147,7 +155,7 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 			Role:      strPtr(roleTODOMarker),
 			Addresses: []string{},
 		}
-		capturePeer(&p, r)
+		capturePeer(&p, r, rep)
 		f.Peers = append(f.Peers, p)
 		rep.Added = append(rep.Added, r.Alias)
 	}
@@ -169,12 +177,44 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 	return f, rep, nil
 }
 
-// capturePeer copies the four facts the store actually knows. Everything else on
-// the peer is the human's and is left exactly as found.
-func capturePeer(p *FormationPeer, r RosterPeer) {
+// capturePeer copies what the store knows onto a peer. The three always-known facts
+// (sessionId, cwd, machine) refresh in place. The birth-record (origin, model) is
+// filled ONCE, on the m9l fill rules:
+//   - fill only when the envelope field is BLANK and the meta value is non-blank;
+//   - a hand-set envelope value always wins (no overwrite, no re-fill on a later save);
+//   - a blank meta never clobbers a set field;
+//   - a meta value the envelope would reject (G6: origin outside the enum, a
+//     flag-shaped model) is NOT propagated — it is skipped and surfaced in the report,
+//     so a corrupted meta cannot ride a garbage birth-record into the file silently.
+func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 	p.SessionID = r.SessionID
 	p.Cwd = r.Cwd
 	p.Machine = r.Machine
+
+	if p.Origin == "" && r.Origin != "" {
+		if validOrigin(r.Origin) {
+			p.Origin = r.Origin
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: origin %q (meta not one of fresh|fork|joined)", r.Alias, r.Origin))
+		}
+	}
+	if p.Model == "" && r.Model != "" {
+		if validModel(r.Model) {
+			p.Model = r.Model
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: model %q (meta not a usable model token)", r.Alias, r.Model))
+		}
+	}
+}
+
+func validOrigin(o string) bool {
+	return o == OriginFresh || o == OriginFork || o == OriginJoined
+}
+
+// validModel is the same screen FormationPeer.validate applies, so a captured model
+// can never make the envelope fail its own Validate.
+func validModel(m string) bool {
+	return core.ValidName(m) && !strings.HasPrefix(m, "-")
 }
 
 func strPtr(s string) *string { return &s }

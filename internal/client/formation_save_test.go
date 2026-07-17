@@ -337,3 +337,107 @@ func TestSaveFormationSavedByOutsider(t *testing.T) {
 		t.Errorf("anchorAlias = %q, want empty when the saver is not on the channel", f.AnchorAlias)
 	}
 }
+
+// TestCapturePeerFillTable is G5: origin/model fill exactly once, blank-only, and a
+// hand-set value always wins.
+func TestCapturePeerFillTable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		envOrigin  string
+		envModel   string
+		metaOrigin string
+		metaModel  string
+		wantOrigin string
+		wantModel  string
+	}{
+		{"blank env, meta present -> fill", "", "", "fresh", "opus", "fresh", "opus"},
+		{"set env wins over meta -> no overwrite", "fork", "sonnet", "fresh", "opus", "fork", "sonnet"},
+		{"blank meta never clobbers a set field", "joined", "opus", "", "", "joined", "opus"},
+		{"blank env, blank meta -> stays blank", "", "", "", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &FormationPeer{Alias: "a", Origin: tc.envOrigin, Model: tc.envModel}
+			r := RosterPeer{Alias: "a", Origin: tc.metaOrigin, Model: tc.metaModel}
+			rep := &SaveReport{}
+			capturePeer(p, r, rep)
+			if p.Origin != tc.wantOrigin || p.Model != tc.wantModel {
+				t.Errorf("got (origin %q, model %q), want (%q, %q)", p.Origin, p.Model, tc.wantOrigin, tc.wantModel)
+			}
+			if len(rep.SkippedBirth) != 0 {
+				t.Errorf("no skip expected: %v", rep.SkippedBirth)
+			}
+		})
+	}
+}
+
+// TestCapturePeerHardening is G6: a hand-corrupted meta origin/model must NOT ride
+// into the envelope silently — it is skipped and surfaced.
+func TestCapturePeerHardening(t *testing.T) {
+	p := &FormationPeer{Alias: "coder"}
+	r := RosterPeer{Alias: "coder", Origin: "spawned-maybe", Model: "--dangerous"}
+	rep := &SaveReport{}
+	capturePeer(p, r, rep)
+	if p.Origin != "" || p.Model != "" {
+		t.Errorf("garbage birth-record must NOT be captured: origin=%q model=%q", p.Origin, p.Model)
+	}
+	if len(rep.SkippedBirth) != 2 {
+		t.Fatalf("both skips must be surfaced, got %v", rep.SkippedBirth)
+	}
+	joined := strings.Join(rep.SkippedBirth, " ")
+	if !strings.Contains(joined, "origin") || !strings.Contains(joined, "model") || !strings.Contains(joined, "coder") {
+		t.Errorf("skip reasons must name the peer and the fields: %v", rep.SkippedBirth)
+	}
+	// and the envelope it produced still validates (the garbage never reached it)
+	f := &Formation{Schema: FormationSchema, Name: "x", Channel: "x", Peers: []FormationPeer{*p}}
+	if err := f.Validate(); err != nil {
+		t.Errorf("a skipped-garbage save must still be valid: %v", err)
+	}
+}
+
+// TestSaveEndToEndBirth is G8: real Spawn -> real Join -> real SaveFormation captures
+// origin=fresh + model with ZERO hand-edit. This is exactly the smoke's step 8, gone.
+func TestSaveEndToEndBirth(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-parent")
+
+	// the launcher spawns a fresh child on opus (fake terminal, real Spawn -> real
+	// ReserveAlias stamps the birth-record).
+	if _, _, err := Spawn("tab", "roles", "opus", "coder", "", &fakeForker{}); err != nil {
+		t.Fatal(err)
+	}
+	// the child boots and joins under its own sid, reclaiming the reservation.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-child")
+	if _, _, err := Join("roles", "coder"); err != nil {
+		t.Fatal(err)
+	}
+	// the saver captures the channel.
+	f, _, err := SaveFormation("roles", "roles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coder *FormationPeer
+	for i := range f.Peers {
+		if f.Peers[i].Alias == "coder" {
+			coder = &f.Peers[i]
+		}
+	}
+	if coder == nil {
+		t.Fatal("coder not captured")
+	}
+	if coder.Origin != OriginFresh {
+		t.Errorf("origin = %q, want fresh captured with NO hand-edit", coder.Origin)
+	}
+	if coder.Model != "opus" {
+		t.Errorf("model = %q, want opus captured", coder.Model)
+	}
+	// and a save-minted origin=fresh means apply would RESUME it (given a transcript),
+	// not refuse it on D12 — the whole point of the birth-record.
+	w := testWorld()
+	w.Host = coder.Machine // the peer was born on this host; match it
+	w = withTranscripts(w, coder.SessionID)
+	coder.Mode = ModeResume
+	pp := decidePeer(coder, f, w, map[string]bool{}, map[string]bool{}, map[string]bool{})
+	if pp.Action != ActionResume {
+		t.Errorf("a fresh-born peer with a transcript should resume, got %v (%s)", pp.Action, pp.Reason)
+	}
+}
