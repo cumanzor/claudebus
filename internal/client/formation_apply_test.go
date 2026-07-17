@@ -179,6 +179,9 @@ func TestApplyPerModeArgv(t *testing.T) {
 func applyWith(t *testing.T, f *Formation, opts ApplyOptions, forker TerminalForker,
 	has func(profile, sid string) bool) (*ApplyReport, error) {
 	t.Helper()
+	if err := overrideChannel(f, opts); err != nil {
+		return nil, err
+	}
 	self, err := applierAddress(f.Channel)
 	if err != nil {
 		return nil, err
@@ -673,5 +676,78 @@ func TestApplyDeferredModelReachesLaunchAndReservation(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"model": "fable"`) {
 		t.Errorf("reservation did not stamp the resolved model:\n%s", b)
+	}
+}
+
+// TestApplyChannelOverride is H6: --channel must reach EVERYTHING — the applier
+// presence check, the roster/reconcile, the kickoff join lines and reply-to, and the
+// alias reservation. A straggler on the envelope's own channel is a split-brain
+// formation. The envelope struct's channel IS mutated in memory (per-run), but no
+// file is written by apply.
+func TestApplyChannelOverride(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	// the applier is joined to the OVERRIDE channel, not the template's default.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-applier")
+	plantPeer(t, "real-chan", "orchestrator", "sid-applier")
+	inbox := filepath.Join(CBUSDir(), "real-chan", "orchestrator", "inbox.jsonl")
+	if err := os.WriteFile(inbox, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &Formation{
+		Schema: FormationSchema, Name: "dev-trio", Channel: "dev-trio", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{
+			peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+			peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		},
+	}
+	fk := &recForker{}
+	// applier is NOT on "dev-trio"; without the override reaching applierAddress this
+	// would fail "not on dev-trio". With it, the applier resolves on real-chan.
+	rep, err := applyWith(t, f, ApplyOptions{Channel: "real-chan"}, fk, nil)
+	if err != nil {
+		t.Fatalf("override apply: %v", err)
+	}
+	// reservation landed on the OVERRIDE channel, not the template default
+	if !dirExists(filepath.Join(CBUSDir(), "real-chan", "coder")) {
+		t.Error("reservation did not target the override channel")
+	}
+	if dirExists(filepath.Join(CBUSDir(), "dev-trio", "coder")) {
+		t.Error("reservation leaked onto the template's default channel — split brain")
+	}
+	// the kickoff's join line and reply-to both target the override channel
+	spec, ok := fk.specFor("coder")
+	if !ok {
+		t.Fatal("coder not launched")
+	}
+	prompt := spec.Argv[len(spec.Argv)-1]
+	if !strings.Contains(prompt, "cbus join real-chan coder") {
+		t.Errorf("kickoff join line did not follow the override:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "cbus send real-chan/orchestrator") {
+		t.Errorf("kickoff reply-to did not follow the override:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "dev-trio") {
+		t.Errorf("a straggler on the template channel leaked into the kickoff:\n%s", prompt)
+	}
+	// the report shows the effective (override) channel
+	orchPresent := false
+	for _, r := range rep.Results {
+		if r.Alias == "orchestrator" && r.Outcome == OutcomePresent {
+			orchPresent = true
+		}
+	}
+	if !orchPresent {
+		t.Error("the applier on the override channel should read present")
+	}
+}
+
+func TestApplyChannelOverrideRejectsBad(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	applierOn(t, "ch", "applier")
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	if _, err := applyWith(t, f, ApplyOptions{Channel: "bad/name"}, &recForker{}, nil); err == nil ||
+		!strings.Contains(err.Error(), "--channel") {
+		t.Errorf("a bad --channel must be refused, got %v", err)
 	}
 }
