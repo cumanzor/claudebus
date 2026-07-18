@@ -100,6 +100,9 @@ func TestHookCompactThroughTheRealBinary(t *testing.T) {
 	if out != "" {
 		t.Errorf("hook-compact wrote stdout %q — exit-0 stdout is parsed as hook JSON", out)
 	}
+	if errb != "" {
+		t.Errorf("hook-compact wrote stderr %q on success — a hook target is silent on BOTH fds", errb)
+	}
 	got := lastCompactEvent(t, root, "zig", "watcher")
 	if got["kind"] != "presence" || got["event"] != "compact-pre" {
 		t.Errorf("kind/event = %q/%q, want presence/compact-pre", got["kind"], got["event"])
@@ -112,8 +115,8 @@ func TestHookCompactThroughTheRealBinary(t *testing.T) {
 	}
 
 	postIn := `{"session_id":"SELFSID","transcript_path":"/x/t.jsonl","cwd":"/x","hook_event_name":"PostCompact","trigger":"manual","compact_summary":"SUMMARYLEAK"}`
-	if out, errb, rc := run("", postIn, "hook-compact", "post"); rc != 0 || out != "" {
-		t.Errorf("hook-compact post rc=%d stdout=%q stderr=%s", rc, out, errb)
+	if out, errb, rc := run("", postIn, "hook-compact", "post"); rc != 0 || out != "" || errb != "" {
+		t.Errorf("hook-compact post rc=%d stdout=%q stderr=%q, want rc 0 and both fds silent", rc, out, errb)
 	}
 	got = lastCompactEvent(t, root, "zig", "watcher")
 	if got["event"] != "compact-post" {
