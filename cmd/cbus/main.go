@@ -320,7 +320,7 @@ func extractForkFlags(args []string) (model, name string, rest []string, err err
 }
 
 func runBranch(args []string) int {
-	const use = "usage: cbus branch [window|tab|tmux] [channel] [--model m] [--name n]"
+	const use = "usage: cbus branch [window|tab|tmux|pane] [channel] [--model m] [--name n]"
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
@@ -351,7 +351,7 @@ func runBranch(args []string) int {
 }
 
 func runSpawn(args []string) int {
-	const use = "usage: cbus spawn [window|tab|tmux] [channel|<ch>@<host>] [--model m] [--name n] [--role r]"
+	const use = "usage: cbus spawn [window|tab|tmux|pane] [channel|<ch>@<host>] [--model m] [--name n] [--role r]"
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
