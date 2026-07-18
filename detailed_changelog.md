@@ -1,5 +1,72 @@
 # Changelog (detailed)
 
+## [2026-07-18 01:15:55 UTC] [Distribution] Release Makefile and repo-slug plumbing (M1)
+
+[Attempt #1]
+
+First milestone of the distribution effort (gh releases, selfupdate, and
+embedded installs — the bdx pattern): ddf7527, approved clean with no
+conditions.
+
+Adds a cross-compile Makefile that builds the unix matrix only — darwin and
+linux, amd64 and arm64 (D25; Windows is out of scope for this effort). It
+stamps the version and the repo slug into the binary via ldflags, builds a
+`dist/` directory with exact `cbus-<os>-<arch>` asset names (the naming the
+later selfupdate milestone will need to match exactly to find its own
+asset), and carries a tag-and-slug-gated release target that publishes
+through `gh`. That target is written but never run as part of this
+milestone — the remote and the first real release both stay gated behind
+Carlos's post-quiesce window, same as every outward action in this repo.
+
+`repoSlug` is baked into the binary at release time and stays empty in
+committed source (D26): no personal repo slug lands in a file that gets
+committed, so the repo's visibility (public/private) can change later
+without requiring another history scrub like the one already pending.
+`$CBUS_REPO` overrides the baked value at runtime for anyone building their
+own binary from source, and an empty slug (neither baked nor overridden)
+prints a remedy telling the user how to set it, rather than guessing or
+silently degrading.
+
+No behavior change to any existing verb, and the legacy install scripts
+(`install.sh`, `install-cbus-go.sh`) are untouched — this milestone is
+additive build tooling only.
+
+Reviewer evidence worth recording, not just the verdict: the ldflags bake
+was proven from the reviewer's own matrix build, grepping the built
+binaries' strings in both directions (present when the slug was baked,
+absent when it wasn't — not just "the flag was passed"). The `-X` ldflags
+target's symbol existence was checked explicitly, closing a silent-no-op
+failure class where a renamed or moved variable would silently stop
+accepting the flag with no build error. The legacy installers were
+confirmed byte-identical before and after. The release target's
+tag-and-slug-gated refusal was live-confirmed with `gh` never actually
+reached — the gate fires before the network call, not after a failed one.
+
+[Files Changed]
+- Makefile (new): the cross-compile matrix, asset naming, ldflags stamping,
+  the release target.
+- cmd/cbus/repo.go (new) + repo_test.go (new): repoSlug resolution
+  (env > baked > empty-with-remedy), a 4-case test.
+- .gitignore: excludes the new `dist/` build output.
+
+[Possible Ripple Effects]
+- The exact `cbus-<os>-<arch>` asset naming is now a contract the
+  selfupdate milestone (M3) must match byte-for-byte to find its own
+  update asset; renaming the pattern here would be a breaking change to
+  that milestone once it lands.
+- repoSlug's env>baked>empty precedence is now the standing resolution
+  order for any future code that needs to know the repo's remote location.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Reviewer's own cross-compiled matrix build, strings-grepped both
+  directions for the baked slug.
+- Live-confirmed: the release target refuses before reaching `gh` when the
+  tag/slug gate isn't satisfied.
+
+M2 (root embed package + install-commands/install-roles) is released in
+parallel and held for its own verdict.
+
 ## [2026-07-17 19:22:17 UTC] [Client/Formations] The starter template library (M8) — formations v1 complete
 
 [Attempt #1]
