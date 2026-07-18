@@ -1,2 +1,6 @@
 # runtime bus state
 .claude-bus/
+
+# build artifacts (make build / make dist)
+/cbus
+/dist/
