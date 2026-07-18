@@ -1,5 +1,92 @@
 # Changelog (detailed)
 
+## [2026-07-18 01:27:28 UTC] [Distribution] Selfupdate from the latest GitHub release (M3)
+
+[Attempt #1]
+
+Third milestone of the distribution effort: 10c6768, approved with one
+class-C (non-blocking) finding, c6. This entry covers the milestone; c6's
+hash is pending and will be appended the same way c1-c5 were in the
+formations effort.
+
+`cbus selfupdate` downloads this platform's release asset via `gh`,
+verifies it, swaps the running binary in place, and refreshes the
+installed commands and roles by exec'ing the new binary's own install
+verbs. `--check` reports what would happen without applying it.
+
+The download is version-gated before anything is swapped: the newly
+downloaded binary must report the exact tag that was asked of `gh`, so a
+corrupt download or a wrong-platform asset can never replace a working
+install. `versionMatchesTag` is a pure function, mutation-tested, and both
+a wrong-version fixture and an unrunnable-binary fixture are refused by
+it. A release with no asset matching this platform's naming pattern is a
+loud error, deliberately not a quiet no-op that could be mistaken for
+"already up to date."
+
+The swap itself is a same-filesystem rename by default, with a fallback
+for cross-filesystem installs that handles `ETXTBSY` safely (replacing a
+binary that is currently executing cannot always use a simple rename). A
+failed swap, on either path, leaves the running binary untouched — there
+is no window where the install is neither the old nor the new binary.
+
+The asset name selfupdate looks for is pinned equal to the names M1's
+Makefile actually produces; a dedicated test (S5) greps the Makefile
+directly rather than duplicating the string, so the two cannot drift
+apart in either direction — a Makefile rename without a client update
+fails the test, and so does the reverse. Tag classification keeps a
+prerelease off the stable update path. M1's deferred empty-slug remedy
+(print a remedy rather than guess) was exercised live in this milestone,
+not left as a unit-test-only claim.
+
+Reviewer evidence worth carrying, not just the verdict: all three of the
+coder's own mutation tests were re-run independently, plus a fourth the
+reviewer added itself (an S6 anchor-drop mutation). The `ETXTBSY`
+cross-filesystem fallback leg cannot be triggered naturally on macOS, so
+the reviewer forced it deliberately — worth doing because the NUC's
+tmpfs-backed `/tmp` is exactly where this fallback will actually fire in
+production, so an untested fallback there would be a live gap, not a
+theoretical one — and drove both a success case and a
+failure-leaves-the-old-binary-in-place case through it. `gh` was genuinely
+reached live, past the slug gate, against a real authenticated read-only
+view — not mocked for this check.
+
+[Files Changed]
+- cmd/cbus/selfupdate.go (new) + selfupdate_test.go (new): the download,
+  version-gate, swap, and post-swap refresh logic.
+- cmd/cbus/version.go (new) + version_test.go (new): `versionMatchesTag`
+  and its mutation-tested comparison.
+- cmd/cbus/main.go, usage.go: verb dispatch and help text.
+
+[Possible Ripple Effects]
+- The asset-naming contract with M1's Makefile is now enforced by a test
+  in both directions; either side changing independently is caught, not
+  silently accepted.
+- The install-refresh step depends on M2's `install-commands`/
+  `install-roles` verbs existing in the newly downloaded binary — a
+  future change to those verbs' contract is now also selfupdate's
+  contract.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Reviewer re-ran all three coder mutations plus its own S6 mutation.
+- ETXTBSY fallback leg forced and driven through both success and
+  failure-preserves-original cases (unreachable naturally on macOS, real
+  on the NUC's tmpfs `/tmp`).
+- `gh` reached live past the slug gate against a real authenticated
+  read-only view.
+
+Honest limit for the eventual wrap, stated now rather than discovered
+later: the full `gh` round-trip and `get.sh` (M5) are declared, not
+faked, checklist material deferred to a post-release manual pass — by
+necessity, since no release exists yet to round-trip against.
+`runSelfupdate`'s actual binary-swap path is deliberately not
+unit-driven, because doing so would replace the running test binary
+itself; its component pieces (version-gate, asset naming, the rename/
+fallback logic) are each tested in isolation instead.
+
+M4 (update-check hint) is released in parallel and held for its own
+verdict.
+
 ## [2026-07-18 01:20:50 UTC] [Distribution] Embed and install the /bus-* skills and role prompts (M2)
 
 [Attempt #1]
