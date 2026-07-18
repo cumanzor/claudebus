@@ -107,7 +107,33 @@ surface the sweep could not prove dead.
 - ESRCH-during-TERM and zombie-owner paths both assert `Ok: true`
   ("already gone"), not a failure.
 
-## [2026-07-18 20:23:27 UTC] [Client/Forking] formation apply: pane splits chain off the largest-area candidate; envelope peers gain a `split` field
+## [2026-07-18 20:23:43 UTC] [Docs] Multi-harness exploration doc
+
+### [Attempt #1]
+
+Research pass across cbus internals and three open-source harnesses (Codex CLI
+0.144.1, xai-org/grok-build, sst/opencode 1.18.3) to map what it takes for each
+to participate as a bus peer. File-based/relay-based only; no daemons proposed.
+
+### [Files Changed]
+
+- `docs/architecture/multi-harness-exploration.md` (new) — coupling audit (4
+  spots: identity.go:26 env var, marker.go:60-80 ownerPid walk, harness.go
+  launch argv, 8 bootstrap prompt constants), per-harness profiles, comparison
+  table, 5 ordered increments, open questions.
+
+### [Possible Ripple Effects]
+
+- None (doc only). If acted on, first code change is the SessionID()/ownerPid
+  seams in internal/client/identity.go and marker.go.
+
+### [Testing Notes]
+
+- Grok monitor tool + OpenCode plugin injection were verified by research probes
+  (OpenCode end-to-end live); Codex Stop-hook continuation is documented but not
+  executed — flagged as prototype-first in the doc.
+
+[2026-07-18 20:23:27 UTC] [Client/Forking] formation apply: pane splits chain off the largest-area candidate; envelope peers gain a `split` field
 
 [Attempt #1]
 
@@ -5009,28 +5035,4 @@ files under `~/.claude-bus` (`CBUS_DIR`).
   grace window + legacy-entry cleanup, dead-listener sweep on next join, and
   `leave`. Round-trip send delivered as a Monitor event end-to-end.
 
-## [2026-07-18 20:23:43 UTC] [Docs] Multi-harness exploration doc
-
-### [Attempt #1]
-
-Research pass across cbus internals and three open-source harnesses (Codex CLI
-0.144.1, xai-org/grok-build, sst/opencode 1.18.3) to map what it takes for each
-to participate as a bus peer. File-based/relay-based only; no daemons proposed.
-
-### [Files Changed]
-
-- `docs/architecture/multi-harness-exploration.md` (new) — coupling audit (4
-  spots: identity.go:26 env var, marker.go:60-80 ownerPid walk, harness.go
-  launch argv, 8 bootstrap prompt constants), per-harness profiles, comparison
-  table, 5 ordered increments, open questions.
-
-### [Possible Ripple Effects]
-
-- None (doc only). If acted on, first code change is the SessionID()/ownerPid
-  seams in internal/client/identity.go and marker.go.
-
-### [Testing Notes]
-
-- Grok monitor tool + OpenCode plugin injection were verified by research probes
-  (OpenCode end-to-end live); Codex Stop-hook continuation is documented but not
-  executed — flagged as prototype-first in the doc.
+## 
