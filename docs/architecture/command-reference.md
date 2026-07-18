@@ -3,7 +3,8 @@
 The complete behavior reference for the claudebus client surface: every `cbus`
 subcommand, the address grammar, the Monitor-arming contract, the slash
 commands, the `formation` verb family, the distribution and self-update verbs,
-and the SessionEnd `hook-exit` flow. The retired fork helper (`bin/cc-branch.sh`)
+the SessionEnd `hook-exit` flow, and the PreCompact/PostCompact `hook-compact`
+flow. The retired fork helper (`bin/cc-branch.sh`)
 and installers (`install.sh`, `install-cbus-go.sh`) are kept as historical
 sections (§13–§14).
 
@@ -120,7 +121,7 @@ all and render bash's stock `parameter null or not set`.
 
 | Code | When |
 |---|---|
-| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `auth status` always; `hook-exit` **always**; idempotent re-join; no-op rename |
+| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `auth status` always; `hook-exit` / `hook-compact` **always**; idempotent re-join; no-op rename |
 | 1 | Every `die()`; every `${n:?}` usage error; `whoami` with no registrations; `leave` with nothing to leave; `cbus list @host` transport failure (the pipeline's rightmost python exits 1 on empty stdin — curl's own exit code is always masked) |
 
 ### Environment variables (complete)
@@ -143,6 +144,7 @@ all and render bash's stock `parameter null or not set`.
 |---|---|
 | `cbus auth set ... --token - / --cf-id - / --cf-secret -` | Each `-` value reads **all of stdin** — only one `-` per invocation is practical |
 | `cbus hook-exit` | Reads the SessionEnd hook's JSON payload; extracts `session_id`. **Blocks awaiting EOF at an interactive TTY** |
+| `cbus hook-compact <pre\|post>` | Reads the PreCompact/PostCompact hook's JSON payload; extracts `session_id` + `trigger`. Same TTY-block behavior as `hook-exit` |
 | (internal) | Relay auth headers are piped to `curl -K -`; Keychain writes go through `security -i` — secrets never appear in any argv |
 
 No other command reads stdin.
@@ -831,6 +833,86 @@ by hand.)
 **Quirk:** run interactively, `hook-exit` blocks on TTY stdin until EOF
 (Ctrl-D) — harmless in hook context, surprising manually. Args are dropped by
 dispatch.
+
+### `cbus hook-compact <pre|post>` — the PreCompact/PostCompact flow
+
+Lets a Claude Code **PreCompact** or **PostCompact** hook announce that this
+session is about to lose, or has just lost, its in-context state — same
+"tell peers immediately" instinct as `hook-exit`, but for compaction instead
+of departure. Unlike `hook-exit`, the session's registration is **untouched**:
+a compacting session is still here.
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code (PreCompact / PostCompact)
+    participant H as cbus hook-compact <pre|post>
+    participant B as local bus
+    CC->>H: hook JSON on stdin — {"session_id", "trigger", ...}
+    H->>H: extract session_id (stdin JSON → env fallback → give up silently)
+    H->>B: broadcast compact-<phase> presence to every LOCAL joined channel
+    H-->>CC: always exit 0 (a hook must never fail)
+```
+
+Behavior, exactly:
+
+1. `phase` is the first positional arg (`pre` or `post`); anything else is a
+   bad phase, reported on stderr (the hook debug log), still exits 0.
+   **Trailing args past `phase` are ignored, not fatal.** The honest reason is
+   NOT "avoid rc 2 blocking compaction" — a strict no-extra-args `die` here
+   would exit 1, which does not block compaction either. It's that **a hook
+   must never fail**, and the failure would show up as stderr noise that
+   **PostCompact surfaces to the user** in the transcript.
+2. Reads `session_id` from **stdin JSON** first (hook env may not export
+   `CLAUDE_CODE_SESSION_ID`), env fallback second, silent no-op third.
+3. Broadcasts one `kind=presence` event, `event=compact-<phase>`, to every
+   **local** channel this session is joined to (skip=self, same convention as
+   join/leave/rename).
+4. Text is built from an **allowlisted** `trigger` (`manual`/`auto` only — an
+   arbitrary hook payload can't write text into every peer's inbox; anything
+   else drops the parenthetical rather than guessing a cause):
+   - pre: `about to compact (auto), in-context state will be lost`
+   - post: `compacted (auto), in-context state was reset`
+5. **PostCompact's `compact_summary` is never read or carried** — deliberately:
+   it's unbounded conversation content and would land in every peer's inbox.
+
+Hook input differs by phase: PreCompact carries `trigger` +
+`custom_instructions`; PostCompact carries `trigger` + `compact_summary`. Only
+PreCompact can veto (exit 2 / decision JSON blocks compaction) — PostCompact
+has already happened and can't be. `hook-compact` uses neither: it always
+exits 0 and writes nothing to stdout (an exit-0 hook's stdout is parsed as
+JSON output).
+
+**Local only (D-zig-1)**: the frozen `POST /send` relay contract carries no
+`kind` field and the relay rebuilds stored lines from `{from,text,to,ts}`, so a
+relayed notice would arrive as plain chat, not presence. The honest fix is a
+wire change plus a relay redeploy — deferred, not faked; there's also no
+network call available inside the compaction window regardless.
+
+**PostCompact vs `SessionStart(source=compact)`**: both are documented,
+independent post-compaction signals (hooks reference). `hook-compact post` is
+wired to PostCompact because it fires in the *completing* context and needs no
+matcher, keeping the PreCompact+PostCompact wiring symmetric — not because
+`SessionStart(source=compact)` is undocumented (it is; it was considered and
+passed over).
+
+**Wiring is manual** — no installer touches settings. Add to
+`~/.claude/settings.json`:
+
+```json
+{"hooks": {
+  "PreCompact": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-compact pre"}]}],
+  "PostCompact": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-compact post"}]}]
+}}
+```
+
+(`~/.claude/settings.json` is **shared across every CCS profile** on this
+machine via the `~/.ccs/shared` symlink — wiring it once wires it for every
+profile. Applied by hand, Carlos-gated; no installer or `cbus` verb does this.)
+
+**Quirk:** args are dropped past `phase` — same family as `hook-exit`'s
+dropped args, different reason underneath (point 1 above).
 
 ---
 
@@ -1532,7 +1614,10 @@ client; they remain for the homogenization/port record.
    live marker.
 10. `whoami` exits 1 when empty (unlike `list`/`channels`); `auth status`
     always exits 0.
-11. `channels`/`whoami`/`hook-exit` silently drop extra args.
+11. `channels`/`whoami`/`hook-exit` silently drop extra args; `hook-compact`
+    too, past its `phase` positional — not to dodge rc-2 blocking (a `die`
+    here would be rc 1, which doesn't block anything) but because a hook must
+    never fail and PostCompact shows stderr to the user.
 
 **Delivery & liveness**
 12. Re-arm never replays: messages queued between listener death and re-arm

@@ -292,7 +292,8 @@ Same shape plus two fields (bin/cbus:341-343):
 
 ```json
 {"from": "<ch>/<subject>", "to": "<ch>/<peer>", "ts": "<shared ts>",
- "kind": "presence", "event": "join|leave|rename|departed", "text": "<human text>"}
+ "kind": "presence", "event": "join|leave|rename|departed|compact-pre|compact-post",
+ "text": "<human text>"}
 ```
 
 See §8 for semantics. Note `event` is stored but **never rendered** by the framer —
@@ -648,12 +649,28 @@ against concurrently vanishing peers.
 | `departed` | rename's dead-name reclaim | reclaimed (dead) alias | **old alias** (the actor, else it self-echoes) | `departed (name reclaimed)` |
 | `departed` | prune reap (after the atomic claim) | reaped alias | =from | `departed (listener gone)` |
 | `departed` | `cbus unregister` | removed alias | =from | `unregistered` |
+| `compact-pre` | `cbus hook-compact pre` (PreCompact hook) | own alias | =from | `about to compact[ (manual\|auto)], in-context state will be lost` |
+| `compact-post` | `cbus hook-compact post` (PostCompact hook) | own alias | =from | `compacted[ (manual\|auto)], in-context state was reset` |
 
 Receiver rendering (local frame): `◀ cbus msg from=<ch>/<al> to=<ch>/<you> ts=<iso>
 kind=presence` + text + end marker.
 
 Properties to preserve or consciously rethink:
 
+- **Compaction presence (D-zig-1, local-only)**: `cbus hook-compact pre|post`,
+  wired via Claude Code's PreCompact/PostCompact hooks (manual per host, see
+  command-reference §7), broadcasts `compact-pre`/`compact-post` exactly like
+  any other presence event above — registration is untouched, so the
+  compacting session keeps listening throughout. **Local channels only**: the
+  frozen `POST /send` contract (§3.3) carries no `kind` field and the relay
+  rebuilds stored lines from `{from,text,to,ts}`, so a relayed notice would
+  arrive as plain chat, not presence; the honest fix is a wire change plus a
+  relay redeploy, deferred rather than faked (there is also no network call
+  available inside the compaction window). The `trigger` text is rendered from
+  an **allowlist** (`manual`/`auto` only) rather than passed through, so an
+  arbitrary hook payload can't write text into every peer's inbox, and an
+  absent/unrecognized trigger just drops the parenthetical. PostCompact's
+  `compact_summary` (unbounded conversation content) is never carried.
 - **Relay presence (cbus-ijx.5)**: the relay now renders `kind` and GENERATES
   join/departed from the ws lifecycle (attach → join; detach + ~90s grace → departed),
   fanned to connected peers via the spool. Semantics differ from local: it is
