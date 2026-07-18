@@ -93,3 +93,28 @@ func TestRemoteTailSpec(t *testing.T) {
 		t.Fatalf("arm-spec mismatch:\n got: %q\nwant: %q", spec, want)
 	}
 }
+
+// TestIsClaudeName: identity is argv[0]'s BASENAME being claude or claude-*. The
+// first two false rows are the blocker itself — "2.1.214" is what the bun-compiled
+// CLI reports as its kernel comm, and "/x/claudebus" is this repo's own binary,
+// which a substring match would have happily claimed as a claude session.
+func TestIsClaudeName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"2.1.214":                  false, // the bug: the CLI's comm is its version string
+		"/opt/x/claudebus":         false, // substring, not basename — cbus is not a session
+		"claudebus":                false,
+		"myclaude":                 false, // suffix must not match either
+		"Claude":                   false, // exact case, no folding
+		"":                         false,
+		"sh":                       false,
+		"claude":                   true,
+		"/usr/local/bin/claude":    true,
+		"claude-code":              true,
+		"claude-":                  true, // degenerate but in-contract for claude-*
+		"/nix/store/abc/claude-v2": true,
+	} {
+		if got := isClaudeName(name); got != want {
+			t.Errorf("isClaudeName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
