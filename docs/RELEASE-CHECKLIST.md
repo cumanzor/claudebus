@@ -43,5 +43,5 @@ exists; the true gh round-trip is checked here, by hand, once step 3 has run.
 
 The relay is a separate binary on `relay/deploy.sh` (build-on-NUC) and is untouched.
 `install.sh` (the bash rollback) and `install-cbus-go.sh` (the transitional installer)
-are left byte-for-byte in place; their retirement is a separate call for the quiesce
-window.
+were retired from the tree after the first release; recover them from git history if
+ever needed.
