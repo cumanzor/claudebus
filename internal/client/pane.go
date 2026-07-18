@@ -112,10 +112,15 @@ func forkTmuxPane(spec ForkSpec) error {
 	if caller == "" {
 		return fmt.Errorf("$TMUX_PANE unset — cannot target the calling pane")
 	}
-	argv := tmuxSplitArgv(caller, terminalCommand(spec), tmuxPaneCount(caller))
-	out, err := exec.Command("tmux", argv...).Output()
+	preCount := tmuxPaneCount(caller)
+	out, err := exec.Command("tmux", tmuxSplitArgv(caller, terminalCommand(spec), preCount)...).Output()
+	if err != nil && preCount == 1 {
+		// -l 70% (percentage sizing) needs tmux >= 3.1; retry the plain split
+		// before failing the fork — sizing is a nicety, the pane is the point.
+		out, err = exec.Command("tmux", tmuxSplitArgv(caller, terminalCommand(spec), 0)...).Output()
+	}
 	if err != nil {
-		return fmt.Errorf("tmux split-window: %v", err)
+		return fmt.Errorf("tmux split-window: %v%s", err, cmdStderr(err))
 	}
 	// only decorate a shape-valid pane id (%N) — garbage from -P -F must not become
 	// a -t that lands remain-on-exit on some other pane.
@@ -130,14 +135,26 @@ func forkTmuxPane(spec ForkSpec) error {
 }
 
 // tmuxSplitArgv is the pure argv builder for the split (testable without tmux):
-// preCount is the pane count in the caller's window before the split; 1 means this
-// is the first teammate, which takes 70% width beside the caller.
+// preCount is the pane count in the caller's window before the split; exactly 1
+// means this is the first teammate, which takes 70% width beside the caller (any
+// other value — including the 0 the retry path passes — builds the plain split).
 func tmuxSplitArgv(caller, shellCmd string, preCount int) []string {
 	argv := []string{"split-window", "-d", "-P", "-F", "#{pane_id}", "-t", caller}
 	if preCount == 1 {
 		argv = append(argv, "-h", "-l", "70%")
 	}
 	return append(argv, shellCmd)
+}
+
+// cmdStderr renders an *exec.ExitError's captured stderr as a ": …" suffix —
+// .Output()'s bare %v is just "exit status 1", which buries tmux's actual message.
+func cmdStderr(err error) string {
+	if ee, ok := err.(*exec.ExitError); ok {
+		if s := strings.TrimSpace(string(ee.Stderr)); s != "" {
+			return ": " + s
+		}
+	}
+	return ""
 }
 
 // tmuxPaneCount counts panes in the window owning pane (0 on any failure — callers

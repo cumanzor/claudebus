@@ -333,14 +333,19 @@ func osaForkITerm(spec ForkSpec) error {
 		return err
 	}
 	run := iterm2Command(path) // bare `/bin/bash <tmpfile>` — tokenizer-proof
+	var ferr error
 	switch spec.Target {
 	case "window":
-		return runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
+		ferr = runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
 	case "pane":
-		return osaForkPane(run)
+		ferr = osaForkPane(run)
 	default: // tab — targeted at the caller's own window when locatable (pane.go)
-		return osaForkTab(run)
+		ferr = osaForkTab(run)
 	}
+	if ferr != nil {
+		os.Remove(path) // dispatch failed => the launcher never ran, so it never self-deletes
+	}
+	return ferr
 }
 
 // iterm2Command is the bare command handed to iTerm2: `/bin/bash <tmpfile>` with NO
