@@ -1,14 +1,19 @@
 # cbus Command Reference
 
 The complete behavior reference for the claudebus client surface: every `cbus`
-subcommand, the address grammar, the Monitor-arming contract, the three slash
-commands, the fork helper (`bin/cc-branch.sh`), the installer (`install.sh`),
-and the SessionEnd `hook-exit` flow.
+subcommand, the address grammar, the Monitor-arming contract, the slash
+commands, the `formation` verb family, the distribution and self-update verbs,
+and the SessionEnd `hook-exit` flow. The retired fork helper (`bin/cc-branch.sh`)
+and installers (`install.sh`, `install-cbus-go.sh`) are kept as historical
+sections (§13–§14).
 
-This documents behavior **as-is** at HEAD `f213e26`. Source anchors are
-`bin/cbus:N` unless another file is named. Behavioral oddities are flagged as
-**quirk** — they are part of the current contract and are catalogued for the
-planned port (preserve or rethink deliberately, never change silently).
+This documents behavior **as-is** for the installed Go client. Source anchors are
+`bin/cbus:N` for behavior inherited from the retired bash contract (kept in-repo
+as the rollback artifact until P3) and `cmd/cbus/*.go` / `internal/client/*.go`
+for the Go-native verbs (`spawn`, the `formation` family, the distribution verbs)
+that have no bash counterpart. Behavioral oddities are flagged as **quirk** —
+they are part of the current contract and are catalogued so a reimplementation
+preserves or rethinks them deliberately, never silently.
 
 > **STATUS (2026-07-13): bash-era reference spec.** The installed `cbus` on every
 > machine is now the Go port (`cmd/cbus`), differentially verified byte-identical
@@ -37,9 +42,14 @@ planned port (preserve or rethink deliberately, never change silently).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
 >     relay's `/send` body cap.
 >
-> §11 (cc-branch.sh) and §12 (install.sh) describe retired components: `branch` is
-> native in the Go client (TerminalForker), and `install.sh` is now the rollback
-> installer.
+> §13 (cc-branch.sh) and §14 (install.sh) describe **retired** components. `branch`
+> is native in the Go client (TerminalForker, §9), and both legacy installers
+> (`install.sh`, `install-cbus-go.sh`) were removed in `de07cbe` — distribution is
+> now `get.sh` + `cbus selfupdate` + `install-commands`/`install-roles` (§11).
+> Rolling back to the bash client (still at `bin/cbus`) is a manual copy over
+> `~/.local/bin/cbus`. The Go-native verbs added post-cutover — `spawn` (§9), the
+> `formation` family (§10), and the distribution verbs (§11) — have no bash
+> counterpart and anchor to `cmd/cbus`/`internal/client`.
 
 Related docs: [`prior-art-and-cc-internals.md`](../prior-art-and-cc-internals.md)
 (design rationale), the repo [`README.md`](../../README.md) and
@@ -58,27 +68,32 @@ code — this reference is the current truth).
 6. [Commands: presence & discovery](#6-commands-presence--discovery)
 7. [Commands: lifecycle & cleanup](#7-commands-lifecycle--cleanup)
 8. [Commands: auth](#8-commands-auth)
-9. [Commands: forking](#9-commands-forking)
-10. [Slash commands](#10-slash-commands)
-11. [cc-branch.sh — the fork helper](#11-cc-branchsh--the-fork-helper)
-12. [install.sh](#12-installsh)
-13. [Deprecated & legacy surfaces](#13-deprecated--legacy-surfaces)
-14. [Quirk index](#14-quirk-index)
+9. [Commands: forking & spawning](#9-commands-forking--spawning)
+10. [Commands: formations](#10-commands-formations)
+11. [Commands: distribution & self-update](#11-commands-distribution--self-update)
+12. [Slash commands](#12-slash-commands)
+13. [Historical: the cc-branch.sh fork helper](#13-historical-the-cc-branchsh-fork-helper)
+14. [Historical: the retired installers](#14-historical-the-retired-installers)
+15. [Deprecated & legacy surfaces](#15-deprecated--legacy-surfaces)
+16. [Quirk index](#16-quirk-index)
 
 ---
 
 ## 1. Invocation basics & global behavior
 
-`bin/cbus` is a single bash script (914 lines, `#!/usr/bin/env bash`,
-`set -euo pipefail`). All JSON work — and the long-lived tail follower itself —
-is delegated to short embedded `python3` programs; there is no `jq` dependency.
+The installed client is a single static Go binary (`cmd/cbus`) with no runtime
+dependencies. The retired bash `bin/cbus` it replaced was a single script (914
+lines, `#!/usr/bin/env bash`, `set -euo pipefail`) that delegated all JSON work —
+and the long-lived tail follower itself — to short embedded `python3` programs
+(no `jq`). The rows below citing `bin/cbus:N` describe that bash-era contract,
+preserved here because the script stays in-repo as the rollback artifact.
 
 | Fact | Detail |
 |---|---|
-| python3 required for **everything** | Checked at startup, before dispatch (bin/cbus:22). Even `cbus --help` dies without it: `cbus: python3 not found (set CBUS_PYTHON)`. |
+| python3 (bash era only) | The bash `bin/cbus` checked python3 at startup before dispatch (bin/cbus:22) — even `cbus --help` died without it (`cbus: python3 not found (set CBUS_PYTHON)`). The installed **Go client has no python dependency**; `CBUS_PYTHON` survives only as a COMPAT(P3 #4) help-text vestige (env table below), printed for byte-parity and ignored (README:482). |
 | State root | `$CBUS_DIR`, default `~/.claude-bus` (bin/cbus:16). |
 | Timestamps | UTC ISO-8601 `YYYY-MM-DDTHH:MM:SSZ` via `date -u` (bin/cbus:20). |
-| bash floor | macOS `/bin/bash` 3.2 is a hard compatibility floor (a nameref refactor was rejected for breaking it). |
+| bash floor (bash era only) | macOS `/bin/bash` 3.2 was a hard compatibility floor for the retired script (a nameref refactor was rejected for breaking it); the Go client has no shell-version floor. |
 
 ### Two error dialects
 
@@ -113,12 +128,12 @@ all and render bash's stock `parameter null or not set`.
 | Var | Read at | Effect |
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
-| `CBUS_PYTHON` | bin/cbus:17 | Python interpreter (default `python3`) |
+| `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — still printed in `--help` for byte-parity as a COMPAT(P3 #4) vestige (README:482) |
 | `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)) |
 | `CBUS_ALIAS` | :478 | Last-resort `from` on **local** send only. Unvalidated. Documented nowhere else — this is its only doc |
 | `CBUS_SITE_<HOST>_URL` | :134-139 | Per-host relay public URL override/extension (see [§2](#host--endpoint-resolution)) |
 | `CBUS_RELAY_LOCAL_URL` | :149 | Loopback relay probe target (default `http://127.0.0.1:8090`) |
-| `CC_BRANCH` | :817 | Fork-helper path (default `~/.claude/bin/cc-branch.sh`) |
+| `CC_BRANCH` | :817 (bash era) | Fork-helper path for the retired `cc-branch.sh` (default `~/.claude/bin/cc-branch.sh`). **No longer consulted** — `branch`/`spawn` fork natively (TerminalForker, §9); dropped from `--help` |
 | `XDG_CONFIG_HOME` | :165 | Linux credential dir root (default `~/.config`) |
 | `HOME`, `PWD`, `PPID` | various | Defaults; `cwd` recorded at join; `PPID` seeds the owner-pid walk and the `nosession-$PPID` / `<host>-$PPID` fallback identities |
 
@@ -137,10 +152,10 @@ No other command reads stdin.
 | Invocation | Handler | Notes |
 |---|---|---|
 | `cbus join ...` | `cmd_join` | |
-| `cbus register [alias]` | `cmd_join global` | **Deprecated** v1 alias (§13) |
+| `cbus register [alias]` | `cmd_join global` | **Deprecated** v1 alias (§15) |
 | `cbus send ...` | `cmd_send` | Routes to remote on `@` in target |
 | `cbus tail ...` | `cmd_tail` | Routes to remote on `@` in target |
-| `cbus list ...` / `cbus peers ...` | `cmd_list` | `peers` is an undocumented alias (§13) |
+| `cbus list ...` / `cbus peers ...` | `cmd_list` | `peers` is an undocumented alias (§15) |
 | `cbus active [ch]` | `cmd_list --active` | |
 | `cbus channels` | `cmd_channels` | Extra args silently dropped |
 | `cbus prune [ch]` | `cmd_prune` | |
@@ -155,6 +170,14 @@ No other command reads stdin.
 | `cbus auth ...` | `cmd_auth` | |
 | (none), `-h`, `--help` | usage heredoc to **stdout**, exit **0** | |
 | anything else | `cbus: unknown command '<X>' (cbus --help)`, exit 1 | |
+
+> **Go-native verbs (post-cutover).** `spawn`, the `formation …` family,
+> `selfupdate`, `install-commands`, `install-roles`, and `--version`/`version`
+> are not in the bash dispatch above. They route through `cmd/cbus/main.go`'s
+> switch to `runSpawn` / `runFormation` / `runSelfupdate` / `runInstallCommands` /
+> `runInstallRoles` (§9–§11). A **hidden** `__update-check` subcommand backs the
+> opt-in update hint (§11); there is **no** public `update-check` verb — typing
+> one hits the `unknown command` default.
 
 <a name="sessionless-degradation"></a>
 ### Sessionless degradation
@@ -456,7 +479,7 @@ cbus join global               # the machine-wide orchestrator bus (by conventio
 ### `cbus register [alias]` — deprecated
 
 Exactly `cbus join global [alias]`. Kept as the v1 compatibility alias from
-before named channels. Nothing programmatic calls it; see §13.
+before named channels. Nothing programmatic calls it; see §15.
 
 ### `cbus whoami`
 
@@ -794,7 +817,7 @@ Behavior, exactly:
 Coverage: SessionEnd fires only on **graceful** exits; hard kills still rely
 on the prune `departed` backstop.
 
-**Wiring is manual** — `install.sh` does not touch settings. Add to
+**Wiring is manual** — no installer touches settings. Add to
 `~/.claude/settings.json`:
 
 ```json
@@ -863,63 +886,164 @@ fails with a plain HTTP 401 handshake refusal — a different symptom than the
 
 ---
 
-## 9. Commands: forking
+## 9. Commands: forking & spawning
 
-### `cbus branch [window|tab|tmux] [channel]`
+`branch` and `spawn` both open a new terminal session joined to a channel; they
+differ in the child's transcript. `branch` **forks** — the child resumes the
+parent's conversation (`--resume <sid> --fork-session`). `spawn` opens a
+**fresh**, blank session. Both are Go-native (`internal/client/harness.go`,
+`spawn.go`); the retired bash `cc-branch.sh` helper (§13) is no longer consulted.
+The terminal launch is shared (`TerminalForker` / `OSAForker`): iTerm2 window/tab
+via osascript, tmux via `tmux new-window`.
+
+### `cbus branch [window|tab|tmux] [channel] [--model M] [--name N]`
 
 One-shot parent side of `/bus-branch`: derive channel → join (idempotent) →
-fork a child terminal seeded with the canonical bootstrap prompt. Collapses
-what used to be three model turns into one command.
+**reserve the child's alias** → fork the parent's transcript into a new terminal
+seeded with the canonical bootstrap prompt. Collapses what used to be three model
+turns into one command. Handler `runBranch` (main.go:304); mechanics
+`client.Branch` (harness.go:81).
 
 - Target defaults to `window`; anything else →
-  `cbus: target must be window|tab|tmux` (note: `session` is rejected here
-  even though cc-branch.sh accepts it as a `tab` synonym).
-- Channel default: basename of `git rev-parse --show-toplevel`, filtered
-  through `tr -cd 'A-Za-z0-9._-'`; if empty (not a repo), `global`.
-- Joins (output suppressed; an already-joined session reuses its alias), then
-  re-finds this session's alias via `resolve_self` →
-  `cbus: failed to join "<ch>"` if absent — which is exactly what happens
-  **outside** a Claude session (**quirk:** join succeeds with an empty
-  sessionId, the readback fails, and an orphan peer dir is left behind until
-  the 10-minute grace prune).
-- Helper: `${CC_BRANCH:-$HOME/.claude/bin/cc-branch.sh}`; not executable →
-  `cbus: fork helper not found: <path> (set CC_BRANCH)`.
-- Runs `helper <target> --prompt "$(cmd_bootstrap <ch> <alias>)"`. Helper
-  failure aborts the command, but the parent **stays joined** (harmless —
-  joins are idempotent).
+  `cbus: target must be window|tab|tmux` (note: `session` is rejected here even
+  though the retired cc-branch.sh accepted it as a `tab` synonym). A `tmux`
+  target with no `$TMUX` → `cbus: not inside a tmux session`.
+- Channel default: basename of the git toplevel, filtered to `[A-Za-z0-9._-]`;
+  if empty (not a repo), `global`.
+- `--model M` launches the child on a specific model (`sonnet`, `opus`,
+  `fable`, …), passed through verbatim to the child launch. Pre-screened: a
+  flag-shaped or invalid token fails with `cbus: bad model "<M>"` before any
+  fork (a leading `-` would be read as a CLI flag and instant-close the window).
+- `--name N` fixes the child's alias **and** its session title (default: the
+  auto-pick — `main`, else lowest free `fork-N`). Validated `cbus: bad name
+  "<N>"`. Both flags may appear **leading or trailing** — `extractForkFlags`
+  scans the whole arg list, unusual vs the leading-only parsing everywhere else;
+  a flag with no value → `cbus: --model: missing value (<usage>)`.
+- **`--role` is refused:** `cbus: --role rides fresh spawns only (a fork inherits
+  its parent's intent) — use: cbus spawn ... --role <r>`. The refusal fires on
+  any presence of the token (even `--role` with no value). A fork carries the
+  parent's intent; handing a forked peer someone else's role prompt is the
+  ghost-orchestrator failure formations exist to prevent (§10).
+- Joins itself (output suppressed; an already-joined session reuses its alias),
+  then re-finds its own alias via `ResolveSelf` → `cbus: failed to join "<ch>"`
+  if absent — which is exactly what happens **outside** a Claude session
+  (**quirk:** join succeeds with an empty sessionId, the readback fails, and an
+  orphan peer dir is left behind until the 10-minute grace prune).
+- Reserves the child alias with a birth-record stamp (`ReserveAlias`,
+  `origin=fork` plus the model) — the **only** place `origin=fork` is stamped
+  (protocol.md §2.2, birth records). On fork failure the reservation is released
+  (`Unreserve`) and the parent **stays joined** (harmless — joins are
+  idempotent).
 
-**Output:**
+**Output (two stdout lines):**
 
 ```
-parent: <ch>/<alias> (child will announce itself on the bus)
+parent: <ch>/<alias>; child: <ch>/<child> (alias reserved + session titled — it joins as it boots)
 arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>
 ```
+
+**Errors:** `target must be window|tab|tmux`, `bad model "<M>"`, `bad name
+"<N>"`, `bad channel "<ch>"`, `failed to join "<ch>"`, plus whatever `Join`
+returns.
 
 ```mermaid
 sequenceDiagram
     participant P as Parent session
     participant C as cbus branch
-    participant H as cc-branch.sh
+    participant F as TerminalForker (OSAForker)
     participant T as iTerm2 / tmux
     participant K as Child session
-    P->>C: cbus branch window
-    C->>C: derive channel (repo name) → join (idempotent)
-    C->>H: helper window --prompt "$(cbus bootstrap ch alias)"
-    H->>H: write self-deleting launcher (PATH, CLAUDE_CONFIG_DIR, cwd)
-    H->>T: osascript create window / tmux new-window
-    T->>K: ccs <profile>|claude --resume <sid> --fork-session "<bootstrap prompt>"
-    C-->>P: parent: ch/alias + arm reminder
-    K->>K: cbus join ch (auto alias fork-N) → arm Monitor
+    P->>C: cbus branch window [--model m] [--name n]
+    C->>C: derive channel → join (idempotent) → reserve child alias (origin=fork)
+    C->>F: Fork(spec: sid, model, childAlias, bootstrap prompt)
+    F->>F: write self-deleting launcher (PATH, CLAUDE_CONFIG_DIR, cwd)
+    F->>T: osascript create window/tab (bare `/bin/bash <tmpfile>`) / tmux new-window
+    T->>K: ccs <profile>|claude --resume <sid> --fork-session [--model m] [--name childAlias] "<prompt>"
+    C-->>P: parent + child lines + arm reminder
+    K->>K: cbus join ch (reclaims the reserved alias) → arm Monitor
     K-->>P: join presence event (parent's armed tail sees it)
 ```
 
-### `cbus bootstrap <channel> [parent-alias]`
+**Quirk (iTerm2 tokenizer shim):** window/tab forks hand iTerm2 a **bare**
+`/bin/bash <tmpfile>` command through a self-deleting launcher script, not a
+quoted one-liner. iTerm2's AppleScript `command` parameter is tokenized by
+iTerm2 itself and does **not** honor POSIX quoting, so a quoted one-liner
+launches nothing (probe-verified live, twice). tmux takes the opposite path — a
+POSIX-quoted one-liner through `/bin/sh`. The child inherits `PATH` always and
+`CLAUDE_CONFIG_DIR` when set; under a CCS instance config dir it relaunches via
+`ccs <profile>`. (This is the mechanism port-map §4.12 mislabels as "quoting
+cruft"; the real rationale is the tokenizer.)
+
+### `cbus spawn [window|tab|tmux] [channel | <ch>@<host>] [--model M] [--name N] [--role R]`
+
+Opens a **fresh, blank-transcript** session — not a fork — that joins and arms
+the channel on its own. Go-native, no bash counterpart. Handler `runSpawn`
+(main.go:335); mechanics `client.Spawn` (spawn.go:60). Same terminal launch as
+`branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
+blank transcript.
+
+**How it differs from `branch`:**
+
+- **Does not join** the channel itself. For a local channel it only **reserves**
+  the child alias (birth-record `origin=fresh`), so `spawn` works even when the
+  caller is not on the channel.
+- The child starts blank instead of resuming the parent's transcript — the right
+  choice when a peer must not inherit the parent's history, e.g. a distinct role
+  in a formation (§10).
+
+**Flags:**
+
+- `--model M` / `--name N` — same contract as `branch` (alias + session title,
+  leading or trailing, `bad model` / `bad name` validation).
+- `--role R` reads a committed role prompt from `roles/<R>.md` — the spawn cwd's
+  git repo first, then `$CBUS_DIR/roles` as the machine-global fallback (the
+  `install-roles` destination, §11) — and appends its body to the child's first
+  turn **after** the join/arm instructions. It defaults `--name` to the role name
+  and `--model` to the file's `MODEL:` line; an explicit `--name` / `--model`
+  still wins. `LoadRole` runs **before** any alias is reserved, so an unknown
+  role fails clean, listing every path it tried: `cbus: role "<R>" not found
+  (tried <path>, <path>)`. Bad token → `cbus: bad role "<R>"`. (`branch` refuses
+  `--role`; see above.)
+
+**Address handling:**
+
+- Default (no channel arg): this session's first registration, else the
+  git-toplevel / `global` derivation.
+- A `/` in the arg → `cbus: spawn takes a channel or channel@host, no alias — use
+  --name to fix the child's alias`.
+- **Remote (`<ch>@<host>`)** must be explicit (`bad channel` / `bad host`
+  validation). The relay has no reservation step: **with** `--name` spawn
+  pre-assigns the relay alias (title = the name); **without** `--name` the child
+  picks its own alias and the session title falls back to the address. A local
+  reservation is undone on fork failure; a remote pre-assignment is not (there is
+  nothing to unreserve).
+
+**Output:**
+
+```
+spawned: fresh session -> <ch>/<child> (<target>, alias fixed + session titled[ + role brief]); it joins and arms itself
+verify: cbus list <ch>
+```
+
+Remote self-pick (no `--name`) prints instead:
+
+```
+spawned: fresh session -> <ch>@<host> (<target>); it joins and arms itself (picks its own alias)
+verify: cbus list @<host>
+```
+
+**Errors:** `target must be window|tab|tmux`, `bad model/name/channel/host/role
+"<x>"`, `role "<R>" not found (tried …)`, and the no-alias message above.
+
+### `cbus bootstrap <channel> [parent-alias] [child-alias]`
 
 Prints the canonical first-turn prompt for a forked child. Kept in the binary
-(not duplicated in skill files) so prompt fixes ship with it. Channel
-required; parent defaults to `main` — **quirk:** a manual `cbus bootstrap
-<ch>` tells the child its parent is `<ch>/main` even if the real parent has
-another alias (`cbus branch` always passes the real one).
+(not duplicated in skill files) so prompt fixes ship with it. Channel required;
+parent defaults to `main` — **quirk:** a manual `cbus bootstrap <ch>` tells the
+child its parent is `<ch>/main` even if the real parent has another alias
+(`cbus branch` always passes the real one). A third `child-alias` arg selects the
+**reserved-alias variant** (`BootstrapPromptAliased`) that `cbus branch` emits:
+the child is told to reclaim a pre-reserved alias rather than auto-pick `fork-N`.
 
 The prompt instructs the child to: `cbus join <ch>` and note the auto-picked
 alias; arm the Monitor **persistent** on `cbus tail <ch>/<alias>` with
@@ -932,12 +1056,250 @@ note; confirm the join in one line and wait for instructions.
 
 ---
 
-## 10. Slash commands
+## 10. Commands: formations
 
-Installed to `~/.claude/commands/` by `install.sh`. Each is an instruction
-sheet **to the model** with YAML frontmatter (`description`, `argument-hint`,
-`allowed-tools`) and ends with a hard **"Do nothing else."** — a guardrail
-against model over-helpfulness that a port's skill files should keep.
+A **formation** is a saved snapshot of a channel's topology — its peers, their
+roles and models, and how to relaunch them — so a whole multi-session fleet can
+be brought back after a reboot, handed to a successor, or stamped out fresh.
+Go-native (`cmd/cbus/formation.go`, `internal/client/formation*.go`); dispatch
+`runFormation` (formation.go:19). See also overview.md and the `/bus-formation`
+skill (§12).
+
+**Storage and resolution.** Runtime formations live in
+`$CBUS_DIR/.formations/<name>.json` (dot-prefixed so channel walkers skip it);
+committed starter templates live in `<git-toplevel>/formations/`. The envelope
+schema id is `cbus-formation/v1`. Name resolution is **runtime store first, then
+the repo's `formations/` templates** (`ResolveFormation`) — a runtime save
+**shadows** a committed starter of the same name, and `apply`/`show` print which
+source they used (`runtime store (<path>)` / `committed template (<path>)`) so a
+shadow is stated, not a surprise. A torn runtime file stops resolution there
+(never falls through). Not found → `cbus: no formation "<name>" (looked in the
+runtime store <path> and the repo's <path>/)`.
+
+> **Discoverability seam (n17, by design):** `formation list` enumerates **only**
+> the runtime store; `show`/`apply` additionally resolve committed templates. So a
+> repo starter that was never saved locally (e.g. `dev-trio`) is **invisible to
+> `list`** yet fully usable by `show`/`apply`. This is the deliberate consequence
+> of the runtime-first precedence, not a bug — `list` reports what you saved,
+> resolution reaches what the repo ships.
+
+**The envelope** (`Formation` / `FormationPeer`, formation.go:56-92). Top-level:
+`schema`, `name`, `channel`, `host` (nullable), `anchorAlias`, `savedAt`,
+`savedBy`, `drift_anchors`, `payload` (opaque — carried into briefs, never
+followed), `peers`. Each peer: `alias`, `model`, `rolefile` (a committed prompt
+pinned at a commit, e.g. `roles/coder.md@b3a806e`), `role` (freeform fallback),
+`origin` (`fresh`/`fork`/`joined`), `mode` (`resume`/`fork`/`template`),
+`sessionId`, `onStale` (`template`/`skip`/`fail`), `profile`, `cwd`, `target`,
+`machine`, `addresses`. Unknown keys round-trip verbatim (`Extra`).
+
+### `cbus formation save <name> [channel]`
+
+Snapshots the channel's current peers into the runtime store. Channel defaults to
+this session's own registration (`not joined to a channel in this session — pass
+one` if none; `joined to <N> channels (<list>) — pass one` if several).
+
+- **The store records exactly four facts per peer**: `sessionId`, `cwd`,
+  `machine`, and the birth-record `origin`/`model` **when the launcher recorded
+  them** (§9 / protocol.md birth records). It fills a blank origin/model **once**
+  and never overwrites a hand-edited field; `rolefile`/`role` and `profile` are
+  yours to fill in. A corrupted birth-record is skipped with a note, not fatal.
+- New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
+  `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
+  this with the peer's brief`).
+- Peers in the file but no longer on the channel are **kept**, not dropped.
+- Refusals: `refusing to overwrite an envelope that will not load: <err>` and
+  `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
+  (...)`. A committed template of the same name can seed a first save (`based on
+  the committed template ...`, written to the runtime store, never the repo).
+
+**Output** (example):
+
+```
+saved formation "myeffort" (<path>, new)
+  channel "myeffort": +3 new (orchestrator, coder, reviewer)
+  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;
+  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates
+  check it: cbus formation show myeffort
+```
+
+### `cbus formation apply <name> [--channel ch] [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]`
+
+Relaunches exactly the peers **missing** from the channel, sequentially and
+**anchor-first** (the orchestrator comes up before anyone who expects to reach
+it). A real apply requires this session to already be on the channel — apply
+briefs peers to answer *it*, so it must be a peer first: `this session is not on
+"<ch>" — ... cbus join <ch> <alias>`.
+
+- `--channel ch` retargets the formation for this run only (the file is untouched;
+  `channel: <a> -> <b> (this run only; the <name> file is untouched)`); validated
+  `--channel must be [A-Za-z0-9._-], got "<x>"`. This is how a starter template
+  serves any effort.
+- `--only a,b` narrows to named peers (`--only: name at least one peer` if empty;
+  `--only names no such peer: <x>`).
+- `--dry-run` builds the exact same plan and launches nothing (`apply --dry-run
+  (planned only; nothing was launched)`).
+- `--wait <dur>` sets the per-peer answer wait (default `90s`; `0` = launch and
+  return; `--wait: want a duration like 90s or 2m (0 = do not wait), got "<x>"`).
+- `--brief TEXT` adds an effort brief to every kickoff.
+
+**Convergence is a round-trip, not a timer.** Each kickoff carries a per-peer
+nonce (`cbus-ok-<alias>-<base36>`); apply reads its own inbox until the nonce
+returns or `--wait` elapses. A peer that launches but never answers is reported
+`failed` (`launched, but did not answer within <dur> (...)`), and apply **returns
+exit 1** when not converged (`Converged()` = no peer `failed`); `0` when
+converged or on a `--wait 0` / `--dry-run` run.
+
+Restore obeys the three modes (below): `template`/`fork` reserve the alias and
+stamp the birth-record (`origin=fresh`/`fork`); **`resume` does not reserve** (a
+placeholder would clobber the resumed peer's preserved origin). Plan refusals are
+surfaced as the per-peer detail — the load-bearing ones:
+
+- `origin=fork` + resume → refused (R1): the fork-born session is the *parent's*
+  transcript; restore it with `mode=template`.
+- empty `origin` + a resume/fork mode → refused (D12): the tool cannot know how
+  the peer was born, and a fork-born peer must never be resumed.
+- a live-armed session + `mode=resume` → refused (D14): resume would attach a
+  second process to one transcript.
+- cross-machine peer → `recorded on "<h>", this host is "<self>" (cross-machine
+  launch is not in v1)`.
+
+**Output** (per peer): `<alias>  <outcome>[ — <detail>]`, outcomes `present` /
+`resumed` / `forked` / `templated` / `degraded` / `skipped` / `refused` /
+`failed`, plus `<alias>  answered its kickoff (round-trip verified)` on
+convergence. Drift findings print `DRIFT <anchor>: saved <a>, now <b> — ... not
+blocking`.
+
+### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
+
+Prints **one** peer's first-turn prompt to stdout for you to paste by hand — the
+path for a peer `apply` will not launch (recorded on another machine; cross-
+machine launch is not in v1) or for previewing a brief. Consults no live state.
+Errors mirror apply's plan refusals (`formation "<name>" has no peer "<alias>"
+(it has: <list>)`, the `origin=fork` / empty-origin refusals, and `nobody for the
+peer to answer: join <ch> yourself, or set anchorAlias in the formation`).
+
+### `cbus formation list`
+
+Enumerates the runtime store only (see the seam above). Empty → `no formations
+saved`. Per entry: `<name>  channel=<ch>  peers=<n>  saved=<ts|?>`. An unreadable
+envelope is listed **with** its error (`<name>  unreadable: <err>`), never
+skipped.
+
+### `cbus formation show <name>`
+
+Inspects one formation without launching anything. Prints the resolved `source:`,
+the channel/host, `saved ... by ...`, any anchor, the `drift_anchors` (recorded
+at save; apply is what diffs them), the opaque `payload`, and each peer's
+`model`/`mode`/`origin`/`target`/`machine`, its role line (`rolefile`, a freeform
+byte count, or a `TODO` when neither is usable), and its `sid` state — **`STALE`**
+when the recorded transcript is gone (`resume/fork cannot run, onStale=<x>
+applies`), `unchecked` when recorded on another machine, or `none recorded`. A
+trailer summarizes `warnings: <n> stale sid(s), <n> role TODO(s)`. **Warnings
+never set the exit code** — `show` reports, it does not rule.
+
+### `cbus formation rm <name>`
+
+Deletes a runtime formation (`removed formation "<name>" (<path>)`; also removes
+the `.formations` dir when empty). **Refuses to delete a committed template**:
+`"<name>" is a committed template (<path>), not a runtime formation — remove it
+via git, not cbus`. `save`/`rm` only ever touch the runtime store.
+
+### Restore modes & birth records
+
+Three modes decide *how* a peer comes back, and they never cross: `resume`
+continues a session's own transcript; `fork` tells the child plainly it is not
+the original and must not act on unfinished parent work; `template` comes back on
+a fresh transcript, briefed from its role file. **A peer is never forked across
+roles** — the exact design mistake formations exist to fix. The `origin`/`model`
+that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
+the peer's `meta.json` at birth, before the child boots, and `save` picks them up
+automatically. Full field-level mechanics: protocol.md (meta.json birth records).
+
+---
+
+## 11. Commands: distribution & self-update
+
+How the client and its embedded assets get onto a machine and stay current. First
+install is `get.sh` (bootstrap); thereafter `cbus selfupdate`. The retired
+`install.sh` / `install-cbus-go.sh` scripts (§14) are gone. Go source:
+`cmd/cbus/selfupdate.go`, `install_assets.go`, `update_check.go`, `version.go`,
+`repo.go`.
+
+**Repo slug resolution** (`repo.go`). Release operations need a GitHub repo:
+`$CBUS_REPO` overrides the slug baked into a released binary (`-X
+main.repoSlug=owner/repo` at build). Neither set → `cbus: no release repo
+configured — set CBUS_REPO=owner/repo, or use a released binary (its slug is baked
+in at build)`.
+
+### `cbus selfupdate [--check] [--force]`
+
+Updates the running binary from the latest GitHub release, then refreshes the
+installed commands and roles. Needs `gh` on `PATH` and authenticated (`gh CLI not
+found — ...`; `gh is not authenticated — run 'gh auth login'`).
+
+- `--check` reports and applies nothing, printing one of: `<cur> (dev/local
+  build) — latest release: <latest>` / `<cur> — already on latest` / `<cur> ->
+  <latest> available`.
+- Otherwise it downloads the platform asset `cbus-<goos>-<goarch>` to a temp dir
+  (`downloading <tag> <asset> from <slug>...`), **verifies the download reports
+  the tag it fetched before swapping** (runs `<tmp> --version`; a binary that
+  won't run or reports the wrong version is refused, nothing swapped), then swaps
+  in place via rename (the running inode stays alive). Success: `updated <cur> ->
+  <latest>`.
+- Guards: a dev/local build refuses to self-overwrite without `--force`
+  (`selfupdate: running a dev/local build (<cur>) — refusing to overwrite; pass
+  --force ...`); already-latest is a no-op (`already on latest (<v>)`); a missing
+  platform asset is loud (`no asset named "<asset>" in release <tag> of <slug> —
+  that platform's binary is missing from the release`).
+- After swapping it execs the new binary's `install-commands --force` and
+  `install-roles --force`; a non-zero refresh prints `note: <verb> refresh
+  reported problems (see above)` but does not fail the update.
+
+### `cbus install-commands [--path DIR] [--force]` / `cbus install-roles [--path DIR] [--force]`
+
+Write the embedded assets to disk: `install-commands` places the `/bus-*` skills
+(default `~/.claude/commands`), `install-roles` places the role prompts (default
+`$CBUS_DIR/roles`, the `spawn --role` fallback). `--path DIR` overrides the
+destination.
+
+- **sha-guarded.** Per embedded `*.md`: byte-identical destination → `up-to-date`;
+  differs and **not** `--force` → `SKIPPED — differs from shipped (locally
+  edited?) — pass --force to overwrite`; differs with `--force`, or absent →
+  written (atomically). One file's failure never aborts the batch.
+- **Output** (per file, then a summary): `  <name>  <up-to-date|installed>` /
+  `  <name>  SKIPPED — <reason>` / `  <name>  FAILED — <reason>`, then
+  `<commands|roles> -> <dir> (<n> file(s))`.
+- **Exit code: 1 if any file was skipped or failed** (the safe files still land),
+  else 0. A hard error (embed read, mkdir) is a `die`.
+
+### Update-available hint (`CBUS_UPDATE_CHECK=1`)
+
+There is **no public `update-check` verb**. Opt in by exporting
+`CBUS_UPDATE_CHECK=1`: on any ordinary invocation the client synchronously prints
+one stderr hint when a cache already knows a newer stable release — `cbus: note:
+<version> available — run 'cbus selfupdate'` — then, if the cache is missing or
+older than 24h, spawns a **detached** `cbus __update-check` (a hidden subcommand)
+that polls the release API with a 5s budget and rewrites
+`~/.config/cbus/update-check.json`. Everything is best-effort and silent on error;
+it is skipped for `selfupdate`/`hook-exit`/`--version`/`__update-check`, in
+`--json` mode, and when no repo slug is configured.
+
+### `cbus --version` / `cbus version`
+
+Prints `cbus-go <version>` (stdout, exit 0). The `cbus-go` token is the
+self-identifier kept from the coexistence era, not `cbus`. `<version>` is the
+build stamp injected by the Makefile (`-X main.version=$(git describe --tags
+--always --dirty)`), default `dev`. `selfupdate`'s download-verify reads this same
+line from the downloaded binary.
+
+---
+
+## 12. Slash commands
+
+Installed to `~/.claude/commands/` by `cbus install-commands` (§11). Each is an
+instruction sheet **to the model** with YAML frontmatter (`description`,
+`argument-hint`, `allowed-tools`) and ends with a hard **"Do nothing else."** — a
+guardrail against model over-helpfulness that a port's skill files should keep.
 
 ### `/bus-join [channel[@host]] [alias]`
 
@@ -1004,9 +1366,35 @@ add steps to try to suppress it."**
 3. Report the new address in one line; note the user can match the TUI title
    with `/rename <new-alias>` — the TUI title cannot be set programmatically.
 
+### `/bus-spawn [window|tab|tmux] [channel|ch@host] [--model M] [--name N]`
+
+`allowed-tools: Bash(cbus:*), AskUserQuestion`
+
+Thin wrapper over `cbus spawn` (§9): opens a **fresh** session (blank transcript,
+not a fork) in a new terminal, joined and armed on its own. The model asks for a
+target via AskUserQuestion only if none was passed, runs `cbus spawn`, and reports
+the result. The skill's argument hint surfaces `--model`/`--name`; `--role` is a
+`cbus spawn` flag used directly (§9).
+
+### `/bus-formation <verb> ...`
+
+`allowed-tools: Bash(cbus:*), Monitor`
+
+Wraps the whole `cbus formation` family (§10) — `save`, `show`, `apply` (with
+`--channel`/`--dry-run`), `bootstrap`, `list`, `rm` — for driving formations from
+inside a session rather than shelling out. Runs the matching `cbus formation`
+command and reports its output; `Monitor` is allowed so an `apply` can arm the
+applier's listener to catch peers' kickoff answers.
+
 ---
 
-## 11. cc-branch.sh — the fork helper
+## 13. Historical: the cc-branch.sh fork helper
+
+> **RETIRED (de07cbe).** `bin/cc-branch.sh` was the bash fork helper `cbus branch`
+> shelled out to. `branch`/`spawn` now fork natively in Go (`TerminalForker` /
+> `OSAForker`, §9); the helper is no longer consulted and `CC_BRANCH` is dropped
+> from `--help`. This section is kept as the historical record of what native
+> forking replaced.
 
 `bin/cc-branch.sh` (70 lines) forks the current Claude Code session into a new
 terminal. Must run from inside a session — hard-fails without
@@ -1047,9 +1435,18 @@ prompt is not secret).
 
 ---
 
-## 12. install.sh
+## 14. Historical: the retired installers
 
-Copies (default) or symlinks (`--link`) exactly five files:
+> **RETIRED (de07cbe).** `install.sh` (bash-client + skills installer) and
+> `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
+> releases and `cbus selfupdate` shipped. Distribution is now `get.sh` (bootstrap)
+> + `cbus selfupdate` + `install-commands`/`install-roles` (§11); rolling back to
+> the bash client is a manual copy over `~/.local/bin/cbus`. This section is kept
+> as the historical record of the copy/symlink installer it replaced; the caveats
+> below (copy-install drift, mode-switch) described `install.sh` and no longer
+> apply to the release flow.
+
+`install.sh` copied (default) or symlinked (`--link`) exactly five files:
 
 | Source | Destination | Override env |
 |---|---|---|
@@ -1081,7 +1478,7 @@ Copies (default) or symlinks (`--link`) exactly five files:
 
 ---
 
-## 13. Deprecated & legacy surfaces
+## 15. Deprecated & legacy surfaces
 
 | Surface | Status | Behavior |
 |---|---|---|
@@ -1096,10 +1493,12 @@ drop them (delete the README one-liner) or keep them for muscle memory.
 
 ---
 
-## 14. Quirk index
+## 16. Quirk index
 
 Consolidated list of the behaviors flagged above — each is **as-is** and must
-be preserved or consciously rethought in a port, never changed silently.
+be preserved or consciously rethought in a port, never changed silently. Items
+tagged **(bash era)** describe the retired `bin/cbus` and no longer bind the Go
+client; they remain for the homogenization/port record.
 
 **Parsing & addressing**
 1. `/alias` ≡ bare `alias` (empty channel half skips validation).
@@ -1172,7 +1571,8 @@ be preserved or consciously rethought in a port, never changed silently.
     fallback; remote send never consults it.
 
 **Environment & platform**
-33. python3 is required for everything, including `--help`.
+33. **(bash era)** python3 was required for everything, including `--help`; the
+    Go client has no python dependency (`CBUS_PYTHON` is a byte-parity vestige).
 34. Sessionless operation degrades quietly (orphan peers, unroutable froms,
     `nosession-$PPID` markers).
 35. Owner detection needs a `claude`/`claude-*`-named ancestor within 16 hops;
@@ -1180,6 +1580,6 @@ be preserved or consciously rethought in a port, never changed silently.
 36. `window`/`tab` forking is iTerm2-only AppleScript; `tab` needs an existing
     window; tmux requires `$TMUX`; helper failures leak the launcher tmpfile
     and print errors to stdout.
-37. Copy-install drift (per-machine re-runs; no version handshake); mode-switch
-    (link→copy) breaks the installer; the install NOTE about bus-branch.md is
-    stale.
+37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
+    version handshake) and the link→copy mode-switch break — retired with the
+    installer (§14); distribution is now `get.sh` + `selfupdate` (§11).
