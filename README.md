@@ -1,7 +1,7 @@
 # claudebus
 
 A tiny **file-based message bus that lets two (or more) live Claude Code sessions
-talk to each other** — for example a parent session and a `/branch-term` fork in
+talk to each other** — for example a parent session and a `/bus-branch` fork in
 another window, so the fork can report results back live instead of writing a
 handoff doc you carry over by hand.
 
@@ -36,7 +36,7 @@ orchestrator that anything can reach.
 Each participating session **joins a channel** and **arms a listener**:
 
 - **Store** — `~/.claude-bus/<channel>/<alias>/` holds:
-  - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}`
+  - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}` (plus `origin`/`model` birth-record fields; see [Birth records](#birth-records))
   - `inbox.jsonl` — append-only, one JSON message per line
 - **Join** — `cbus join <channel>` auto-picks the alias (`main` if free, then
   `fork-1`, `fork-2`, …), is idempotent for a session already in the channel, and
@@ -476,7 +476,9 @@ cbus rename <new-alias> [channel]  rename this session's local alias (re-arm aft
 cbus unregister <channel>/<alias>  force-remove any peer
 
 env: CBUS_DIR (default ~/.claude-bus); CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL
-     (relay endpoint overrides); CBUS_ALIAS (last-resort local from)
+     (relay endpoint overrides); CBUS_ALIAS (last-resort local from);
+     CBUS_REPO (owner/repo for selfupdate; baked into released binaries);
+     CBUS_UPDATE_CHECK=1 (opt-in once-a-day update hint)
 ```
 
 `--help` still prints a vestigial `CBUS_PYTHON` line for byte-parity with the bash client; the
