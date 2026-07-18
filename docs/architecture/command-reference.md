@@ -1082,6 +1082,10 @@ runtime store <path> and the repo's <path>/)`.
 > of the runtime-first precedence, not a bug — `list` reports what you saved,
 > resolution reaches what the repo ships.
 
+The shipped starter `dev-trio` carries **four** peers despite the name —
+orchestrator, coder, reviewer, documenter — because the orchestrator anchor rides
+in the file; a reader of `dev-trio.json` alone would expect three.
+
 **The envelope** (`Formation` / `FormationPeer`, formation.go:56-92). Top-level:
 `schema`, `name`, `channel`, `host` (nullable), `anchorAlias`, `savedAt`,
 `savedBy`, `drift_anchors`, `payload` (opaque — carried into briefs, never
@@ -1125,7 +1129,10 @@ saved formation "myeffort" (<path>, new)
 
 Relaunches exactly the peers **missing** from the channel, sequentially and
 **anchor-first** (the orchestrator comes up before anyone who expects to reach
-it). A real apply requires this session to already be on the channel — apply
+it). The full plan is computed (`BuildPlan`) **before any peer launches**, so a
+mid-fleet refusal can never strand a half-launched formation — peer 3 refusing
+does not leave peers 1–2 already forked and orphaned. A real apply requires this
+session to already be on the channel — apply
 briefs peers to answer *it*, so it must be a peer first: `this session is not on
 "<ch>" — ... cbus join <ch> <alias>`.
 
@@ -1440,7 +1447,10 @@ prompt is not secret).
 > `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
 > releases and `cbus selfupdate` shipped. Distribution is now `get.sh` (bootstrap)
 > + `cbus selfupdate` + `install-commands`/`install-roles` (§11); rolling back to
-> the bash client is a manual copy over `~/.local/bin/cbus`. This section is kept
+> the bash client is a manual copy over `~/.local/bin/cbus`. They were **deleted,
+> not deprecated in place**: a runnable bash-restore script beside a self-updating
+> client is a live footgun with no remaining job — a stray run would overwrite the
+> Go binary with the retired bash client. This section is kept
 > as the historical record of the copy/symlink installer it replaced; the caveats
 > below (copy-install drift, mode-switch) described `install.sh` and no longer
 > apply to the release flow.
