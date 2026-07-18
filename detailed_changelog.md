@@ -4,7 +4,7 @@
 
 [Attempt #1]
 
-Three fixes folded in immediately after `d52a264` landed, all in `058ea28`,
+Three fixes folded in immediately after `f246e3b` landed, all in `ff7ceef`,
 all caught before review:
 
 1. **tmux<3.1 plain-split retry.** `forkTmuxPane`'s first split passes
@@ -33,9 +33,9 @@ all caught before review:
    needing cleanup yet.
 
 Doc fold-in: command-reference.md quirk 36's launcher-leak claim ("A pre-exec
-osascript failure leaks...") was written against pre-058ea28 code and went
+osascript failure leaks...") was written against pre-ff7ceef code and went
 stale the same day — reworded to describe the pre-dispatch/dispatch split
-precisely, with the `058ea28` anchor.
+precisely, with the `ff7ceef` anchor.
 
 [Files Changed]
 - internal/client/harness.go: `osaForkITerm` captures the dispatch result as
@@ -48,8 +48,8 @@ precisely, with the `058ea28` anchor.
   (this entry's fold-in).
 
 [Testing Notes]
-Documenter-side: verified directly against the `058ea28` diff (`git show
-058ea28`), not transcribed from the review-verdict message unverified.
+Documenter-side: verified directly against the `ff7ceef` diff (`git show
+ff7ceef`), not transcribed from the review-verdict message unverified.
 
 ## [2026-07-18 18:38:09 UTC] [Client/Forking] pane: a fourth fork target that splits the caller's own surface, and a tab targeting fix
 
@@ -139,7 +139,7 @@ found") reaches the caller instead of being swallowed as a bare exit status.
 [Testing Notes]
 Documenter-side: every precedence, error-string, and dispatch claim above
 was cross-checked directly against internal/client/pane.go and the
-harness.go diff (commit d52a264) before being written, not transcribed
+harness.go diff (commit f246e3b) before being written, not transcribed
 unverified from the kickoff message. No coder/reviewer test-run report
 (`go test`/`-race`/live-fork verification) was relayed for this entry as of
 this writing.
