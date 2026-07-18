@@ -140,6 +140,11 @@ cbus formation rm myeffort                          # delete (starters: use git 
 - `apply` only launches MISSING peers, sequential + anchor-first; convergence
   is a round-trip (nonce in, nonce back), so an unanswering peer reports
   `failed` rather than counting as up.
+- A `pane`-target peer's split now chains off the largest pane made so far
+  (applier + this run's created panes) instead of always the applier -- a
+  self-balancing grid. A peer's `"split": "right"|"down"` (hand-edit the
+  envelope; `save` never writes it) forces that divider, and ANY declared
+  direction in the file turns off tmux's auto-reflow for the whole run.
 - Join the formation's channel and arm your Monitor **before** applying — a
   peer can answer before apply returns.
 - A saved peer's origin (`fresh`/`fork`) and model are stamped automatically
@@ -175,6 +180,8 @@ cbus bootstrap <channel> [parent] # canonical fork-child prompt
 cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-branch runs)
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
+cbus close <ch>/<alias> [...] [--force]  # end a peer's process (SIGTERM, then
+                                  # sweep its terminal surface; local only)
 cbus hook-exit                   # SessionEnd hook target (announces departure)
 cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus --version                   # installed client version

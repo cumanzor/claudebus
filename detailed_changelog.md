@@ -1,5 +1,249 @@
 # Changelog (detailed)
 
+## [2026-07-18 21:09:13 UTC] [Docs] Amendment: pane-split claims corrected for chain-split anchoring
+
+[Attempt #1]
+
+Two entries from earlier today described formation apply's pane target as
+always splitting off the applier's own surface. That was accurate when
+written -- `ForkSpec.Anchor` was always empty for apply, same as
+`branch`/`spawn` -- but chain-split anchoring (see the 20:23:27 UTC entry
+below) changed apply's behavior under that field without changing the field
+itself, so the claim is now wrong for apply specifically:
+
+- The 19:26:00 UTC "dev-trio starter targets: tab -> pane" entry's ripple-
+  effects line: "A fresh `cbus formation apply dev-trio` now splits all four
+  peers out of the APPLIER's own pane/session." Since chain-split anchoring
+  landed, only the FIRST peer's split is guaranteed to anchor on the applier.
+  Later peers anchor on the largest-area candidate among the applier and the
+  panes already created this run, so a 4-peer apply typically chains: peer 2
+  splits the applier, peer 3 may split peer 2's pane instead if it is now the
+  larger one, and so on. The applier stays large by the tie-break rule (ties
+  go to the newest teammate, not the applier), not because it is always the
+  anchor.
+- The 18:38:09 UTC "pane: a fourth fork target..." entry's headline and body
+  describe `branch`/`spawn`/`formation apply` together as all splitting "the
+  CALLER's own" surface. That phrasing still holds for `branch`/`spawn` --
+  their anchor is unconditionally empty (the caller), unchanged by this round
+  -- but is no longer accurate for `formation apply`, which now computes a
+  per-split anchor.
+
+No prior entry's text is rewritten -- both stand as an accurate record of
+what shipped that day. This note is the correction, not a silent edit.
+
+[Files Changed]
+- None -- documentation-only correction note.
+
+[Testing Notes]
+- N/A (changelog correction, not a code change).
+
+## [2026-07-18 21:06:17 UTC] [Fix] `cbus close` false-succeeded on every live Go-era peer -- ownerPid derivation matched the wrong process name
+
+[Attempt #1]
+
+`OwnerPID`'s ancestry walk matched a candidate ancestor's kernel `comm`
+against `claude`/`claude-*`. The Go client is a bun-compiled binary whose
+kernel accounting name (`ucomm`) is its version string, not `claude` -- so
+every Go-era peer registration recorded `ownerPid` as null, and `ClosePeer`'s
+`pid == 0` check read that as "no live process," reporting "already gone"
+without ever sending a signal. A live peer closed with `cbus close` looked
+torn down and was not.
+
+Fixed in two passes:
+1. `ownerFromPid` (the walk, factored out of `OwnerPID`) now matches argv[0]'s
+   basename first, `comm` kept as a fallback for any build where it still
+   reads `claude`. `ClosePeer` derives the owner from the armed listener's
+   ancestry when the stored `ownerPid` is null, rather than false-succeeding.
+2. That fallback was itself unsafe: it walked ANY live `listenerPid`'s
+   ancestry, so a recycled `listenerPid` now belonging to a process under a
+   DIFFERENT claude session would have donated that session to the SIGTERM --
+   closing a window nobody asked to close. Fixed by requiring the listener's
+   argv to carry THIS peer's inbox path first (the same identity test
+   `MetaListenerAlive` already uses), so a genuine armed follower always
+   passes and a stranger reads as nothing to close.
+
+Also folded in (reviewer rider n4): the surface sweep now runs under a 5s
+deadline (`context.WithTimeout`) instead of unbounded `exec.Command` calls --
+a wedged Apple Event was observed stalling ~45s in a detached shell; a
+nonzero `ps` on the tty stays the normal "still busy, leave alone" path, and
+only a sweep TIMEOUT is now treated as "left alone" rather than closing a
+surface the sweep could not prove dead.
+
+[Files Changed]
+- internal/client/marker.go: `ownerFromPid` (factored out of `OwnerPID`)
+  matches argv[0]'s basename via new `isClaudeName`, `comm` kept as fallback.
+- internal/client/close.go: null-`ownerPid` fallback to
+  `ownerFromPid(listenerPid)`, gated on `argvContains(listenerPid,
+  metaInboxNeedle(...))`; a zombie owner reads as already-gone, not
+  "recycled"; `SIGTERM` hitting `ESRCH` (died between the argv check and the
+  signal) is idempotent success; `sweepSurface` takes a `context.Context`
+  bound to a 5s `surfaceSweepBudget`.
+- internal/client/pane.go: `runOsascriptOut` now wraps a context-bound
+  `runOsascriptOutCtx`, used by the surface sweep.
+- internal/client/close_test.go (new): the owner-walk regression suite --
+  fake processes orphaned to PID 1 and `setsid`'d so the walk terminates at
+  init rather than climbing into the real test-runner session; a fake
+  reporting `comm "claude"` alone would pass through the old fallback and
+  prove nothing, so cases assert argv-only identity too.
+- internal/client/marker_test.go: `ownerFromPid`/`isClaudeName` coverage.
+
+[Possible Ripple Effects]
+- Every PRE-fix registration on disk (recorded before this lands) still has
+  `ownerPid: null`; the listener-ancestry fallback covers those going
+  forward, but a peer with BOTH a dead listener and a null ownerPid stays
+  unreachable by `close` until it re-registers (join/re-arm) -- the same
+  ceiling as before this round, not a new gap.
+- The 5s sweep deadline means a very slow AppleScript environment (heavy
+  Apple Event backlog) now leaves a surface open that an unbounded wait
+  would eventually have closed -- traded deliberately: closing a surface the
+  sweep could not prove dead risks closing the WRONG one.
+
+[Testing Notes]
+- Owner-walk regressions: comm-only match (old behavior, still passes as
+  fallback), argv[0]-only match (the actual defect case), ancestry walk
+  terminating at PID 1, null-ownerPid path deriving from a live listener, and
+  the needle guard refusing a listener whose argv does NOT carry this peer's
+  inbox path.
+- ESRCH-during-TERM and zombie-owner paths both assert `Ok: true`
+  ("already gone"), not a failure.
+
+## [2026-07-18 20:23:27 UTC] [Client/Forking] formation apply: pane splits chain off the largest-area candidate; envelope peers gain a `split` field
+
+[Attempt #1]
+
+`formation apply`'s pane target no longer always splits the applier's own
+surface. `TerminalForker.Fork` now returns the created surface's id (iTerm2
+session UUID / tmux pane id for `pane`, empty for `window`/`tab`/`tmux`), and
+`ForkSpec` gains `Anchor` (pane only: the surface to split; empty still means
+the caller, which `branch`/`spawn` keep using unconditionally). Apply tracks
+candidates -- its own surface plus every pane created so far this run -- and
+picks each new split's anchor via `PaneAnchor`: the largest-area candidate
+(one geometry query, `tmux list-panes` or an AppleScript triple-loop over
+iTerm2 sessions), ties going to the newest-created teammate over the applier.
+The result is a self-balancing grid instead of the applier being shaved down
+by every subsequent split; `PaneAnchor` degrades to `""` (split the applier)
+rather than failing the launch when geometry can't be read.
+
+Envelope peers gain an optional `split: auto|right|down` field (`right` =
+side-by-side, `down` = stacked, `auto`/absent keeps the existing 2.2-ratio
+heuristic on iTerm2 and today's 70/30-then-normalize behavior on tmux). It is
+hand-maintained like `rolefile`/`role`/`profile`: `formation save` never
+writes it. ANY peer in the file declaring an explicit direction suppresses
+tmux's main-vertical normalize AND the 70%-first-split sizing for the WHOLE
+run (`ForkSpec.NoNormalize`) -- a per-peer flag would let an `auto` sibling's
+reflow stomp the layout the file asked for.
+
+[Files Changed]
+- internal/client/formation.go: `FormationPeer.Split` field + `split`
+  round-trip in `fields()`; `validate()` gates it to `auto|right|down`.
+- internal/client/formation_apply.go: `launchPeer` threads `Anchor`/`Split`/
+  `NoNormalize` into each `ForkSpec` and returns the created surface id;
+  `fileDeclaresSplit` scans the envelope once per run for the normalize
+  suppression; the peer loop accumulates `created` and calls `PaneAnchor`
+  only for `pane`-target peers.
+- internal/client/pane.go: `PaneAnchor`/`pickLargest`/`parseGeometry`
+  (backend-aware: `$TMUX` first, else iTerm2), `paneGeometryScript` (iTerm2
+  geometry query), `osaForkPane`/`forkTmuxPane` now return the created id and
+  accept `spec.Anchor`/`spec.Split`, `tmuxSplitArgv` gains the `right`/`down`
+  `-h`/`-v` mapping.
+- internal/client/harness.go: `TerminalForker.Fork` signature change to
+  `(created string, err error)`; `ForkSpec.Anchor`/`Split`/`NoNormalize`.
+- internal/client/spawn.go: updated for the new `Fork` signature (behavior
+  unchanged -- spawn never sets `Anchor`).
+- cmd/cbus/usage.go: `formation apply` usage gains the split-field note.
+- Test-fake mechanical updates for the new `Fork` signature: cmd/cbus/
+  formation_test.go, internal/client/formation_apply_test.go, harness_test.go,
+  pane_test.go, cmd/cbus/pane_test.go.
+- internal/client/formation_apply_test.go, pane_test.go: chain-split anchor
+  table (`TestPickLargestPolicy`), the mixed-file suppress-normalize case
+  (`TestApplyNoNormalizeIsRunLevel`, `TestApplyNormalizeStaysOnForAnAllAutoFile`),
+  end-to-end apply through a fake tmux answering the geometry query
+  (`TestApplyChainsPaneAnchors`: %0 -> %1 -> %2).
+- internal/client/formation_save_test.go (new): split survives `save`
+  unmodified, asserted against the file bytes and a reload.
+
+[Possible Ripple Effects]
+- `dev-trio` and any other pane-target formation now chains splits without a
+  file change -- this is a behavior change under the existing `target: pane`
+  field, not something a saved envelope opts into. See the amendment entry
+  above for the two changelog claims this invalidates.
+- A geometry query failure (osascript/tmux error, or a candidate whose id
+  fails the shape check) degrades to `anchor=""` -- apply still splits the
+  applier rather than failing the peer's launch.
+- Saved runtime formations that predate this round have no `split` field;
+  they round-trip as `auto` (today's heuristic), not a hard-coded direction.
+
+[Testing Notes]
+- `pickLargest` pinned as a table: largest area wins, ties go to the newest
+  pane (`TestApplyAnchorsOnTheLargestPane` covers the applier-stays-anchor
+  case when it is genuinely largest).
+- End-to-end apply exercised against a fake tmux on PATH answering the
+  geometry query, confirming the %0 -> %1 -> %2 anchor chain without a real
+  multiplexer.
+- Mixed-file case: one peer declaring a direction suppresses the tmux reflow
+  for its `auto` siblings too (a per-peer flag would let a sibling stomp the
+  file's declared layout).
+- Split preservation asserted against `formation save`'s file bytes and a
+  reload, not the returned struct -- the failure mode is the value never
+  reaching disk, not the in-memory copy losing it.
+
+## [2026-07-18 20:17:15 UTC] [CLI] New `cbus close <channel>/<alias>... [--force]` teardown verb
+
+[Attempt #1]
+
+`cbus close` ends one or more LOCAL peer sessions on request: read
+`OwnerPid` from the peer's registration, `SIGTERM` it (graceful -- the
+SessionEnd hook broadcasts `left` and removes the registration itself), wait
+up to 5s, then sweep any terminal surface still standing once the tty reads
+dead (`ps -o tty=` captured BEFORE the signal, since a reaped pid has no tty
+left to read after; iTerm2 session closed by tty match, or `tmux kill-pane`
+via `tmux list-panes -a`). `--force` escalates to `SIGKILL` after the grace.
+An already-gone target (no live process) reports success, not an error, so a
+scripted sweep can close the same roster twice. Targets resolve the way
+`send`'s do -- a bare alias searches this session's own channels.
+
+Refusals: this session itself (closing yourself is not how you exit --
+refused before any signal), a remote `@host` target (refused at the CLI
+layer, before `ClosePeer` runs -- `ClosePeer` takes a local `(channel,
+alias)` and cannot express a host, so an accepted remote form would tear
+down a same-named LOCAL peer instead), and a pid whose argv no longer looks
+like a claude session (pid recycling -- signaling a stranger is worse than
+failing the close). Registrations are never touched by close itself; the
+SessionEnd hook owns the graceful path and lazy-prune owns the rest.
+
+Every target produces exactly one stdout line in the order given, refusals
+included; the exit code is 1 if any target failed.
+
+[Files Changed]
+- internal/client/close.go (new): `ClosePeer`, `sweepSurface`,
+  `closeSurfaceScript`, `ttyOf`, `waitGone`.
+- cmd/cbus/main.go: `close` verb dispatch, `runClose` (parses its own argv --
+  the shared `splitVerbArgs` scanner stops at the first positional, which
+  would swallow a trailing `--force` as a target here since targets are
+  variadic), `closeOne` (target resolution + remote refusal).
+- cmd/cbus/usage.go: `cbus close` usage block.
+- cmd/cbus/close_test.go (new): CLI-layer argv parsing, target resolution,
+  remote refusal, aggregate exit code.
+
+[Possible Ripple Effects]
+- `close` is local-only by design -- closing a remote peer requires running
+  `cbus close` on its own host. No cross-machine teardown exists yet.
+- A peer closed via `--force` skips the graceful SessionEnd broadcast (the
+  process never gets to run it), so its registration is left for prune's
+  10-minute grace rather than removed immediately.
+- No dedicated `/bus-close` skill was added: `leave`/`unregister`/`prune`/
+  `hook-exit` have no dedicated skill either, and `close` is the same shape
+  (CLI verb, orchestrator-driven). Documented in CHEATSHEET.md's "Under the
+  hood" list instead.
+
+[Testing Notes]
+- CLI-layer: argv parsing (`--force` in leading/trailing position, unknown
+  flag rejection), target resolution (bare alias vs full address), remote
+  refusal, aggregate exit code across mixed success/failure targets.
+- Client-layer coverage for `ClosePeer` itself (the owner-walk paths) landed
+  with the fix below (internal/client/close_test.go), not in this commit --
+  see the 21:06:17 UTC entry.
+
 ## [2026-07-18 19:17:24 UTC] [Client/Forking] pane/tab fork fixes: tmux<3.1 retry, tmux stderr surfaced, launcher tmpfile reaped on dispatch failure
 
 [2026-07-18 19:26:00 UTC] [Formations] dev-trio starter targets: tab -> pane
