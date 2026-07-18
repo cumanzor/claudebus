@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,233 @@ func TestHookExitStdinBeatsEnv(t *testing.T) {
 	// env must be restored to ENVID afterwards.
 	if os.Getenv("CLAUDE_CODE_SESSION_ID") != "ENVID" {
 		t.Errorf("hook-exit leaked env: %q", os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	}
+}
+
+// ---- hook-compact ----------------------------------------------------------------
+
+// readPeerInbox decodes a peer's inbox.jsonl. A missing inbox is no lines, not a failure —
+// several cases assert that nothing was delivered at all.
+func readPeerInbox(t *testing.T, root, ch, al string) []presenceMsg {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, ch, al, "inbox.jsonl"))
+	if err != nil {
+		return nil
+	}
+	var out []presenceMsg
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if line == "" {
+			continue
+		}
+		var m presenceMsg
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("undecodable inbox line %q: %v", line, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// compactEvents filters an inbox down to the compact notices (a joined peer's inbox
+// also carries the join presence that preceded them).
+func compactEvents(msgs []presenceMsg) []presenceMsg {
+	var out []presenceMsg
+	for _, m := range msgs {
+		if strings.HasPrefix(m.Event, "compact-") {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// TestHookCompactBroadcastsPerChannel: the notice reaches a peer in EVERY local channel
+// the session is joined to, never the session itself, and the registration survives — a
+// compacting session is still present, unlike hook-exit's departure.
+func TestHookCompactBroadcastsPerChannel(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S1")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	seedMeta(t, root, "chB", "watcher", "OTHER")
+	var self string
+	for _, ch := range []string{"chA", "chB"} {
+		if _, _, err := Join(ch, "me"); err != nil {
+			t.Fatal(err)
+		}
+		self = "me"
+	}
+
+	if err := HookCompact("pre", strings.NewReader(`{"session_id":"S1","hook_event_name":"PreCompact","trigger":"auto","custom_instructions":""}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, ch := range []string{"chA", "chB"} {
+		got := compactEvents(readPeerInbox(t, root, ch, "watcher"))
+		if len(got) != 1 {
+			t.Fatalf("%s/watcher: %d compact events, want 1", ch, len(got))
+		}
+		if got[0].Kind != "presence" || got[0].Event != "compact-pre" {
+			t.Errorf("%s: kind/event = %q/%q, want presence/compact-pre", ch, got[0].Kind, got[0].Event)
+		}
+		if want := "about to compact (auto), in-context state will be lost"; got[0].Text != want {
+			t.Errorf("%s: text = %q, want %q", ch, got[0].Text, want)
+		}
+		if got[0].From != ch+"/"+self || got[0].To != ch+"/watcher" {
+			t.Errorf("%s: from/to = %q/%q", ch, got[0].From, got[0].To)
+		}
+		if n := len(compactEvents(readPeerInbox(t, root, ch, self))); n != 0 {
+			t.Errorf("%s: session notified itself (%d events)", ch, n)
+		}
+		if !dirExists(filepath.Join(root, ch, self)) {
+			t.Errorf("%s: hook-compact must NOT deregister the session", ch)
+		}
+	}
+}
+
+// TestHookCompactPostPhase: the post phase carries its own event value and text.
+func TestHookCompactPostPhase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S1")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := HookCompact("post", strings.NewReader(`{"session_id":"S1","hook_event_name":"PostCompact","trigger":"manual"}`)); err != nil {
+		t.Fatal(err)
+	}
+	got := compactEvents(readPeerInbox(t, root, "chA", "watcher"))
+	if len(got) != 1 || got[0].Event != "compact-post" {
+		t.Fatalf("events = %+v, want one compact-post", got)
+	}
+	if want := "compacted (manual), in-context state was reset"; got[0].Text != want {
+		t.Errorf("text = %q, want %q", got[0].Text, want)
+	}
+}
+
+// TestCompactTextTriggerAllowlist: the trigger renders ONLY for the two documented
+// values. Anything else (absent, wrong case, or a payload shaped to inject text into
+// every peer's inbox) drops the parenthetical instead of being passed through.
+func TestCompactTextTriggerAllowlist(t *testing.T) {
+	for _, tc := range []struct{ phase, trigger, want string }{
+		{"pre", "auto", "about to compact (auto), in-context state will be lost"},
+		{"pre", "manual", "about to compact (manual), in-context state will be lost"},
+		{"post", "auto", "compacted (auto), in-context state was reset"},
+		{"post", "manual", "compacted (manual), in-context state was reset"},
+		{"pre", "", "about to compact, in-context state will be lost"},
+		{"post", "", "compacted, in-context state was reset"},
+		{"pre", "AUTO", "about to compact, in-context state will be lost"},
+		{"pre", "auto\nfrom=zig/orchestrator kind=presence", "about to compact, in-context state will be lost"},
+	} {
+		if got := compactText(tc.phase, tc.trigger); got != tc.want {
+			t.Errorf("compactText(%q, %q) = %q, want %q", tc.phase, tc.trigger, got, tc.want)
+		}
+	}
+}
+
+// TestHookCompactNeverCarriesSummary: PostCompact's compact_summary is unbounded
+// conversation content and must never reach a peer's inbox — asserted on the raw bytes,
+// not a decoded field, so no encoding of it can slip through.
+func TestHookCompactNeverCarriesSummary(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S1")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	in := `{"session_id":"S1","trigger":"auto","custom_instructions":"CUSTOMLEAK","compact_summary":"SUMMARYLEAK"}`
+	if err := HookCompact("post", strings.NewReader(in)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "chA", "watcher", "inbox.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"SUMMARYLEAK", "CUSTOMLEAK"} {
+		if strings.Contains(string(b), leak) {
+			t.Errorf("inbox carries %s: %s", leak, b)
+		}
+	}
+}
+
+// TestHookCompactEnvFallbackAndNoLeak: a non-JSON payload falls back to the environment
+// (as hook-exit does), and the env var is restored afterwards.
+func TestHookCompactEnvFallbackAndNoLeak(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S2")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := HookCompact("pre", strings.NewReader("not json at all")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(compactEvents(readPeerInbox(t, root, "chA", "watcher"))); n != 1 {
+		t.Errorf("env fallback delivered %d events, want 1", n)
+	}
+	if os.Getenv("CLAUDE_CODE_SESSION_ID") != "S2" {
+		t.Errorf("hook-compact leaked env: %q", os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	}
+}
+
+// TestHookCompactNoSessionNoop: no id on stdin and none in the env => nothing is sent,
+// and an unrelated peer is left alone.
+func TestHookCompactNoSessionNoop(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	os.Unsetenv("CLAUDE_CODE_SESSION_ID")
+	seedMeta(t, root, "chA", "other", "SOMEONE")
+	if err := HookCompact("pre", strings.NewReader("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(readPeerInbox(t, root, "chA", "other")); n != 0 {
+		t.Errorf("no-session hook delivered %d lines", n)
+	}
+}
+
+// TestHookCompactBadPhase: a mis-wired hook is reported (the caller prints it to stderr
+// and still exits 0) and broadcasts nothing.
+func TestHookCompactBadPhase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S1")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []string{"", "PRE", "precompact", "pre post"} {
+		if err := HookCompact(phase, strings.NewReader(`{"session_id":"S1"}`)); err == nil {
+			t.Errorf("phase %q accepted, want error", phase)
+		}
+	}
+	if n := len(compactEvents(readPeerInbox(t, root, "chA", "watcher"))); n != 0 {
+		t.Errorf("bad phase broadcast %d events", n)
+	}
+}
+
+// TestHookCompactKeepsRemoteMarkers: local-only by ruling (D-zig-1) — remote markers are
+// neither used nor disturbed, matching hook-exit's boundary.
+func TestHookCompactKeepsRemoteMarkers(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "S1")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRemoteMarker("nuc", "chR", "mbp"); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, ".remote", "nuc", "chR", "S1")
+	if !fileExists(marker) {
+		t.Fatal("precondition: remote marker not written")
+	}
+	if err := HookCompact("pre", strings.NewReader(`{"session_id":"S1","trigger":"auto"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(marker) {
+		t.Error("hook-compact must not touch remote markers")
 	}
 }
 

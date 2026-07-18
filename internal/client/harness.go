@@ -38,15 +38,83 @@ func HookExit(stdin io.Reader) {
 	}
 }
 
+// HookCompact runs the PreCompact/PostCompact hooks: it tells every LOCAL channel this
+// session is joined to that the session is about to lose (phase "pre") or has just lost
+// (phase "post") its in-context state, so an orchestrating peer can force a checkpoint
+// before the context goes. The registration itself is untouched — a compacting session
+// is still here, unlike hook-exit's departure.
+//
+// LOCAL ONLY (D-zig-1): the frozen POST /send contract carries no kind field and the
+// relay rebuilds stored lines, so a relayed notice would land as plain chat rather than
+// presence; the honest remote fix is a wire change plus a relay redeploy. Best-effort
+// and SILENT, and the caller always exits 0 — a PreCompact hook exiting 2 BLOCKS
+// compaction (hooks reference, PreCompact). Returns an error only for a bad phase, so a
+// mis-wired hook is diagnosable in the debug log without failing the session.
+func HookCompact(phase string, stdin io.Reader) error {
+	if phase != "pre" && phase != "post" {
+		return fmt.Errorf("phase must be pre|post, got %q", phase)
+	}
+	in := readHookInput(stdin)
+	sid := in.SessionID
+	if sid == "" {
+		sid = os.Getenv("CLAUDE_CODE_SESSION_ID")
+	}
+	if sid == "" {
+		return nil
+	}
+	// ResolveSelf reads the id via SessionID(); the hook env may not export it.
+	prev, had := os.LookupEnv("CLAUDE_CODE_SESSION_ID")
+	_ = os.Setenv("CLAUDE_CODE_SESSION_ID", sid)
+	regs := ResolveSelf()
+	if had {
+		_ = os.Setenv("CLAUDE_CODE_SESSION_ID", prev)
+	} else {
+		_ = os.Unsetenv("CLAUDE_CODE_SESSION_ID")
+	}
+	text := compactText(phase, in.Trigger)
+	for _, reg := range regs {
+		BroadcastPresence(reg.Channel, reg.Alias, "compact-"+phase, text, reg.Alias)
+	}
+	return nil
+}
+
+// compactText renders the peer-visible line. A follower renders kind but never the
+// event value, so the text carries the whole meaning on its own. The trigger is an
+// ALLOWLIST of the two documented values, not a passthrough: an arbitrary payload must
+// not be able to write text into every peer's inbox, and an absent trigger drops the
+// parenthetical rather than claiming a cause we were not given. PostCompact's
+// compact_summary is deliberately never carried — it is unbounded conversation content.
+func compactText(phase, trigger string) string {
+	head, tail := "about to compact", ", in-context state will be lost"
+	if phase == "post" {
+		head, tail = "compacted", ", in-context state was reset"
+	}
+	if trigger == "manual" || trigger == "auto" {
+		head += " (" + trigger + ")"
+	}
+	return head + tail
+}
+
+// hookInput is the subset of a hook's stdin JSON the harness reads. Payloads differ per
+// event (trigger is PreCompact/PostCompact only), every field is optional, and a
+// non-JSON payload yields the zero value — a hook must never fail on its input.
+type hookInput struct {
+	SessionID string `json:"session_id"`
+	Trigger   string `json:"trigger"` // PreCompact/PostCompact: manual|auto
+}
+
+func readHookInput(stdin io.Reader) hookInput {
+	b, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
+	var in hookInput
+	_ = json.Unmarshal(b, &in)
+	return in
+}
+
 // hookSessionID reads {"session_id":...} off the hook's stdin (tolerant of any
 // non-JSON / missing-field payload), falling back to the environment.
 func hookSessionID(stdin io.Reader) string {
-	b, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	var m struct {
-		SessionID string `json:"session_id"`
-	}
-	if json.Unmarshal(b, &m) == nil && m.SessionID != "" {
-		return m.SessionID
+	if sid := readHookInput(stdin).SessionID; sid != "" {
+		return sid
 	}
 	return os.Getenv("CLAUDE_CODE_SESSION_ID")
 }
