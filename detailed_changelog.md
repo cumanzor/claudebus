@@ -1,5 +1,37 @@
 # Changelog (detailed)
 
+## [2026-07-18 21:26:45 UTC] [Fix] `procZombie` was darwin-only -- broke the linux leg of `make dist`
+
+[Attempt #1]
+
+`close.go`'s `waitGone` calls `procZombie` to tell a zombie owner apart from a
+genuinely-alive one. It was implemented against darwin's process APIs only;
+every gate through this round's landing (unit tests, live door runs, the
+reviewer's own checks) ran on darwin, so `GOOS=linux` was never actually
+compiled until `make dist` cross-built the release. That build broke.
+
+Fixed with a linux-specific implementation reading `/proc/<pid>/stat`'s
+process-state field directly: `Z` is a zombie, any read/parse failure is
+treated as not-zombie (the pid either doesn't exist or isn't inspectable,
+neither of which is "confirmed zombie").
+
+[Files Changed]
+- internal/client/procinfo_linux.go (new): `procZombie` for linux via
+  `/proc/<pid>/stat` state-field parsing.
+
+[Possible Ripple Effects]
+- None outside the linux build target -- darwin's `procZombie` is untouched.
+- `make dist`'s cross-compile remains the only gate that actually exercises
+  linux-specific code in this repo; a darwin-only dev/review loop won't catch
+  the next one either.
+
+[Testing Notes]
+- Documenter-side: verified against the `40eaec2` diff directly (the new
+  file, the state-field parse, the Z/unreadable handling) -- did not run
+  `make dist` myself; the coder's own cross-build is the primary evidence
+  per the commit message ("every gate ran on darwin so make dist was the
+  first linux compile").
+
 ## [2026-07-18 21:09:13 UTC] [Docs] Amendment: pane-split claims corrected for chain-split anchoring
 
 [Attempt #1]
@@ -5034,5 +5066,3 @@ files under `~/.claude-bus` (`CBUS_DIR`).
   `active` filter, bare-alias vs full-address send, `--force` queueing, `prune`
   grace window + legacy-entry cleanup, dead-listener sweep on next join, and
   `leave`. Round-trip send delivered as a Monitor event end-to-end.
-
-## 
