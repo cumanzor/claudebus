@@ -2,6 +2,22 @@
 
 ## [2026-07-18 19:17:24 UTC] [Client/Forking] pane/tab fork fixes: tmux<3.1 retry, tmux stderr surfaced, launcher tmpfile reaped on dispatch failure
 
+[2026-07-18 19:26:00 UTC] [Formations] dev-trio starter targets: tab -> pane
+
+[Attempt #1]
+
+[Files Changed]
+- formations/dev-trio.json: all four peers (orchestrator, coder, reviewer, documenter) change "target": "tab" to "target": "pane". No other fields touched; template mode/rolefile/channel unchanged.
+
+[Possible Ripple Effects]
+- A fresh `cbus formation apply dev-trio` now splits all four peers out of the APPLIER's own pane/session (tmux: split-window grid normalized to main-vertical past two panes; iTerm2: osascript splits of the applier's session). Five panes total counting the applier -- on a small window tmux may refuse late splits with "no space", which surfaces per-peer and skips that peer, not the run.
+- Hosts with neither $TMUX nor $ITERM_SESSION_ID (plain SSH to the NUC, Terminal.app) now hard-error per pane's contract where the old template opened tabs. Deliberate, Carlos-ruled: refusing beats splitting a frontmost surface; workaround is running under tmux or copying the envelope with per-peer targets.
+- Saved runtime formations are unaffected -- this is the committed starter template only; existing envelopes keep whatever targets they recorded.
+
+[Testing Notes]
+- Template validates post-flip: formation oneOf accepts pane since f246e3b (unit: formation_test.go); a pane-target template already exercised live through apply --dry-run during the f246e3b review.
+- Real apply smoke deferred to first live dev-trio launch on the new binary; the pane fork path itself carries the f246e3b..fef5cba review ledger (live tmux + iTerm2 door runs).
+
 [Attempt #1]
 
 Three fixes folded in immediately after `f246e3b` landed, all in `ff7ceef`,
