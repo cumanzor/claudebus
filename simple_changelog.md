@@ -157,3 +157,4 @@ Honest limits stated at wrap, v1-wide, in the coder's own words: fork mode is pe
 [2026-07-07 00:20:44 UTC] [Liveness] Hardened listener liveness — trust a live pid only if its args reference the inbox (kills pid-recycling false-positives); record owning `claude` pid so a crash-orphaned tail reads `off`.
 [2026-07-07 00:20:44 UTC] [CLI] Added `cbus active [channel]` / `cbus list --active` to list only currently-listening peers; `cbus channels` summarizes channels.
 [2026-07-07 00:20:44 UTC] [Commands] `/bus-branch` forks before arming the parent's Monitor (no stale "no completion record" task in the child); `/bus-listen` + `/bus-branch` default the channel to the repo name.
+[2026-07-18 20:23:43 UTC] [Docs] Multi-harness exploration — docs/architecture/multi-harness-exploration.md maps Codex CLI, Grok Build, and OpenCode as cbus peers: coupling audit, per-harness receive paths, comparison, ordered increments.
