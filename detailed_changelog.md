@@ -1,5 +1,42 @@
 # Changelog (detailed)
 
+## [2026-07-18 03:03:18 UTC] [Distribution] Legacy installers retired
+
+[Attempt #1]
+
+Carlos-directed removal of `install.sh` and `install-cbus-go.sh`, the
+decision the distribution effort's D24 ruling explicitly deferred ("their
+retirement is a separate call"). The call came after v0.1.0 shipped and
+the release path was live-verified end to end on both machines — the two
+scripts' jobs no longer exist: first installs are `get.sh`, updates are
+`cbus selfupdate`, and the transitional side-by-side era is over.
+
+[Files Changed]
+- `install.sh`, `install-cbus-go.sh` — deleted (git history and the
+  pre-scrub bundle retain them).
+- `README.md` — the legacy-installers note now records the retirement and
+  the remaining rollback reality: `bin/cbus` (the retired bash client)
+  stays until P3, and rolling back to it is a manual copy over
+  `~/.local/bin/cbus`.
+- `get.sh` — header note updated (no longer claims the two are untouched).
+- `docs/RELEASE-CHECKLIST.md` — "Not part of this" section updated to the
+  retirement.
+
+[Possible Ripple Effects]
+- The NUC never-run-install.sh footgun (bash rollback) is now structurally
+  impossible — the script is gone from the tree.
+- `docs/architecture/` still references both installers as present
+  (overview, command-reference §12, port-map, compat-deletion-plan,
+  cutover-decision-package); those pages were already flagged stale and
+  the references ride the cbus-yle docs-refresh.
+- P3 homogenization (cbus-8k9.4) loses one of its deletion items — the
+  bash artifacts remaining in scope are `bin/cbus` and `bin/cc-branch.sh`.
+
+[Testing Notes]
+- `git grep` over the live tree confirms the only remaining references are
+  historical (changelogs) and the architecture tier noted above.
+- Suite untouched by the change (script deletions + doc edits only).
+
 ## [2026-07-18 01:40:33 UTC] [Distribution] Bootstrap installer, release checklist, and install docs (M5) — distribution complete
 
 [Attempt #1]
