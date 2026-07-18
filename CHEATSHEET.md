@@ -175,7 +175,7 @@ cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-b
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
 cbus hook-exit                   # SessionEnd hook target (announces departure)
-cbus hook-compact <pre|post>      # PreCompact/PostCompact hook target (announces compaction)
+cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ```

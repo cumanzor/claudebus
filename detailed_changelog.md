@@ -30,8 +30,8 @@ hook exiting 2 blocks compaction. Trailing args past `phase` are ignored
 rather than fatal; the first-draft rationale for that (dodging rc-2 blocking)
 was wrong and caught in review — a strict no-extra-args `die` would exit 1,
 which doesn't block compaction either. The honest reason: a hook must never
-fail, and the failure would show up as stderr noise that PostCompact surfaces
-to the user in the transcript.
+fail, and either hook exiting nonzero surfaces a hook-error notice plus the
+first stderr line to the user — not a PostCompact-only behavior.
 
 **PostCompact vs SessionStart(source=compact).** Both are documented,
 independent post-compaction signals in the Claude Code hooks reference.
@@ -44,11 +44,13 @@ doesn't exist.
 **Local only (D-zig-1).** The frozen `POST /send` relay contract carries no
 `kind` field and the relay rebuilds stored lines from `{from,text,to,ts}`, so a
 relayed notice would arrive as plain chat rather than presence. The honest fix
-is a wire change plus a relay redeploy — deferred, not faked, and there's no
-network call available inside the compaction window regardless.
+is a wire change plus a relay redeploy — deferred, not faked.
 
-**Reviewer verdict:** APPROVED — single commit `19dd20b`, one review finding
-(C1) scoped to tests only, no impact on documented behavior.
+**Reviewer verdict:** APPROVED — two code commits, `19dd20b` (the verb) and
+`4dd092d` (a follow-up: the users-door test checked rc and stdout but not
+stderr, so it would have passed with chatter on the hook's stderr; added
+assertions that both success paths stay silent on both fds), one review
+finding (C1) scoped to tests only, no impact on documented behavior.
 
 [Files Changed]
 - `cmd/cbus/main.go` — dispatch case + `runHookCompact` (19dd20b)
@@ -57,11 +59,12 @@ network call available inside the compaction window regardless.
 - `internal/client/harness.go` — `HookCompact`, `compactText`, shared
   `hookInput`/`readHookInput` (refactored out of the pre-existing
   `hookSessionID`) (19dd20b)
-- `cmd/cbus/hook_compact_test.go` (new) / `internal/client/harness_test.go` —
-  per-channel broadcast, both phases, trigger allowlist, env fallback,
-  no-session no-op, bad phase, remote markers untouched, plus a users-door
-  test that builds the real binary and drives it with the documented hook
-  payloads (19dd20b)
+- `cmd/cbus/hook_compact_test.go` (new, 19dd20b; stderr-silence assertions
+  added, 4dd092d) / `internal/client/harness_test.go` (19dd20b) — per-channel
+  broadcast, both phases, trigger allowlist, env fallback, no-session no-op,
+  bad phase, remote markers untouched, stderr silence on both success paths,
+  plus a users-door test that builds the real binary and drives it with the
+  documented hook payloads
 - `docs/architecture/protocol.md` — `compact-pre`/`compact-post` added to the
   presence event enum + event table; new "Compaction presence (D-zig-1,
   local-only)" bullet

@@ -860,8 +860,8 @@ Behavior, exactly:
    **Trailing args past `phase` are ignored, not fatal.** The honest reason is
    NOT "avoid rc 2 blocking compaction" — a strict no-extra-args `die` here
    would exit 1, which does not block compaction either. It's that **a hook
-   must never fail**, and the failure would show up as stderr noise that
-   **PostCompact surfaces to the user** in the transcript.
+   must never fail**: either hook exiting nonzero surfaces a hook-error notice
+   plus the first stderr line to the user, not a PostCompact-only behavior.
 2. Reads `session_id` from **stdin JSON** first (hook env may not export
    `CLAUDE_CODE_SESSION_ID`), env fallback second, silent no-op third.
 3. Broadcasts one `kind=presence` event, `event=compact-<phase>`, to every
@@ -885,8 +885,7 @@ JSON output).
 **Local only (D-zig-1)**: the frozen `POST /send` relay contract carries no
 `kind` field and the relay rebuilds stored lines from `{from,text,to,ts}`, so a
 relayed notice would arrive as plain chat, not presence. The honest fix is a
-wire change plus a relay redeploy — deferred, not faked; there's also no
-network call available inside the compaction window regardless.
+wire change plus a relay redeploy — deferred, not faked.
 
 **PostCompact vs `SessionStart(source=compact)`**: both are documented,
 independent post-compaction signals (hooks reference). `hook-compact post` is
@@ -1617,7 +1616,8 @@ client; they remain for the homogenization/port record.
 11. `channels`/`whoami`/`hook-exit` silently drop extra args; `hook-compact`
     too, past its `phase` positional — not to dodge rc-2 blocking (a `die`
     here would be rc 1, which doesn't block anything) but because a hook must
-    never fail and PostCompact shows stderr to the user.
+    never fail: either hook exiting nonzero surfaces a hook-error notice plus
+    the first stderr line to the user, not PostCompact-only.
 
 **Delivery & liveness**
 12. Re-arm never replays: messages queued between listener death and re-arm

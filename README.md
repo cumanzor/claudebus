@@ -464,7 +464,7 @@ cbus formation rm <name>         delete a saved formation (runtime only —
 cbus prune [channel]             remove dead peers (and empty channels); a bare
                                  `cbus prune` also sweeps dead remote identity markers
 cbus hook-exit                   SessionEnd hook target: announce departure (always exit 0)
-cbus hook-compact <pre|post>      PreCompact/PostCompact hook target: announce compaction
+cbus hook-compact <pre|post>     PreCompact/PostCompact hook target: announce compaction
                                  (always exit 0; wiring manual, see docs/architecture/command-reference.md)
 cbus --version                   print the installed client version
 
