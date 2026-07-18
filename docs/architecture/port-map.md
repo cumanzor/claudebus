@@ -24,9 +24,10 @@
 > 1. **The relay stays.** `relay/cmd/cbus-relay` (Go, std-lib-only, tested) is already the
 >    real-language side. The port target is `bin/cbus` (914 lines of bash) plus its satellites:
 >    `bin/cc-branch.sh`, `install.sh`, and the three `commands/*.md` skills.
-> 2. **A mixed-version fleet is guaranteed during transition.** `install.sh` is a copy-install;
->    the NUC runs its own hand-updated copy, and a third node (logos/WSL, tracked as `cbus-dc5`)
->    is planned. The port will coexist with the bash client across machines (over the relay wire)
+> 2. **A mixed-version fleet is guaranteed during transition.** `install.sh` was a copy-install
+>    (retired `de07cbe`; the NUC now updates via `cbus selfupdate`), and a third node (logos/WSL,
+>    tracked as `cbus-dc5`) is planned. The port will coexist with the bash client across machines
+>    (over the relay wire)
 >    and with *already-armed* bash-era followers on the same machine (shared `$CBUS_DIR` and
 >    process table).
 
@@ -262,14 +263,17 @@ Behaviors that exist **only** because the implementation is bash. Each with its 
 11. **`"$*"` message assembly + flags-before-text ordering** (bin/cbus:444-451). → a real flag
     parser with `--` support (documented observable change).
 12. ~~cc-branch.sh's self-deleting mktemp launcher~~ — **CORRECTED, NOT deletable** (was
-    mischaracterized here as a bash-only workaround). The true rationale: iTerm2's AppleScript
-    `do script` command parameter does not parse POSIX-style quoting, so a temp launcher script
-    avoids embedding a quoted, multi-arg command directly in the AppleScript string — this is an
-    AppleScript/iTerm2 constraint, not a bash one. Live-proven during the Go port: P2.5's `OSAForker`
-    built argv natively (no shim) and broke on the same tokenizer; the ruled fix resurrects the
-    launcher-shim pattern with this rationale documented. → the ported iTerm2 `TerminalForker`
-    backend keeps an equivalent temp-launcher-file mechanism; only the implementation (mktemp +
-    self-delete vs. some other temp-file scheme) is free to change, not the underlying need.
+    mischaracterized here as a bash-only workaround). The true rationale: the `command` parameter
+    of iTerm2's `create window` / `create tab` AppleScript is **tokenized by iTerm2 itself** and
+    does not honor POSIX quoting, so a quoted, multi-arg one-liner is mis-tokenized and launches
+    nothing; the temp launcher exists so iTerm2 only ever sees the bare, whitespace-tokenized
+    command `/bin/bash <tmpfile>` — an AppleScript/iTerm2 constraint, not a bash one (harness.go
+    `osaForkITerm`; overview.md *Terminal coupling*). Live-proven during the Go port: P2.5's
+    `OSAForker` built argv natively (no shim) and broke on the same tokenizer; the ruled fix
+    resurrects the launcher-shim pattern with this rationale documented. → the ported iTerm2
+    `TerminalForker` backend keeps an equivalent temp-launcher-file mechanism; only the
+    implementation (mktemp + self-delete vs. some other temp-file scheme) is free to change, not
+    the underlying need.
 13. **`'+1'`/`'0'` vestigial `tail -n` tokens** (bin/cbus:514, 553). → explicit replay enum.
 14. **stdout re-encoding with `errors="replace"`** (bin/cbus:517-520) — python-under-bash
     locale defensiveness. → controlled output encoding; keep the never-die-on-mojibake policy.
@@ -340,12 +344,13 @@ spooling).
 
 ### NUC propagation
 
-Until the Phase 2 version stamp lands, every phase that touches `bin/cbus` or `commands/`
-ends with a manual `install.sh` re-run on the NUC (copy-install; per the standing memory note,
-skipping it means NUC-local prune/presence diverges). The port's installer should: embed a
-version stamp (`-ldflags`), be mode-agnostic (`rm`+`cp` or `install(1)` — the current
-copy/link mode-switch is a hazard), verify/offer the SessionEnd hook wiring, and consider a
-relay protocol-version warning. `relay/deploy.sh` is a separate path and is unaffected.
+The Phase 2 version stamp has since landed (`cbus --version`), so this note is largely
+historical. A NUC client update is now `cbus selfupdate` (which also refreshes `commands/` and
+`roles/`), not a manual `install.sh` re-run — the legacy copy-installer was retired (`de07cbe`),
+its copy/link mode-switch hazard with it. The installer-design goals this note set — embedded
+version stamp (`-ldflags`), mode-agnostic placement, SessionEnd hook wiring — are met by the
+release flow (`get.sh` + `selfupdate` + the sha-guarded `install-commands` / `install-roles`).
+`relay/deploy.sh` remains a separate path and is unaffected.
 
 ---
 
