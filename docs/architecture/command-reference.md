@@ -174,12 +174,13 @@ No other command reads stdin.
 | anything else | `cbus: unknown command '<X>' (cbus --help)`, exit 1 | |
 
 > **Go-native verbs (post-cutover).** `spawn`, the `formation …` family,
-> `selfupdate`, `install-commands`, `install-roles`, and `--version`/`version`
-> are not in the bash dispatch above. They route through `cmd/cbus/main.go`'s
-> switch to `runSpawn` / `runFormation` / `runSelfupdate` / `runInstallCommands` /
-> `runInstallRoles` (§9–§11). A **hidden** `__update-check` subcommand backs the
-> opt-in update hint (§11); there is **no** public `update-check` verb — typing
-> one hits the `unknown command` default.
+> `close`, `selfupdate`, `install-commands`, `install-roles`, and
+> `--version`/`version` are not in the bash dispatch above. They route through
+> `cmd/cbus/main.go`'s switch to `runSpawn` / `runFormation` / `runClose` /
+> `runSelfupdate` / `runInstallCommands` / `runInstallRoles` (§7, §9–§11). A
+> **hidden** `__update-check` subcommand backs the opt-in update hint (§11);
+> there is **no** public `update-check` verb — typing one hits the
+> `unknown command` default.
 
 <a name="sessionless-degradation"></a>
 ### Sessionless degradation
@@ -769,6 +770,56 @@ rmdir empty channel. Output: `unregistered <ch>/<al>`. Bare alias →
 A still-running tail on that inbox keeps polling the deleted path forever and
 becomes invisible to `list`.
 
+### `cbus close <channel>/<alias> [...] [--force]`
+
+Ends one or more **local** peer sessions on request — the only command that
+signals a peer's OS process rather than just touching its registration.
+Handler `runClose` (main.go); mechanics `client.ClosePeer` (close.go).
+Go-native (§1), variadic: every target produces exactly one stdout line in
+the order given, and the exit code is **1 if any target failed** —
+`already gone` counts as success, so a scripted sweep can close the same
+roster twice.
+
+- **Target resolution** matches `send`'s: `<channel>/<alias>`, or a bare
+  alias searched across this session's own channels
+  (`no peer "<al>" in your channels — use <channel>/<alias> (cbus list)`).
+- **A remote (`@host`) target is refused at the CLI layer**, before anything
+  is signalled: `close is local-only — a remote peer must be closed on its
+  own host`. `ClosePeer` takes a local `(channel, alias)` and cannot express
+  a host, so an accepted remote form would silently tear down a same-named
+  **local** peer instead.
+- **Self-refusal:** closing this session's own registration is refused —
+  `that peer is THIS session — refusing (exit it normally)`.
+- **Mechanics, per target:** read `OwnerPid` from the peer's `meta.json`
+  (falling back to deriving it from the armed listener's ancestry when
+  `OwnerPid` is null — pre-fix registrations, see the quirk below — gated on
+  the listener's own inbox path appearing in its argv, so a recycled
+  listener pid belonging to a *different* session can't donate that session
+  to the signal); capture the owning process's tty **before** signalling (a
+  reaped pid has no tty left to read after); `SIGTERM`; wait up to 5s. On
+  timeout, `--force` escalates to `SIGKILL` (2s further wait) — without
+  `--force` a TERM-survivor is reported, not escalated (closing its surface
+  would be a disguised kill). A pid whose argv no longer contains `claude`
+  is refused as a probable pid recycle rather than signalled.
+- **Surface sweep** (best-effort, after the process is confirmed gone): if
+  the captured tty is still busy (a live `ps -t <tty>`), the surface is left
+  alone (stranger or TERM-survivor); otherwise a matching tmux pane is
+  `kill-pane`d, or a matching iTerm2 session (by tty) is closed via
+  AppleScript. The whole sweep runs under a **5s deadline**; a timeout
+  reports `surface sweep timed out — left alone` rather than closing a
+  surface that couldn't be proven dead.
+- **Registrations are never touched by `close` itself** — the SessionEnd
+  hook (§7 above) removes a gracefully-terminated peer's registration, and
+  `prune`'s lazy sweep is the backstop for anything that doesn't.
+
+**Output** (one line per target): `<ch>/<al>: <detail>` — `already gone`,
+`process ended; <surface detail>`, or a refusal reason.
+
+**No dedicated `/bus-close` skill exists.** `leave`/`unregister`/`prune`/
+`hook-exit` have no dedicated skill either; `close` is the same shape — a
+CLI verb, orchestrator-driven, not an interactive multi-step dance the way
+`rename` is. See CHEATSHEET.md's "Under the hood" list.
+
 ### `cbus prune [channel]`
 
 Manual sweep of dead peers.
@@ -1183,6 +1234,8 @@ followed), `peers`. Each peer: `alias`, `model`, `rolefile` (a committed prompt
 pinned at a commit, e.g. `roles/coder.md@b3a806e`), `role` (freeform fallback),
 `origin` (`fresh`/`fork`/`joined`), `mode` (`resume`/`fork`/`template`),
 `sessionId`, `onStale` (`template`/`skip`/`fail`), `profile`, `cwd`, `target`,
+`split` (pane layout: `""`/`auto`/`right`/`down`, hand-maintained like
+`rolefile`/`role`/`profile` — chain-split anchoring below, under `apply`),
 `machine`, `addresses`. Unknown keys round-trip verbatim (`Extra`).
 
 ### `cbus formation save <name> [channel]`
@@ -1194,8 +1247,9 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 - **The store records exactly four facts per peer**: `sessionId`, `cwd`,
   `machine`, and the birth-record `origin`/`model` **when the launcher recorded
   them** (§9 / protocol.md birth records). It fills a blank origin/model **once**
-  and never overwrites a hand-edited field; `rolefile`/`role` and `profile` are
-  yours to fill in. A corrupted birth-record is skipped with a note, not fatal.
+  and never overwrites a hand-edited field; `rolefile`/`role`, `profile`, and
+  `split` are yours to fill in — `save` never writes `split` at all, even on a
+  blank one. A corrupted birth-record is skipped with a note, not fatal.
 - New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
   `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
   this with the peer's brief`).
@@ -1238,6 +1292,27 @@ briefs peers to answer *it*, so it must be a peer first: `this session is not on
 - `--wait <dur>` sets the per-peer answer wait (default `90s`; `0` = launch and
   return; `--wait: want a duration like 90s or 2m (0 = do not wait), got "<x>"`).
 - `--brief TEXT` adds an effort brief to every kickoff.
+
+**`pane`-target peers chain-split rather than always splitting the applier.**
+`TerminalForker.Fork` returns the created surface's id (iTerm2 session UUID
+/ tmux pane id; empty for `window`/`tab`/`tmux`), and apply tracks
+candidates — its own surface plus every pane created so far this run. Each
+new `pane` peer's split anchors on `PaneAnchor(created)`: the **largest-area**
+candidate by one geometry query (`tmux list-panes`, or an AppleScript
+triple-loop over iTerm2 sessions), ties going to the **newest-created
+teammate over the applier** — a self-balancing grid instead of every split
+shaving the applier down. A geometry-query failure or a candidate id that
+fails the shape check degrades to anchor `""` (split the applier) rather
+than failing the peer's launch. `branch`/`spawn` are unaffected — their
+anchor is unconditionally the caller (§9), unchanged.
+
+A peer's `split: right|down` (§10's envelope, above) forces that peer's own
+divider (`-h`/`-v` on tmux); `auto`/unset keeps the existing 2.2-ratio
+heuristic on iTerm2 and today's 70/30-then-normalize behavior on tmux. **Any**
+peer in the file declaring an explicit direction suppresses tmux's
+main-vertical normalize **and** the 70%-first-split sizing for the **whole
+run** (`ForkSpec.NoNormalize`) — a per-peer flag would let an `auto`
+sibling's reflow stomp the layout the file asked for.
 
 **Convergence is a round-trip, not a timer.** Each kickoff carries a per-peer
 nonce (`cbus-ok-<alias>-<base36>`); apply reads its own inbox until the nonce
@@ -1680,7 +1755,12 @@ client; they remain for the homogenization/port record.
 34. Sessionless operation degrades quietly (orphan peers, unroutable froms,
     `nosession-$PPID` markers).
 35. Owner detection needs a `claude`/`claude-*`-named ancestor within 16 hops;
-    otherwise liveness degrades to pid-only.
+    otherwise liveness degrades to pid-only. Identity is matched against
+    **argv[0]'s basename**, not kernel `comm` (kept only as a fallback): the
+    bun-compiled CLI's `comm`/`ucomm` is its version string, not `claude`, so
+    every Go-era registration recorded `ownerPid: null` until this was fixed
+    — `cbus close` exposed it (a null `ownerPid` read as "already gone" and
+    skipped signalling a live peer entirely).
 36. `window`/`tab`/`pane` (iTerm2 branch) forking is iTerm2-only AppleScript;
     `tmux` (plain, or `pane`'s tmux branch) requires `$TMUX`. `tab` no longer
     always targets iTerm2's current/frontmost window (the old behavior, and
@@ -1703,3 +1783,12 @@ client; they remain for the homogenization/port record.
 37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
     version handshake) and the link→copy mode-switch break — retired with the
     installer (§14); distribution is now `get.sh` + `selfupdate` (§11).
+38. `cbus close` is local-only (a remote peer must be closed on its own host —
+    `ClosePeer` cannot express a host, so an accepted remote target would
+    silently close a same-named local peer) and refuses a pid whose argv no
+    longer contains `claude` (probable pid recycle) rather than signalling
+    it. Its null-`ownerPid` fallback derives the owner from the armed
+    listener's ancestry only when the listener's own argv still carries this
+    peer's inbox path — without that guard a recycled listener pid under a
+    *different* claude session would donate that session to the SIGTERM
+    (§7).
