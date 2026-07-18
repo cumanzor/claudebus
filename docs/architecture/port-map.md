@@ -348,8 +348,10 @@ The Phase 2 version stamp has since landed (`cbus --version`), so this note is l
 historical. A NUC client update is now `cbus selfupdate` (which also refreshes `commands/` and
 `roles/`), not a manual `install.sh` re-run — the legacy copy-installer was retired (`de07cbe`),
 its copy/link mode-switch hazard with it. The installer-design goals this note set — embedded
-version stamp (`-ldflags`), mode-agnostic placement, SessionEnd hook wiring — are met by the
-release flow (`get.sh` + `selfupdate` + the sha-guarded `install-commands` / `install-roles`).
+version stamp (`-ldflags`) and mode-agnostic placement — are met by the release flow (`get.sh` +
+`selfupdate` + the sha-guarded `install-commands` / `install-roles`); the SessionEnd hook wiring
+it also wanted stays a **manual `settings.json` edit** (`cbus hook-exit`, command-reference §7),
+since neither `get.sh` nor `selfupdate` touches settings.
 `relay/deploy.sh` remains a separate path and is unaffected.
 
 ---
