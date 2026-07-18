@@ -238,7 +238,11 @@ non-dead peer in the channel as `kind=presence` messages (replayed at a
 joined-but-unarmed peer's first arm). Presence is **local-only** — it does not cross
 the relay. A SessionEnd hook (`cbus hook-exit`, wired manually in
 `~/.claude/settings.json`) announces graceful exits immediately; hard kills fall back
-to the lazy prune's `departed` broadcast.
+to the lazy prune's `departed` broadcast. PreCompact/PostCompact hooks
+(`cbus hook-compact pre|post`, same manual wiring) announce compaction the same
+way — `compact-pre`/`compact-post` events, local-only for now — so an
+orchestrating peer learns a session is about to lose, or just lost, its
+in-context state.
 
 ## Formations
 
@@ -460,6 +464,8 @@ cbus formation rm <name>         delete a saved formation (runtime only —
 cbus prune [channel]             remove dead peers (and empty channels); a bare
                                  `cbus prune` also sweeps dead remote identity markers
 cbus hook-exit                   SessionEnd hook target: announce departure (always exit 0)
+cbus hook-compact <pre|post>      PreCompact/PostCompact hook target: announce compaction
+                                 (always exit 0; wiring manual, see docs/architecture/command-reference.md)
 cbus --version                   print the installed client version
 
 distribution / self-update:
