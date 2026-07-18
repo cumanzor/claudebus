@@ -1,5 +1,93 @@
 # Changelog (detailed)
 
+## [2026-07-18 01:34:13 UTC] [Distribution] Opt-in update-available hint (M4)
+
+[Attempt #1]
+
+Fourth milestone of the distribution effort: 1f813c5, approved clean with
+no conditions.
+
+With `CBUS_UPDATE_CHECK=1` set, `cbus` prints one stderr line when a newer
+stable release exists, and at most once a day spawns a detached `gh` poll
+(via `Setsid`, so it outlives the command that spawned it) to refresh an
+on-disk cache the next invocation reads from. With the variable unset, the
+feature does nothing at all — no poll, no cache read, no stderr line.
+Everything about the check is deliberately best-effort and silent on
+failure: a version hint must never break or slow down the command it
+rides along with, and the one exception to "silent" is the hint itself,
+which is capped at exactly one line so it can never become noise.
+
+Prereleases stay invisible to the hint, using the same clean-X.Y.Z tag
+classification the stable selfupdate path already established in M3
+(reused, not reimplemented — a second classifier would be a second place
+for the definition to drift). Dev builds (unstamped or non-release
+version strings) are never nagged. The hint is excluded from `--json`
+output, from `selfupdate` itself (which has its own, more detailed
+update-related output), and from `hook-exit` (a SessionEnd hook target
+where any extra output is unwanted noise in a log nobody is watching
+interactively). With no repository configured (M1's empty-slug case),
+the hint is a silent no-op rather than an error.
+
+Reviewer evidence worth carrying, not just the verdict: the exclusion
+list's completeness was argued structurally rather than by enumeration
+and hoping nothing was missed. The hint writes to stderr only, so any
+consumer that only reads stdout is safe by construction and needed no
+individual check. Every consumer that reads a *merged* stream (stdout and
+stderr combined) was instead checked one at a time and explicitly
+excluded: `hook-exit` (log noise), `--json` (whose output is scanned
+before any terminator, so a stray line could corrupt a parse), `--version`
+(excluded as defense-in-depth even though it isn't actually a merged-
+stream consumer), and the hidden subcommand the detached poll itself
+dispatches to (closing the recursion question below). No-recursion holds
+by construction — the detached poll's own process dispatches through a
+path that cannot itself trigger another hint — and this was additionally
+confirmed live with a 0.09-second probe rather than left as a structural
+claim alone. A garbage or corrupted on-disk cache fails silently and
+falls through to no-hint, rather than crashing the command it's
+supposed to be invisible alongside. Prerelease-invisibility and
+dev-builds-never-nagged were both live-proven against real version
+strings, not just asserted from the code reading correctly.
+
+Reviewer's own evidence-hygiene note, carried here because the habit is
+worth keeping visible in the record: its first verification probe
+miscounted `cbus list`'s own "no peers registered" baseline output as if
+it were a hint line, inflating an apparent hit count. It caught this by
+checking the actual content of what it counted before concluding
+anything, rather than trusting a bare line-count match — the standard
+this effort's verification held to throughout, worth naming explicitly
+rather than only implicitly demonstrating.
+
+[Files Changed]
+- cmd/cbus/update_check.go (new) + update_check_test.go (new): the
+  throttled poll, on-disk cache, hint formatting, exclusion checks.
+- cmd/cbus/detach_unix.go (new): the `Setsid`-based detachment so the poll
+  outlives the parent command.
+- cmd/cbus/main.go, usage.go: wiring and help text.
+
+[Possible Ripple Effects]
+- Any future verb that reads a merged stdout+stderr stream needs to be
+  added to the exclusion check explicitly — the structural stdout-only
+  safety argument does not cover a verb that changes to read merged
+  output later.
+- The on-disk cache format and throttle window are now a small piece of
+  persistent state on the user's machine; a future change to either needs
+  to tolerate a stale cache written by an older binary.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Live 0.09s no-recursion probe.
+- Live-proven prerelease-invisibility and dev-never-nagged behavior
+  against real version strings, not simulated ones.
+- Garbage-cache silent-fail path exercised directly.
+
+The live `gh` poll leg itself (the actual network round-trip against a
+real release) is S10 checklist material, deferred to M5's post-release
+checklist for the same reason M3's full round-trip was: no release exists
+yet to poll against.
+
+M5 (get.sh bootstrap, the checklist file, and docs) is the effort's final
+milestone, released and held for its verdict.
+
 ## [2026-07-18 01:27:28 UTC] [Distribution] Selfupdate from the latest GitHub release (M3)
 
 [Attempt #1]
