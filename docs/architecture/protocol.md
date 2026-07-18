@@ -154,10 +154,39 @@ the next read; *quirk — a port should write-temp-then-rename*).
 | `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor `claude` process (empty → null) |
 | `host` | string | join | `hostname -s` (fallback `hostname`) |
 | `ts` | string | join | join time, UTC ISO-8601; never refreshed as a field |
+| `lastActivity` | string, `omitempty` | Go client only | D3 grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas |
+| `origin` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: `fresh` (spawn) / `fork` (branch) / `joined` (plain join); absent = unknown / hand-maintained |
+| `model` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the model the child was launched on; absent = unknown |
 
 **The file's mtime is protocol state**: the 10-minute never-armed grace (§6.2) is
 `find <meta> -mmin +10`, and the `jset` at arm time refreshes mtime. Any tooling that
 touches meta.json resets the grace clock. *quirk.*
+
+**Birth records (Go client).** `spawn` / `branch` stamp `origin` and `model` into the
+peer's meta **before the child boots** — the launcher knows how a session was born; the
+session cannot reliably know its own origin. `ReserveAlias` (store.go) lays down a
+placeholder meta (`sessionId: "reserved"`, null pids) carrying the two fields; the
+child's `join` reclaims the reservation and inherits them. Both fields are `omitempty`:
+a meta written by bash `cbus`, or any pre-birth-record join, omits the keys entirely and
+stays **byte-identical** for bash's tolerant reader (the A3 freeze, port-map §5) — an
+absent field reads as unknown / hand-maintained, never inferred. `formation save` reads
+these fields directly, which is how a spawn-born peer records its origin/model with no
+hand-edit.
+
+**The join stamp map** (`birthForJoin`, store.go) resolves origin/model against whatever
+meta already sits at the alias:
+
+- placeholder `sessionId: "reserved"` → carry its stamped origin/model through the
+  reclaim (a blank stays blank);
+- `sessionId` == this session's own → resume-rejoin, **preserve** the existing
+  origin/model;
+- any other sid, or unreadable → `origin=joined`, model unknown (a takeover never
+  inherits the stranger's `fork`).
+
+A **reservation is never laid down for a resume** — `formation apply`'s `resume` mode
+skips `ReserveAlias`, because a placeholder would win over the resumed session's own sid
+in `birthForJoin` and clobber its preserved origin. The `template` and `fork` restore
+modes do reserve, stamping `fresh` / `fork` respectively.
 
 ### 2.3 `inbox.jsonl`
 
