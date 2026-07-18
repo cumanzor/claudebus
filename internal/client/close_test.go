@@ -29,7 +29,11 @@ import (
 //   - it is setsid'd, so it has no controlling tty and the surface sweep finds
 //     nothing to close.
 //   - both pids are killed on cleanup.
-func fakeSessionTree(t *testing.T, name string) (ownerPid, childPid int) {
+//
+// listenerArg is placed in the CHILD's argv, standing in for the --inbox path a real
+// armed follower carries: close's null-ownerPid fallback greps for it before trusting
+// the pid, so tests can present both a genuine follower and a recycled stranger.
+func fakeSessionTree(t *testing.T, name, listenerArg string) (ownerPid, childPid int) {
 	t.Helper()
 	if _, err := exec.LookPath("perl"); err != nil {
 		t.Skip("perl needed to rewrite argv[0]")
@@ -39,10 +43,16 @@ func fakeSessionTree(t *testing.T, name string) (ownerPid, childPid int) {
 	if err := os.Symlink("/bin/sh", fake); err != nil {
 		t.Fatal(err)
 	}
+	// the child is a script rather than an inline -c so its argv carries listenerArg
+	// without a second level of shell quoting
+	child := filepath.Join(dir, "listener.sh")
+	if err := os.WriteFile(child, []byte("#!/bin/sh\n/bin/sleep 60 & wait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	pids := filepath.Join(dir, "pids")
 	// written to a tmp path and renamed so the reader never sees one pid of two
-	inner := fmt.Sprintf(`echo $$ > %s.tmp; /bin/sleep 60 & echo $! >> %s.tmp; mv %s.tmp %s; wait`,
-		pids, pids, pids, pids)
+	inner := fmt.Sprintf(`echo $$ > %s.tmp; %s %s & echo $! >> %s.tmp; mv %s.tmp %s; wait`,
+		pids, shQuote(child), shQuote(listenerArg), pids, pids, pids)
 	launch := exec.Command("/bin/sh", "-c",
 		fmt.Sprintf(`perl -e 'exec {"/bin/sh"} ($ARGV[0], "-c", $ARGV[1])' %s %s &`,
 			shQuote(fake), shQuote(inner)))
@@ -92,7 +102,7 @@ func fakeSessionTree(t *testing.T, name string) (ownerPid, childPid int) {
 // starved every registration of its ownerPid and made close report success on a live
 // peer.
 func TestOwnerFromPidMatchesArgv0(t *testing.T) {
-	owner, child := fakeSessionTree(t, "claude")
+	owner, child := fakeSessionTree(t, "claude", "")
 
 	// the premise: comm does NOT identify this process as claude
 	if comm, _, err := procParent(owner); err != nil {
@@ -116,7 +126,7 @@ func TestOwnerFromPidMatchesArgv0(t *testing.T) {
 // ancestor exists" — and the orphaning is what makes the negative deterministic
 // rather than dependent on whatever launched the test.
 func TestOwnerFromPidIgnoresANonClaudeAncestor(t *testing.T) {
-	_, child := fakeSessionTree(t, "notclaude")
+	_, child := fakeSessionTree(t, "notclaude", "")
 	if got, ok := ownerFromPid(child); ok {
 		t.Errorf("ownerFromPid = %d,%v; want no match for a non-claude tree", got, ok)
 	}
@@ -127,10 +137,13 @@ func TestOwnerFromPidIgnoresANonClaudeAncestor(t *testing.T) {
 // the owner from the armed listener's ancestry and END it — not report the cheerful
 // "already gone" that left live sessions running.
 func TestClosePeerDerivesOwnerFromNullOwnerPid(t *testing.T) {
-	owner, child := fakeSessionTree(t, "claude")
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
+	// the listener must look like THIS peer's follower, so it carries the inbox path
+	// close greps for — the same identity test MetaListenerAlive applies
+	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	owner, child := fakeSessionTree(t, "claude", needle)
 	seedClosePeer(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child))
 
 	rep := ClosePeer("ch", "peer", false)
@@ -166,6 +179,33 @@ func TestClosePeerStillReportsGoneWhenTheListenerIsDead(t *testing.T) {
 	}
 }
 
+// TestClosePeerIgnoresAForeignListenerPid is the wrong-session-kill guard: a stored
+// listenerPid can be recycled onto a process under a DIFFERENT claude session, and
+// walking its ancestry would hand that innocent session's pid to the SIGTERM. The
+// pid here is alive and IS descended from a claude-shaped owner — only the argv
+// needle says it is not this peer's follower, and that alone must stop the close.
+func TestClosePeerIgnoresAForeignListenerPid(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
+	// a plausible follower argv, but for a DIFFERENT peer's inbox
+	foreign := metaInboxNeedle(filepath.Join(root, "other", "stranger", "meta.json"))
+	owner, child := fakeSessionTree(t, "claude", foreign)
+	seedClosePeer(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child))
+
+	rep := ClosePeer("ch", "peer", false)
+	if !rep.Ok || !strings.Contains(rep.Detail, "already gone") {
+		t.Errorf("a foreign listener must read as nothing-to-close, got ok=%v %q", rep.Ok, rep.Detail)
+	}
+	// the assertion that matters: the stranger's session was never signalled
+	if !pidAlive(owner) || procZombie(owner) {
+		t.Fatalf("close SIGTERMed a session it had no business touching (owner %d)", owner)
+	}
+	if !pidAlive(child) {
+		t.Errorf("the foreign listener %d was signalled", child)
+	}
+}
+
 func seedClosePeer(t *testing.T, root, ch, al, sid, ownerPid, listenerPid string) {
 	t.Helper()
 	dir := filepath.Join(root, ch, al)
@@ -177,5 +217,80 @@ func seedClosePeer(t *testing.T, root, ch, al, sid, ownerPid, listenerPid string
 		al, ch, sid, listenerPid, ownerPid)
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// fakeBins puts stub executables on PATH (name -> shell body), so each subprocess the
+// sweep shells out to can be made slow, silent or talkative deterministically. The
+// sweep is defined entirely by what those three commands say, so faking them is the
+// only way to exercise it without a terminal.
+func fakeBins(t *testing.T, bins map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range bins {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
+// TestSweepSurfaceTimesOutRatherThanStalling: the sweep is best-effort cleanup that
+// runs AFTER the process is already dead, so a wedged Apple Event queue must cost a
+// bounded wait, not the ~45s stall observed in a detached shell.
+func TestSweepSurfaceTimesOutRatherThanStalling(t *testing.T) {
+	prev := surfaceSweepBudget
+	surfaceSweepBudget = 100 * time.Millisecond
+	t.Cleanup(func() { surfaceSweepBudget = prev })
+	fakeBins(t, map[string]string{"ps": "sleep 30"})
+
+	start := time.Now()
+	got := sweepSurface("ttys999")
+	if !strings.Contains(got, "timed out") {
+		t.Errorf("sweep = %q, want a timeout report", got)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("sweep took %v — the deadline did not bound it", elapsed)
+	}
+}
+
+// TestSweepSurfaceTimesOutOnAWedgedOsascript is the case the deadline was actually
+// filed for: the tty probes answer instantly and it is the Apple Event that hangs.
+// Without the trailing deadline check this reports "surface already closed" — a
+// cleanup we never performed, claimed as done.
+func TestSweepSurfaceTimesOutOnAWedgedOsascript(t *testing.T) {
+	prev := surfaceSweepBudget
+	surfaceSweepBudget = 150 * time.Millisecond
+	t.Cleanup(func() { surfaceSweepBudget = prev })
+	fakeBins(t, map[string]string{
+		"ps":        "exit 1", // dead tty: nothing on it
+		"tmux":      "exit 1", // no multiplexer
+		"osascript": "sleep 30",
+	})
+
+	got := sweepSurface("ttys999")
+	if strings.Contains(got, "already closed") {
+		t.Fatalf("sweep claimed %q while osascript was still wedged", got)
+	}
+	if !strings.Contains(got, "timed out") {
+		t.Errorf("sweep = %q, want a timeout report", got)
+	}
+}
+
+// TestSweepSurfaceLeavesABusyTTYAlone: any live process on the tty means either a
+// TERM-survivor or a recycled tty hosting a stranger. Both must keep their surface —
+// this is the guard that stops a close from taking someone else's window with it.
+func TestSweepSurfaceLeavesABusyTTYAlone(t *testing.T) {
+	fakeBins(t, map[string]string{"ps": "echo 4242"}) // a live pid on that tty
+	if got := sweepSurface("ttys999"); !strings.Contains(got, "busy") {
+		t.Errorf("sweep = %q, want the busy-tty refusal", got)
+	}
+}
+
+// TestSweepSurfaceNeedsATTY: with no tty captured there is nothing to locate, and the
+// sweep must say so rather than probe with an empty device path.
+func TestSweepSurfaceNeedsATTY(t *testing.T) {
+	if got := sweepSurface(""); !strings.Contains(got, "no tty") {
+		t.Errorf("sweep = %q, want the no-tty report", got)
 	}
 }
