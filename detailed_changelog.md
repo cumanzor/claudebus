@@ -96,6 +96,50 @@ consistent with the frozen-tier treatment already applied to port-map.md §0).
   protocol.md §8 in the same pass, not taken on faith from the M2 commit
   message alone.
 
+## [2026-07-18 03:56:39 UTC] [Docs] Repo docs/architecture refresh, M3: README fixes + architecture-docs pointer (cbus-yle)
+
+[Attempt #1]
+
+Third milestone of the docs-refresh effort (cbus-yle). Two commits, both
+APPROVED — reviewer reproduced R1/R3/R5 (skills exist on disk as named,
+every link in the new section resolves, the meta.json anchor resolves,
+code fences balance).
+
+`be50b2f` fixed three README inaccuracies unrelated to the shipped-surface
+gap list but found along the way: the intro pointed at `/branch-term` (the
+generic, non-bus-joined terminal-fork skill) where it meant `/bus-branch`
+(the bus-aware skill the rest of the README's example actually depends on —
+a fork opened via `/branch-term` alone can't report back over cbus); the
+CLI-reference env block was missing `CBUS_REPO` and `CBUS_UPDATE_CHECK`,
+documented only in Install prose; and the How-it-works `meta.json` field
+list read as exhaustive without a pointer to the `origin`/`model` birth-record
+fields added since.
+
+`e4a2849` added a "distribution / self-update" block to the CLI reference
+(`selfupdate`, `install-commands`, `install-roles` — previously documented
+only in Install prose, not the verb list) and a new "Architecture & reference
+docs" section linking `overview.md`/`command-reference.md`/`protocol.md`/
+`port-map.md`, which the README had never linked before (only
+`compat-deletion-plan.md` got an inline mention, and only in one place).
+
+[Files Changed]
+- `README.md` — `/branch-term`→`/bus-branch` intro fix, env-block additions
+  (`be50b2f`); distribution CLI block + new architecture-docs section
+  (`e4a2849`).
+
+[Possible Ripple Effects]
+- The new "Architecture & reference docs" section is the first link from
+  README.md into `docs/architecture/` — anything that renames or moves those
+  four files now needs a README update too, not just cross-links among
+  themselves.
+- `/branch-term` itself still exists as a skill (generic fork, no bus join) —
+  the fix only corrects README's own example to point at the bus-aware skill
+  it actually narrates; it does not deprecate `/branch-term`.
+
+[Testing Notes]
+- Docs-only; reviewer live-checked all four new links resolve and that the
+  named skills exist on disk under their corrected names.
+
 ## [2026-07-18 03:50:50 UTC] [Docs] Repo docs/architecture refresh, M1: help text, overview, command-reference for spawn/formations/distribution (cbus-yle)
 
 [Attempt #1]
