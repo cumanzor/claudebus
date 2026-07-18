@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // ghLatestTag and ghDownload are seams: real gh calls in production, injectable in
@@ -152,8 +154,16 @@ func requireGh() error {
 }
 
 func ghLatestTagImpl(slug string) (string, error) {
-	out, err := exec.Command("gh", "release", "view", "--repo", slug, "--json", "tagName").Output()
+	cmd := exec.Command("gh", "release", "view", "--repo", slug, "--json", "tagName")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
+		// surface gh's own message ("release not found", "could not resolve to a
+		// Repository") — for the private-repo flow this is the error users meet (c6).
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("gh release view: %s", msg)
+		}
 		return "", fmt.Errorf("gh release view: %w", err)
 	}
 	var resp struct {
