@@ -1,5 +1,101 @@
 # Changelog (detailed)
 
+## [2026-07-18 03:58:02 UTC] [Docs] Repo docs/architecture refresh, M2: protocol, compat-deletion-plan, cutover-package, port-map (cbus-yle)
+
+[Attempt #1]
+
+Second milestone of the docs-refresh effort (cbus-yle). Four commits reviewed
+as one batch alongside M1's two fold commits; three approved outright, one
+conditional on two findings, both folded into this entry per the
+hold-for-verdict rule.
+
+`f628283` documented `protocol.md` §2.2's Go-client-only meta.json fields:
+`origin`/`model` (the launcher-stamped birth record) and `lastActivity` (the
+D3 grace-clock timestamp), all `omitempty` so bash-written and pre-birth-record
+metas stay byte-identical to bash's tolerant reader (the A3 freeze). Also
+documents the join stamp map (`birthForJoin`): a reservation-reclaim inherits
+the placeholder's stamped origin/model, a resume-rejoin preserves the existing
+values, and anything else is a takeover reading as `joined`/unknown — and why
+`formation apply`'s `resume` mode never lays down a reservation (a placeholder
+would win over the resumed session's own sid and clobber its preserved origin).
+
+`de59683` updated `compat-deletion-plan.md`'s status banner and item 6: the
+legacy installers are retired (`de07cbe`), so they're no longer the rollback
+procedure or a pending P3 deletion — the remaining bash artifacts narrow to
+`bin/cbus` + `bin/cc-branch.sh`, and rollback is now a manual copy.
+
+`ad45c78` fixed `cutover-decision-package.md`'s rollback procedure, which still
+told a reader to run `./install.sh` — retired. Step 1 now reads: copy `bin/cbus`
+over `~/.local/bin/cbus` (or recover from git history), with the rest of the
+package's installer references left as the recorded P2.6-readiness snapshot,
+flagged as such in the banner.
+
+`33b4565` (CONDITIONAL) tightened `port-map.md` §4.12's tokenizer rationale
+(it's specifically iTerm2's `create window`/`create tab` **`command` parameter**
+that self-tokenizes, not `do script` generally — cross-referenced to
+`harness.go`'s `osaForkITerm` and overview.md's Terminal-coupling section) and
+reframed §5's NUC-propagation note for the post-cutover, post-distribution
+world (`install.sh` retired, NUC updates via `cbus selfupdate`). That reframe
+overreached on one point:
+
+**F3 (binding):** §5 claimed the release flow (`get.sh` + `selfupdate` +
+sha-guarded install verbs) meets all three installer-design goals the original
+note set, including "SessionEnd hook wiring." False — `get.sh` and `selfupdate`
+touch no settings files; hook wiring stays a manual `settings.json` edit
+(`cbus hook-exit`, command-reference §7). Fixed in `bdc2249`: dropped the hook-
+wiring claim from the "met" list, keeping only the two goals actually
+delivered (version stamp, mode-agnostic placement).
+
+**F4 (binding, overview.md — pre-existing, not introduced by 33b4565):** the
+presence design-decision row still read "remote presence does not work yet —
+the relay strips `kind`," filed against `cbus-ijx.5`. Stale since `cbus-ijx.5`
+shipped 2026-07-14: the relay now renders `kind` and generates join/departed
+from the ws connect/disconnect lifecycle (protocol.md §8, verified current in
+this same M2 pass). Reworded in `bdc2249`: what's actually still open is ijx.5
+phase 2 — client-originated `leave`/`rename` and offline catch-up.
+
+The dev-docs tier held its own mirror of both findings rather than writing
+ahead of this fold: F3 against dev-docs port-map.md's M10/Phase-2 rows (ruled
+NOT a mirror — those rows correctly describe the P2-era installer's real
+hook-wiring check, an era D29 protects, distinct from the repo tier's "met by
+the release flow" claim) and F4 against dev-docs behavior-spec.md §5's
+"Remote presence does not exist" line (a genuine mirror, true as of its 2026-
+07-12 freeze date but misleading in present tense — annotated
+`[SUPERSEDED 2026-07-16: cbus-ijx.5 shipped...]` in place rather than rewritten,
+consistent with the frozen-tier treatment already applied to port-map.md §0).
+
+[Files Changed]
+- `docs/architecture/protocol.md` — §2.2 Go-client meta fields + birth-record
+  mechanism + join stamp map (`f628283`).
+- `docs/architecture/compat-deletion-plan.md` — status banner + item 6
+  (`de59683`).
+- `docs/architecture/cutover-decision-package.md` — rollback procedure
+  (`ad45c78`).
+- `docs/architecture/port-map.md` — §4.12 precision + §5 NUC-propagation
+  reframe (`33b4565`); F3 fold drops the hook-wiring claim (`bdc2249`).
+- `docs/architecture/overview.md` — F4 fold rewords the presence row
+  (`bdc2249`).
+- `~/dev-docs/projects/claudebus/behavior-spec.md` (direct-edit tier) — F4's
+  mirror sentence annotated `[SUPERSEDED 2026-07-16: ...]` in place, same pass.
+
+[Possible Ripple Effects]
+- Hook wiring being manual (not automated by any current or planned
+  distribution surface) is now stated in three places that must stay in sync
+  if that ever changes: port-map.md §5, command-reference.md §7, and the
+  behavior-spec.md drift context — a future automation of hook wiring needs
+  all three touched, not just the installer code.
+- Remote presence's real open item (ijx.5 phase 2: client-originated
+  leave/rename) is now named consistently in overview.md and protocol.md;
+  anything still citing "remote presence does not work" as a blanket
+  statement is now the actual stale claim.
+
+[Testing Notes]
+- All five commits (four M2 + the bdc2249 fold) are docs-only; no code or test
+  surface touched.
+- F4's "relay renders kind" claim was independently checked against
+  protocol.md §8 in the same pass, not taken on faith from the M2 commit
+  message alone.
+
 ## [2026-07-18 03:50:50 UTC] [Docs] Repo docs/architecture refresh, M1: help text, overview, command-reference for spawn/formations/distribution (cbus-yle)
 
 [Attempt #1]
