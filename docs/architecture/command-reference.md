@@ -1577,8 +1577,10 @@ client; they remain for the homogenization/port record.
 35. Owner detection needs a `claude`/`claude-*`-named ancestor within 16 hops;
     otherwise liveness degrades to pid-only.
 36. `window`/`tab` forking is iTerm2-only AppleScript; `tab` needs an existing
-    window; tmux requires `$TMUX`; helper failures leak the launcher tmpfile
-    and print errors to stdout.
+    window; tmux requires `$TMUX`. A pre-exec `osascript` failure leaks the
+    self-deleting launcher tmpfile (Go `osaForkITerm` skips cleanup on that
+    path). **(bash era)** the retired helper printed its failures to stdout; the
+    Go client dies to stderr (main.go:110).
 37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
     version handshake) and the link→copy mode-switch break — retired with the
     installer (§14); distribution is now `get.sh` + `selfupdate` (§11).
