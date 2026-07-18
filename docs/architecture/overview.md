@@ -155,8 +155,7 @@ nothing (probe-verified live, twice). The window/tab path works around this by w
 **self-deleting launcher script** and handing iTerm2 only the bare, whitespace-tokenized command
 `/bin/bash <tmpfile>`; the launcher restores `PATH` / `CLAUDE_CONFIG_DIR` / cwd and execs the real
 launch. The tmux path has no such constraint — it runs a normal POSIX-quoted one-liner through
-`/bin/sh`. (port-map §4.12 mislabels this shim as "quoting cruft"; the true rationale is the
-tokenizer, corrected in that doc.)
+`/bin/sh`. (port-map §4.12 records the same rationale for a reimplementation.)
 
 The child launch itself is `ccs <profile>` (CCS-profile-aware) or plain `claude`, with
 `--resume <sid> --fork-session` for `branch` and without that pair for `spawn`, plus `--model` /

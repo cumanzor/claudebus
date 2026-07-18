@@ -971,8 +971,7 @@ iTerm2 itself and does **not** honor POSIX quoting, so a quoted one-liner
 launches nothing (probe-verified live, twice). tmux takes the opposite path — a
 POSIX-quoted one-liner through `/bin/sh`. The child inherits `PATH` always and
 `CLAUDE_CONFIG_DIR` when set; under a CCS instance config dir it relaunches via
-`ccs <profile>`. (This is the mechanism port-map §4.12 mislabels as "quoting
-cruft"; the real rationale is the tokenizer.)
+`ccs <profile>`. (port-map §4.12 records the same rationale for a reimplementation.)
 
 ### `cbus spawn [window|tab|tmux] [channel | <ch>@<host>] [--model M] [--name N] [--role R]`
 
