@@ -36,14 +36,14 @@ func updateCheckCachePath() string {
 // version hint must never break or slow the command the user actually ran.
 //
 // Skipped for --json (scripts see no chatter), for selfupdate (it does its own
-// check), for hook-exit (the SessionEnd hook stays quiet), and for the hidden refresh
-// subcommand (no recursion).
+// check), for hook-exit and hook-compact (hook targets stay quiet), and for the hidden
+// refresh subcommand (no recursion).
 func maybeStartUpdateCheck(cmd string, jsonMode bool) {
 	if os.Getenv("CBUS_UPDATE_CHECK") != "1" || jsonMode {
 		return
 	}
 	switch cmd {
-	case "selfupdate", "hook-exit", updateCheckSubcmd, "--version", "version":
+	case "selfupdate", "hook-exit", "hook-compact", updateCheckSubcmd, "--version", "version":
 		return
 	}
 	if _, ok := resolveRepoSlug(); !ok {

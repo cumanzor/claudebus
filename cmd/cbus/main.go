@@ -82,6 +82,8 @@ func run(args []string) int {
 
 	case "hook-exit": // SessionEnd hook: announce departure (never fails the session)
 		return runHookExit()
+	case "hook-compact": // PreCompact/PostCompact hooks: announce compaction (never fails the session)
+		return runHookCompact(args[1:])
 	case "bootstrap":
 		return runBootstrap(args[1:])
 	case "branch":
@@ -240,6 +242,22 @@ func runTailRemote(target string) int {
 // the session — and produces no stdout (best-effort local-leave, remote markers survive).
 func runHookExit() int {
 	client.HookExit(os.Stdin)
+	return 0
+}
+
+// runHookCompact runs the PreCompact/PostCompact hook. It ALWAYS returns 0 — rc 2 would
+// BLOCK compaction, and a hook must never fail the session — and writes NOTHING to
+// stdout, which Claude Code parses as hook JSON on exit 0. A bad or missing phase is
+// reported on stderr (the hook debug log) and still exits 0; trailing args are ignored
+// rather than fatal (the noExtra rule would mean failing a hook, which is not allowed).
+func runHookCompact(args []string) int {
+	phase := ""
+	if len(args) > 0 {
+		phase = args[0]
+	}
+	if err := client.HookCompact(phase, os.Stdin); err != nil {
+		fmt.Fprintf(os.Stderr, "cbus: hook-compact: %v\n", err)
+	}
 	return 0
 }
 
