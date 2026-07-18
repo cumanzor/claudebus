@@ -8,14 +8,16 @@
 > [cutover-decision-package.md](cutover-decision-package.md)). Topology, protocol,
 > semantics, and the security model below are unchanged; statements about bash/python3
 > mechanics describe the retired reference implementation (kept in `bin/` until P3).
+> Post-cutover feature additions — `spawn`, formations, roles, and the distribution
+> surface — are folded into the component map (§2) and command-reference.md.
 >
 > Companion documents:
 > - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
 > - [protocol.md](protocol.md) — on-disk formats, wire protocol, framing contract
 > - [port-map.md](port-map.md) — what a port to a real language must preserve, and why
 > - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the landscape survey and the
->   Claude Code internals probes that justified building this at all (the sole surviving copy of that
->   research; the ephemeral scratchpads behind it are gone)
+>   Claude Code internals probes that justified building this at all (the design research, summarized
+>   and kept as the historical record)
 > - [cutover-decision-package.md](cutover-decision-package.md) — the executed cutover's
 >   decision record and rollback procedure
 > - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash
@@ -90,7 +92,10 @@ Monitor-tail is the only turn-native answer with no hooks, no polling, and no in
 | **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the NUC bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /peers` presence; `GET /healthz`. |
 | **Maildir spool** | `relay/internal/spool` | `<root>/<channel>/<alias>/{tmp,new,cur}` — write to `tmp/`, atomic rename into `new/`, move to `cur/` after delivery. Crash-safe by construction (no fsync — deliberately not power-loss durable). |
 | **wstail** | `relay/cmd/wstail` | Loopback **debug/verification client** for `/tail`. TCP-only (no TLS) so it cannot cross the Cloudflare front door — it is not a production bridge. The real remote consumer is the Monitor's `ws:` source. |
-| **CC integration** | `commands/*.md`; installers: `install-cbus-go.sh` (side-by-side Go), `install.sh` (legacy bash / rollback) | Three slash commands (`/bus-join`, `/bus-branch`, `/bus-rename`) that are deliberately thin — logic lives in the binary. `cbus branch` forks the session natively via a `TerminalForker` (iTerm2 window/tab via osascript with a temp-launcher shim, or tmux) using `--resume <sid> --fork-session` (CCS-profile-aware); `bin/cc-branch.sh` is no longer consulted (retained until P3). `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
+| **CC integration** | `commands/*.md`, `roles/*.md` (embedded); placed by `cbus install-commands` / `install-roles` | Five slash commands (`/bus-join`, `/bus-branch`, `/bus-spawn`, `/bus-rename`, `/bus-formation`) that are deliberately thin — logic lives in the binary. `cbus branch` (fork) and `cbus spawn` (fresh session) place the child natively via a `TerminalForker` (see *Terminal coupling*, below) using `--resume <sid> --fork-session` for branch (CCS-profile-aware); `bin/cc-branch.sh` is retired. `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
+| **Formations** | `cmd/cbus/formation.go` + `internal/client/formation*.go`; `$CBUS_DIR/.formations/`, repo `formations/` | Saved channel topologies — peers, roles, models, restore modes — that relaunch a fleet with `cbus formation apply`. Runtime saves shadow committed starter templates (`formations/dev-trio.json`); `save` captures the birth-record origin/model automatically. |
+| **Roles** | `roles/*.md` (embedded via `go:embed`); `internal/client/role.go` | Committed role-prompt files that `cbus spawn --role <r>` appends to a fresh peer's first turn (repo `roles/` first, then `$CBUS_DIR/roles`). Each carries a `MODEL:` line that defaults the child's model. |
+| **Distribution** | `get.sh`; `cmd/cbus/{selfupdate,install_assets,update_check,version}.go` | First install bootstraps via `get.sh` (downloads a GitHub release binary, then installs the embedded skills/roles); thereafter `cbus selfupdate`. `CBUS_UPDATE_CHECK=1` opts into a once-a-day update hint. The legacy `install.sh` / `install-cbus-go.sh` were retired (`de07cbe`). |
 
 ```mermaid
 flowchart LR
@@ -129,6 +134,34 @@ flowchart LR
 Two transports, one message shape: the relay stores and re-emits messages **byte-compatible with
 local inbox lines** (`{from,to,ts,text}`), so the client needs no translation layer, and both
 paths deliver the identical framed block to the receiving Monitor.
+
+### Terminal coupling: the `TerminalForker` seam
+
+`cbus branch` (fork) and `cbus spawn` (fresh session) place the child in a new terminal surface
+through one interface, `TerminalForker` (`internal/client/harness.go`) — the deliberate seam
+between the bus logic and the host terminal. The real implementation is `OSAForker`; tests inject
+a fake, so every fork path is exercised without opening a window. This is the single place a port,
+or a new terminal backend, plugs in.
+
+| Target | Backend | Coupling | Mechanism |
+|---|---|---|---|
+| `window` | iTerm2 | **iTerm2-only** (macOS) | `osascript` → `create window` |
+| `tab` | iTerm2 | **iTerm2-only** (macOS), needs an existing window | `osascript` → `create tab` |
+| `tmux` | tmux | **terminal-agnostic** | `tmux new-window` (requires `$TMUX`) |
+
+The two paths differ in one load-bearing way. **iTerm2's AppleScript `command` parameter is
+tokenized by iTerm2 itself and does not honor POSIX quoting**, so a quoted one-liner launches
+nothing (probe-verified live, twice). The window/tab path works around this by writing a
+**self-deleting launcher script** and handing iTerm2 only the bare, whitespace-tokenized command
+`/bin/bash <tmpfile>`; the launcher restores `PATH` / `CLAUDE_CONFIG_DIR` / cwd and execs the real
+launch. The tmux path has no such constraint — it runs a normal POSIX-quoted one-liner through
+`/bin/sh`. (port-map §4.12 mislabels this shim as "quoting cruft"; the true rationale is the
+tokenizer, corrected in that doc.)
+
+The child launch itself is `ccs <profile>` (CCS-profile-aware) or plain `claude`, with
+`--resume <sid> --fork-session` for `branch` and without that pair for `spawn`, plus `--model` /
+`--name` when supplied. `window`/`tab` are the iTerm2-coupled surfaces; **tmux is the only
+terminal-agnostic fork path** and the natural target on Linux or under a non-iTerm2 terminal.
 
 ---
 
@@ -202,9 +235,10 @@ If the receiver is offline, the flow stops at the spool: mail queues in `new/` a
 - **No forking across machines** (deferred, `cbus-b8m`): start a fresh session on the target box
   and join the shared channel; each side picks its own explicit alias.
 - **Install drift**: the Go client is version-stamped (`cbus --version`) but there is
-  still no version handshake between hosts — after any client change, rebuild/reinstall on
-  the NUC by hand (the relay has its own deploy path, `relay/deploy.sh`). `commands/*.md`
-  are still copy-installed.
+  still no version handshake between hosts — after any client change, update the NUC by hand
+  (`cbus selfupdate`, or rebuild; the relay has its own deploy path, `relay/deploy.sh`).
+  `commands/*.md` and `roles/*.md` install via `cbus install-commands`/`install-roles`
+  (sha-guarded) and refresh on `selfupdate`.
 
 ---
 
@@ -285,8 +319,8 @@ caveat, not just a feature: a peer message can trigger action while you're away.
 
 `cbus tail` must **never** run under Bash: it execs a follower that never exits, so a Bash call
 blocks the session forever and delivers nothing. This warning is repeated at every surface the
-model reads — join/rename/branch output, the usage text, the bootstrap prompt, and all three
-slash commands.
+model reads — join/rename/branch output, the usage text, the bootstrap prompt, and the slash
+commands.
 
 ### 5.2 The closed mailbox (why this project exists)
 
@@ -332,7 +366,7 @@ ignored: the spool always queues, so there is nothing to force.
 | **Maildir server-side only.** The relay spools `tmp→new→cur`. | A relay restart losing queued cross-machine messages is a real, higher-stakes failure mode — the direct application of the AMQ prior-art lesson. Declined with rationale: fsync durability (overkill for a session bus) and sequence-first spool names (would break ordering across restarts). |
 | **Single active tail per peer.** A new `/tail` displaces the old (mutex-held `close(done)`, per-message displacement checks, pointer-compared detach). | Displacement *is* the collision feedback for explicit remote aliases; regression-tested handover. Note: the honest contract is at-least-once with no interleaved drains — a narrow handover race can deliver one in-flight message to both tails (the README's "no duplicate delivery" overstates). |
 | **Reframed delivery format.** Both framers emit `◀ cbus msg from=… to=… ts=…` + body wrapped at 440 UTF-8 bytes + `◀ cbus end from=…`, written as one buffered write / one ws text frame. | The Monitor's caps were *measured*, not assumed: 500 chars per stdout line, ~200 ms line batching, and a second ~3000-char per-notification ceiling shared by both paths. `wsFrameSafe = 2800` with a `⚠truncated~<N>B` header notice (header delivered first, so the warning survives the cut) encodes those measurements — if the harness changes, the constants are suspect. |
-| **Skills thin, logic in the binary.** The fork-child bootstrap prompt is emitted by `cbus bootstrap`; channel derivation lives in `cbus branch`. | Model-executed skill prose is prompt-drift-prone; shipping prompts and paths with the binary means fixes can't drift across skill-file copies. All three skills end with "Do nothing else." as a guardrail against model over-helpfulness. |
+| **Skills thin, logic in the binary.** The fork-child bootstrap prompt is emitted by `cbus bootstrap`; channel derivation lives in `cbus branch`. | Model-executed skill prose is prompt-drift-prone; shipping prompts and paths with the binary means fixes can't drift across skill-file copies. Each skill ends with "Do nothing else." as a guardrail against model over-helpfulness. |
 | **Explicit remote aliases, no remote registry/presence build.** | Scope cut as over-engineering; the relay's one-active-tail rule makes collisions self-evident. |
 | **Presence announcements (local only).** join/leave/rename/departed broadcast `kind=presence` events to every non-dead channel peer; every removal path broadcasts `departed`; `cbus hook-exit` (SessionEnd hook) announces graceful exits immediately, with lazy prune as the hard-kill backstop. | Peers used to come and go silently. Targeting uses the same `!peer_dead` rule as send so joined-but-unarmed peers still get presence (replayed at first arm). Deliberately app-agnostic (no tmux/iTerm2 integration). Remote presence does not work yet — the relay strips `kind` (filed `cbus-ijx.5`). |
 | **Arm-before-fork ordering.** The parent arms its Monitor *before* forking. | The alternative (arm after fork, to avoid a cosmetic note in the child) was empirically disproven — `--fork-session` reads the transcript at child *boot* regardless — and additionally opened a child-announce race. The child's "no completion record" note is cosmetic and unavoidable; the skill explicitly forbids reordering to suppress it. |
@@ -401,8 +435,8 @@ Documented, accepted, or tracked — none are silent.
   Go-port fix; bash had none). A timeout after the relay already spooled the message still
   has no idempotency key — a retry duplicates.
 - Token rotation is a manual all-clients outage with a non-1006 failure symptom (§4).
-- Copy-install drift between machines is a real failure mode; protocol changes require re-running
-  `install.sh` on the NUC by hand.
+- Install drift between machines is a real failure mode (no version handshake); protocol changes
+  require updating the NUC by hand (`cbus selfupdate` or rebuild).
 
 **Environment assumptions**
 
