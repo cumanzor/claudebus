@@ -54,22 +54,32 @@ func WriteRemoteMarker(host, channel, alias string) error {
 }
 
 // OwnerPID walks up from PPID to the owning claude session pid so a marker's
-// ownerPid tracks the SESSION's liveness (find_owner_pid, bin/cbus:44-53): the
-// first ancestor within 16 hops whose command basename is "claude" or "claude-*".
+// ownerPid tracks the SESSION's liveness (find_owner_pid, bin/cbus:44-53).
 // Uses the platform procParent (sysctl on darwin, procfs on linux) — no ps spawn.
 func OwnerPID() (int, bool) {
-	p := os.Getppid()
+	return ownerFromPid(os.Getppid())
+}
+
+// ownerFromPid walks up from pid: the first ancestor within 16 hops that IS a
+// claude session. Identity is argv[0]'s basename ("claude"/"claude-*"), NOT the
+// kernel comm — the bun-compiled CLI sets its accounting name to its version
+// string (ucomm "2.1.214"), which starved every Go-era registration of its
+// ownerPid until close's false-success exposed it. comm is kept as a fallback
+// for any build where it still reads "claude".
+func ownerFromPid(pid int) (int, bool) {
+	p := pid
 	for depth := 0; p > 1 && depth < 16; depth++ {
 		comm, ppid, err := procParent(p)
 		if err != nil {
 			return 0, false
 		}
-		base := comm
-		if i := strings.LastIndexByte(base, '/'); i >= 0 {
-			base = base[i+1:]
-		}
-		if base == "claude" || strings.HasPrefix(base, "claude-") {
+		if isClaudeName(comm) {
 			return p, true
+		}
+		if argv, aerr := procArgs(p); aerr == nil {
+			if f := strings.Fields(argv); len(f) > 0 && isClaudeName(f[0]) {
+				return p, true
+			}
 		}
 		if ppid <= 1 {
 			break
@@ -77,4 +87,14 @@ func OwnerPID() (int, bool) {
 		p = ppid
 	}
 	return 0, false
+}
+
+// isClaudeName reports whether a command path/name's basename is claude or
+// claude-* — argv[0]-shaped identity, immune to prompt text elsewhere in argv.
+func isClaudeName(name string) bool {
+	base := name
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	return base == "claude" || strings.HasPrefix(base, "claude-")
 }
