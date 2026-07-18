@@ -83,6 +83,11 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles
   cbus formation rm <name>         delete a saved formation
+  cbus selfupdate [--check] [--force]            update the running binary from
+                                   the latest GitHub release (needs gh authed);
+                                   --check reports without applying; then refreshes
+                                   the installed commands + roles. Set CBUS_REPO
+                                   or use a released binary (its repo is baked in)
   cbus install-commands [--path DIR] [--force]   write the embedded /bus-* skills
                                    to ~/.claude/commands (sha-guarded; --force
                                    overwrites a locally-edited file)
