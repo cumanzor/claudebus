@@ -83,6 +83,11 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles
   cbus formation rm <name>         delete a saved formation
+  cbus install-commands [--path DIR] [--force]   write the embedded /bus-* skills
+                                   to ~/.claude/commands (sha-guarded; --force
+                                   overwrites a locally-edited file)
+  cbus install-roles [--path DIR] [--force]      write the embedded role prompts
+                                   to $CBUS_DIR/roles (the LoadRole fallback)
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined

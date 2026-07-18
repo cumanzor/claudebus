@@ -83,6 +83,10 @@ func run(args []string) int {
 		return runSpawn(args[1:])
 	case "formation": // post-cutover Go-native verb — no bash counterpart
 		return runFormation(args[1:])
+	case "install-commands": // cbus-7sg: write the embedded /bus-* skills to ~/.claude/commands
+		return runInstallCommands(args[1:])
+	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
+		return runInstallRoles(args[1:])
 
 	default:
 		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
