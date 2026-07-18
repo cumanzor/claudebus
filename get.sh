@@ -54,18 +54,24 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 OUT="$INSTALL_DIR/cbus"
+# download to a sibling temp on the SAME filesystem, verify it runs, then atomically
+# move it over $OUT — a re-run that dies mid-download or fetches a short asset must
+# never damage a working install (selfupdate's own order; C7).
+TMP="$OUT.tmp.$$"
+trap 'rm -f "$TMP"' EXIT
 
 if [ "$VERSION" = "latest" ]; then
-    echo "cbus: downloading latest $BIN to $OUT..."
-    gh release download --repo "$REPO" --pattern "$BIN" --output "$OUT" --clobber
+    echo "cbus: downloading latest $BIN..."
+    gh release download --repo "$REPO" --pattern "$BIN" --output "$TMP" --clobber
 else
-    echo "cbus: downloading $VERSION $BIN to $OUT..."
-    gh release download "$VERSION" --repo "$REPO" --pattern "$BIN" --output "$OUT" --clobber
+    echo "cbus: downloading $VERSION $BIN..."
+    gh release download "$VERSION" --repo "$REPO" --pattern "$BIN" --output "$TMP" --clobber
 fi
-chmod +x "$OUT"
+chmod +x "$TMP"
 
 echo ""
-"$OUT" --version
+"$TMP" --version          # the download must run before it replaces anything
+mv -f "$TMP" "$OUT"       # same-fs atomic rename
 echo "installed: $OUT"
 
 # install the skill commands and role prompts the binary carries.
