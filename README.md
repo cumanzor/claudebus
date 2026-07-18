@@ -462,6 +462,14 @@ cbus prune [channel]             remove dead peers (and empty channels); a bare
 cbus hook-exit                   SessionEnd hook target: announce departure (always exit 0)
 cbus --version                   print the installed client version
 
+distribution / self-update:
+cbus selfupdate [--check] [--force]   update the binary from the latest GitHub
+                                 release, then refresh commands + roles (needs gh)
+cbus install-commands [--path DIR] [--force]   write the embedded /bus-* skills
+                                 to ~/.claude/commands (sha-guarded)
+cbus install-roles [--path DIR] [--force]      write the embedded role prompts
+                                 to $CBUS_DIR/roles (the spawn --role fallback)
+
 remote (relay-backed) — address form <channel>@<host>/<alias>:
 cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
 cbus tail <ch>@<host>/<al>       print Monitor ws arm spec + claim identity
@@ -548,6 +556,17 @@ boundary is exactly what claudebus provides: an open, file-based channel any pro
 window, or CCS profile can append to, built from stable documented primitives with a
 liveness-aware registry. The two compose: SendMessage for in-session fan-out, cbus for
 session-to-session.
+
+## Architecture & reference docs
+
+Deeper than this README, under `docs/architecture/`:
+
+- [overview.md](docs/architecture/overview.md) — system topology, component map, design rationale, security model
+- [command-reference.md](docs/architecture/command-reference.md) — every subcommand, flag, output string, and exit code
+- [protocol.md](docs/architecture/protocol.md) — on-disk formats, wire protocol, framing contract
+- [port-map.md](docs/architecture/port-map.md) — what a reimplementation must preserve, and why
+
+See also [CHEATSHEET.md](CHEATSHEET.md) for the quick-reference card.
 
 ## License
 
