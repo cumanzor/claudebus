@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,13 @@ import (
 	"syscall"
 	"time"
 )
+
+// surfaceSweepBudget bounds the whole surface sweep. Cleanup is best-effort by
+// design, and an unbounded osascript can wedge for tens of seconds on a busy Apple
+// Event queue — the close itself has already succeeded by then, so the sweep gets a
+// deadline rather than the caller getting a stall.
+// (a var, not a const, only so the timeout path is testable in milliseconds.)
+var surfaceSweepBudget = 5 * time.Second
 
 // CloseReport is one target's outcome. Ok covers "closed" AND "already gone" —
 // a teardown that finds nothing to tear down succeeded (scripted sweeps depend
@@ -33,7 +41,8 @@ type CloseReport struct {
 // path and the lazy-prune backstop the rest.
 func ClosePeer(ch, alias string, force bool) CloseReport {
 	target := ch + "/" + alias
-	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), ch, alias, "meta.json"))
+	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
+	m, ok := ReadPeerMeta(metaPath)
 	if !ok {
 		return CloseReport{target, false, "no such peer"}
 	}
@@ -44,8 +53,12 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 	if pid == 0 {
 		// pre-fix registrations recorded ownerPid null (the comm-vs-version-string
 		// walk, see ownerFromPid) — derive the owner NOW from the armed listener's
-		// ancestry rather than false-succeeding on a live peer.
-		if m.ListenerPid > 0 && pidAlive(m.ListenerPid) {
+		// ancestry rather than false-succeeding on a live peer. The listener must
+		// still be THIS peer's follower (same argv-needle identity MetaListenerAlive
+		// uses): a recycled listenerPid that now belongs to a process under a
+		// DIFFERENT claude session would otherwise donate that session's pid to the
+		// TERM below, killing a window nobody asked to close.
+		if m.ListenerPid > 0 && pidAlive(m.ListenerPid) && argvContains(m.ListenerPid, metaInboxNeedle(metaPath)) {
 			pid, _ = ownerFromPid(m.ListenerPid)
 		}
 	}
@@ -112,24 +125,36 @@ func sweepSurface(tty string) string {
 	if tty == "" {
 		return "surface unknown (no tty)"
 	}
-	if out, err := exec.Command("ps", "-t", tty, "-o", "pid=").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+	ctx, cancel := context.WithTimeout(context.Background(), surfaceSweepBudget)
+	defer cancel()
+
+	// a NONZERO ps here is the normal case, not a failure: a dead tty makes ps exit 1
+	// ("No such file or directory"), which is precisely the leftover surface we sweep.
+	// Only a TIMEOUT is disqualifying, and it is caught once at the end rather than
+	// after each step — an expired context fails every later command immediately, so
+	// control always reaches the check without closing anything on the way.
+	out, err := exec.CommandContext(ctx, "ps", "-t", tty, "-o", "pid=").Output()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
 		return "tty busy — surface left alone"
 	}
 	dev := "/dev/" + tty
-	if out, err := exec.Command("tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
+	if out, err := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			f := strings.Fields(line)
 			if len(f) == 2 && f[1] == dev && validTmuxPaneID(f[0]) {
-				if exec.Command("tmux", "kill-pane", "-t", f[0]).Run() == nil {
+				if exec.CommandContext(ctx, "tmux", "kill-pane", "-t", f[0]).Run() == nil {
 					return "tmux pane closed"
 				}
 			}
 		}
 	}
-	if out, err := runOsascriptOut(closeSurfaceScript(dev)); err == nil {
+	if out, err := runOsascriptOutCtx(ctx, closeSurfaceScript(dev)); err == nil {
 		if strings.TrimSpace(out) == "closed" {
 			return "iTerm2 surface closed"
 		}
+	}
+	if ctx.Err() != nil {
+		return "surface sweep timed out — left alone"
 	}
 	return "surface already closed"
 }
