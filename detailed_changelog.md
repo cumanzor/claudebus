@@ -1,5 +1,56 @@
 # Changelog (detailed)
 
+## [2026-07-18 19:17:24 UTC] [Client/Forking] pane/tab fork fixes: tmux<3.1 retry, tmux stderr surfaced, launcher tmpfile reaped on dispatch failure
+
+[Attempt #1]
+
+Three fixes folded in immediately after `d52a264` landed, all in `058ea28`,
+all caught before review:
+
+1. **tmux<3.1 plain-split retry.** `forkTmuxPane`'s first split passes
+   `-l 70%` (percentage pane sizing) to give the child 70% width beside the
+   caller — but `-l <percentage>` needs tmux >= 3.1. On an older tmux the
+   sized split fails; rather than fail the whole fork over a sizing nicety,
+   `forkTmuxPane` now retries the SAME split with `preCount=0` (the plain,
+   unsized form `tmuxSplitArgv` builds for anything other than exactly
+   `preCount==1`) before giving up. The pane is the point; the 70/30 layout
+   is a nicety that degrades gracefully.
+2. **tmux stderr surfaced.** `exec.Command(...).Output()`'s error is just
+   `exit status 1` — it discards tmux's own stderr message (e.g. "no space
+   for new pane"). New `cmdStderr` helper type-asserts the error to
+   `*exec.ExitError` and appends its captured `Stderr` (trimmed) as a
+   `": <text>"` suffix, so `tmux split-window: <err>` now carries the actual
+   reason.
+3. **Launcher tmpfile reaped on dispatch failure.** `osaForkITerm` writes a
+   self-deleting launcher script to a tempfile, then hands it to iTerm2 via
+   osascript; the script deletes itself when it RUNS. Previously any
+   osascript failure after the tempfile was written leaked it (nothing ever
+   executed the self-delete). Now the dispatch call's error is captured
+   (`ferr`) and, if non-nil, `os.Remove(path)` reaps the tempfile explicitly.
+   This closes the leak for DISPATCH failures (osascript/pane/tab call
+   errors) — a failure during SETUP (the write/`Close`/`chmod` calls before
+   dispatch even runs) still leaks, since nothing has identified the file as
+   needing cleanup yet.
+
+Doc fold-in: command-reference.md quirk 36's launcher-leak claim ("A pre-exec
+osascript failure leaks...") was written against pre-058ea28 code and went
+stale the same day — reworded to describe the pre-dispatch/dispatch split
+precisely, with the `058ea28` anchor.
+
+[Files Changed]
+- internal/client/harness.go: `osaForkITerm` captures the dispatch result as
+  `ferr`, reaps the tempfile with `os.Remove(path)` when `ferr != nil`.
+- internal/client/pane.go: `forkTmuxPane` retries the split with
+  `preCount=0` when the first (sized) attempt fails and `preCount==1`; new
+  `cmdStderr` helper; `tmuxSplitArgv`'s doc comment updated for the retry's
+  `preCount=0` call.
+- docs/architecture/command-reference.md: quirk index item 36 reworded
+  (this entry's fold-in).
+
+[Testing Notes]
+Documenter-side: verified directly against the `058ea28` diff (`git show
+058ea28`), not transcribed from the review-verdict message unverified.
+
 ## [2026-07-18 18:38:09 UTC] [Client/Forking] pane: a fourth fork target that splits the caller's own surface, and a tab targeting fix
 
 [Attempt #1]
