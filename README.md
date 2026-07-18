@@ -92,14 +92,37 @@ Each participating session **joins a channel** and **arms a listener**:
 ## Install
 
 The client is a single static Go binary — no runtime dependencies (python3 is no
-longer needed). Build and install it as `cbus`:
+longer needed).
+
+**From a release (once one exists).** Bootstrap once, then update in place. The repo
+is private, so `gh` must be installed and authenticated; the repo slug is passed in
+(it is not baked into the script):
+
+```sh
+curl -fsSL <raw get.sh> | CBUS_REPO=owner/repo sh   # downloads cbus + installs the skills
+cbus selfupdate                                     # thereafter, update in place
+```
+
+`get.sh` writes `cbus` to `~/.local/bin` and runs `install-commands` + `install-roles`.
+`cbus selfupdate` downloads the latest release, verifies the download reports the tag
+it fetched before swapping the running binary, and refreshes the commands and roles.
+`cbus selfupdate --check` reports without applying. Set `CBUS_UPDATE_CHECK=1` for an
+opt-in once-a-day "update available" hint. Release binaries carry the repo slug baked
+in, so `CBUS_REPO` is only needed for a dev build. Release engineering (tags, `make
+release`, the quiesce sequence) lives in [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md).
+
+**From source.** Build and install as `cbus`, then install the embedded skill commands
+and role prompts:
 
 ```sh
 go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
   -o ~/.local/bin/cbus ./cmd/cbus
+cbus install-commands   # the /bus-* skills -> ~/.claude/commands
+cbus install-roles      # role prompts -> $CBUS_DIR/roles (the spawn-outside-repo fallback)
 ```
 
-Then place the slash commands (copy `commands/*.md` into `~/.claude/commands/`):
+Both install verbs are sha-guarded: an unchanged file is left alone, a locally-edited
+one is skipped (with a reason) unless `--force`. The commands placed are:
 
 | file | destination | purpose |
 |---|---|---|
