@@ -1,5 +1,144 @@
 # Changelog (detailed)
 
+## [2026-07-18 01:40:33 UTC] [Distribution] Bootstrap installer, release checklist, and install docs (M5) — distribution complete
+
+[Attempt #1]
+
+Fifth and final milestone of the distribution effort (cbus-7sg), approved
+with one binding finding (C7) and one class-C finding (c8). This entry
+covers 1a93755 together with C7's fold-in fix (28ffbff) and c8's fold-in
+fix (cd3d1a0), per the hold-for-verdict rule, and closes with the effort's
+ledger — this is the record's last write for this effort.
+
+1a93755 adds `get.sh`, the first-install bootstrap: it downloads the
+release binary via `gh` and installs the skill commands and role prompts
+it carries, as one `curl | sh` step. This is deliberately a third,
+distinct installer alongside the two that already existed and stay
+untouched: the retired `install.sh` (bash rollback) and the transitional
+`install-cbus-go.sh`. It reads the repo slug from `$CBUS_REPO` at
+bootstrap time rather than baking one into the committed script (the same
+never-commit-a-personal-slug posture M1's `repoSlug` plumbing already
+established), and refuses clearly, naming the missing variable, when it's
+unset.
+
+`docs/RELEASE-CHECKLIST.md` is the S10 deliverable this milestone was
+building toward: a ledger of every path in this effort that touches a
+real GitHub release and therefore cannot be exercised until one exists.
+It names the selfupdate round-trip (on both a Mac, exercising the
+same-filesystem rename, and the NUC, whose tmpfs-backed `/tmp` forces the
+cross-filesystem fallback leg), the bootstrap itself, the update-check
+poll, and `make release`, with the Carlos-gated sequence that has to run
+first (history scrub, private remote, tag, `make release`, then bootstrap
+each machine). The point of the file is that nothing gh-facing in this
+effort gets silently counted as tested when it wasn't — it is named,
+sequenced, and left for a human pass after the quiesce window.
+
+README and the cheat sheet learn the full release-install path in this
+same milestone: `get.sh` for first install, `selfupdate` thereafter, the
+sha-guarded `install-commands`/`install-roles` verbs, `$CBUS_REPO`, and
+`CBUS_UPDATE_CHECK`, with the checklist linked. Docs ship inside the
+milestone that introduces the feature, not trailing it in a later pass.
+
+C7, the binding finding: `get.sh --clobber` downloaded the new binary
+directly onto the path of the already-installed `cbus`. A run that died
+mid-transfer, or that fetched a truncated or otherwise bad asset, would
+leave a damaged binary in place of a working install — the exact failure
+class M3's `selfupdate` was designed from the ground up to make
+impossible. Fixed in 28ffbff: `get.sh` now fetches to a sibling temporary
+file on the same filesystem, verifies the temp file actually runs before
+trusting it, and only then atomically moves it into place — the identical
+never-damage-a-working-install order `selfupdate` already followed. The
+coder's own self-report is carried here rather than smoothed into a
+generic "fixed": this was its own M3 discipline (temp, verify, atomic
+move) not carried over to a sibling surface that needed the identical
+protection, and it was found and fixed inside the same review cycle
+rather than shipped and found later. Reviewer confirmed the fix live: it
+planted a genuinely working binary, ran a `get.sh` invocation engineered
+to fail partway through against it, and confirmed the original survived
+checksum-identical afterward, with its trap-cleaned temporary file gone —
+not merely that the code looked right, but that a real failure left the
+real install untouched.
+
+c8, folded in via cd3d1a0: the release-asset name format
+(`cbus-<os>-<arch>`) lived in a third, unguarded place — `get.sh`'s own
+`BIN="cbus-${OS}-${ARCH}"` — that the existing asset-name pin (M3's S5
+test, which already covered the Makefile and the Go client) did not
+reach. The pin now also greps `get.sh`, so a format change there fails
+the build the same way a Makefile or client-side change already did. The
+reviewer's own mutation of the format in `get.sh` confirmed the new pin
+actually catches it.
+
+Reviewer pass highlights for the record, beyond the two findings: the S10
+checklist (`docs/RELEASE-CHECKLIST.md`) was verified complete against its
+own pre-registered list of gh-facing paths, including a line for running
+the formations live smoke against the released binary rather than a
+manually built one. S8 (this repo's standing coverage/quality gate) came
+back clean across the entire commit range of the effort, not spot-checked
+on this milestone alone. Both of M3's `gh`-error remedies — the download
+path's original stderr pass-through and c6's fix to the release-view
+path — were live-probed again as part of this pass, not assumed still
+correct from M3's own review. Docs were checked to match behavior in both
+directions: every doc claim was checked against what the code actually
+does, and every behavior the code has was checked for a corresponding doc
+line, rather than only checking one direction.
+
+[Files Changed]
+- get.sh (new, 1a93755; hardened in 28ffbff): the bootstrap installer,
+  the temp-verify-atomic-move sequence.
+- docs/RELEASE-CHECKLIST.md (new, 1a93755): the S10 gh-facing-paths
+  ledger.
+- README.md, CHEATSHEET.md (1a93755): the release-install path
+  documented alongside the feature.
+- cmd/cbus/selfupdate_test.go (cd3d1a0): the asset-name pin extended to
+  grep get.sh as a third guarded location.
+
+[Possible Ripple Effects]
+- `get.sh` and `selfupdate` now share one hardening pattern
+  (temp+verify+atomic-move); a future change to that pattern in one
+  should be checked against the other rather than assumed independent.
+- The asset-name format is now guarded in three places by one test
+  family (Makefile, Go client, get.sh); a fourth future consumer of the
+  format would need the same treatment to stay covered.
+- `docs/RELEASE-CHECKLIST.md` is now the single source Carlos needs for
+  the post-quiesce manual pass; it should be kept in sync if the
+  gh-facing surface grows before that pass happens.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Reviewer live-planted a working binary and drove a failing get.sh run
+  against it: checksum-identical survival, trap-cleaned temp confirmed
+  gone.
+- Reviewer's own mutation of get.sh's asset-name format confirmed caught
+  by the extended pin.
+- S10 checklist completeness checked against its own pre-registration;
+  S8 clean across the full effort range; docs-match-behavior checked in
+  both directions.
+
+## Distribution effort (cbus-7sg) — effort ledger
+
+Closing this effort's record. All five milestones are reviewer-approved:
+M1 (ddf7527, release Makefile + repoSlug), M2 (03a5514, embed package +
+install verbs), M3 (10c6768, selfupdate, with c6's fold-in 08c577b), M4
+(1f813c5, opt-in update hint), M5 (1a93755, bootstrap installer +
+checklist + docs, with C7's fold-in 28ffbff and c8's fold-in cd3d1a0).
+13 local commits span the effort, ddf7527 through cd3d1a0. Nothing has
+been pushed — no remote exists for this repo yet; that, the tag, and the
+first `make release` all wait on Carlos's quiesce window. The full test
+suite ran green under `-race` throughout, milestone by milestone.
+
+Honest limit for the record, stated at wrap rather than discovered
+later: every path in this effort that talks to a real GitHub release —
+the selfupdate round-trip, the bootstrap, the update-check poll, `make
+release` itself — is unit-tested at the helper level and driven through
+injectable seams where one exists, but the true end-to-end round-trip
+against a real release has not run, because no release exists yet to run
+it against. `docs/RELEASE-CHECKLIST.md` names every one of those paths
+explicitly for a human pass after the quiesce window. This is declared
+here, not discovered by someone hitting it later.
+
+This is the documenter's last scheduled write for the distribution
+effort.
+
 ## [2026-07-18 01:34:13 UTC] [Distribution] Opt-in update-available hint (M4)
 
 [Attempt #1]
