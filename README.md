@@ -134,11 +134,12 @@ one is skipped (with a reason) unless `--force`. The commands placed are:
 
 Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's installed.
 
-> **Legacy installers** (kept until P3 homogenization deletes the bash artifacts —
-> see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)):
-> `./install.sh` installs the **retired bash client** over `~/.local/bin/cbus` —
-> running it is the rollback procedure, so don't run it casually. `./install-cbus-go.sh`
-> is the transitional side-by-side installer (builds the Go client as `cbus-go`).
+> **Legacy installers — retired.** `install.sh` (bash-client restore) and
+> `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
+> releases and `cbus selfupdate` shipped; recover them from git history if ever needed.
+> The retired bash client itself stays at `bin/cbus` until P3 homogenization deletes it
+> (see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)); rolling back
+> to it is now a manual copy over `~/.local/bin/cbus`.
 
 > **Forking:** `cbus branch` forks natively (iTerm2 window/tab via osascript, or
 > tmux) and relaunches through `ccs <profile>` when it detects a CCS config dir. The

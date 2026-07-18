@@ -12,8 +12,8 @@
 #   curl -fsSL .../get.sh | CBUS_REPO=owner/repo CBUS_INSTALL_DIR=/usr/local/bin sh
 #   curl -fsSL .../get.sh | CBUS_REPO=owner/repo CBUS_VERSION=v0.1.0 sh
 #
-# NOTE: distinct from install.sh (the retired bash client / rollback) and
-# install-cbus-go.sh (the transitional side-by-side installer) — neither is touched.
+# NOTE: the legacy install.sh (bash restore) and install-cbus-go.sh are retired
+# from the tree; recover them from git history if ever needed.
 
 set -eu
 
