@@ -376,7 +376,10 @@ func TestFormationBootstrapVerb(t *testing.T) {
 // without opening a terminal.
 type cmdRecForker struct{ specs []client.ForkSpec }
 
-func (f *cmdRecForker) Fork(s client.ForkSpec) error { f.specs = append(f.specs, s); return nil }
+func (f *cmdRecForker) Fork(s client.ForkSpec) (string, error) {
+	f.specs = append(f.specs, s)
+	return "", nil
+}
 
 // TestFormationApplyBriefThroughCLI is the reviewer's user's-door requirement for
 // D17: the brief must reach a rendered kickoff through runFormationApply itself, not

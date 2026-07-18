@@ -126,17 +126,26 @@ func hookSessionID(stdin io.Reader) string {
 // only places the spec in a new window/tab/pane. Modeling it as data makes it testable
 // without a real terminal.
 type ForkSpec struct {
-	Target string            // window | tab | tmux
+	Target string            // window | tab | tmux | pane
 	Argv   []string          // launch command, e.g. ["ccs","personal","--resume",sid,"--fork-session",prompt]
 	Env    map[string]string // env vars to replicate (PATH always; CLAUDE_CONFIG_DIR when set)
 	Dir    string            // working directory to replicate
+	Anchor string            // pane only: surface to split (iTerm2 session UUID / tmux pane id); "" = the caller
+	Split  string            // pane only: "auto"/"" (geometry heuristic), "right" (side-by-side), "down" (stacked)
+	// NoNormalize suppresses tmux's auto main-vertical reflow for THIS fork. Apply
+	// sets it on EVERY pane spec of a run whose file declares any right/down: the
+	// reflow is per-window, so one auto peer normalizing would stomp the layout a
+	// sibling peer declared (run-level fact, per-peer spec — hence the flag).
+	NoNormalize bool
 }
 
-// TerminalForker places a forked child session in a new terminal surface. The real
-// impl (OSAForker) drives iTerm2 via osascript and tmux via tmux; tests inject a fake
-// that captures the spec and asserts env replication without launching anything.
+// TerminalForker places a forked child session in a new terminal surface, returning
+// the created surface's id when the backend can name one (pane: iTerm2 session UUID
+// or tmux pane id; window/tab: "") — formation apply chains later splits off it. The
+// real impl (OSAForker) drives iTerm2 via osascript and tmux via tmux; tests inject a
+// fake that captures the spec and asserts env replication without launching anything.
 type TerminalForker interface {
-	Fork(ForkSpec) error
+	Fork(ForkSpec) (created string, err error)
 }
 
 // Branch is the one-shot parent side of /bus-branch: derive the channel, join
@@ -192,7 +201,7 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 	}
-	if err := forker.Fork(spec); err != nil {
+	if _, err := forker.Fork(spec); err != nil {
 		Unreserve(ch, childAlias)
 		return "", "", "", err
 	}
@@ -277,7 +286,7 @@ func forkReplicatedEnv() map[string]string {
 // runs a quoted one-liner (terminalCommand) — see each for the per-surface rationale.
 type OSAForker struct{}
 
-func (OSAForker) Fork(spec ForkSpec) error {
+func (OSAForker) Fork(spec ForkSpec) (string, error) {
 	switch spec.Target {
 	case "window", "tab":
 		return osaForkITerm(spec)
@@ -291,16 +300,16 @@ func (OSAForker) Fork(spec ForkSpec) error {
 		if iTermSessionUUID() != "" {
 			return osaForkITerm(spec)
 		}
-		return fmt.Errorf("pane needs tmux or iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab")
+		return "", fmt.Errorf("pane needs tmux or iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab")
 	case "tmux":
 		if os.Getenv("TMUX") == "" {
-			return fmt.Errorf("not inside a tmux session")
+			return "", fmt.Errorf("not inside a tmux session")
 		}
 		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
 		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
-		return exec.Command("tmux", "new-window", "-n", "cc-branch", terminalCommand(spec)).Run()
+		return "", exec.Command("tmux", "new-window", "-n", "cc-branch", terminalCommand(spec)).Run()
 	default:
-		return fmt.Errorf("unknown target %q", spec.Target)
+		return "", fmt.Errorf("unknown target %q", spec.Target)
 	}
 }
 
@@ -315,37 +324,38 @@ func (OSAForker) Fork(spec ForkSpec) error {
 // mktemp shim is quoting cruft" rationale was wrong. We write a 0700 self-deleting
 // script holding the real (POSIX-quoted, /bin/sh-dialect) env exports + cd + exec, and
 // hand iTerm2 only the BARE, whitespace-tokenized command `/bin/bash <tmpfile>`.
-func osaForkITerm(spec ForkSpec) error {
+func osaForkITerm(spec ForkSpec) (string, error) {
 	f, err := os.CreateTemp("", "cc-branch.*.sh")
 	if err != nil {
-		return err
+		return "", err
 	}
 	path := f.Name()
 	_, werr := io.WriteString(f, launcherScript(spec, path))
 	cerr := f.Close()
 	if werr != nil {
-		return werr
+		return "", werr
 	}
 	if cerr != nil {
-		return cerr
+		return "", cerr
 	}
 	if err := os.Chmod(path, 0o700); err != nil {
-		return err
+		return "", err
 	}
 	run := iterm2Command(path) // bare `/bin/bash <tmpfile>` — tokenizer-proof
+	var created string
 	var ferr error
 	switch spec.Target {
 	case "window":
 		ferr = runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
 	case "pane":
-		ferr = osaForkPane(run)
+		created, ferr = osaForkPane(spec, run)
 	default: // tab — targeted at the caller's own window when locatable (pane.go)
 		ferr = osaForkTab(run)
 	}
 	if ferr != nil {
 		os.Remove(path) // dispatch failed => the launcher never ran, so it never self-deletes
 	}
-	return ferr
+	return created, ferr
 }
 
 // iterm2Command is the bare command handed to iTerm2: `/bin/bash <tmpfile>` with NO

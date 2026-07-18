@@ -85,6 +85,7 @@ type FormationPeer struct {
 	Profile   string   `json:"profile"`
 	Cwd       string   `json:"cwd"`
 	Target    string   `json:"target"`
+	Split     string   `json:"split"` // pane layout: ""/auto (largest-area chain) | right | down; hand-maintained, save never records it
 	Machine   string   `json:"machine"`
 	Addresses []string `json:"addresses"` // reserved: v1 apply prints these as manual joins
 
@@ -130,6 +131,7 @@ func (p *FormationPeer) fields() []jsonField {
 		{"profile", p.Profile},
 		{"cwd", p.Cwd},
 		{"target", p.Target},
+		{"split", p.Split},
 		{"machine", p.Machine},
 		{"addresses", addrs},
 	}
@@ -554,6 +556,9 @@ func (p *FormationPeer) validate() error {
 		return err
 	}
 	if err := oneOf("target", p.Target, "window", "tab", "tmux", "pane"); err != nil {
+		return err
+	}
+	if err := oneOf("split", p.Split, "auto", "right", "down"); err != nil {
 		return err
 	}
 	return nil

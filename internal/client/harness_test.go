@@ -345,7 +345,7 @@ type fakeForker struct {
 	called bool
 }
 
-func (f *fakeForker) Fork(s ForkSpec) error { f.spec = s; f.called = true; return nil }
+func (f *fakeForker) Fork(s ForkSpec) (string, error) { f.spec = s; f.called = true; return "", nil }
 
 // TestBranchReplicatesEnvCCS: under a CCS instance config dir, Branch joins and forks
 // with `ccs <profile> --resume <sid> --fork-session <prompt>`, replicating PATH +
