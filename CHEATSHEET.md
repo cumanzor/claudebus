@@ -148,6 +148,23 @@ cbus formation rm myeffort                          # delete (starters: use git 
   with `--channel <effort>`, no setup required.
 - `/bus-formation <verb> ...` wraps all of the above as a slash command.
 
+## Install & update
+
+```sh
+curl -fsSL <raw get.sh> | CBUS_REPO=owner/repo sh   # first install (needs gh authed)
+cbus selfupdate                                     # update the binary in place
+cbus selfupdate --check                             # is there a newer release?
+cbus install-commands                               # (re)write the /bus-* skills
+cbus install-roles                                  # (re)write role prompts to $CBUS_DIR/roles
+export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'update available' hint
+```
+
+- `selfupdate` verifies the download reports the tag it fetched before swapping the
+  running binary, then refreshes commands + roles. `--force` reinstalls a dev build.
+- install verbs are sha-guarded: a locally-edited file is skipped (with a reason)
+  unless `--force`.
+- release binaries carry the repo slug; `CBUS_REPO` is only needed for a dev build.
+
 ## Under the hood (rarely needed)
 
 ```sh
