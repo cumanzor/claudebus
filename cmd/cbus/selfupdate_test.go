@@ -35,6 +35,15 @@ func TestAssetNameMatchesMakefile(t *testing.T) {
 	if !strings.Contains(string(mk), "$(BINARY)-$$os-$$arch") {
 		t.Error("Makefile no longer builds names as $(BINARY)-$os-$arch — pin is stale")
 	}
+	// the bootstrap script is the THIRD place the asset name lives (c8); pin it too so
+	// a format change cannot silently break get.sh's download.
+	gs, err := os.ReadFile("../../get.sh")
+	if err != nil {
+		t.Fatalf("read get.sh: %v", err)
+	}
+	if !strings.Contains(string(gs), `BIN="cbus-${OS}-${ARCH}"`) {
+		t.Error("get.sh no longer builds names as cbus-${OS}-${ARCH} — the asset-name pin is stale")
+	}
 }
 
 // fixtureBinary writes an executable that prints the given --version line, standing in
