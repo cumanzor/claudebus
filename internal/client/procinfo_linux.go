@@ -47,3 +47,20 @@ func procParent(pid int) (comm string, ppid int, err error) {
 	ppid, err = strconv.Atoi(rest[1])
 	return comm, ppid, err
 }
+
+// procZombie reports whether pid is a zombie: state field 'Z' in /proc/<pid>/stat
+// (the field right after the parenthesized comm). Unreadable => false, matching
+// the darwin impl's posture (a doubt is not a zombie).
+func procZombie(pid int) bool {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return false
+	}
+	s := string(b)
+	closeParen := strings.LastIndexByte(s, ')')
+	if closeParen < 0 {
+		return false
+	}
+	rest := strings.Fields(s[closeParen+1:])
+	return len(rest) > 0 && rest[0] == "Z"
+}
