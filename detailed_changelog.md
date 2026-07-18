@@ -1,5 +1,96 @@
 # Changelog (detailed)
 
+## [2026-07-18 03:50:50 UTC] [Docs] Repo docs/architecture refresh, M1: help text, overview, command-reference for spawn/formations/distribution (cbus-yle)
+
+[Attempt #1]
+
+First milestone of the docs-refresh effort (cbus-yle): the `docs/architecture/`
+tier had gone stale against everything shipped 2026-07-14 through 07-18 (spawn
+family, formations, birth-records, distribution, terminal coupling), same gap
+list the dev-docs tier (`~/dev-docs/projects/claudebus/`) was refreshed against
+in parallel. Three commits, two APPROVED outright, one CONDITIONAL, both
+findings folded into this entry per the hold-for-verdict rule rather than
+written separately.
+
+`17a3ab1` fixed `cmd/cbus/usage.go`'s `formation save` help text: it claimed
+model/role/origin/profile are all hand-maintained and the store records none —
+false since the birth-record landed, `save` captures origin/model from the
+launcher's stamp when recorded. Text-only, no behavior change.
+
+`f13ab49` rewrote `docs/architecture/overview.md`'s component map (dropped
+`install.sh`/`install-cbus-go.sh` as live installers, retired per `de07cbe`;
+added Formations/Roles/Distribution rows; CC-integration row now lists five
+slash commands and native spawn/branch forking) and added a new "Terminal
+coupling: the `TerminalForker` seam" subsection: `OSAForker`'s iTerm2
+window/tab path (with the self-deleting launcher-script workaround) versus
+the terminal-agnostic tmux path. Also reframed the prior-art pointer (dropped
+the now-inaccurate "sole surviving copy / scratchpads gone" framing) and swept
+residual install-drift and slash-command-count mentions. APPROVED, but carried
+one class-C riding F1's fix below (same false attribution, same fold commit).
+
+`2951c0a` rewrote `docs/architecture/command-reference.md` (§9 forking/spawning
+gains spawn + `--model`/`--name`/`--role`, native `TerminalForker`/`OSAForker`,
+drops the retired `cc-branch.sh` helper path; new §10 formations — the full
+verb set, the `cbus-formation/v1` envelope, birth-record capture, the
+list-vs-committed-templates discoverability seam; new §11 distribution —
+selfupdate, install-commands/install-roles, the `CBUS_UPDATE_CHECK=1` hint;
+renumbers historical/retired/deprecated/quirks sections by +2; reframes
+python3/CC_BRANCH as bash-era; fixes the STATUS banner for both retired
+installers; adds `/bus-spawn` and `/bus-formation` slash entries). CONDITIONAL
+on two findings:
+
+**F1 (binding, both f13ab49 and 2951c0a):** both files quoted "quoting cruft"
+as `port-map` §4.12's own words and claimed §4.12 currently mislabels the
+launcher shim that way. Both claims were false — §4.12 was corrected in place
+back at `dab6726` (2026-07-13), and "quoting cruft" never appeared in
+`port-map.md` at all; it's `harness.go`'s own paraphrase of the
+pre-correction item, not a quote of anything port-map ever said. Confirmed
+three independent ways before the fold: the reviewer's `git log -S`, the
+orchestrator's routing note, and the documenter's own direct grep across
+`port-map.md` — all three found zero hits. Fixed in `8703a82`: both mentions
+replaced with a plain cross-reference to port-map §4.12 recording the same
+rationale.
+
+**F2 (class-C, 2951c0a only):** quirk 36 in the consolidated registry sat
+under the new "(bash era)" binding header but mixed eras — the tmpfile leak
+on a pre-exec `osascript` failure is current Go behavior (`osaForkITerm`
+skips cleanup on that path), while only the stdout-errors half is genuinely
+bash-era (the Go client dies to stderr, `main.go:110`). Fixed in `83cfe64`
+by splitting the quirk into its two era-scoped halves.
+
+The dev-docs tier's parallel draft (index.md's "Shipped since cutover" section,
+architecture.md's new design-decision rows and terminal-coupling entries) was
+grounded in the same source facts throughout and never repeated either
+misattribution — no rework needed there once these folds confirmed.
+
+[Files Changed]
+- `cmd/cbus/usage.go` — formation-save help text corrected (`17a3ab1`).
+- `docs/architecture/overview.md` — component map, new terminal-coupling
+  subsection, prior-art reframe, residual cleanups (`f13ab49`); F1 fold
+  removes the misattributed quote (`8703a82`).
+- `docs/architecture/command-reference.md` — new §9-§11 content, section
+  renumbering (+2), STATUS banner fix, new slash entries (`2951c0a`); F1 fold
+  (`8703a82`) + F2 fold (`83cfe64`).
+
+[Possible Ripple Effects]
+- Section renumbering in `command-reference.md` (historical cc-branch.sh
+  §10→§13, retired installers §11→§14, deprecated §14→§15, quirks §15→§16)
+  shifts every in-repo cross-reference by two; anything outside this commit
+  range citing the old numbers is now off by two.
+- `docs/architecture/port-map.md` itself is untouched by this milestone — its
+  §4.12 correction (`dab6726`, 07-13) is what both fold commits point back to,
+  not something this pass changed.
+- dev-docs tier (cbus-yle, same effort) already finalized its mirroring
+  sections against these facts; no follow-up write needed there.
+
+[Testing Notes]
+- All five commits are docs/help-text only; `17a3ab1`'s own commit message
+  notes `formation_test.go`'s substring assertions are unaffected; no other
+  test surface touched.
+- F1 verified independently three times (reviewer git-log search, orchestrator
+  routing, documenter direct grep) before the fold landed — no reliance on a
+  single check.
+
 ## [2026-07-18 03:03:18 UTC] [Distribution] Legacy installers retired
 
 [Attempt #1]
