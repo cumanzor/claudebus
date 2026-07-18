@@ -5,9 +5,8 @@
 [Attempt #1]
 
 Third milestone of the distribution effort: 10c6768, approved with one
-class-C (non-blocking) finding, c6. This entry covers the milestone; c6's
-hash is pending and will be appended the same way c1-c5 were in the
-formations effort.
+class-C (non-blocking) finding, c6, closed in 08c577b. This entry covers
+the milestone and c6's fold-in together.
 
 `cbus selfupdate` downloads this platform's release asset via `gh`,
 verifies it, swaps the running binary in place, and refreshes the
@@ -83,6 +82,22 @@ necessity, since no release exists yet to round-trip against.
 unit-driven, because doing so would replace the running test binary
 itself; its component pieces (version-gate, asset naming, the rename/
 fallback logic) are each tested in isolation instead.
+
+c6, folded in via 08c577b: the latest-tag lookup (the release-view path,
+distinct from the download path) captured only `gh`'s stdout, so a failed
+lookup surfaced as a bare "exit status 1" with no explanation. The
+download path already passed `ExitError.Stderr` through correctly; the
+view path had not. Both now surface it, and the fix was live-verified
+against a genuinely nonexistent repository, returning "release not found"
+(or "could not resolve to a Repository") instead of a bare exit code. The
+mechanism worth naming: this was the error a private-repo user's most
+likely mistake (repo not yet public, or `gh` not authenticated against
+it) would actually produce, and until this fix it was exactly the one
+with no reason attached.
+
+[Files Changed, c6]
+- cmd/cbus/selfupdate.go (08c577b): stderr capture and pass-through on the
+  release-view path.
 
 M4 (update-check hint) is released in parallel and held for its own
 verdict.
