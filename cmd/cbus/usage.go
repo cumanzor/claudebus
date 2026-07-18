@@ -61,8 +61,8 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus formation save <name> [ch]  capture a channel's topology (channel
                                    defaults to this session's); refreshes an
                                    existing file, preserving hand-edited fields
-                                   (model/role/origin/profile are hand-maintained
-                                   — the store records none of them)
+                                   (origin/model come from the birth-record when
+                                   recorded; role/profile stay hand-maintained)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); join the
                                    channel first — peers are briefed to answer you.
