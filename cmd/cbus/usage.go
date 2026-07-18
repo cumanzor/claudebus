@@ -34,7 +34,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus bootstrap <channel> [parent] [child-alias]  print the canonical fork-child
                                    prompt (child-alias: the reserved-alias variant)
   cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
-                                   (target: window|tab|tmux; channel auto-derives
+                                   (target: window|tab|tmux|pane — pane splits
+                                   your own tmux pane or iTerm2 session, and
+                                   errors when in neither; channel auto-derives
                                    from the git repo name; arm the Monitor after;
                                    the child's alias is reserved at fork time and
                                    its session title matches it)
@@ -44,9 +46,10 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    (default: auto-pick — main, fork-N)
   cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
                                    a fork) that joins + arms the channel on its
-                                   own (target: window|tab|tmux; local channel
-                                   auto-derives — child alias reserved + titled
-                                   like branch; channel@host must be explicit)
+                                   own (target: window|tab|tmux|pane; local
+                                   channel auto-derives — child alias reserved +
+                                   titled like branch; channel@host must be
+                                   explicit)
        --model <m>                 launch the child on a specific model
        --name <n>                  fix the child's alias AND session title
                                    (remote: pre-assigns the relay alias; omitted
