@@ -6,11 +6,14 @@ during the side-by-side window. When bash `cbus` is fully retired — the P3
 "structural liveness" homogenization, *after* every machine has cut over — these
 delete in one commit. This is the inventory.
 
-**Status 2026-07-13:** cutover executed on the MBP and NUC — item 5's rename
-happened (the Go binary is installed as `cbus`). Items 1–4 stay until no bash-era
-follower can be armed anywhere (P3 homogenization); item 6's bash files remain
-in-repo as the rollback artifact (`install.sh` = the rollback procedure); item 7
-stays frozen. The logos/WSL node (`cbus-dc5`) starts on the port directly.
+**Status (updated 2026-07-17):** cutover executed on the MBP and NUC — item 5's
+rename happened (the Go binary is installed as `cbus`). Items 1–4 stay until no
+bash-era follower can be armed anywhere (P3 homogenization); item 6's bash files
+(`bin/cbus`, `bin/cc-branch.sh`) remain in-repo as the rollback artifact — the
+legacy installers `install.sh` / `install-cbus-go.sh` were **retired** (`de07cbe`),
+so rollback is now a manual copy of `bin/cbus` over `~/.local/bin/cbus` (or
+git-history recovery); item 7 stays frozen. The logos/WSL node (`cbus-dc5`) starts
+on the port directly.
 
 | # | What | Where | Why it exists | Deletes to |
 |---|------|-------|---------------|------------|
@@ -19,7 +22,7 @@ stays frozen. The logos/WSL node (`cbus-dc5`) starts on the port directly.
 | 3 | **D3 `lastActivity` mtime fallback** | `liveness.go` `unarmedGraceElapsed` | bash never wrote `lastActivity`; the grace clock falls back to the meta mtime for bash-written peers | `lastActivity`-only (the mtime read drops) |
 | 4 | **`CBUS_PYTHON` env line in `--help`** | `cmd/cbus/usage.go` | ported byte-for-byte from bash help; bash used python, cbus-go does not | drop the line (the last bash-ism in the help text) |
 | 5 | **Self-id Option X oddity** — `cbus-go --help` prints `cbus`, errors point at `cbus --help` | `usage.go`, `main.go` unknown-command | Option X: match bash's frozen strings so cutover is a pure binary swap | **no code change** — the binary is renamed `cbus` at cutover and the oddity is gone |
-| 6 | **bash artifacts** — `bin/cbus`, `bin/cc-branch.sh`, `install.sh` | repo root / `bin/` | the bash client + its fork helper + its installer | remove; `install-cbus-go.sh` (or a retargeted `install.sh`) is the sole installer, placing the Go binary as `cbus` |
+| 6 | **bash artifacts** — `bin/cbus`, `bin/cc-branch.sh` (the installers `install.sh` / `install-cbus-go.sh` were retired at `de07cbe`) | repo root / `bin/` | the bash client + its fork helper; distribution is now `get.sh` + `cbus selfupdate` | remove `bin/cbus` + `bin/cc-branch.sh` at P3 |
 | 7 | **A3/A6 frozen credential-store locations** | `internal/client/cred.go` | keychain / XDG paths frozen so no re-seed is needed across the bash↔Go boundary | may relax, but no reason to — keep frozen |
 
 **Grep-driven sweep:** shims #1–#4 carry a source token — `grep -rn 'COMPAT(P3' internal/ cmd/`
