@@ -59,9 +59,9 @@ func SpawnPromptAliased(address, alias string) string {
 // Returns the resolved address and the fixed child alias ("" = remote self-pick).
 func Spawn(target, address, model, name, role string, forker TerminalForker) (addr, childAlias string, err error) {
 	switch target {
-	case "window", "tab", "tmux":
+	case "window", "tab", "tmux", "pane":
 	default:
-		return "", "", fmt.Errorf("target must be window|tab|tmux")
+		return "", "", fmt.Errorf("target must be window|tab|tmux|pane")
 	}
 	var roleBody string
 	if role != "" {

@@ -322,7 +322,7 @@ func TestFormationValidate(t *testing.T) {
 		{"bad origin", func(f *Formation) { f.Peers[0].Origin = "spawned" }, "origin must be one of"},
 		{"empty origin ok", func(f *Formation) { f.Peers[0].Origin = "" }, ""},
 		{"bad onStale", func(f *Formation) { f.Peers[0].OnStale = "retry" }, "onStale must be one of"},
-		{"bad target", func(f *Formation) { f.Peers[0].Target = "pane" }, "target must be one of"},
+		{"bad target", func(f *Formation) { f.Peers[0].Target = "screen" }, "target must be one of"},
 		{"flag-shaped model", func(f *Formation) { f.Peers[0].Model = "--dangerous" }, "bad model"},
 		{"bad model chars", func(f *Formation) { f.Peers[0].Model = "opus 4" }, "bad model"},
 		{"no peers is fine", func(f *Formation) { f.Peers = nil; f.AnchorAlias = "" }, ""},

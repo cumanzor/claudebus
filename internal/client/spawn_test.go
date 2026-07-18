@@ -116,7 +116,7 @@ func TestSpawnRejectsAliasAndBadNames(t *testing.T) {
 	for _, tc := range []struct{ target, addr, wantErr string }{
 		{"window", "dev/main", "no alias"},
 		{"window", "dev@nuc/mbp", "no alias"},
-		{"pane", "dev", "target must be"},
+		{"split", "dev", "target must be"},
 		{"window", "a b", `bad channel "a b"`},
 		{"window", "dev@", `bad host ""`},
 		{"window", "@nuc", `bad channel ""`},
