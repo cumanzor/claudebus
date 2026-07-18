@@ -1028,7 +1028,7 @@ parent: <ch>/<alias>; child: <ch>/<child> (alias reserved + session titled — i
 arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>
 ```
 
-**Errors:** `target must be window|tab|tmux`, `bad model "<M>"`, `bad name
+**Errors:** `target must be window|tab|tmux|pane`, `bad model "<M>"`, `bad name
 "<N>"`, `bad channel "<ch>"`, `failed to join "<ch>"`, plus whatever `Join`
 returns.
 
@@ -1121,7 +1121,7 @@ spawned: fresh session -> <ch>@<host> (<target>); it joins and arms itself (pick
 verify: cbus list @<host>
 ```
 
-**Errors:** `target must be window|tab|tmux`, `bad model/name/channel/host/role
+**Errors:** `target must be window|tab|tmux|pane`, `bad model/name/channel/host/role
 "<x>"`, `role "<R>" not found (tried …)`, and the no-alias message above.
 
 ### `cbus bootstrap <channel> [parent-alias] [child-alias]`
@@ -1429,7 +1429,7 @@ Instructs the model to:
 7. **Report:** `cbus list <channel>`, then one line with this session's
    address, current listeners, and the `cbus send <channel>/<peer> "..."` form.
 
-### `/bus-branch [window|tab|tmux] [channel]`
+### `/bus-branch [window|tab|tmux|pane] [channel]`
 
 `allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion`
 
@@ -1463,7 +1463,7 @@ add steps to try to suppress it."**
 3. Report the new address in one line; note the user can match the TUI title
    with `/rename <new-alias>` — the TUI title cannot be set programmatically.
 
-### `/bus-spawn [window|tab|tmux] [channel|ch@host] [--model M] [--name N]`
+### `/bus-spawn [window|tab|tmux|pane] [channel|ch@host] [--model M] [--name N]`
 
 `allowed-tools: Bash(cbus:*), AskUserQuestion`
 
