@@ -102,6 +102,13 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
                                    meta); re-arm the Monitor on the new address
   cbus unregister <channel>/<alias>  force-remove any peer
+  cbus close <channel>/<alias> [...] [--force]   end peer sessions: SIGTERM the
+                                   owning process, then sweep its terminal surface
+                                   once the tty is dead (local only — a remote peer
+                                   is closed on its own host). Registrations are
+                                   left to the SessionEnd hook and prune; a peer
+                                   that is already gone reports so and succeeds.
+                                   --force escalates to SIGKILL after the grace
 
 remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 

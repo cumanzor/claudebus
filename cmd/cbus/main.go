@@ -79,6 +79,8 @@ func run(args []string) int {
 		return runUnregister(args[1:])
 	case "prune":
 		return runPrune(args[1:])
+	case "close":
+		return runClose(args[1:])
 
 	case "hook-exit": // SessionEnd hook: announce departure (never fails the session)
 		return runHookExit()
@@ -657,6 +659,74 @@ func runUnregister(args []string) int {
 	}
 	fmt.Printf("unregistered %s/%s\n", ch, al)
 	return 0
+}
+
+const closeUsage = "usage: cbus close <channel>/<alias> [...] [--force]"
+
+// runClose ends peer sessions. Every target produces exactly one stdout line in the
+// order given — refusals included, matching CloseReport's own design of reporting a
+// failure rather than returning an error — and the exit code is 1 if ANY target
+// failed. "already gone" is a success (Ok), so a scripted sweep can close the same
+// roster twice.
+//
+// A remote target is refused HERE, before anything is signalled: ClosePeer takes a
+// local (channel, alias) and cannot express a host, so an @host accepted this far
+// would silently tear down a same-named LOCAL peer instead.
+func runClose(args []string) int {
+	// close parses its own argv instead of splitVerbArgs: that scanner stops at the
+	// first positional (flags.go:60), which works for verbs taking a fixed leading
+	// target but would swallow a trailing --force as a TARGET here, where targets are
+	// variadic. Unknown flags are strict in either position — close has no free-text
+	// body to protect, so a typo'd --forse must die rather than be signalled at.
+	force := false
+	var targets []string
+	for _, a := range args {
+		switch {
+		case a == "--force":
+			force = true
+		case strings.HasPrefix(a, "-"):
+			return die("unknown flag %s", a)
+		default:
+			targets = append(targets, a)
+		}
+	}
+	if len(targets) == 0 {
+		return die("%s", closeUsage)
+	}
+	rc := 0
+	for _, t := range targets {
+		r, err := closeOne(t, force)
+		if err != nil {
+			fmt.Printf("%s: %v\n", t, err)
+			rc = 1
+			continue
+		}
+		fmt.Printf("%s: %s\n", r.Target, r.Detail)
+		if !r.Ok {
+			rc = 1
+		}
+	}
+	return rc
+}
+
+// closeOne resolves one target the way send does (bare alias searches this session's
+// own channels) and tears it down.
+func closeOne(target string, force bool) (client.CloseReport, error) {
+	if client.IsRemote(target) {
+		return client.CloseReport{}, fmt.Errorf("close is local-only — a remote peer must be closed on its own host")
+	}
+	ch, al, err := client.ParseLocal(target)
+	if err != nil {
+		return client.CloseReport{}, err
+	}
+	if ch == "" {
+		found, ok := client.FindPeerChannel(al)
+		if !ok {
+			return client.CloseReport{}, fmt.Errorf("no peer %q in your channels — use <channel>/<alias> (cbus list)", al)
+		}
+		ch = found
+	}
+	return client.ClosePeer(ch, al, force), nil
 }
 
 func runPrune(args []string) int {
