@@ -1084,7 +1084,7 @@ runtime store <path> and the repo's <path>/)`.
 
 The shipped starter `dev-trio` carries **four** peers despite the name —
 orchestrator, coder, reviewer, documenter — because the orchestrator anchor rides
-in the file; a reader of `dev-trio.json` alone would expect three.
+in the file; the name alone suggests three.
 
 **The envelope** (`Formation` / `FormationPeer`, formation.go:56-92). Top-level:
 `schema`, `name`, `channel`, `host` (nullable), `anchorAlias`, `savedAt`,
@@ -1129,9 +1129,10 @@ saved formation "myeffort" (<path>, new)
 
 Relaunches exactly the peers **missing** from the channel, sequentially and
 **anchor-first** (the orchestrator comes up before anyone who expects to reach
-it). The full plan is computed (`BuildPlan`) **before any peer launches**, so a
-mid-fleet refusal can never strand a half-launched formation — peer 3 refusing
-does not leave peers 1–2 already forked and orphaned. A real apply requires this
+it). The full plan — including every refusal — is decided (`BuildPlan`) and reported
+**before any peer launches**, so a refusal never interrupts the sequence midway:
+refused peers are reported while the launchable rest still come up, and a re-run
+reconciles. A real apply requires this
 session to already be on the channel — apply
 briefs peers to answer *it*, so it must be a peer first: `this session is not on
 "<ch>" — ... cbus join <ch> <alias>`.
