@@ -441,3 +441,65 @@ func TestSaveEndToEndBirth(t *testing.T) {
 		t.Errorf("a fresh-born peer with a transcript should resume, got %v (%s)", pp.Action, pp.Reason)
 	}
 }
+
+// TestSaveFormationPreservesSplitOnDisk: split is hand-maintained — save never
+// derives it from the roster, and a refresh must carry it through untouched. The
+// assertion is deliberately made against the FILE BYTES and a reload, not the
+// returned struct: capturePeer already leaves the field alone, so the way this
+// actually breaks is the value never reaching disk (a serializer that forgets the
+// key), which a struct-only check would sail straight past.
+func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "roles", "coder", "sid-coder")
+	plantPeer(t, "roles", "orchestrator", "sid-orch")
+
+	f, _, err := SaveFormation("roles", "roles")
+	if err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	for i := range f.Peers {
+		if f.Peers[i].Alias == "coder" {
+			f.Peers[i].Target = "pane"
+			f.Peers[i].Split = "right"
+		}
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// a later save refreshes live facts; the hand-set direction must ride through
+	plantPeer(t, "roles", "coder", "sid-coder-v2")
+	if _, _, err := SaveFormation("roles", "roles"); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(dir, formationsDir, "roles.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"split": "right"`) {
+		t.Errorf("the file lost the hand-set split:\n%s", b)
+	}
+	reloaded, err := LoadFormation("roles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reloaded.Peers {
+		if p.Alias != "coder" {
+			continue
+		}
+		if p.Split != "right" {
+			t.Errorf("reloaded split = %q, want right", p.Split)
+		}
+		if p.SessionID != "sid-coder-v2" {
+			t.Errorf("the live fact should still refresh alongside it, sid = %q", p.SessionID)
+		}
+	}
+	// a formation written back out must still validate — a preserved value that the
+	// envelope would reject on the next apply is not actually preserved
+	if err := reloaded.Validate(); err != nil {
+		t.Errorf("round-tripped formation no longer validates: %v", err)
+	}
+}

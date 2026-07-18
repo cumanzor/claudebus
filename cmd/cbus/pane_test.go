@@ -86,3 +86,23 @@ func TestPaneIsNotAVerb(t *testing.T) {
 		t.Errorf("stderr = %q, want the unknown-command form", out)
 	}
 }
+
+// TestUsageAdvertisesSplitField: the split direction is envelope-only — there is no
+// flag that reveals it — so the help is the ONLY place a user can learn it exists.
+// An undocumented envelope field is unreachable surface.
+func TestUsageAdvertisesSplitField(t *testing.T) {
+	out := captureStdout(t, func() { run([]string{"--help"}) })
+	if !strings.Contains(out, `"split"`) {
+		t.Errorf("help must name the split field:\n%s", out)
+	}
+	for _, want := range []string{"right", "down"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help must list the %q direction:\n%s", want, out)
+		}
+	}
+	// the run-level consequence is the surprising half: one peer's direction changes
+	// how every pane in the run is laid out
+	if !strings.Contains(out, "whole run") {
+		t.Errorf("help should say a declared direction applies run-wide:\n%s", out)
+	}
+}

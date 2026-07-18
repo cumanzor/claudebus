@@ -70,7 +70,13 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    host (sequential, anchor first); join the
                                    channel first — peers are briefed to answer you.
                                    name resolves runtime-first, then the repo's
-                                   formations/ starter templates
+                                   formations/ starter templates.
+                                   pane peers split the LARGEST pane each time
+                                   (applier + panes made this run), so a run tiles
+                                   instead of shaving the applier. a peer's
+                                   "split": right|down forces its divider; any
+                                   declared direction turns off tmux's reflow for
+                                   the whole run, so the file's layout stands
        --channel ch                target ch for this run (a template serves any
                                    effort; the envelope file is not changed)
        --dry-run                   print the plan, launch nothing
