@@ -3,8 +3,10 @@
 > **CUTOVER EXECUTED 2026-07-13.** The per-machine swap in "What changes at cutover"
 > was performed on the MBP and the NUC — `~/.local/bin/cbus` on both is now the Go
 > binary (verify: `cbus --version`). This package is preserved as the decision
-> record; the rollback procedure below remains valid until P3 deletes the bash
-> artifacts.
+> record. **Update (2026-07-17):** the `install.sh` / `install-cbus-go.sh` installers
+> were retired (`de07cbe`); rollback is now a manual copy of `bin/cbus` (still in-repo
+> until P3), not `./install.sh` — see the corrected procedure below. Installer
+> references elsewhere in this package describe the P2.6 readiness state as recorded.
 
 Prepared at P2.6 (cutover **readiness**; zero cutover executed). This is the summary
 that decided the per-machine binary swap. It was prepared pre-cutover; the cutover has
@@ -83,7 +85,9 @@ then **NUC** (re-run its installer — copy-install does not auto-update), then
 
 ## Rollback procedure (per machine)
 
-1. Reinstall bash `cbus`: `./install.sh` (restores `bin/cbus` → `~/.local/bin/cbus`).
+1. Restore bash `cbus`: copy `bin/cbus` over `~/.local/bin/cbus` (`install.sh` was
+   retired at `de07cbe`; recover it from git history if the copy alone is not enough).
+   The bash client stays in-repo at `bin/cbus` until P3.
 2. No state action needed — bash reads and operates on all cbus-go-written state
    (proven; the D3 `lastActivity` field is ignored by bash's tolerant reader).
 3. The SessionEnd hook `cbus hook-exit` again resolves to bash. Done.
