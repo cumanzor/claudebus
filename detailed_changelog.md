@@ -1,5 +1,98 @@
 # Changelog (detailed)
 
+## [2026-07-18 18:35:17 UTC] [Core] New verb: cbus hook-compact <pre|post> — compaction notices
+
+[Attempt #1]
+
+Mirrors `hook-exit`'s SessionEnd wiring for Claude Code's PreCompact/PostCompact
+hooks: a session about to lose (or having just lost) its in-context state now
+broadcasts a `compact-pre`/`compact-post` `kind=presence` event to every LOCAL
+channel it's joined to, so an orchestrating peer can force a checkpoint before
+the context goes rather than discovering it after the fact.
+
+**Mechanism.** `runHookCompact` (cmd/cbus/main.go) reads the phase (`pre`/`post`)
+off argv and hands stdin to `HookCompact` (internal/client/harness.go), which
+extracts `session_id` (stdin JSON first, env fallback second, silent no-op
+third — same as `hook-exit`), resolves this session's registrations, and
+broadcasts one presence event per joined channel via the existing
+`BroadcastPresence` (skip=self, same convention as join/leave/rename).
+Registration itself is untouched — unlike `hook-exit`, a compacting session is
+still here. Text (`compactText`) is phase + an allowlisted `trigger`
+(`manual`/`auto` only; anything else drops the parenthetical rather than
+guessing) + a fixed tail: "about to compact (auto), in-context state will be
+lost" / "compacted (auto), in-context state was reset". `PostCompact`'s
+`compact_summary` field is deliberately never read — unbounded conversation
+content that would otherwise land in every peer's inbox.
+
+**Always exits 0, corrected rationale.** The verb never writes stdout (an
+exit-0 hook's stdout is parsed as JSON) and always exits 0 — a `PreCompact`
+hook exiting 2 blocks compaction. Trailing args past `phase` are ignored
+rather than fatal; the first-draft rationale for that (dodging rc-2 blocking)
+was wrong and caught in review — a strict no-extra-args `die` would exit 1,
+which doesn't block compaction either. The honest reason: a hook must never
+fail, and the failure would show up as stderr noise that PostCompact surfaces
+to the user in the transcript.
+
+**PostCompact vs SessionStart(source=compact).** Both are documented,
+independent post-compaction signals in the Claude Code hooks reference.
+`hook-compact post` is wired to the dedicated `PostCompact` hook because it
+fires in the *completing* context and needs no matcher, keeping the
+`PreCompact`+`PostCompact` wiring symmetric — the `SessionStart(source=compact)`
+alternative was considered and passed over for that reason, not because it
+doesn't exist.
+
+**Local only (D-zig-1).** The frozen `POST /send` relay contract carries no
+`kind` field and the relay rebuilds stored lines from `{from,text,to,ts}`, so a
+relayed notice would arrive as plain chat rather than presence. The honest fix
+is a wire change plus a relay redeploy — deferred, not faked, and there's no
+network call available inside the compaction window regardless.
+
+**Reviewer verdict:** APPROVED — single commit `19dd20b`, one review finding
+(C1) scoped to tests only, no impact on documented behavior.
+
+[Files Changed]
+- `cmd/cbus/main.go` — dispatch case + `runHookCompact` (19dd20b)
+- `cmd/cbus/update_check.go` — `hook-compact` added to the update-check skip
+  list alongside `hook-exit` (hook targets stay quiet) (19dd20b)
+- `internal/client/harness.go` — `HookCompact`, `compactText`, shared
+  `hookInput`/`readHookInput` (refactored out of the pre-existing
+  `hookSessionID`) (19dd20b)
+- `cmd/cbus/hook_compact_test.go` (new) / `internal/client/harness_test.go` —
+  per-channel broadcast, both phases, trigger allowlist, env fallback,
+  no-session no-op, bad phase, remote markers untouched, plus a users-door
+  test that builds the real binary and drives it with the documented hook
+  payloads (19dd20b)
+- `docs/architecture/protocol.md` — `compact-pre`/`compact-post` added to the
+  presence event enum + event table; new "Compaction presence (D-zig-1,
+  local-only)" bullet
+- `docs/architecture/command-reference.md` — new §7 subsection (`cbus
+  hook-compact <pre|post>`, mermaid sequence diagram, wiring JSON), exit-code
+  table, stdin table, and quirk index (#11) updated
+- `README.md`, `CHEATSHEET.md` — one-line verb mentions + presence paragraph
+  extended
+- `~/dev-docs/projects/claudebus/architecture.md` (direct-edit) — new
+  "Compaction" data-flow subsection + 3 design-decision rows
+- `~/dev-docs/projects/claudebus/index.md` (direct-edit) — new paragraph in
+  "Shipped since cutover"
+
+[Possible Ripple Effects]
+- None to existing verbs — new dispatch case only; the one shared code path
+  touched, `hookSessionID`, was refactored to reuse the new `readHookInput`
+  behavior-preservingly, covered by the existing `hook-exit` tests too.
+- Settings.json wiring is manual and explicitly NOT part of this effort — no
+  PreCompact/PostCompact hooks are live on either machine until Carlos adds
+  them by hand (shared across every CCS profile via `~/.ccs/shared`).
+- Remote/relay compaction notices remain unimplemented (D-zig-1) — an
+  orchestrator on a different machine gets no signal until the wire change
+  plus relay redeploy this entry defers.
+
+[Testing Notes]
+- Verified against the actual diff (`git show 19dd20b`), not the commit
+  message alone, before writing this entry.
+- Reviewer approved the single commit; the one test-only finding (C1) was
+  confirmed with the orchestrator to carry no doc-content implications before
+  omitting further detail here.
+
 ## [2026-07-18 04:12:19 UTC] [Docs] Docs-refresh effort complete: dev-docs→repo promotion + F5 + ledger (cbus-yle)
 
 [Attempt #1]
