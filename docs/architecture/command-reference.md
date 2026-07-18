@@ -1697,7 +1697,7 @@ client; they remain for the homogenization/port record.
     can still leak the launcher tmpfile — a DISPATCH failure (the
     `osascript`/pane/tab call itself erroring) is reaped: `osaForkITerm`
     `os.Remove`s the tmpfile whenever dispatch returns an error, since the
-    launcher never got a chance to self-delete (`058ea28`). **(bash era)**
+    launcher never got a chance to self-delete (`ff7ceef`). **(bash era)**
     the retired helper printed its failures to stdout; the Go client dies to
     stderr (main.go:110).
 37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
