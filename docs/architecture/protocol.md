@@ -665,10 +665,9 @@ Properties to preserve or consciously rethink:
   frozen `POST /send` contract (§3.3) carries no `kind` field and the relay
   rebuilds stored lines from `{from,text,to,ts}`, so a relayed notice would
   arrive as plain chat, not presence; the honest fix is a wire change plus a
-  relay redeploy, deferred rather than faked (there is also no network call
-  available inside the compaction window). The `trigger` text is rendered from
-  an **allowlist** (`manual`/`auto` only) rather than passed through, so an
-  arbitrary hook payload can't write text into every peer's inbox, and an
+  relay redeploy, deferred rather than faked. The `trigger` text is rendered
+  from an **allowlist** (`manual`/`auto` only) rather than passed through, so
+  an arbitrary hook payload can't write text into every peer's inbox, and an
   absent/unrecognized trigger just drops the parenthetical. PostCompact's
   `compact_summary` (unbounded conversation content) is never carried.
 - **Relay presence (cbus-ijx.5)**: the relay now renders `kind` and GENERATES
