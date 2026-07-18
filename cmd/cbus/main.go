@@ -31,6 +31,13 @@ func run(args []string) int {
 	if len(args) > 0 {
 		verb = args[0]
 	}
+	// the hidden detached poll runs before anything else and never triggers itself.
+	if verb == updateCheckSubcmd {
+		return cmdUpdateCheckRefresh()
+	}
+	// opt-in update hint (CBUS_UPDATE_CHECK=1): a best-effort stderr note + a detached
+	// poll, both silent on failure — it must never break the command it precedes.
+	maybeStartUpdateCheck(verb, hasJSONFlag(args))
 	switch verb {
 	case "", "-h", "--help":
 		fmt.Print(usage)
