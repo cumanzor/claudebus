@@ -1,5 +1,94 @@
 # Changelog (detailed)
 
+## [2026-07-18 04:12:19 UTC] [Docs] Docs-refresh effort complete: dev-docs→repo promotion + F5 + ledger (cbus-yle)
+
+[Attempt #1]
+
+Closing entry for the docs-refresh effort (cbus-yle). Covers the promotion
+assessment, its resulting port commit + fold, and the effort's full ledger.
+
+**Promotion assessment.** With both tiers refreshed (M1-M3), the question was
+what dev-docs content (`~/dev-docs/projects/claudebus/`, direct-edit) had no
+repo-tier counterpart and deserved a repo home for a human reader. The
+standing prior was that the 11 design-decision WHY rows added to dev-docs
+architecture.md were the strongest candidates — repo docs tend to state
+decisions but not why. Checked each of the 11 individually against
+command-reference.md/overview.md/protocol.md by grep rather than trusting the
+prior's count: 7 were already duplicated (M1-M3 had independently documented
+the same rationale — OSAForker/tokenizer, birth-record anti-ghost-orchestrator,
+formations runtime-shadows-template, `--role` spawn-only, flag-shape screening,
+selfupdate verify-before-swap, sha-guard install), leaving 3 genuine gaps: the
+`dev-trio` starter's 4-peer count (stated nowhere in the repo tier), formations'
+plan-before-launch rationale (mechanism described, rationale not), and
+install.sh's deletion-as-policy rationale (every commit says WHAT, none says
+WHY delete rather than deprecate). A 4th candidate — a post-cutover commit
+timeline — was ruled SKIP: changelogs are the repo's audit trail; the existing
+frozen §9 timeline in overview.md is precedent for the format, not a mandate
+to extend it. Verdict: the prior was right in kind (WHY rows are where repo
+docs under-explain) but wrong in number — most WHYs had already been ported by
+the refresh's own M1-M3 work, not left for a separate promotion pass.
+
+**Port commit `e2c7832`** wrote the 3 ruled whys into `command-reference.md`
+§10/§14. **F5, on the formations plan-before-launch rationale**: the
+originating claim — first written into dev-docs architecture.md by the
+documenter, faithfully paraphrased into the orchestrator's routing message,
+transcribed by the coder into the port commit — read "a refusal can't strand
+a half-launched fleet," implying a refusal halts the launch sequence. Wrong:
+`formation_apply.go:139-141` shows `ActionRefuse` peers are recorded and the
+loop `continue`s — launchable siblings still fork regardless of an earlier
+refusal; only an all-refused/empty-launchable plan aborts pre-launch (D13,
+`:124-135`, so a silent "converged 0 peers" is never reported as success). The
+reviewer caught this by reading the actual code path rather than trusting the
+chain of paraphrases, fixed it in `8779444` (the real guarantee: every
+refusal is decided and reported before any launch, so it never interrupts the
+sequence midway — refused peers are skipped, the rest come up, a re-run
+reconciles), reworded the `dev-trio` note per n7 ("the name alone suggests
+three"), and the coder adopted a new standing rule — verify a mechanism claim
+against the actual code path before writing it, especially a claim received
+as a paraphrase of a paraphrase — which the reviewer confirmed matches its
+own rule 9. The documenter independently found and fixed the same wrong
+framing at its origin: dev-docs architecture.md's design-decision row and
+index.md's formations paragraph both carried the "strand a half-launched
+fleet" claim and both are corrected in this same pass, so the error doesn't
+survive anywhere it was written.
+
+**dev-docs §4.12 sync-back**: ruled in separately — port-map.md's own
+tokenizer-rationale wording ("AppleScript `do script`") was one class of
+imprecision behind D30's repo-side fix (33b4565: the `command` parameter of
+`create window`/`create tab` specifically, not `do script` generally).
+Tightened both mentions (the primitive-inventory row, the Preserve-forever
+entry) to match.
+
+**Effort ledger, cbus-yle complete.** 14 repo commits across M1-M3 + the
+promotion pass: `17a3ab1 f13ab49 2951c0a 8703a82 83cfe64` (M1) ·
+`f628283 de59683 ad45c78 33b4565 bdc2249` (M2) · `be50b2f e4a2849` (M3) ·
+`e2c7832 8779444` (promotion + F5). Four dev-docs files refreshed direct-edit
+(index.md, architecture.md, behavior-spec.md, port-map.md) — no hashes, per
+tier. Findings F1-F5 all confirmed; micro-notes n1-n7 on record. Both doc
+tiers now current against everything shipped 2026-07-14→07-18: spawn family,
+formations, birth-records, distribution, terminal coupling, retired
+installers.
+
+[Files Changed]
+- `docs/architecture/command-reference.md` — 3 promoted whys (`e2c7832`); F5
+  correction + n7 reword (`8779444`).
+- `~/dev-docs/projects/claudebus/port-map.md` (direct-edit) — §4.12 tokenizer
+  wording tightened, 2 mentions.
+- `~/dev-docs/projects/claudebus/architecture.md` (direct-edit) — F5's wrong
+  framing corrected at its origin (design-decision row).
+- `~/dev-docs/projects/claudebus/index.md` (direct-edit) — same F5 correction
+  in the formations paragraph.
+
+[Possible Ripple Effects]
+- None expected — this closes the effort. Both tiers are now the source of
+  truth for the 2026-07-14→07-18 surface; a future feature should update both
+  as it ships rather than accumulate another multi-day gap.
+
+[Testing Notes]
+- All docs-only; no code or test surface touched by this entry's commits.
+- F5 verified independently against `formation_apply.go:124-141` before
+  writing this entry, not taken from the fold commit message alone.
+
 ## [2026-07-18 03:58:02 UTC] [Docs] Repo docs/architecture refresh, M2: protocol, compat-deletion-plan, cutover-package, port-map (cbus-yle)
 
 [Attempt #1]
