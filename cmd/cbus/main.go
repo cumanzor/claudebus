@@ -87,6 +87,8 @@ func run(args []string) int {
 		return runInstallCommands(args[1:])
 	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
 		return runInstallRoles(args[1:])
+	case "selfupdate": // cbus-7sg: gh-driven in-place update of the running binary
+		return runSelfupdate(args[1:])
 
 	default:
 		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
