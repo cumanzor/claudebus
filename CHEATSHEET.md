@@ -11,7 +11,7 @@ the reserved machine-wide channel for an orchestrator session.
 | Put current session on its repo channel | `/bus-join` |
 | Join a specific channel / alias | `/bus-join <channel> [alias]` |
 | Join the machine-wide bus | `/bus-join global` |
-| Fork + put both sides on the repo channel | `/bus-branch window` (or `tab` \| `tmux`) |
+| Fork + put both sides on the repo channel | `/bus-branch window` (or `tab` \| `tmux` \| `pane`) |
 | Fork onto a named channel | `/bus-branch window <channel>` |
 | N sessions | join the same channel from each — any-to-any |
 
@@ -23,6 +23,7 @@ dead peers first, so numbers don't grow forever.
 ```sh
 cbus branch tab                              # fork this session, same channel
 cbus branch tab --model opus --name coder    # fork, pinned model + alias
+cbus branch pane                             # fork into a tmux/iTerm2 split beside this session
 cbus spawn tab formations --role documenter  # fresh session, role prompt on first turn
 ```
 
