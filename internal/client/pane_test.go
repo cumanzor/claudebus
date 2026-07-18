@@ -49,7 +49,6 @@ func TestFindSessionScriptByteExact(t *testing.T) {
 		"      repeat with s in sessions of t\n" +
 		"        if id of s is \"UU-ID\" then\n" +
 		"          BODY\n" +
-		"          return \"ok\"\n" +
 		"        end if\n" +
 		"      end repeat\n" +
 		"    end repeat\n" +
@@ -66,18 +65,18 @@ func TestFindSessionScriptByteExact(t *testing.T) {
 // hands iTerm2 the launch command through the ATOMIC `split ... command` verb —
 // there is no separate write-text injection step that a racing shell could beat.
 func TestPaneSplitScriptByteExact(t *testing.T) {
-	got := paneSplitScript("UU-ID", "/bin/bash /tmp/cc-branch.1.sh")
+	got := paneSplitScript("UU-ID", "/bin/bash /tmp/cc-branch.1.sh", "")
 	want := "tell application \"iTerm2\"\n" +
 		"  repeat with w in windows\n" +
 		"    repeat with t in tabs of w\n" +
 		"      repeat with s in sessions of t\n" +
 		"        if id of s is \"UU-ID\" then\n" +
 		"          if (columns of s) > (rows of s) * 2.2 then\n" +
-		"            tell s to split vertically with default profile command \"/bin/bash /tmp/cc-branch.1.sh\"\n" +
+		"            tell s to set newS to (split vertically with default profile command \"/bin/bash /tmp/cc-branch.1.sh\")\n" +
 		"          else\n" +
-		"            tell s to split horizontally with default profile command \"/bin/bash /tmp/cc-branch.1.sh\"\n" +
+		"            tell s to set newS to (split horizontally with default profile command \"/bin/bash /tmp/cc-branch.1.sh\")\n" +
 		"          end if\n" +
-		"          return \"ok\"\n" +
+		"          return id of newS\n" +
 		"        end if\n" +
 		"      end repeat\n" +
 		"    end repeat\n" +
@@ -94,7 +93,7 @@ func TestPaneSplitScriptByteExact(t *testing.T) {
 // wrong-window bug this target exists to avoid, so the absence of a fallback is a
 // feature and is pinned as one.
 func TestPaneSplitScriptNeverFallsBack(t *testing.T) {
-	got := paneSplitScript("UU-ID", "RUN")
+	got := paneSplitScript("UU-ID", "RUN", "")
 	if strings.Contains(got, "current window") || strings.Contains(got, "current session") {
 		t.Errorf("pane must never fall back to the frontmost surface:\n%s", got)
 	}
@@ -152,7 +151,7 @@ func TestTabFallbackIsPositionedAfterTheLoops(t *testing.T) {
 func TestPaneScriptsEscapeTheirArguments(t *testing.T) {
 	nasty := `a"b\c`
 	for name, got := range map[string]string{
-		"paneSplitScript":         paneSplitScript(nasty, nasty),
+		"paneSplitScript":         paneSplitScript(nasty, nasty, ""),
 		"tabInOwningWindowScript": tabInOwningWindowScript(nasty, nasty),
 	} {
 		if strings.Contains(got, `"a"b`) {
@@ -175,14 +174,14 @@ func TestTmuxSplitArgv(t *testing.T) {
 	const cmd = "/bin/bash -c 'cd /w && exec claude'"
 	base := []string{"split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "%3"}
 
-	sized := tmuxSplitArgv("%3", cmd, 1)
+	sized := tmuxSplitArgv("%3", cmd, 1, "")
 	if want := append(append([]string{}, base...), "-h", "-l", "70%", cmd); !slices.Equal(sized, want) {
 		t.Fatalf("preCount=1 argv:\n got  %v\n want %v", sized, want)
 	}
 	// 0 is the tmux<3.1 retry (percentage sizing unsupported); 2+ is a window that
 	// already has teammates and gets normalized by select-layout instead.
 	for _, preCount := range []int{0, 2, 3, 9} {
-		got := tmuxSplitArgv("%3", cmd, preCount)
+		got := tmuxSplitArgv("%3", cmd, preCount, "")
 		if want := append(append([]string{}, base...), cmd); !slices.Equal(got, want) {
 			t.Fatalf("preCount=%d argv:\n got  %v\n want %v", preCount, got, want)
 		}
@@ -195,7 +194,7 @@ func TestTmuxSplitArgv(t *testing.T) {
 func TestTmuxSplitArgvCommandIsLast(t *testing.T) {
 	const cmd = "/bin/bash -c 'exec claude'"
 	for _, preCount := range []int{0, 1, 2} {
-		got := tmuxSplitArgv("%7", cmd, preCount)
+		got := tmuxSplitArgv("%7", cmd, preCount, "")
 		if got[len(got)-1] != cmd {
 			t.Errorf("preCount=%d: command must be the last operand, got %v", preCount, got)
 		}
@@ -216,7 +215,7 @@ func TestTmuxSplitArgvSharesTheShellBuilder(t *testing.T) {
 		Env:    map[string]string{"PATH": "/a b"},
 		Dir:    "/work dir",
 	}
-	argv := tmuxSplitArgv("%1", terminalCommand(spec), 2)
+	argv := tmuxSplitArgv("%1", terminalCommand(spec), 2, "")
 	got := argv[len(argv)-1]
 	if !strings.HasPrefix(got, "/bin/bash -c '") {
 		t.Fatalf("the tmux leg must be a POSIX-quoted -c one-liner, got %s", got)
@@ -343,7 +342,7 @@ func TestValidatePeerAcceptsPaneTarget(t *testing.T) {
 func TestOSAForkPaneRefusesWithoutASurface(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("ITERM_SESSION_ID", "")
-	err := OSAForker{}.Fork(ForkSpec{Target: "pane", Argv: []string{"claude"}, Dir: "/tmp"})
+	_, err := OSAForker{}.Fork(ForkSpec{Target: "pane", Argv: []string{"claude"}, Dir: "/tmp"})
 	if err == nil {
 		t.Fatal("pane with no terminal surface must error")
 	}
@@ -356,9 +355,9 @@ func TestOSAForkPaneRefusesWithoutASurface(t *testing.T) {
 
 type errForker struct{ called bool }
 
-func (f *errForker) Fork(ForkSpec) error {
+func (f *errForker) Fork(ForkSpec) (string, error) {
 	f.called = true
-	return errors.New("pane needs tmux or iTerm2")
+	return "", errors.New("pane needs tmux or iTerm2")
 }
 
 // TestFailedPaneForkLeavesNoReservation: the no-surface refusal surfaces through

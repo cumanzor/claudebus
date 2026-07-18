@@ -134,6 +134,12 @@ func applyWorld(f *Formation, opts ApplyOptions, forker TerminalForker, world *P
 		return rep, fmt.Errorf("nothing to launch: no peer in %q is startable on this host — see the reasons above", f.Name)
 	}
 
+	// Run-level layout facts: a file declaring ANY right/down suppresses the tmux
+	// normalize for every pane fork this run (see ForkSpec.NoNormalize), and each
+	// pane fork anchors on the largest-area pane among the applier's own surface
+	// and the panes created so far (ties newest-first, so the applier stays big).
+	declared := fileDeclaresSplit(f)
+	var created []string
 	for _, pp := range order(plan, f.AnchorAlias) {
 		switch pp.Action {
 		case ActionPresent, ActionSkip, ActionRefuse:
@@ -146,8 +152,15 @@ func applyWorld(f *Formation, opts ApplyOptions, forker TerminalForker, world *P
 			rep.Results = append(rep.Results, res)
 			continue
 		}
-		if err := launchPeer(f, pp, self, nonce, opts.Brief, forker); err != nil {
+		anchor := ""
+		if launchTarget(pp.Peer.Target) == "pane" {
+			anchor = PaneAnchor(created) // "" degrades to splitting the applier, never fails the launch
+		}
+		cid, err := launchPeer(f, pp, self, nonce, opts.Brief, forker, anchor, declared)
+		if err != nil {
 			res.Outcome, res.Detail = OutcomeFailed, "launch failed: "+err.Error()
+		} else if cid != "" {
+			created = append(created, cid)
 		}
 		rep.Results = append(rep.Results, res)
 	}
@@ -211,9 +224,22 @@ func applierAddress(ch string) (string, error) {
 	return "", fmt.Errorf("this session is not on %q — apply briefs peers to answer IT, so it must be a peer first: cbus join %s <alias>", ch, ch)
 }
 
-// launchPeer places one peer's session in a terminal. The alias is reserved before
+// fileDeclaresSplit reports whether ANY peer in the envelope declares an explicit
+// split direction — the run-level fact that suppresses the tmux normalize (a
+// per-window reflow one auto sibling could otherwise use to stomp the layout).
+func fileDeclaresSplit(f *Formation) bool {
+	for _, p := range f.Peers {
+		if p.Split == "right" || p.Split == "down" {
+			return true
+		}
+	}
+	return false
+}
+
+// launchPeer places one peer's session in a terminal, returning the created
+// surface id ("" when the backend cannot name one). The alias is reserved before
 // the fork for a fresh spawn (the child reclaims it on join), exactly as spawn does.
-func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker TerminalForker) error {
+func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker TerminalForker, anchor string, noNormalize bool) (string, error) {
 	p := pp.Peer
 	// A template and a fork both launch a NOT-YET-EXISTENT session, so claim the alias
 	// before it boots — the title and alias agree, and two applies cannot race for it —
@@ -230,29 +256,33 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	switch pp.Action {
 	case ActionTemplate:
 		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model); err != nil {
-			return err
+			return "", err
 		}
 		reserved = true
 	case ActionFork:
 		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model); err != nil {
-			return err
+			return "", err
 		}
 		reserved = true
 	}
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
-		Target: launchTarget(p.Target),
-		Argv:   peerLaunchArgv(pp, prompt, model),
-		Env:    peerEnv(p.Profile),
-		Dir:    launchDir(p.Cwd),
+		Target:      launchTarget(p.Target),
+		Argv:        peerLaunchArgv(pp, prompt, model),
+		Env:         peerEnv(p.Profile),
+		Dir:         launchDir(p.Cwd),
+		Anchor:      anchor,
+		Split:       p.Split,
+		NoNormalize: noNormalize,
 	}
-	if err := forker.Fork(spec); err != nil {
+	created, err := forker.Fork(spec)
+	if err != nil {
 		if reserved {
 			Unreserve(f.Channel, p.Alias)
 		}
-		return err
+		return "", err
 	}
-	return nil
+	return created, nil
 }
 
 func launchTarget(t string) string {

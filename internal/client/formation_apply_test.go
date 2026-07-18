@@ -11,18 +11,24 @@ import (
 	"time"
 )
 
-// recForker records every launch instead of opening a window.
+// recForker records every launch instead of opening a window. ids, when set, are
+// returned one per successful Fork in order (simulating created pane surfaces);
+// exhausted or unset, Fork returns "" like a window/tab launch.
 type recForker struct {
 	specs []ForkSpec
 	err   error
+	ids   []string
 }
 
-func (f *recForker) Fork(s ForkSpec) error {
+func (f *recForker) Fork(s ForkSpec) (string, error) {
 	if f.err != nil {
-		return f.err
+		return "", f.err
 	}
 	f.specs = append(f.specs, s)
-	return nil
+	if n := len(f.specs) - 1; n < len(f.ids) {
+		return f.ids[n], nil
+	}
+	return "", nil
 }
 
 func (f *recForker) aliases() []string {
@@ -61,9 +67,10 @@ type answeringForker struct {
 	quiet map[string]bool // aliases that stay silent
 }
 
-func (f *answeringForker) Fork(s ForkSpec) error {
-	if err := f.recForker.Fork(s); err != nil {
-		return err
+func (f *answeringForker) Fork(s ForkSpec) (string, error) {
+	created, err := f.recForker.Fork(s)
+	if err != nil {
+		return created, err
 	}
 	prompt := s.Argv[len(s.Argv)-1]
 	nonce := nonceRe.FindString(prompt)
@@ -72,7 +79,7 @@ func (f *answeringForker) Fork(s ForkSpec) error {
 	}
 	for a := range f.quiet {
 		if strings.Contains(nonce, "-"+a+"-") {
-			return nil
+			return created, nil
 		}
 	}
 	line := `{"from":"x/y","to":"z","ts":"2026-07-16T00:00:00Z","text":"` + nonce + ` — read the role; provenance: fresh spawn"}` + "\n"
@@ -84,7 +91,7 @@ func (f *answeringForker) Fork(s ForkSpec) error {
 	if _, err := fh.WriteString(line); err != nil {
 		f.t.Fatal(err)
 	}
-	return nil
+	return created, nil
 }
 
 // applierOn joins this session to ch as alias so Apply has an address and an inbox.
