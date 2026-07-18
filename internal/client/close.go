@@ -41,7 +41,15 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		return CloseReport{target, false, "that peer is THIS session — refusing (exit it normally)"}
 	}
 	pid := m.OwnerPid
-	if pid == 0 || !pidAlive(pid) {
+	if pid == 0 {
+		// pre-fix registrations recorded ownerPid null (the comm-vs-version-string
+		// walk, see ownerFromPid) — derive the owner NOW from the armed listener's
+		// ancestry rather than false-succeeding on a live peer.
+		if m.ListenerPid > 0 && pidAlive(m.ListenerPid) {
+			pid, _ = ownerFromPid(m.ListenerPid)
+		}
+	}
+	if pid == 0 || !pidAlive(pid) || procZombie(pid) {
 		return CloseReport{target, true, "already gone (no live process; the sweep owns the registration)"}
 	}
 	if argv, err := procArgs(pid); err != nil || !strings.Contains(argv, "claude") {
@@ -49,6 +57,11 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 	}
 	tty := ttyOf(pid)
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if err == syscall.ESRCH {
+			// died between the argv check and the signal — a teardown that finds
+			// nothing to tear down succeeded (idempotent sweeps).
+			return CloseReport{target, true, "already gone (exited before the signal)"}
+		}
 		return CloseReport{target, false, fmt.Sprintf("SIGTERM pid %d: %v", pid, err)}
 	}
 	if !waitGone(pid, 5*time.Second) {
