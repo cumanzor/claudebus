@@ -975,9 +975,10 @@ parent's conversation (`--resume <sid> --fork-session`). `spawn` opens a
 **fresh**, blank session. Both are Go-native (`internal/client/harness.go`,
 `spawn.go`); the retired bash `cc-branch.sh` helper (§13) is no longer consulted.
 The terminal launch is shared (`TerminalForker` / `OSAForker`): iTerm2 window/tab
-via osascript, tmux via `tmux new-window`.
+via osascript, tmux via `tmux new-window`, `pane` via a split of the **caller's
+own** surface (tmux-first, else iTerm2, else a hard error — mechanics below).
 
-### `cbus branch [window|tab|tmux] [channel] [--model M] [--name N]`
+### `cbus branch [window|tab|tmux|pane] [channel] [--model M] [--name N]`
 
 One-shot parent side of `/bus-branch`: derive channel → join (idempotent) →
 **reserve the child's alias** → fork the parent's transcript into a new terminal
@@ -986,9 +987,13 @@ turns into one command. Handler `runBranch` (main.go:304); mechanics
 `client.Branch` (harness.go:81).
 
 - Target defaults to `window`; anything else →
-  `cbus: target must be window|tab|tmux` (note: `session` is rejected here even
-  though the retired cc-branch.sh accepted it as a `tab` synonym). A `tmux`
-  target with no `$TMUX` → `cbus: not inside a tmux session`.
+  `cbus: target must be window|tab|tmux|pane` (note: `session` is rejected here
+  even though the retired cc-branch.sh accepted it as a `tab` synonym). A `tmux`
+  target with no `$TMUX` → `cbus: not inside a tmux session`. A `pane` target
+  with neither `$TMUX` nor `$ITERM_SESSION_ID` set → `cbus: pane needs tmux or
+  iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab` —
+  refusing rather than silently splitting whatever iTerm2 window happens to be
+  frontmost (`internal/client/pane.go`).
 - Channel default: basename of the git toplevel, filtered to `[A-Za-z0-9._-]`;
   if empty (not a repo), `global`.
 - `--model M` launches the child on a specific model (`sonnet`, `opus`,
@@ -1050,11 +1055,15 @@ sequenceDiagram
 quoted one-liner. iTerm2's AppleScript `command` parameter is tokenized by
 iTerm2 itself and does **not** honor POSIX quoting, so a quoted one-liner
 launches nothing (probe-verified live, twice). tmux takes the opposite path — a
-POSIX-quoted one-liner through `/bin/sh`. The child inherits `PATH` always and
+POSIX-quoted one-liner through `/bin/sh`. `pane` splits whichever surface is
+live instead of opening a new one: its iTerm2 branch (`osaForkPane`) reuses the
+**same** launcher-script indirection as window/tab (`osaForkITerm`), while its
+tmux branch (`forkTmuxPane`) reuses the same quoted-one-liner `terminalCommand`
+as plain `tmux` — dispatch differs by surface, not by target. The child inherits `PATH` always and
 `CLAUDE_CONFIG_DIR` when set; under a CCS instance config dir it relaunches via
 `ccs <profile>`. (port-map §4.12 records the same rationale for a reimplementation.)
 
-### `cbus spawn [window|tab|tmux] [channel | <ch>@<host>] [--model M] [--name N] [--role R]`
+### `cbus spawn [window|tab|tmux|pane] [channel | <ch>@<host>] [--model M] [--name N] [--role R]`
 
 Opens a **fresh, blank-transcript** session — not a fork — that joins and arms
 the channel on its own. Go-native, no bash counterpart. Handler `runSpawn`
@@ -1672,11 +1681,21 @@ client; they remain for the homogenization/port record.
     `nosession-$PPID` markers).
 35. Owner detection needs a `claude`/`claude-*`-named ancestor within 16 hops;
     otherwise liveness degrades to pid-only.
-36. `window`/`tab` forking is iTerm2-only AppleScript; `tab` needs an existing
-    window; tmux requires `$TMUX`. A pre-exec `osascript` failure leaks the
-    self-deleting launcher tmpfile (Go `osaForkITerm` skips cleanup on that
-    path). **(bash era)** the retired helper printed its failures to stdout; the
-    Go client dies to stderr (main.go:110).
+36. `window`/`tab`/`pane` (iTerm2 branch) forking is iTerm2-only AppleScript;
+    `tmux` (plain, or `pane`'s tmux branch) requires `$TMUX`. `tab` no longer
+    always targets iTerm2's current/frontmost window (the old behavior, and
+    the source of the tab-in-wrong-window bug): it now locates the window
+    OWNING the caller's session via the `$ITERM_SESSION_ID` UUID and targets
+    that window directly; current-window survives only as the no-UUID
+    fallback (and only there does `tab` still need an existing iTerm2 window
+    — `tell current window` errors on zero windows). `pane` never falls back
+    to frontmost: a UUID that resolves to no live session is a hard
+    AppleScript `error`, and neither `$TMUX` nor `$ITERM_SESSION_ID` set is a
+    hard `cbus:` error — refusing beats silently splitting whatever happens to
+    be frontmost (`internal/client/pane.go`). A pre-exec `osascript` failure
+    leaks the self-deleting launcher tmpfile (Go `osaForkITerm` skips cleanup
+    on that path). **(bash era)** the retired helper printed its failures to
+    stdout; the Go client dies to stderr (main.go:110).
 37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
     version handshake) and the link→copy mode-switch break — retired with the
     installer (§14); distribution is now `get.sh` + `selfupdate` (§11).

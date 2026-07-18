@@ -1,5 +1,98 @@
 # Changelog (detailed)
 
+## [2026-07-18 18:38:09 UTC] [Client/Forking] pane: a fourth fork target that splits the caller's own surface, and a tab targeting fix
+
+[Attempt #1]
+
+`branch`/`spawn`/`formation apply` gain a fourth target, `pane`, alongside
+`window`/`tab`/`tmux`: instead of opening a new terminal surface, it splits the
+CALLER's own — Claude-Code-teammate style. The same commit fixes a real bug in
+`tab`: it previously always landed in iTerm2's current/frontmost window, which
+moves with the user's focus, so a peer forked from one window could land in
+whichever window happened to be frontmost at fork time, not the caller's own.
+
+Precedence for `pane` is tmux-first, matching CC's own teammate placement:
+inside tmux (`$TMUX` set) the split is a tmux pane targeted at `$TMUX_PANE`
+(focus-immune, unlike "current pane" which follows the user); otherwise, inside
+iTerm2, the split targets the CALLER's own session, located by the UUID in
+`$ITERM_SESSION_ID` — never "current window". Neither surface present is a hard
+error: silently splitting whatever is frontmost would reintroduce the exact bug
+`tab` fixes elsewhere in this commit, so refusing is the feature, not a gap.
+
+tmux mechanics: `tmux split-window -d -P -F '#{pane_id}' -t $TMUX_PANE`, with
+`-h -l 70%` on the first split (child gets 70% width, caller keeps a 30% leader
+column); a best-effort `remain-on-exit failed` on the new pane (a crashed child
+stays inspectable, a clean exit closes its pane); and past two panes the window
+is renormalized to `main-vertical` with the caller's column resized back to
+30%. All three post-split steps are best-effort (`_ = exec.Command(...).Run()`)
+— older tmux lacks some of the forms.
+
+iTerm2 mechanics: an AppleScript triple loop (windows→tabs→sessions) locates
+the session whose `id` matches the UUID (AppleScript has no flat
+session-by-id accessor and `whose` clauses are unreliable across nested
+elements), then splits it — vertically (side-by-side) when the terminal is
+wider than tall by more than 2.2x (a cell is ~2.2x taller than wide, so this
+approximates a tiled grid instead of ever-thinner slices as splits repeat),
+else horizontally. A UUID that matches no live session is a hard AppleScript
+`error`, not a fallback — unlike `tab` below.
+
+tab fix: it now finds the window OWNING the caller's session (the same UUID +
+triple-loop lookup as pane, but `tell w to create tab`, not `tell s to
+split`) and creates the tab there directly. Unlike pane, a stale or absent
+UUID degrades to the historical `tell current window` behavior rather than
+failing the fork — tab never depended on locating the caller, so there is no
+reason to fail over the lookup instead of falling back.
+
+Dispatch reuses existing plumbing rather than inventing new pathways: pane's
+iTerm2 branch goes through the same self-deleting launcher-script indirection
+as window/tab (`osaForkITerm`, the iTerm2-tokenizer workaround); pane's tmux
+branch goes through the same quoted-one-liner `terminalCommand` as plain
+`tmux` (tmux runs via `/bin/sh`, which does honor POSIX quoting). AppleScript
+errors are surfaced via a new `runOsascriptErr` (`CombinedOutput`, not a bare
+`.Run()`) so the pane/tab scripts' meaningful `error` text (e.g. "session not
+found") reaches the caller instead of being swallowed as a bare exit status.
+
+[Files Changed]
+- internal/client/pane.go (new, 151 lines): iTermSessionUUID,
+  findSessionScript (the shared triple-loop), paneSplitScript,
+  tabInOwningWindowScript, osaForkPane, osaForkTab, runOsascriptErr,
+  forkTmuxPane, tmuxSplitArgv (pure argv builder, testable without tmux),
+  tmuxPaneCount.
+- internal/client/harness.go: Branch/Spawn target validation extended to
+  window|tab|tmux|pane; OSAForker.Fork gains the pane case (tmux-first
+  precedence, hard error on neither surface); osaForkITerm's tab case now
+  calls osaForkTab instead of the old inline current-window osascript.
+- internal/client/spawn.go, internal/client/formation.go (+ spawn_test.go,
+  formation_test.go): target enum extended to accept pane throughout.
+
+[Possible Ripple Effects]
+- tab's landing window changes for any caller running inside iTerm2 with
+  `$ITERM_SESSION_ID` set (the normal case) — a fork that used to land
+  wherever was frontmost now lands in the caller's own window. No CLI
+  signature change; existing `cbus branch tab` / `cbus spawn tab`
+  invocations are unaffected in form.
+- pane is reachable via `branch`, `spawn`, and `formation apply`'s peer
+  launcher (formation target enum updated too) but has no dedicated
+  slash-command surface yet — bus-branch.md/bus-spawn.md's argument-hints
+  now list it, no new skill file.
+- Docs (this commit): commands/bus-spawn.md, commands/bus-branch.md,
+  CHEATSHEET.md, docs/architecture/command-reference.md §9 (mechanism line,
+  both target headings, target-validation prose + pane's precondition, the
+  tokenizer-quirk paragraph's dispatch note, quirk index item 36 rewritten
+  for the corrected tab behavior). dev-docs
+  (`~/dev-docs/projects/claudebus/`) intentionally NOT touched — the
+  feature is unmerged on this branch; a deferred-patch note (exact file,
+  section, one-line change) was handed to the lead for post-merge
+  application instead of documenting unshipped behavior as canon.
+
+[Testing Notes]
+Documenter-side: every precedence, error-string, and dispatch claim above
+was cross-checked directly against internal/client/pane.go and the
+harness.go diff (commit d52a264) before being written, not transcribed
+unverified from the kickoff message. No coder/reviewer test-run report
+(`go test`/`-race`/live-fork verification) was relayed for this entry as of
+this writing.
+
 ## [2026-07-18 18:35:17 UTC] [Core] New verb: cbus hook-compact <pre|post> — compaction notices
 
 [Attempt #1]

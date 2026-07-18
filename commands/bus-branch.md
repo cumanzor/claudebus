@@ -1,6 +1,6 @@
 ---
 description: Fork this session into a new window, both joined to a cbus channel
-argument-hint: "[window|tab|tmux] [channel] [--model m] [--name n]"
+argument-hint: "[window|tab|tmux|pane] [channel] [--model m] [--name n]"
 allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion
 ---
 
@@ -8,8 +8,8 @@ Fork this conversation into a separate terminal **and** wire both sides onto a
 `cbus` channel so parent and child can message each other live (instead of
 writing a handoff doc and carrying it back).
 
-The user passed: "$ARGUMENTS" — first word is the target (window | tab | tmux;
-ask via AskUserQuestion ONLY if empty), optional second word is the channel name.
+The user passed: "$ARGUMENTS" — first word is the target (window | tab | tmux |
+pane; ask via AskUserQuestion ONLY if empty), optional second word is the channel name.
 
 Two steps, no more:
 
