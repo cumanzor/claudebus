@@ -1692,10 +1692,14 @@ client; they remain for the homogenization/port record.
     to frontmost: a UUID that resolves to no live session is a hard
     AppleScript `error`, and neither `$TMUX` nor `$ITERM_SESSION_ID` set is a
     hard `cbus:` error — refusing beats silently splitting whatever happens to
-    be frontmost (`internal/client/pane.go`). A pre-exec `osascript` failure
-    leaks the self-deleting launcher tmpfile (Go `osaForkITerm` skips cleanup
-    on that path). **(bash era)** the retired helper printed its failures to
-    stdout; the Go client dies to stderr (main.go:110).
+    be frontmost (`internal/client/pane.go`). Only a pre-DISPATCH failure
+    (`CreateTemp`/write/`chmod`, before the `osascript`/pane/tab call runs)
+    can still leak the launcher tmpfile — a DISPATCH failure (the
+    `osascript`/pane/tab call itself erroring) is reaped: `osaForkITerm`
+    `os.Remove`s the tmpfile whenever dispatch returns an error, since the
+    launcher never got a chance to self-delete (`058ea28`). **(bash era)**
+    the retired helper printed its failures to stdout; the Go client dies to
+    stderr (main.go:110).
 37. **(bash era)** `install.sh` copy-install drift (per-machine re-runs; no
     version handshake) and the link→copy mode-switch break — retired with the
     installer (§14); distribution is now `get.sh` + `selfupdate` (§11).
