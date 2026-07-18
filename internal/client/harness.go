@@ -148,9 +148,9 @@ type TerminalForker interface {
 // gone (Go builds the spec directly; the forker escapes natively).
 func Branch(target, channel, model, name string, forker TerminalForker) (ch, alias, childAlias string, err error) {
 	switch target {
-	case "window", "tab", "tmux":
+	case "window", "tab", "tmux", "pane":
 	default:
-		return "", "", "", fmt.Errorf("target must be window|tab|tmux")
+		return "", "", "", fmt.Errorf("target must be window|tab|tmux|pane")
 	}
 	// leading '-' is ValidName-legal but would be parsed as a flag by the child CLI
 	// (an instant-close window) — reject the shape here.
@@ -281,6 +281,17 @@ func (OSAForker) Fork(spec ForkSpec) error {
 	switch spec.Target {
 	case "window", "tab":
 		return osaForkITerm(spec)
+	case "pane":
+		// tmux-first, matching CC's teammate precedence: a tmux user inside iTerm2
+		// expects tmux panes. No surface => refuse (see pane.go — splitting the
+		// frontmost session instead would be the wrong-window bug by design).
+		if os.Getenv("TMUX") != "" {
+			return forkTmuxPane(spec)
+		}
+		if iTermSessionUUID() != "" {
+			return osaForkITerm(spec)
+		}
+		return fmt.Errorf("pane needs tmux or iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab")
 	case "tmux":
 		if os.Getenv("TMUX") == "" {
 			return fmt.Errorf("not inside a tmux session")
@@ -325,8 +336,10 @@ func osaForkITerm(spec ForkSpec) error {
 	switch spec.Target {
 	case "window":
 		return runOsascript(`tell application "iTerm2" to create window with default profile command ` + appleScriptStr(run))
-	default: // tab
-		return runOsascript("tell application \"iTerm2\"\n  tell current window to create tab with default profile command " + appleScriptStr(run) + "\nend tell")
+	case "pane":
+		return osaForkPane(run)
+	default: // tab — targeted at the caller's own window when locatable (pane.go)
+		return osaForkTab(run)
 	}
 }
 

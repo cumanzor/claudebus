@@ -553,7 +553,7 @@ func (p *FormationPeer) validate() error {
 	if err := oneOf("onStale", p.OnStale, OnStaleTemplate, OnStaleSkip, OnStaleFail); err != nil {
 		return err
 	}
-	if err := oneOf("target", p.Target, "window", "tab", "tmux"); err != nil {
+	if err := oneOf("target", p.Target, "window", "tab", "tmux", "pane"); err != nil {
 		return err
 	}
 	return nil
