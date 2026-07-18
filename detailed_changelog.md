@@ -1,5 +1,78 @@
 # Changelog (detailed)
 
+## [2026-07-18 01:20:50 UTC] [Distribution] Embed and install the /bus-* skills and role prompts (M2)
+
+[Attempt #1]
+
+Second milestone of the distribution effort: 03a5514, approved clean with
+no conditions.
+
+A root `claudebus` package embeds `commands/*.md` and `roles/*.md`. This
+lives at the module root rather than inside `cmd/cbus` because of a hard
+`go:embed` constraint (D23): an embed directive cannot cross a `..` in its
+path, so a package under `cmd/cbus` cannot reach files at the repo root —
+only a package rooted where those files actually live can. Two new verbs
+consume the embed: `install-commands` writes the slash-command prompts to
+`~/.claude/commands`, and `install-roles` writes the four role prompts to
+`$CBUS_DIR/roles`.
+
+Each install is sha-guarded, file by file: an unchanged destination file is
+left alone; a file that has been locally edited since it was last installed
+is skipped unless `--force`; a file that doesn't exist yet is written
+fresh. Every one of those outcomes is reported per file, so a skip is never
+silent (D27's best-effort-but-loud principle, landed here in code rather
+than just stated as a ruling). One skipped or failed file does not abort
+the rest of the batch, but the process exits non-zero whenever anything was
+skipped, so a script driving this can still detect the degraded case.
+
+An embed-count guard fails the build if a command or role file is ever
+added or removed on disk without updating the embed's expected count, and
+a separate check compares the embedded bytes as actually served against
+the live repo source — so a stale embed (built before an edit landed)
+cannot silently pass either.
+
+Reviewer evidence worth carrying, not just the verdict: the stale-embed
+canary was proven honestly rather than staged. The reviewer's test binary
+was compiled *before* editing `roles/coder.md`, so the prebuilt snapshot's
+embedded bytes were already stale by the time the edit landed — and the
+canary caught that real staleness, not a contrived one written to fail on
+demand. The shared doctrine block (repeated 4x across the role files "by
+ruling", per this repo's own standing note) came back byte-identical
+across all four embedded copies as actually served, 2753 bytes each — this
+extends the 4x-by-ruling invariant provably into the compiled binary, not
+just the source tree where it was previously only eyeballed. A
+dest-replaced-by-directory failure probe (installing over a path where a
+directory now sits instead of a file) printed its failure per-file while
+the rest of the batch continued past it, which is C4/D27 landed in code
+rather than left as an intention.
+
+[Files Changed]
+- assets.go (new), assets_test.go (new): the root embed package, the
+  embed-count guard, the served-vs-source staleness check.
+- cmd/cbus/install_assets.go (new), install_assets_test.go (new): the
+  `install-commands`/`install-roles` verbs, sha-guarding, per-file outcome
+  reporting, `--force`.
+- cmd/cbus/main.go, usage.go: verb dispatch and help text.
+
+[Possible Ripple Effects]
+- Any future addition or removal of a file under `commands/` or `roles/`
+  must update the embed-count guard's expectation, or the build fails —
+  this is now a standing constraint on those two directories.
+- `install-commands`/`install-roles` are the mechanism M5's `get.sh`
+  bootstrap will call into for a first-time install; their exit-code and
+  reporting contract is now load-bearing for that milestone.
+
+[Testing Notes]
+- go test ./... green repo-wide.
+- Reviewer's stale-embed canary used a genuinely pre-edit compiled binary,
+  not a synthetic staleness injection.
+- Byte-identity of the doctrine block verified across all four served
+  copies (2753 bytes each).
+- Dest-replaced-by-directory failure probe exercised live, per-file
+  reporting confirmed while the batch continued.
+
+M3 (selfupdate) is released in parallel and held for its own verdict.
+
 ## [2026-07-18 01:15:55 UTC] [Distribution] Release Makefile and repo-slug plumbing (M1)
 
 [Attempt #1]
