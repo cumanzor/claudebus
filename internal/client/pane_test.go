@@ -389,3 +389,142 @@ func TestFailedPaneForkLeavesNoReservation(t *testing.T) {
 		t.Errorf("alias after a failed fork = %q, want kid (reservation not released)", alias)
 	}
 }
+
+// ---- declared split direction ----------------------------------------------------
+
+// TestPaneSplitScriptHonorsDeclaredDirection: a declared direction REPLACES the 2.2
+// heuristic rather than seeding it — the whole point of writing one in the envelope
+// is that the layout stops depending on the surface's current proportions.
+func TestPaneSplitScriptHonorsDeclaredDirection(t *testing.T) {
+	for dir, want := range map[string]string{
+		"right": "split vertically",   // AppleScript: a vertical divider = side by side
+		"down":  "split horizontally", // a horizontal divider = stacked
+	} {
+		got := paneSplitScript("UU-ID", "RUN", dir)
+		if !strings.Contains(got, want) {
+			t.Errorf("dir %q must use %q:\n%s", dir, want, got)
+		}
+		if strings.Contains(got, "columns of s") {
+			t.Errorf("dir %q must not consult the auto heuristic:\n%s", dir, got)
+		}
+		// the id is still read back — a directed split anchors later splits too
+		if !strings.Contains(got, "return id of newS") {
+			t.Errorf("dir %q must still return the created id:\n%s", dir, got)
+		}
+	}
+	// auto keeps both branches AND the heuristic that chooses between them
+	auto := paneSplitScript("UU-ID", "RUN", "")
+	for _, want := range []string{"columns of s", "split vertically", "split horizontally"} {
+		if !strings.Contains(auto, want) {
+			t.Errorf("auto must keep %q:\n%s", want, auto)
+		}
+	}
+}
+
+// TestTmuxSplitArgvDirection: right/down map to tmux's -h/-v, and a DECLARED
+// direction also drops the first-teammate 70% sizing — a file that states its layout
+// gets that layout, not a 70/30 the heuristic would have imposed. Pinned because it
+// is a silent behavior difference between `split: right` and auto's first split.
+func TestTmuxSplitArgvDirection(t *testing.T) {
+	const cmd = "CMD"
+	for dir, flag := range map[string]string{"right": "-h", "down": "-v"} {
+		got := tmuxSplitArgv("%3", cmd, 1, dir) // preCount 1 = would be the 70% case
+		if !slices.Contains(got, flag) {
+			t.Errorf("dir %q must pass %s, got %v", dir, flag, got)
+		}
+		if slices.Contains(got, "-l") {
+			t.Errorf("a declared direction must not also force 70%% sizing, got %v", got)
+		}
+		if got[len(got)-1] != cmd {
+			t.Errorf("command must stay the last operand, got %v", got)
+		}
+	}
+	// "down" must not smuggle in -h alongside -v
+	if got := tmuxSplitArgv("%3", cmd, 1, "down"); slices.Contains(got, "-h") {
+		t.Errorf("down must not pass -h, got %v", got)
+	}
+}
+
+// ---- anchor selection ------------------------------------------------------------
+
+// TestPickLargestPolicy pins the whole anchor rule in one table: biggest area wins,
+// and ties go to the NEWEST created pane so the applier — always first in the
+// candidate list — keeps its size. A regression here degrades silently into
+// "everything splits the applier", which is the layout this feature exists to fix.
+func TestPickLargestPolicy(t *testing.T) {
+	const self = "%0"
+	for name, tc := range map[string]struct {
+		created []string
+		areas   map[string]int
+		want    string
+	}{
+		"applier strictly largest wins": {
+			[]string{"%1", "%2"}, map[string]int{self: 1000, "%1": 500, "%2": 400}, self,
+		},
+		"largest teammate wins": {
+			[]string{"%1", "%2"}, map[string]int{self: 100, "%1": 900, "%2": 100}, "%1",
+		},
+		"all equal -> newest teammate, applier last": {
+			[]string{"%1", "%2"}, map[string]int{self: 500, "%1": 500, "%2": 500}, "%2",
+		},
+		"tie between teammates -> newest": {
+			[]string{"%1", "%2"}, map[string]int{self: 100, "%1": 900, "%2": 900}, "%2",
+		},
+		"tie between applier and teammate -> teammate": {
+			[]string{"%1"}, map[string]int{self: 900, "%1": 900}, "%1",
+		},
+		"ids with no geometry are skipped": {
+			[]string{"%1", "%2"}, map[string]int{self: 100, "%2": 50}, self,
+		},
+		"no geometry at all -> no anchor": {
+			[]string{"%1"}, map[string]int{}, "",
+		},
+		"applier alone": {
+			nil, map[string]int{self: 42}, self,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := pickLargest(append([]string{self}, tc.created...), tc.areas); got != tc.want {
+				t.Errorf("pickLargest = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseGeometry: "id cols rows" lines become areas, and anything malformed is
+// DROPPED rather than defaulted — a zero-area candidate would otherwise win a tie
+// against a pane whose geometry simply failed to parse.
+func TestParseGeometry(t *testing.T) {
+	got := parseGeometry("%0 80 24\n%1 40 24\nnot-a-line\n%2 x 24\n%3 80\n%4 0 24\n%5 -5 10\n")
+	want := map[string]int{"%0": 1920, "%1": 960}
+	if len(got) != len(want) {
+		t.Fatalf("parsed %v, want exactly %v", got, want)
+	}
+	for id, area := range want {
+		if got[id] != area {
+			t.Errorf("%s = %d, want %d", id, got[id], area)
+		}
+	}
+}
+
+// TestValidatePeerSplitDirection: the envelope accepts the three documented values
+// and nothing else. Empty is auto by design — the same convention target and onStale
+// use, where an unset field and an explicitly blank one mean the same thing — so it
+// is pinned as ACCEPTED rather than treated as a missing-value error.
+func TestValidatePeerSplitDirection(t *testing.T) {
+	for _, ok := range []string{"", "auto", "right", "down"} {
+		p := FormationPeer{Alias: "coder", Target: "pane", Split: ok}
+		if err := p.validate(); err != nil {
+			t.Errorf("split %q must validate: %v", ok, err)
+		}
+	}
+	// plausible-but-wrong spellings are the ones a human actually types
+	for _, bad := range []string{"left", "up", "horizontal", "vertical", "h", "v", "RIGHT"} {
+		p := FormationPeer{Alias: "coder", Target: "pane", Split: bad}
+		if err := p.validate(); err == nil {
+			t.Errorf("split %q must be refused", bad)
+		} else if !strings.Contains(err.Error(), "split") {
+			t.Errorf("split %q: error should name the field, got %v", bad, err)
+		}
+	}
+}
