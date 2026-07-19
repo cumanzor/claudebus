@@ -1,5 +1,33 @@
 # Changelog (detailed)
 
+## [2026-07-19 00:55:31 UTC] [Docs] Fold-in: one more stale relay-presence claim, caught by spot-check
+
+[Attempt #1]
+
+The 00:52:59 UTC entry below fixed command-reference.md's presence table and
+quirk 18 (both said relay-generated presence still strips `kind` -- false
+since `cbus-ijx.5` phase 1 shipped 2026-07-14). A third instance of the same
+stale claim survived the first pass: L397-398's follower-rendering bullet, a
+different section describing the same fact, missed because it wasn't in the
+punch list's cited line ranges for that file. Caught in the orchestrator's
+spot-check, not by re-auditing -- reworded consistently with the other two
+fixes: relay-generated `join`/`departed` cross since ijx.5 phase 1;
+client-originated `POST /send` presence and `compact-pre`/`compact-post`
+stay local-only. Swept the rest of the repo + dev-docs tier for any other
+surviving copies of this claim after the fix; found none live (only this
+entry's own new text and historical changelog rows describing what was true
+when written, which stay as-is).
+
+[Files Changed]
+- docs/architecture/command-reference.md: L397-398 bullet reworded.
+
+[Possible Ripple Effects]
+- None -- docs-only, same fact already fixed elsewhere in the same file.
+
+[Testing Notes]
+- Repo-wide + dev-docs grep for "strips `kind`" / "presence never crosses"
+  after the fix, confirming no other live instance remained.
+
 ## [2026-07-19 00:52:59 UTC] [Docs] Docs-audit remediation: v0.3.0 parity pass across both tiers, solo round
 
 [Attempt #1]
