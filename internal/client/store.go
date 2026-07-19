@@ -18,15 +18,21 @@ import (
 // order matches the bash json.dump (bin/cbus:428-433); lastActivity is the D3
 // dual-write, omitted when absent so a rewritten bash-era meta stays byte-identical.
 type peerMeta struct {
-	Alias        string          `json:"alias"`
-	Channel      string          `json:"channel"`
-	SessionID    string          `json:"sessionId"`
-	Cwd          string          `json:"cwd"`
-	ListenerPid  json.RawMessage `json:"listenerPid"`
-	OwnerPid     json.RawMessage `json:"ownerPid"`
-	Host         string          `json:"host"`
-	TS           string          `json:"ts"`
-	LastActivity string          `json:"lastActivity,omitempty"`
+	Alias       string          `json:"alias"`
+	Channel     string          `json:"channel"`
+	SessionID   string          `json:"sessionId"`
+	Cwd         string          `json:"cwd"`
+	ListenerPid json.RawMessage `json:"listenerPid"`
+	OwnerPid    json.RawMessage `json:"ownerPid"`
+	// Structural identity witness (P3): the listener's opaque start-time token, so a
+	// recycled pid does not read as the process that armed. omitempty because bash-era
+	// and pre-P3 metas have none and must rewrite byte-identically; an armed meta
+	// without it falls to the TRANSITION argv branch. EVERY rewriter must carry this
+	// field or it silently strips a live peer down to that branch.
+	ListenerStart string `json:"listenerStart,omitempty"`
+	Host          string `json:"host"`
+	TS            string `json:"ts"`
+	LastActivity  string `json:"lastActivity,omitempty"`
 	// Birth-record (cbus-m9l): how a peer was born and on what model, known to the
 	// LAUNCHER and stamped into the reservation, so formation save can capture what a
 	// session cannot know about itself. omitempty like lastActivity: a rewrite of a
@@ -340,15 +346,31 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 	if os.Rename(filepath.Join(root, ch, old), newDir) != nil {
 		return "", "", false, fmt.Errorf("rename failed")
 	}
-	_ = setMetaAlias(newDir, newAlias) // best-effort, like bash `|| true`
+	_ = renameMeta(newDir, newAlias) // best-effort, like bash `|| true`
 	BroadcastPresence(ch, newAlias, "rename", "renamed "+old+" -> "+newAlias, newAlias)
 	return ch, old, false, nil
 }
 
-// setMetaAlias rewrites only meta.alias, preserving every other field verbatim
-// (raw pids). The port writes the alias as a string always, dropping bash jset's
-// digit→int coercion (port-map row 16, a documented C-delta).
-func setMetaAlias(dir, newAlias string) error {
+// renameMeta rewrites meta.alias AND invalidates the listener identity, preserving
+// every other field verbatim (raw pids). The port writes the alias as a string always,
+// dropping bash jset's digit→int coercion (port-map row 16, a documented C-delta).
+//
+// The invalidation is the P3 half (port-map D1) and it is deliberate NEW behavior.
+// argv-grep used to invalidate on rename by accident: the needle followed the new
+// alias while the live follower's argv still carried the old path, so the peer read
+// dead for free. A structural (pid, starttime) witness survives a directory rename
+// untouched, so without clearing it the stale tail would start reading ALIVE and the
+// "old tail is stale, re-arm" contract would silently break.
+//
+// It clears listenerStart ONLY, never listenerPid. Both must hold at once:
+//   - identity gone   => the predicate reads dead, so the contract holds
+//   - listenerPid kept => the D4 tri-state still says ever-armed, so the re-arm seeks
+//     EOF instead of replaying from byte 0
+//
+// Nulling listenerPid would satisfy the first and silently break the second: rename
+// does not truncate the inbox, so the re-arm would re-deliver every message the peer
+// ever received.
+func renameMeta(dir, newAlias string) error {
 	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if err != nil {
 		return err
@@ -358,6 +380,7 @@ func setMetaAlias(dir, newAlias string) error {
 		return err
 	}
 	m.Alias = newAlias
+	m.ListenerStart = ""
 	return writeMeta(dir, m)
 }
 

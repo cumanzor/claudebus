@@ -3,7 +3,6 @@ package client
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,14 +17,15 @@ const unarmedGrace = 10 * time.Minute
 // PeerMeta is the subset of a peer's meta.json the read-only verbs render.
 // Alias/SessionID are read for formation save, which captures a channel's roster.
 type PeerMeta struct {
-	ListenerPid int // 0 if null/absent
-	OwnerPid    int // 0 if null/absent
-	Host        string
-	Cwd         string
-	Alias       string
-	SessionID   string
-	Origin      string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
-	Model       string
+	ListenerPid   int    // 0 if null/absent
+	OwnerPid      int    // 0 if null/absent
+	ListenerStart string // "" if absent — a pre-P3 arm, judged on the TRANSITION branch
+	Host          string
+	Cwd           string
+	Alias         string
+	SessionID     string
+	Origin        string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
+	Model         string
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -40,14 +40,15 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		return PeerMeta{}, false
 	}
 	return PeerMeta{
-		ListenerPid: rawInt(raw["listenerPid"]),
-		OwnerPid:    rawInt(raw["ownerPid"]),
-		Host:        rawStr(raw["host"]),
-		Cwd:         rawStr(raw["cwd"]),
-		Alias:       rawStr(raw["alias"]),
-		SessionID:   rawStr(raw["sessionId"]),
-		Origin:      rawStr(raw["origin"]),
-		Model:       rawStr(raw["model"]),
+		ListenerPid:   rawInt(raw["listenerPid"]),
+		OwnerPid:      rawInt(raw["ownerPid"]),
+		ListenerStart: rawStr(raw["listenerStart"]),
+		Host:          rawStr(raw["host"]),
+		Cwd:           rawStr(raw["cwd"]),
+		Alias:         rawStr(raw["alias"]),
+		SessionID:     rawStr(raw["sessionId"]),
+		Origin:        rawStr(raw["origin"]),
+		Model:         rawStr(raw["model"]),
 	}, true
 }
 
@@ -82,15 +83,15 @@ func rawStr(r json.RawMessage) string {
 }
 
 // MetaListenerAlive is the three-clause liveness predicate (bin/cbus:58-68): the
-// recorded listenerPid exists AND that process's argv still references the inbox
-// (pid-recycling guard) AND the ownerPid, if recorded, is alive (crash-orphan
-// guard). Any missing clause => not listening.
+// recorded listenerPid exists AND that process is still the one that armed
+// (pid-recycling guard, see listenerIdentityHolds) AND the ownerPid, if recorded, is
+// alive (crash-orphan guard). Any missing clause => not listening.
 func MetaListenerAlive(metaPath string) bool {
 	m, ok := ReadPeerMeta(metaPath)
 	if !ok || m.ListenerPid == 0 || !pidAlive(m.ListenerPid) {
 		return false
 	}
-	if !argvContains(m.ListenerPid, metaInboxNeedle(metaPath)) {
+	if !listenerIdentityHolds(m, metaPath) {
 		return false
 	}
 	if m.OwnerPid == 0 {
@@ -99,25 +100,25 @@ func MetaListenerAlive(metaPath string) bool {
 	return pidAlive(m.OwnerPid)
 }
 
-// COMPAT(P3 #2): raw inbox spelling (needle half) — deletes with argv-grep liveness.
-// metaInboxNeedle is the inbox path argvContains greps for — the SECOND Decision 2
-// compat surface (F1). It MUST be the raw bash inbox_path() spelling so it matches a
-// live follower's --inbox argv under ANY CBUS_DIR spelling: bash writes and greps the
-// raw spelling, so a filepath.Join(dir,"inbox.jsonl") needle (cleaned) would miss a
-// live bash follower under a trailing-slash CBUS_DIR, and a bash needle would miss a
-// live Go follower. Rebuilt from the RAW CBUS_DIR + the peer's subpath (recovered by
-// stripping the cleaned CBUS_DIR prefix off the cleaned meta dir), NOT from the
-// already-cleaned metaPath — so the CBUS_DIR spelling is preserved. Handles legacy v1
-// ($CBUS_DIR/<ch>/meta.json, rel="/<ch>") and v2 ($CBUS_DIR/<ch>/<al>/meta.json,
-// rel="/<ch>/<al>") alike; for a v2 peer it equals compatInboxPath(CBUS_DIR, ch, al),
-// the same string the arm puts in the follower's argv.
-func metaInboxNeedle(metaPath string) string {
-	dir := filepath.Dir(metaPath)
-	rel := strings.TrimPrefix(dir, filepath.Clean(CBUSDir()))
-	if rel == dir { // metaPath not under CBUS_DIR (shouldn't happen) — best-effort raw
-		return dir + "/inbox.jsonl"
+// listenerIdentityHolds answers the pid-recycling question: is the process at
+// listenerPid still the process that armed this peer, or a stranger wearing a reused
+// pid? It is the one place that answers it, so the predicate and close.go's owner
+// guard can never drift into disagreeing about who a listener is.
+//
+// The two branches are EXCLUSIVE by construction, chosen on whether a structural
+// witness was recorded — deliberately not `structural(m) || argv(m)`. An or would let
+// the transition branch resurrect a listener whose starttime says it is not that
+// process, which is exactly the recycled pid this milestone exists to reject.
+// TestPredicateStructuralDoesNotFallBack pins that shape.
+func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
+	if m.ListenerStart == "" {
+		return transitionArgvIdentity(m.ListenerPid, metaPath)
 	}
-	return CBUSDir() + rel + "/inbox.jsonl"
+	cur, err := procStartTime(m.ListenerPid)
+	if err != nil {
+		return false // R2: a proc probe that cannot answer reads DEAD
+	}
+	return cur == m.ListenerStart
 }
 
 // pidAlive is `kill -0`: the process exists (EPERM still means it exists).
@@ -127,20 +128,6 @@ func pidAlive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
-}
-
-// argvContains reports whether pid's argv contains needle, read via the platform
-// procArgs (sysctl KERN_PROCARGS2 on darwin, /proc/<pid>/cmdline on linux — no ps
-// spawn). A read error — ESRCH/EPERM, or a darwin zombie (whose args EINVAL out of
-// KERN_PROCARGS2 on current kernels; procZombie is a belt-and-braces hedge, F1) —
-// returns false, so the argv clause reads DEAD with no invented leniency, matching
-// `ps -o args=` going empty / "<defunct>" (Decision 1 condition iii, edge D1).
-func argvContains(pid int, needle string) bool {
-	args, err := procArgs(pid)
-	if err != nil {
-		return false
-	}
-	return strings.Contains(args, needle)
 }
 
 // PeerDead is the prune / broadcast-recipient / send-gate predicate (bin/cbus:316-323):
