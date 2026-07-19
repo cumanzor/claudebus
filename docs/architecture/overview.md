@@ -92,7 +92,7 @@ Monitor-tail is the only turn-native answer with no hooks, no polling, and no in
 |---|---|---|
 | **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`, including `cbus close` — the one lifecycle verb that signals a peer's OS process (SIGTERM, then `--force` for SIGKILL) rather than just its registration. No runtime dependencies. The retired 914-line bash implementation remains at `bin/cbus` as the rollback artifact until P3. |
 | **Local transport** | `~/.claude-bus/` | Plain files. `<channel>/<alias>/meta.json` (registration + liveness pids) and `inbox.jsonl` (append-only mailbox, one JSON message per line). `.remote/<host>/<channel>/<sessionId>` holds per-session remote identity markers. |
-| **The follower** | exec'd by `cbus tail` | The cbus binary re-exec'd with `--inbox <path>` in argv (so bash-era liveness greps still match), running an in-process Go loop under the Monitor tool. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
+| **The follower** | run in-process by `cbus tail` | An in-process Go loop under the Monitor tool — no re-exec, no argv identity (P3 tranche 2, 2026-07-19). Listener identity is structural, `(pid, starttime)` via `procStartTime`, not argv; a `TRANSITION(P3T2)` argv fallback applies only to peers armed by a pre-P3 binary and is scoped to one release. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
 | **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the NUC bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /peers` presence; `GET /healthz`. |
 | **Maildir spool** | `relay/internal/spool` | `<root>/<channel>/<alias>/{tmp,new,cur}` — write to `tmp/`, atomic rename into `new/`, move to `cur/` after delivery. Crash-safe by construction (no fsync — deliberately not power-loss durable). |
 | **wstail** | `relay/cmd/wstail` | Loopback **debug/verification client** for `/tail`. TCP-only (no TLS) so it cannot cross the Cloudflare front door — it is not a production bridge. The real remote consumer is the Monitor's `ws:` source. |
@@ -112,7 +112,7 @@ flowchart LR
         sessA -->|"Bash: cbus send"| cli
         sessB -->|"Bash: cbus send"| cli
         cli -->|append JSON line| bus
-        bus -->|"re-exec'd Go follower<br/>framed ◀ cbus msg blocks"| sessA
+        bus -->|"in-process Go follower<br/>framed ◀ cbus msg blocks"| sessA
         bus -->|follower| sessB
     end
 
