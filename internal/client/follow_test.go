@@ -148,12 +148,12 @@ func (s *syncBuf) String() string {
 
 // startFollow runs follow in a goroutine with a fast poll and returns the output
 // sink plus a stop+join func. running() reports whether the loop is still alive.
-func startFollow(t *testing.T, inbox string, mode ReplayMode) (buf *syncBuf, running func() bool, stopJoin func()) {
+func startFollow(t *testing.T, inbox string, resume resumePoint) (buf *syncBuf, running func() bool, stopJoin func()) {
 	t.Helper()
 	buf = &syncBuf{}
 	stop := make(chan struct{})
 	done := make(chan struct{})
-	go func() { defer close(done); follow(inbox, mode, buf, 3*time.Millisecond, stop) }()
+	go func() { defer close(done); follow(inbox, resume, buf, 3*time.Millisecond, stop) }()
 	running = func() bool {
 		select {
 		case <-done:
@@ -215,14 +215,14 @@ func writeInbox(t *testing.T, dir string) string {
 	return inbox
 }
 
-// TestFollowFirstArmReplaysFromZero: a first arm (ReplayFromStart) replays the whole
+// TestFollowFirstArmReplaysFromZero: a first arm (no cursor, never armed) replays the whole
 // inbox — everything queued since join (which truncated it) is delivered.
 func TestFollowFirstArmReplaysFromZero(t *testing.T) {
 	inbox := writeInbox(t, filepath.Join(t.TempDir(), "ch", "al"))
 	appendLine(t, inbox, "ch/orch", "ch/al", "prelude one")
 	appendLine(t, inbox, "ch/orch", "ch/al", "prelude two")
 
-	buf, _, stopJoin := startFollow(t, inbox, ReplayFromStart)
+	buf, _, stopJoin := startFollow(t, inbox, resumePoint{})
 	defer stopJoin()
 	waitFor(t, func() bool {
 		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "prelude one")) &&
@@ -235,13 +235,13 @@ func TestFollowFirstArmReplaysFromZero(t *testing.T) {
 	}, "live append after replay")
 }
 
-// TestFollowReArmSeeksEnd: a re-arm (ReplaySeekEnd) replays NOTHING — only appends
+// TestFollowReArmSeeksEnd: the migration path (seekEnd) replays NOTHING — only appends
 // after the arm are delivered.
 func TestFollowReArmSeeksEnd(t *testing.T) {
 	inbox := writeInbox(t, filepath.Join(t.TempDir(), "ch", "al"))
 	appendLine(t, inbox, "ch/orch", "ch/al", "old prelude")
 
-	buf, _, stopJoin := startFollow(t, inbox, ReplaySeekEnd)
+	buf, _, stopJoin := startFollow(t, inbox, resumePoint{seekEnd: true})
 	defer stopJoin()
 	time.Sleep(40 * time.Millisecond) // give the loop time to (not) replay
 	if got := buf.String(); got != "" {
@@ -263,7 +263,7 @@ func TestFollowRotationTruncate(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		appendLine(t, inbox, "ch/orch", "ch/al", strings.Repeat("long-original-", 8))
 	}
-	buf, _, stopJoin := startFollow(t, inbox, ReplayFromStart)
+	buf, _, stopJoin := startFollow(t, inbox, resumePoint{})
 	defer stopJoin()
 	waitFor(t, func() bool {
 		return strings.Count(buf.String(), "◀ cbus end from=ch/orch") == 5
@@ -286,7 +286,7 @@ func TestFollowRotationRecreate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ch", "al")
 	inbox := writeInbox(t, dir)
 	appendLine(t, inbox, "ch/orch", "ch/al", "before recreate")
-	buf, running, stopJoin := startFollow(t, inbox, ReplayFromStart)
+	buf, running, stopJoin := startFollow(t, inbox, resumePoint{})
 	defer stopJoin()
 	waitFor(t, func() bool {
 		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "before recreate"))
@@ -318,7 +318,7 @@ func TestFollowDirDeletionNeverExits(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ch", "al")
 	inbox := writeInbox(t, dir)
 	appendLine(t, inbox, "ch/orch", "ch/al", "before dirdel")
-	buf, running, stopJoin := startFollow(t, inbox, ReplayFromStart)
+	buf, running, stopJoin := startFollow(t, inbox, resumePoint{})
 	defer stopJoin()
 	waitFor(t, func() bool {
 		return strings.Contains(buf.String(), frameOf("ch/orch", "ch/al", "before dirdel"))

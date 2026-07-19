@@ -19,18 +19,6 @@ import (
 // inbox before re-stat'ing for appends or rotation (bin/cbus:564, `time.sleep(0.2)`).
 const followPoll = 200 * time.Millisecond
 
-// ReplayMode is the first-arm vs re-arm distinction, keyed off the TRI-STATE of the
-// meta's recorded listenerPid (absent / null / int): a never-armed peer (absent OR
-// null) replays the whole inbox from byte 0 — join truncated it, so nothing is lost;
-// any re-arm (an int was recorded, even a stale/dead pid) seeks EOF and replays
-// nothing. Mirrors bin/cbus:514.
-type ReplayMode int
-
-const (
-	ReplayFromStart ReplayMode = iota // never-armed listenerPid -> from byte 0 (bash from_line "+1")
-	ReplaySeekEnd                     // a listenerPid was recorded -> seek EOF (bash from_line "0")
-)
-
 // InboxPath is a peer's inbox under the live CBUS_DIR.
 //
 // The bash-era raw concatenation (no filepath.Clean) is gone with the argv it fed:
@@ -66,13 +54,11 @@ func ArmLocalTail(target string) error {
 		return fmt.Errorf("no such peer %q — join first", ch+"/"+al)
 	}
 	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json")
-	// tri-state replay decision, read BEFORE we overwrite listenerPid.
-	mode := ReplayFromStart
-	if pm, ok := ReadPeerMeta(metaPath); ok && pm.ListenerPid != 0 {
-		mode = ReplaySeekEnd
-	}
+	// the replay decision, resolved BEFORE armMeta overwrites listenerPid — the
+	// migration rule reads the PREVIOUS value to tell an upgraded peer from a fresh one.
+	resume := resolveResume(inbox, metaPath)
 	armMeta(metaPath) // best-effort: listenerPid=own pid, listenerStart, ownerPid, lastActivity
-	RunFollower(inbox, mode)
+	RunFollower(inbox, resume)
 	return nil // unreachable: the follower never self-exits (see RunFollower)
 }
 
@@ -112,8 +98,8 @@ func armMeta(metaPath string) {
 // one write per frame, FOREVER. ArmLocalTail calls it directly, in this process; the
 // Monitor tool stops it by killing the process — the follower NEVER self-exits (a
 // vanished inbox is polled until it returns; a rotation is followed like tail -F).
-func RunFollower(inbox string, mode ReplayMode) {
-	follow(inbox, mode, os.Stdout, followPoll, nil)
+func RunFollower(inbox string, resume resumePoint) {
+	follow(inbox, resume, os.Stdout, followPoll, nil)
 }
 
 // follow is the follower loop. It is the counterpart of the embedded python follower
@@ -122,14 +108,19 @@ func RunFollower(inbox string, mode ReplayMode) {
 // Monitor batches the frame's lines into one notification). out/poll/stop are seams:
 // production passes os.Stdout, followPoll, and a nil stop (never stops); tests inject
 // a buffer, a fast poll, and a stop channel.
-func follow(inbox string, mode ReplayMode, out io.Writer, poll time.Duration, stop <-chan struct{}) {
-	f, ok := openFollow(inbox, mode, poll, stop)
+func follow(inbox string, resume resumePoint, out io.Writer, poll time.Duration, stop <-chan struct{}) {
+	f, ok := openFollow(inbox, resume, poll, stop)
 	if !ok {
 		return // only reachable via stop (test); production openFollow retries forever
 	}
 	defer func() { f.Close() }()
+	peerDir := filepath.Dir(inbox)
 	dev, ino := devInoOf(f)
 	consumed := offsetOf(f)
+	// record the starting position immediately, so a crash before the first message
+	// cannot make the next arm re-apply the migration rule and seek END a second time.
+	writeCursor(peerDir, dev, ino, consumed)
+	lastSaved := consumed
 	r := bufio.NewReader(f)
 	pend := ""
 	for {
@@ -148,6 +139,12 @@ func follow(inbox string, mode ReplayMode, out io.Writer, poll time.Duration, st
 			}
 			continue // drain all available data before sleeping (bash: `if chunk: ... continue`)
 		}
+		// the inbox is quiet: persist the cursor once per drain batch rather than once
+		// per frame, and only when it actually moved — a quiet follower writes nothing.
+		if consumed != lastSaved {
+			writeCursor(peerDir, dev, ino, consumed)
+			lastSaved = consumed
+		}
 		time.Sleep(poll)
 		st, err := os.Stat(inbox)
 		if err != nil {
@@ -163,6 +160,11 @@ func follow(inbox string, mode ReplayMode, out io.Writer, poll time.Duration, st
 			f = nf
 			dev, ino = devInoOf(f)
 			consumed = 0
+			// the cursor is keyed to the inode, so a rotation must republish it against
+			// the NEW file; leaving the old pair would make the next arm read a stale
+			// inode, fall to byte 0, and replay what we are about to stream anyway.
+			writeCursor(peerDir, dev, ino, consumed)
+			lastSaved = 0
 			r = bufio.NewReader(f)
 			pend = ""
 		}
@@ -173,13 +175,15 @@ func follow(inbox string, mode ReplayMode, out io.Writer, poll time.Duration, st
 // re-arm seeks EOF (no replay), a first arm stays at byte 0 (replay the whole inbox).
 // It retries until the open succeeds — the arm just verified the inbox exists, so a
 // vanish race between arm and follower must not kill the follower.
-func openFollow(inbox string, mode ReplayMode, poll time.Duration, stop <-chan struct{}) (*os.File, bool) {
+func openFollow(inbox string, resume resumePoint, poll time.Duration, stop <-chan struct{}) (*os.File, bool) {
 	f, ok := reopenUntilSuccess(inbox, poll, stop)
 	if !ok {
 		return nil, false
 	}
-	if mode == ReplaySeekEnd {
+	if resume.seekEnd {
 		_, _ = f.Seek(0, io.SeekEnd)
+	} else if resume.offset > 0 {
+		_, _ = f.Seek(resume.offset, io.SeekStart)
 	}
 	return f, true
 }

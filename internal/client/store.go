@@ -161,6 +161,14 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if err := os.WriteFile(filepath.Join(dir, "inbox.jsonl"), nil, 0o644); err != nil { // truncate-at-join
 		return "", false, err
 	}
+	// A join starts a new epoch, so any replay cursor from the previous one is void.
+	// The truncate above can reuse the inbox INODE (an explicit-alias reclaim removes
+	// the dir, but a path where the dir survives truncates in place), and a stale
+	// sidecar keyed to a reused dev+ino would resume a fresh inbox at an old offset and
+	// silently skip everything sent before the first arm. Join owns epoch semantics, so
+	// join is where the cursor dies; the dev+ino check in resolveResume stays as
+	// belt-and-braces for the reap-and-recreate case.
+	_ = os.Remove(filepath.Join(dir, cursorFile))
 	now := Now()
 	m := peerMeta{
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
