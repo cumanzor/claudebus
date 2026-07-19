@@ -80,11 +80,13 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		// pre-fix registrations recorded ownerPid null (the comm-vs-version-string
 		// walk, see ownerFromPid) — derive the owner NOW from the armed listener's
 		// ancestry rather than false-succeeding on a live peer. The listener must
-		// still be THIS peer's follower (same argv-needle identity MetaListenerAlive
-		// uses): a recycled listenerPid that now belongs to a process under a
-		// DIFFERENT claude session would otherwise donate that session's pid to the
-		// TERM below, killing a window nobody asked to close.
-		if m.ListenerPid > 0 && pidAlive(m.ListenerPid) && argvContains(m.ListenerPid, metaInboxNeedle(metaPath)) {
+		// still be THIS peer's follower (the SAME identity test MetaListenerAlive
+		// applies, structural or TRANSITION argv, via listenerIdentityHolds): a
+		// recycled listenerPid that now belongs to a process under a DIFFERENT claude
+		// session would otherwise donate that session's pid to the TERM below, killing
+		// a window nobody asked to close. This is the highest-consequence caller of
+		// that test — a wrong answer here signals a stranger's session.
+		if m.ListenerPid > 0 && pidAlive(m.ListenerPid) && listenerIdentityHolds(m, metaPath) {
 			pid, _ = ownerFromPid(m.ListenerPid)
 		}
 	}

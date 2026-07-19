@@ -55,18 +55,18 @@ const (
 	tailFlagFrom  = "--from"
 )
 
-// COMPAT(P3 #2): raw inbox spelling — deletes with argv-grep liveness (-> filepath.Join).
 // compatInboxPath is bash inbox_path() VERBATIM (bin/cbus:27): dir + "/" + ch + "/" +
-// al + "/inbox.jsonl", with NO filepath.Clean. This spelling is the Decision 2
-// liveness compat surface and MUST match bash's raw `printf '%s/%s/%s/inbox.jsonl'`
-// byte-for-byte, because it is used on the two grep surfaces — the follower's
-// --inbox argv (what bash's meta_listener_alive greps) AND Go's own argvContains
-// needle (metaInboxNeedle). filepath.Join CLEANS: a trailing-slash CBUS_DIR ("/x/")
-// yields a single-slash Join path but a double-slash bash path, so bash would read a
-// live Go follower "off" and prune reap it (F1) — and Go would misread a live bash
-// follower symmetrically. All four reader/writer directions converge on this raw
-// spelling. File I/O is spelling-agnostic (the kernel collapses '//'), so open/stat
-// may use it directly.
+// al + "/inbox.jsonl", with NO filepath.Clean.
+//
+// The raw spelling is now VESTIGIAL. It existed so the follower's --inbox argv would
+// byte-match what a grep-based liveness predicate looked for; since P3 made listener
+// identity structural, no reader greps this string to judge a peer this binary armed.
+// The only surviving grep is metaInboxNeedle in liveness_transition.go, which reads
+// PRE-P3 metas and rebuilds the spelling itself, independent of this function.
+//
+// It stays raw purely because the argv it feeds is still emitted, and it goes away
+// with that argv when the re-exec is deleted. File I/O is
+// spelling-agnostic (the kernel collapses '//'), so open/stat may use it directly.
 func compatInboxPath(dir, ch, al string) string {
 	return dir + "/" + ch + "/" + al + "/inbox.jsonl"
 }
@@ -165,6 +165,14 @@ func armMeta(metaPath string) {
 		return
 	}
 	m.ListenerPid = json.RawMessage(strconv.Itoa(os.Getpid()))
+	// structural identity witness (P3). Best-effort like the rest of armMeta: if the
+	// probe fails we record no witness rather than a wrong one, and this peer is judged
+	// on the TRANSITION argv branch — which, for a follower this binary armed, has no
+	// inbox in its argv and so reads dead. Failing closed is correct; a listener we
+	// cannot identify must not be trusted as alive.
+	if start, err := procStartTime(os.Getpid()); err == nil {
+		m.ListenerStart = start
+	}
 	if owner, ok := OwnerPID(); ok {
 		m.OwnerPid = json.RawMessage(strconv.Itoa(owner))
 	} else {

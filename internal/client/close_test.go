@@ -301,3 +301,74 @@ func TestSweepSurfaceNeedsATTY(t *testing.T) {
 		t.Errorf("sweep = %q, want the no-tty report", got)
 	}
 }
+
+// TestClosePeerIgnoresARecycledListenerPidStructurally is the structural-branch twin
+// of TestClosePeerIgnoresAForeignListenerPid, and the highest-consequence use of the
+// identity test anywhere in the codebase: a wrong answer here hands an innocent
+// session's pid to SIGTERM and closes a window nobody asked to close.
+//
+// The setup is deliberately the hardest one for the guard. The listener pid is alive,
+// IS descended from a claude-shaped owner, and its argv DOES carry this peer's inbox
+// path — everything the pre-P3 needle looked at says "this is my follower". Only the
+// recorded listenerStart disagrees, which is precisely what a recycled pid looks like
+// once structural identity is in play. That single mismatch must stop the close.
+func TestClosePeerIgnoresARecycledListenerPidStructurally(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
+	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	owner, child := fakeSessionTree(t, "claude", needle)
+
+	// a start token that is well-formed but belongs to some other process
+	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child), "1.1")
+
+	rep := ClosePeer("ch", "peer", false)
+	if !rep.Ok || !strings.Contains(rep.Detail, "already gone") {
+		t.Errorf("a recycled listener must read as nothing-to-close, got ok=%v %q", rep.Ok, rep.Detail)
+	}
+	if !pidAlive(owner) || procZombie(owner) {
+		t.Error("the innocent session was SIGTERMed — the structural guard did not hold")
+	}
+}
+
+// TestClosePeerAcceptsAMatchingStructuralListener is the other side: with a listener
+// whose recorded token really is its own, close must still derive the owner and end
+// it. Without this, a guard that simply refused everything would look correct.
+func TestClosePeerAcceptsAMatchingStructuralListener(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
+	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	owner, child := fakeSessionTree(t, "claude", needle)
+	start, err := procStartTime(child)
+	if err != nil {
+		t.Fatalf("procStartTime(child): %v", err)
+	}
+	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child), start)
+
+	rep := ClosePeer("ch", "peer", false)
+	if !rep.Ok {
+		t.Fatalf("close failed: %s", rep.Detail)
+	}
+	if strings.Contains(rep.Detail, "already gone") {
+		t.Fatalf("close false-succeeded on a LIVE peer: %s", rep.Detail)
+	}
+	if pidAlive(owner) && !procZombie(owner) {
+		t.Errorf("owner %d survived the close", owner)
+	}
+}
+
+func seedClosePeerWithStart(t *testing.T, root, ch, al, sid, ownerPid, listenerPid, listenerStart string) {
+	t.Helper()
+	dir := filepath.Join(root, ch, al)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(
+		`{"alias":%q,"channel":%q,"sessionId":%q,"cwd":"/w","listenerPid":%s,"ownerPid":%s,`+
+			`"listenerStart":%q,"host":"h","ts":"2026-07-18T00:00:00Z"}`,
+		al, ch, sid, listenerPid, ownerPid, listenerStart)
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
