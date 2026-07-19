@@ -726,14 +726,23 @@ at their first arm). The acting session never receives its own event.
 | `departed` | prune reap | `departed (listener gone)` |
 | `departed` | `cbus unregister` | `unregistered` |
 | `departed` | rename's dead-name reclaim | `departed (name reclaimed)` |
+| `compact-pre` | `cbus hook-compact pre` | `about to compact (auto), in-context state will be lost` |
+| `compact-post` | `cbus hook-compact post` | `compacted (auto), in-context state was reset` |
 
 Receivers see them as normal framed messages with `kind=presence` in the
 header. Notes: the `event` field is stored on the wire but never rendered
 (only `kind=` reaches the header); `departed`/`leave` events carry an
-unroutable `from` (the subject's dir is gone — don't reply to it); presence is
-**local-only** — the relay strips `kind`, so presence never crosses machines
-(tracked as `cbus-ijx.5`). There is still no *user-facing* broadcast: `cbus
-send` targets exactly one peer.
+unroutable `from` (the subject's dir is gone — don't reply to it). **Relay-generated
+presence now crosses machines** (`cbus-ijx.5` phase 1, shipped 2026-07-14):
+`core.Reframe` renders ` kind=<k>` in the header (internal/core/frame.go:125-126)
+and the relay generates `join`/`departed` itself from the ws attach/detach
+lifecycle (relay/cmd/cbus-relay/main.go:271-291), so a session tailing a relay
+channel sees peers arrive and leave same as on a local channel. What remains
+**local-only**: client-originated presence sent over `POST /send` (the relay
+strips `kind` there — it isn't a `sendReq` field) and `compact-pre`/`compact-post`
+(`D-zig-1`). Phase 2 of `cbus-ijx.5` — client-originated `leave`/`rename`
+crossing the relay — is still open. There is still no *user-facing* broadcast:
+`cbus send` targets exactly one peer.
 
 ---
 
@@ -1719,8 +1728,12 @@ client; they remain for the homogenization/port record.
     `--from` is unvalidated (header injection/overflow is possible).
 17. The `⚠truncated` warning is relay-only; local over-limit messages cut
     silently (missing `◀ cbus end` is the tell).
-18. Presence is local-only (relay strips `kind`); `departed`/`leave` events
-    carry unroutable `from`s; the `event` field is never rendered.
+18. Relay-generated presence (`join`/`departed`) crosses machines since
+    `cbus-ijx.5` phase 1 — `Reframe` renders `kind`, the relay decides the
+    events itself off the ws attach/detach lifecycle; client-originated
+    presence via `POST /send` and `compact-pre`/`compact-post` still stay
+    local-only. `departed`/`leave` events carry unroutable `from`s; the
+    `event` field is never rendered.
 
 **State & cleanup**
 19. Explicit-alias join destroys a dead peer's queued inbox with no broadcast;

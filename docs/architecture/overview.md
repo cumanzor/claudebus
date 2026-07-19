@@ -86,7 +86,7 @@ Monitor-tail is the only turn-native answer with no hooks, no polling, and no in
 
 | Component | Where | What it is |
 |---|---|---|
-| **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`. No runtime dependencies. The retired 914-line bash implementation remains at `bin/cbus` as the rollback artifact until P3. |
+| **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`, including `cbus close` — the one lifecycle verb that signals a peer's OS process (SIGTERM, then `--force` for SIGKILL) rather than just its registration. No runtime dependencies. The retired 914-line bash implementation remains at `bin/cbus` as the rollback artifact until P3. |
 | **Local transport** | `~/.claude-bus/` | Plain files. `<channel>/<alias>/meta.json` (registration + liveness pids) and `inbox.jsonl` (append-only mailbox, one JSON message per line). `.remote/<host>/<channel>/<sessionId>` holds per-session remote identity markers. |
 | **The follower** | exec'd by `cbus tail` | The cbus binary re-exec'd with `--inbox <path>` in argv (so bash-era liveness greps still match), running an in-process Go loop under the Monitor tool. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
 | **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the NUC bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /peers` presence; `GET /healthz`. |
@@ -146,8 +146,9 @@ or a new terminal backend, plugs in.
 | Target | Backend | Coupling | Mechanism |
 |---|---|---|---|
 | `window` | iTerm2 | **iTerm2-only** (macOS) | `osascript` → `create window` |
-| `tab` | iTerm2 | **iTerm2-only** (macOS), needs an existing window | `osascript` → `create tab` |
+| `tab` | iTerm2 | **iTerm2-only** (macOS) | `osascript` → `create tab` in the window OWNING the caller's session, located by the `$ITERM_SESSION_ID` UUID (`tabInOwningWindowScript`); "needs an existing window" survives only as the no-UUID fallback to the current/frontmost window |
 | `tmux` | tmux | **terminal-agnostic** | `tmux new-window` (requires `$TMUX`) |
+| `pane` | tmux or iTerm2 | **terminal-agnostic when `$TMUX` is set**, else iTerm2-only | tmux-first: `split-window` targeted at `$TMUX_PANE` or apply's chain-split anchor; else an iTerm2 osascript split of the caller's session by the same UUID lookup; else a **hard error** — no frontmost fallback (silently splitting whatever's frontmost would reintroduce the tab bug). Auto direction goes side-by-side iff the anchor's columns > 2.2x its rows, else stacked |
 
 The two paths differ in one load-bearing way. **iTerm2's AppleScript `command` parameter is
 tokenized by iTerm2 itself and does not honor POSIX quoting**, so a quoted one-liner launches
@@ -159,8 +160,10 @@ launch. The tmux path has no such constraint — it runs a normal POSIX-quoted o
 
 The child launch itself is `ccs <profile>` (CCS-profile-aware) or plain `claude`, with
 `--resume <sid> --fork-session` for `branch` and without that pair for `spawn`, plus `--model` /
-`--name` when supplied. `window`/`tab` are the iTerm2-coupled surfaces; **tmux is the only
-terminal-agnostic fork path** and the natural target on Linux or under a non-iTerm2 terminal.
+`--name` when supplied. `window`/`tab` are the iTerm2-coupled surfaces; `tmux` is no longer the
+*only* terminal-agnostic fork path — `pane` is tmux-backed too whenever `$TMUX` is set (falling
+back to an iTerm2-only session split otherwise), and is likewise a natural target on Linux or
+under a non-iTerm2 terminal.
 
 ---
 
@@ -359,7 +362,7 @@ ignored: the spool always queues, so there is nothing to force.
 
 | Decision | Rationale |
 |---|---|
-| **Liveness is a real process, not a stale flag.** Alive = `listenerPid` exists **and** its argv still contains this peer's inbox path (pid-recycling guard) **and** the recorded `ownerPid` (the ancestor `claude` process) is alive (crash-orphan guard). No heartbeat files. | The `exec` design means the recorded pid *is* the follower; when the Monitor kills it, liveness flips to `off` with no trap or cleanup code. Independently validated: a sibling project's wake-lock staleness proof is the same design — convergent evolution. |
+| **Liveness is a real process, not a stale flag.** Alive = `listenerPid` exists **and** its argv still contains this peer's inbox path (pid-recycling guard) **and** the recorded `ownerPid` (the ancestor `claude` process, matched by argv[0]'s basename — `comm` is only a fallback, since the bun-compiled CLI's kernel `comm` is its version string) is alive (crash-orphan guard). No heartbeat files. | The `exec` design means the recorded pid *is* the follower; when the Monitor kills it, liveness flips to `off` with no trap or cleanup code. Independently validated: a sibling project's wake-lock staleness proof is the same design — convergent evolution. |
 | **Self-cleaning registry + 10-minute arm grace.** `join` prunes dead peers first; never-armed peers get a 10-min grace window (keyed on `meta.json` mtime) before being sweepable. | A joined-but-unarmed sibling can't be swept mid-setup; aliases (`main`, lowest free `fork-N`) recycle naturally. |
 | **Atomic join via bare `mkdir`; no local Maildir.** Auto-picked aliases are claimed with `mkdir` (atomic EEXIST) in a retry loop. | Closes the race where two concurrent joins both pick `main` and the loser truncates the winner's inbox. The atomic mkdir closes the realistic local race, so Maildir complexity "wasn't justified locally" — a standing POC decision. |
 | **Maildir server-side only.** The relay spools `tmp→new→cur`. | A relay restart losing queued cross-machine messages is a real, higher-stakes failure mode — the direct application of the AMQ prior-art lesson. Declined with rationale: fsync durability (overkill for a session bus) and sequence-first spool names (would break ordering across restarts). |
@@ -367,9 +370,10 @@ ignored: the spool always queues, so there is nothing to force.
 | **Reframed delivery format.** Both framers emit `◀ cbus msg from=… to=… ts=…` + body wrapped at 440 UTF-8 bytes + `◀ cbus end from=…`, written as one buffered write / one ws text frame. | The Monitor's caps were *measured*, not assumed: 500 chars per stdout line, ~200 ms line batching, and a second ~3000-char per-notification ceiling shared by both paths. `wsFrameSafe = 2800` with a `⚠truncated~<N>B` header notice (header delivered first, so the warning survives the cut) encodes those measurements — if the harness changes, the constants are suspect. |
 | **Skills thin, logic in the binary.** The fork-child bootstrap prompt is emitted by `cbus bootstrap`; channel derivation lives in `cbus branch`. | Model-executed skill prose is prompt-drift-prone; shipping prompts and paths with the binary means fixes can't drift across skill-file copies. Each skill ends with "Do nothing else." as a guardrail against model over-helpfulness. |
 | **Explicit remote aliases, no remote registry/presence build.** | Scope cut as over-engineering; the relay's one-active-tail rule makes collisions self-evident. |
-| **Presence announcements.** join/leave/rename/departed broadcast `kind=presence` events to every non-dead channel peer; every removal path broadcasts `departed`; `cbus hook-exit` (SessionEnd hook) announces graceful exits immediately, with lazy prune as the hard-kill backstop. | Peers used to come and go silently. Targeting uses the same `!peer_dead` rule as send so joined-but-unarmed peers still get presence (replayed at first arm). Deliberately app-agnostic (no tmux/iTerm2 integration). Remote presence now crosses the relay too (`cbus-ijx.5` shipped — the relay renders `kind` and generates join/departed from the ws lifecycle; protocol.md §8). What remains open is ijx.5 phase 2: client-originated `leave`/`rename` and offline catch-up. |
+| **Presence announcements.** join/leave/rename/departed broadcast `kind=presence` events to every non-dead channel peer; every removal path broadcasts `departed`; `cbus hook-exit` (SessionEnd hook) announces graceful exits immediately, with lazy prune as the hard-kill backstop. PreCompact/PostCompact hooks (`cbus hook-compact pre\|post`) broadcast `compact-pre`/`compact-post` the same way, to every LOCAL channel joined — local-only for now (`D-zig-1`). | Peers used to come and go silently. Targeting uses the same `!peer_dead` rule as send so joined-but-unarmed peers still get presence (replayed at first arm). Deliberately app-agnostic (no tmux/iTerm2 integration). Remote presence now crosses the relay too (`cbus-ijx.5` shipped — the relay renders `kind` and generates join/departed from the ws lifecycle; protocol.md §8). What remains open is ijx.5 phase 2: client-originated `leave`/`rename` and offline catch-up. |
 | **Arm-before-fork ordering.** The parent arms its Monitor *before* forking. | The alternative (arm after fork, to avoid a cosmetic note in the child) was empirically disproven — `--fork-session` reads the transcript at child *boot* regardless — and additionally opened a child-announce race. The child's "no completion record" note is cosmetic and unavoidable; the skill explicitly forbids reordering to suppress it. |
 | **`cbus rename` is a true rename, local-only.** Moves the peer dir, rewrites `meta.alias`, preserves inbox history; the skill re-arms the Monitor. | A companion feature (auto-setting the CC session title) was dropped after research proved the live TUI title is not externally settable. Remote aliases are relay-side. Known window: a message landing between the `mv` and the re-arm is not replayed (filed `cbus-8no`). |
+| **`cbus close` ends a peer's OS process, never touches its registration.** SIGTERM the owning process (derived from `ownerPid`, falling back to the armed listener's ancestry when null), wait ≤5s, `--force` escalates to SIGKILL, then sweep the leftover terminal surface once the tty reads dead. Local-only; refuses this session itself and a pid whose argv no longer contains `claude`. | Every other lifecycle verb (`leave`, `rename`, `unregister`, prune) only ever touches the *registration* — none of them end the process behind a stuck peer (`close.go: ClosePeer`). "Already gone" reports success, not an error, so a scripted sweep can close the same roster twice. |
 
 ### Dogfooding
 
@@ -441,11 +445,13 @@ Documented, accepted, or tracked — none are silent.
 
 - No interpreter dependency: the client is a static Go binary. (Bash-era: python3 was
   both the JSON engine and the follower runtime.)
-- `ownerPid` detection needs a `claude`-named ancestor within 16 parent hops; unusual launchers
-  degrade liveness to pid+argv checks only (read via sysctl/procfs in the Go client — no
+- `ownerPid` detection needs a `claude`-named ancestor within 16 parent hops, matched by
+  argv[0]'s basename first (`comm` kept only as a fallback); unusual launchers degrade
+  liveness to pid+argv checks only (read via sysctl/procfs in the Go client — no
   `ps` spawns; same semantics).
-- `window`/`tab` fork targets are iTerm2-only (osascript); tmux is the only
-  terminal-agnostic fork path. (The bash-3.2 floor no longer applies.)
+- `window`/`tab` fork targets are iTerm2-only (osascript); `tmux` and `pane` (tmux-backed
+  when `$TMUX` is set, else iTerm2-only) are the terminal-agnostic paths. (The bash-3.2
+  floor no longer applies.)
 - The whole cross-machine contract hangs on measured, unnegotiated harness behavior: Monitor `ws:`
   supporting only `{url, protocols}`, the 500-char line cap, ~200 ms batching, and the ~3000-char
   notification ceiling. A harness change silently invalidates the constants (440-byte wrap,
@@ -455,7 +461,8 @@ Documented, accepted, or tracked — none are silent.
 
 - `cbus register` (= `join global`) and `cbus peers` (= `list`) survive as undocumented v1
   aliases; legacy v1 flat-registry entries are auto-pruned; `hook-exit` and presence
-  were added to the README/CHEATSHEET in the post-cutover doc pass (2026-07-13).
+  were added to the README/CHEATSHEET in the post-cutover doc pass (2026-07-13);
+  `hook-compact`'s compaction presence followed in the 2026-07-18 pass.
 
 For the exhaustive per-command behavior (including every quirk found in the audit), see
 [command-reference.md](command-reference.md); for wire/disk formats see
