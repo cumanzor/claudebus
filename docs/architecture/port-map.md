@@ -407,8 +407,11 @@ same-parent rename reap + 3-way re-verify; O_APPEND single-write appends with an
 line size; temp+rename meta writes); liveness in compat mode (argv fingerprint kept on the
 tail; three-clause predicate via procfs/libproc; dual-write `lastActivity` + mtime); the
 in-process follower (0.2 s poll, buffer-to-`\n`, dev+ino+size rotation check, never-self-exit,
-one write per frame, shared framer) plus a dormant-on-foreign-reopen tombstone that closes the
-cross-session inbox-leak case without changing live-use behavior; presence byte-identical;
+one write per frame, shared framer). A dormant-on-foreign-reopen tombstone was planned here
+(D5) to close the cross-session inbox-leak case, but it was **never shipped** — no code
+landed, no commit reverted it, and `follow()` has no identity check to build one on. That
+leak (behavior-spec.md §8.7 "zombie reattach") is **OPEN** as of v0.4.0, tracked as
+`cbus-0r8`, closing in M4 via the generalized displacement mechanism; presence byte-identical;
 structured `resolve_self`; the real flag parser behind the frozen verb set; the harness layer
 (`hook-exit`, embedded `bootstrap` prompt, `branch` orchestration, TerminalForker absorbing
 cc-branch.sh). Installer gains the version stamp and hook-wiring check. Rollout order: MBP
@@ -449,7 +452,7 @@ homogenization.**
 | D2 | Dot-prefix invisibility vs moving temps/markers out of the data tree | Explicit skip-dot filter from day one; the tree layout stays byte-identical while any bash cbus shares `$CBUS_DIR`; relocation is Phase 3+ and low-value |
 | D3 | mtime grace vs explicit `lastActivity` | Dual-write both in Phase 2; ported `peer_dead` prefers the field, falls back to mtime; drop the fallback in Phase 3 — **DONE 2026-07-18** (tranche 1, `8f79a83`): `lastActivity`-only, mtime read deleted |
 | D4 | Null-`listenerPid` replay heuristic vs durable cursor | Exact tri-state semantics at cutover (internal enum, same on-disk signal); cursor is a Phase 3 semantic change, landing with D5 since they touch the same state |
-| D5 | Local double-listener: fix vs document | Cutover keeps arm behavior bit-identical but adds the dormant-on-foreign-reopen tombstone; the real displacement gate (relay-style, + `--steal` escape hatch) is Phase 3 |
+| D5 | Local double-listener: fix vs document | Cutover kept arm behavior bit-identical. The dormant-on-foreign-reopen tombstone planned here was **never shipped** (no code, no reverted commit) — the cross-session inbox-leak case (behavior-spec.md §8.7 "zombie reattach") is **OPEN** as of v0.4.0, tracked as `cbus-0r8`. The real displacement gate (relay-style, + `--steal` escape hatch) is Phase 3, closing this in M4 |
 | D6 | Framer degenerate-input tie-breaks | Relay's typed strictness for parsing; local's `?` placeholders for missing routing fields (visibly unroutable, matching the reply convention); empty text → passthrough; `text:null → "None"` never preserved. Only foreign-written lines are affected; tool-authored traffic is byte-identical either way |
 | D7 | Sessionless operation: silent mode vs error | Both: keep the mode (joins record `sessionId:""`, sends never fail on identity) and add one stderr warning |
 | D8 | Message marshal byte-compatibility with the python emitter vs canonical-Go encoding | Marshal produces canonical-Go bytes (compact, raw UTF-8, Go's default HTML-escaping, struct field order `from,to,ts,text[,kind,event]`); byte-for-byte parity with the python emitter is explicitly not a contract — protocol.md §3.3 already establishes a parse-only law, and the relay has never byte-matched the client's encoding either. Guarded by an m4 cross-parse assertion (frames lifted from the bash `emit()` corpus decode identically whether marshaled by Go or python). Declined alternative: a python-compatible `MarshalJSON` kept only as Phase-3-deletable ballast |
