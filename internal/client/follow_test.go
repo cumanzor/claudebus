@@ -149,11 +149,16 @@ func (s *syncBuf) String() string {
 // startFollow runs follow in a goroutine with a fast poll and returns the output
 // sink plus a stop+join func. running() reports whether the loop is still alive.
 func startFollow(t *testing.T, inbox string, resume resumePoint) (buf *syncBuf, running func() bool, stopJoin func()) {
+	return startFollowAs(t, inbox, resume, nil)
+}
+
+// startFollowAs is startFollow with an explicit identity, for the dormancy tests.
+func startFollowAs(t *testing.T, inbox string, resume resumePoint, id *listenerIdentity) (buf *syncBuf, running func() bool, stopJoin func()) {
 	t.Helper()
 	buf = &syncBuf{}
 	stop := make(chan struct{})
 	done := make(chan struct{})
-	go func() { defer close(done); follow(inbox, resume, buf, 3*time.Millisecond, stop) }()
+	go func() { defer close(done); follow(inbox, resume, id, buf, 3*time.Millisecond, stop) }()
 	running = func() bool {
 		select {
 		case <-done:
@@ -376,7 +381,7 @@ func TestArmMetaRecordsListenerAndGrace(t *testing.T) {
 		t.Fatalf("pre-arm listenerPid should read 0 (null), got %d ok=%v", pm.ListenerPid, ok)
 	}
 
-	armMeta(metaPath)
+	armMeta(metaPath, selfStart(t))
 
 	pm, ok := ReadPeerMeta(metaPath)
 	if !ok || pm.ListenerPid != os.Getpid() {
@@ -408,8 +413,18 @@ func TestArmMetaRecordsListenerAndGrace(t *testing.T) {
 func TestArmMetaBestEffortMissing(t *testing.T) {
 	dir := t.TempDir()
 	metaPath := filepath.Join(dir, "meta.json")
-	armMeta(metaPath) // must not panic
+	armMeta(metaPath, selfStart(t)) // must not panic
 	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
 		t.Fatalf("armMeta fabricated a meta for an absent file: err=%v", err)
 	}
+}
+
+// selfStart is this process's structural witness, the token armMeta records.
+func selfStart(t *testing.T) string {
+	t.Helper()
+	s, err := procStartTime(os.Getpid())
+	if err != nil {
+		t.Fatalf("procStartTime(self): %v", err)
+	}
+	return s
 }

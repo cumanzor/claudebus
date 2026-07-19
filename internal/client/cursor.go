@@ -29,9 +29,13 @@ const cursorFile = ".cursor"
 
 // resumePoint is where a follower should begin reading.
 //
-// seekEnd is not "offset = size": the file can grow between the decision and the open,
-// and END has to mean "wherever the end is when I get there" to avoid re-reading a
-// message that landed in that window. It is reachable ONLY through the migration rule.
+// seekEnd resolves at OPEN, not at decision time, and the honest cost of that is a
+// SKIP: anything appended between resolveResume deciding and openFollow seeking lands
+// before the new position and is never delivered. Recording size-at-decision instead
+// would deliver it. The window is microseconds, it is reachable ONLY through the
+// migration rule, and it therefore happens at most once per peer, ever — after which a
+// cursor exists and this branch is unreachable. It also reproduces v0.4.0's behavior
+// exactly, which is the point of the migration rule.
 type resumePoint struct {
 	seekEnd bool
 	offset  int64

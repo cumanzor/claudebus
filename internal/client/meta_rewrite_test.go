@@ -65,7 +65,7 @@ func TestArmMetaRecordsIdentityAndKeepsTheRest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	armMeta(metaPath)
+	armMeta(metaPath, selfStart(t))
 	after := readRawMeta(t, metaPath)
 
 	want, err := procStartTime(os.Getpid())
@@ -108,7 +108,7 @@ func TestArmedPeerReadsAliveEndToEnd(t *testing.T) {
 			`"listenerPid":null,"ownerPid":null,"host":"h","ts":"2026-07-18T00:00:00Z"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	armMeta(metaPath)
+	armMeta(metaPath, selfStart(t))
 	if !MetaListenerAlive(metaPath) {
 		t.Fatal("a peer armed by this process must read alive through the structural branch")
 	}

@@ -54,11 +54,20 @@ func ArmLocalTail(target string) error {
 		return fmt.Errorf("no such peer %q — join first", ch+"/"+al)
 	}
 	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json")
+	// P4: establish the witness BEFORE anything else. A follower that cannot prove which
+	// listener it is would be judged on the TRANSITION argv branch, where a follower this
+	// binary armed has no inbox in its argv and reads dead — so arming anyway would
+	// produce a tail that is instantly and invisibly not the listener. Refuse loudly
+	// instead of arming into that trap.
+	start, err := procStartTime(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("cannot establish listener identity: %v — refusing to arm", err)
+	}
 	// the replay decision, resolved BEFORE armMeta overwrites listenerPid — the
 	// migration rule reads the PREVIOUS value to tell an upgraded peer from a fresh one.
 	resume := resolveResume(inbox, metaPath)
-	armMeta(metaPath) // best-effort: listenerPid=own pid, listenerStart, ownerPid, lastActivity
-	RunFollower(inbox, resume)
+	armMeta(metaPath, start) // listenerPid=own pid, listenerStart, ownerPid, lastActivity
+	RunFollower(inbox, resume, &listenerIdentity{pid: os.Getpid(), start: start, metaPath: metaPath})
 	return nil // unreachable: the follower never self-exits (see RunFollower)
 }
 
@@ -67,7 +76,7 @@ func ArmLocalTail(target string) error {
 // same grace-clock refresh join does). Best-effort and field-preserving: a missing or
 // torn meta is left untouched (bash `jset || true` no-ops when meta.json is absent),
 // and every other field round-trips verbatim (raw pids, byte-for-byte).
-func armMeta(metaPath string) {
+func armMeta(metaPath, start string) {
 	b, err := os.ReadFile(metaPath)
 	if err != nil {
 		return
@@ -77,14 +86,7 @@ func armMeta(metaPath string) {
 		return
 	}
 	m.ListenerPid = json.RawMessage(strconv.Itoa(os.Getpid()))
-	// structural identity witness (P3). Best-effort like the rest of armMeta: if the
-	// probe fails we record no witness rather than a wrong one, and this peer is judged
-	// on the TRANSITION argv branch — which, for a follower this binary armed, has no
-	// inbox in its argv and so reads dead. Failing closed is correct; a listener we
-	// cannot identify must not be trusted as alive.
-	if start, err := procStartTime(os.Getpid()); err == nil {
-		m.ListenerStart = start
-	}
+	m.ListenerStart = start // the caller established it; arming without one is refused
 	if owner, ok := OwnerPID(); ok {
 		m.OwnerPid = json.RawMessage(strconv.Itoa(owner))
 	} else {
@@ -98,8 +100,8 @@ func armMeta(metaPath string) {
 // one write per frame, FOREVER. ArmLocalTail calls it directly, in this process; the
 // Monitor tool stops it by killing the process — the follower NEVER self-exits (a
 // vanished inbox is polled until it returns; a rotation is followed like tail -F).
-func RunFollower(inbox string, resume resumePoint) {
-	follow(inbox, resume, os.Stdout, followPoll, nil)
+func RunFollower(inbox string, resume resumePoint, id *listenerIdentity) {
+	follow(inbox, resume, id, os.Stdout, followPoll, nil)
 }
 
 // follow is the follower loop. It is the counterpart of the embedded python follower
@@ -108,7 +110,7 @@ func RunFollower(inbox string, resume resumePoint) {
 // Monitor batches the frame's lines into one notification). out/poll/stop are seams:
 // production passes os.Stdout, followPoll, and a nil stop (never stops); tests inject
 // a buffer, a fast poll, and a stop channel.
-func follow(inbox string, resume resumePoint, out io.Writer, poll time.Duration, stop <-chan struct{}) {
+func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Writer, poll time.Duration, stop <-chan struct{}) {
 	f, ok := openFollow(inbox, resume, poll, stop)
 	if !ok {
 		return // only reachable via stop (test); production openFollow retries forever
@@ -123,6 +125,12 @@ func follow(inbox string, resume resumePoint, out io.Writer, poll time.Duration,
 	lastSaved := consumed
 	r := bufio.NewReader(f)
 	pend := ""
+	// identityEvery bounds how long a displaced follower keeps reading: the check is one
+	// small meta read, so it runs on a slow multiple of the poll rather than every tick.
+	// Displacement announces itself in no other way — a steal does not rotate the inbox —
+	// so this cadence IS the takeover latency.
+	const identityEvery = 5 // ~1s at a 200ms poll
+	idleTicks := 0
 	for {
 		if stopped(stop) {
 			return
@@ -139,11 +147,27 @@ func follow(inbox string, resume resumePoint, out io.Writer, poll time.Duration,
 			}
 			continue // drain all available data before sleeping (bash: `if chunk: ... continue`)
 		}
-		// the inbox is quiet: persist the cursor once per drain batch rather than once
-		// per frame, and only when it actually moved — a quiet follower writes nothing.
-		if consumed != lastSaved {
-			writeCursor(peerDir, dev, ino, consumed)
-			lastSaved = consumed
+		// the inbox is quiet. Two things happen here, and the order matters.
+		//
+		// P3: a cursor write is identity-conditional. A displaced or orphaned follower
+		// must stop MOVING the cursor, not merely stop reading — an orphan whose peer dir
+		// was recreated writes through the PATH into the new epoch's sidecar and would
+		// corrupt a live peer's resume point. Verifying immediately before the write
+		// leaves a residual TOCTOU of microseconds (a steal landing between the check and
+		// the rename); that window is accepted, because closing it needs the lock the
+		// gate deliberately does not take, and its worst case is one stale cursor write
+		// that the next arm's dev+ino check or the stealer's own write corrects.
+		idleTicks++
+		if consumed != lastSaved || idleTicks >= identityEvery {
+			if cause := identityCause(id); cause != stillListener {
+				_, _ = out.Write([]byte(cause.marker()))
+				return // one-way door (R14): dormancy is never re-entered
+			}
+			if consumed != lastSaved {
+				writeCursor(peerDir, dev, ino, consumed)
+				lastSaved = consumed
+			}
+			idleTicks = 0
 		}
 		time.Sleep(poll)
 		st, err := os.Stat(inbox)
@@ -151,6 +175,13 @@ func follow(inbox string, resume resumePoint, out io.Writer, poll time.Duration,
 			continue // inbox vanished — keep the old fd and keep polling; never self-exit
 		}
 		if rotated(dev, ino, consumed, st) {
+			// a rotation is the foreign-reopen trigger: the inbox we are about to follow
+			// may belong to a DIFFERENT peer that reclaimed this path. Check before
+			// reopening, never after, so a stranger's bytes are never read at all.
+			if cause := identityCause(id); cause != stillListener {
+				_, _ = out.Write([]byte(cause.marker()))
+				return
+			}
 			f.Close()
 			nf, ok := reopenUntilSuccess(inbox, poll, stop)
 			if !ok {

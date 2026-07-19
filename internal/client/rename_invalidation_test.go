@@ -54,7 +54,7 @@ func TestRenameInvalidatesListenerIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldMeta := filepath.Join(root, "dev", "main", "meta.json")
-	armMeta(oldMeta) // this process becomes the listener, with a structural witness
+	armMeta(oldMeta, selfStart(t)) // this process becomes the listener, with a structural witness
 
 	if before := readRawMeta(t, oldMeta); before["listenerStart"] == nil || before["listenerStart"] == "" {
 		t.Fatalf("armMeta recorded no listenerStart; nothing to invalidate: %v", before)
@@ -96,7 +96,7 @@ func TestRenameKeepsEverythingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldMeta := filepath.Join(root, "dev", "main", "meta.json")
-	armMeta(oldMeta)
+	armMeta(oldMeta, selfStart(t))
 	before := readRawMeta(t, oldMeta)
 
 	if _, _, _, err := Rename("newname", ""); err != nil {
@@ -128,7 +128,7 @@ func TestReapExposureUnchangedAcrossRename(t *testing.T) {
 		if _, _, err := Join("dev", "main"); err != nil {
 			t.Fatal(err)
 		}
-		armMeta(filepath.Join(root, "dev", "main", "meta.json"))
+		armMeta(filepath.Join(root, "dev", "main", "meta.json"), selfStart(t))
 		if _, _, _, err := Rename("newname", ""); err != nil {
 			t.Fatal(err)
 		}
