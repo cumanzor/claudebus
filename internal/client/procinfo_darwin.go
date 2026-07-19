@@ -5,7 +5,6 @@ package client
 import (
 	"bytes"
 	"encoding/binary"
-	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -26,11 +25,6 @@ const (
 	_off_pbi_status = 4  // uint32 pbi_status
 	_off_pbi_ppid   = 16 // uint32 pbi_ppid
 	_off_pbi_comm   = 48 // char pbi_comm[MAXCOMLEN=16]
-	// start time lives past pbi_name[32], pbi_nfiles, pbi_pgid, pbi_pjobc, e_tdev,
-	// e_tpgid, pbi_nice. Offsets verified against `ps -o lstart` on live pids rather
-	// than trusted from the header layout (returned size is 136).
-	_off_pbi_start_tvsec  = 120 // uint64 pbi_start_tvsec
-	_off_pbi_start_tvusec = 128 // uint64 pbi_start_tvusec
 
 	_SZOMB = 5 // process status: zombie (<sys/proc.h>)
 )
@@ -85,11 +79,10 @@ func procArgs(pid int) (string, error) {
 	return strings.Join(args, " "), nil
 }
 
-// procStartTime returns pid's start time as an OPAQUE identity token
-// ("<tvsec>.<tvusec>"), the structural half of (pid, starttime). Callers compare it
-// by byte equality and never parse it as a clock: it is a witness that the pid is
-// still the same process, not a timestamp. An error (ESRCH/EPERM, short read) makes
-// the caller read the listener DEAD — a probe that cannot answer never answers alive.
+// procStartTime reads pid's proc_bsdinfo and hands the raw bytes to the shared
+// composer. Syscall wrapper only: the token's format lives in starttime.go so the
+// writer and the prober cannot drift. An error (ESRCH/EPERM, short read) makes the
+// caller read the listener DEAD — a probe that cannot answer never answers alive.
 func procStartTime(pid int) (string, error) {
 	if pid <= 0 {
 		return "", syscall.ESRCH
@@ -101,12 +94,7 @@ func procStartTime(pid int) (string, error) {
 	if errno != 0 {
 		return "", errno
 	}
-	if int(r) < _off_pbi_start_tvusec+8 {
-		return "", syscall.EINVAL
-	}
-	sec := binary.LittleEndian.Uint64(buf[_off_pbi_start_tvsec:])
-	usec := binary.LittleEndian.Uint64(buf[_off_pbi_start_tvusec:])
-	return strconv.FormatUint(sec, 10) + "." + strconv.FormatUint(usec, 10), nil
+	return darwinStartToken(buf[:r])
 }
 
 // procParent returns pid's command accounting name (p_comm, as `ps -o comm=`) and

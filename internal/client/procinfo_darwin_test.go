@@ -3,11 +3,39 @@
 package client
 
 import (
+	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
+
+// TestProcStartTimeWrapperFeedsComposer closes the seam B1 opened: the composer is
+// unit-tested on synthetic bytes and the syscall is exercised on a live pid, but
+// nothing yet proved the wrapper hands the composer the RIGHT bytes. A wrapper that
+// passed a wrong slice bound would still produce a plausible stable token.
+func TestProcStartTimeWrapperFeedsComposer(t *testing.T) {
+	var buf [256]byte
+	r, _, errno := syscall.Syscall6(_SYS_proc_info,
+		_PROC_CALL_PIDINFO, uintptr(os.Getpid()), _PROC_PIDTBSDINFO, 0,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if errno != 0 {
+		t.Fatalf("proc_pidinfo(self): %v", errno)
+	}
+	want, err := darwinStartToken(buf[:r])
+	if err != nil {
+		t.Fatalf("darwinStartToken: %v", err)
+	}
+	got, err := procStartTime(os.Getpid())
+	if err != nil {
+		t.Fatalf("procStartTime(self): %v", err)
+	}
+	if got != want {
+		t.Errorf("procStartTime = %q but composer over the same bytes = %q", got, want)
+	}
+}
 
 // TestProcStartTimeOffsetSanity is the offset check the stability and distinctness
 // tests cannot make: a WRONG offset into proc_bsdinfo can still yield a value that is
