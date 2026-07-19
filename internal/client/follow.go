@@ -181,15 +181,28 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 		// the rename); that window is accepted, because closing it needs the lock the
 		// gate deliberately does not take, and its worst case is one stale cursor write
 		// that the next arm's dev+ino check or the stealer's own write corrects.
+		// The cursor records the last FRAME BOUNDARY, not the last byte read.
+		//
+		// consumed counts bytes pulled off the fd, which includes a partial line still
+		// sitting in pend. Persisting that would point the next arm INTO the middle of a
+		// message: once the writer completes the line, the resuming follower starts
+		// mid-frame, the head is lost forever and the tail surfaces as a raw fragment.
+		// That is silent loss, which is the one outcome this whole mechanism trades
+		// duplicates to avoid. Subtracting pend leaves the cursor on the last '\n' we
+		// actually emitted, so the worst case stays a re-delivery.
+		//
+		// It also makes the write condition honest: a batch that only grew pend has not
+		// advanced the boundary, so there is nothing to persist.
+		boundary := consumed - int64(len(pend))
 		idleTicks++
-		if consumed != lastSaved || idleTicks >= identityEvery {
+		if boundary != lastSaved || idleTicks >= identityEvery {
 			if cause := identityCause(id); cause != stillListener {
 				_, _ = out.Write([]byte(cause.marker()))
 				return // one-way door (R14): dormancy is never re-entered
 			}
-			if consumed != lastSaved {
-				writeCursor(peerDir, dev, ino, consumed)
-				lastSaved = consumed
+			if boundary != lastSaved {
+				writeCursor(peerDir, dev, ino, boundary)
+				lastSaved = boundary
 			}
 			idleTicks = 0
 		}
