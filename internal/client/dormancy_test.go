@@ -316,3 +316,100 @@ func TestDisplacementGateRefusesASecondArm(t *testing.T) {
 		t.Errorf("a dead ex-listener must fall through the gate (meta %+v)", m)
 	}
 }
+
+// TestMarkerRemedyMatchesBehavior is the pin that would have caught the wrong-remedy
+// defect at N2. It is not a string test: for each cause it puts the peer INTO that
+// state and checks that the remedy the marker names is the one the code actually
+// accepts. Text and behavior are asserted against each other, so neither can drift
+// alone.
+//
+// The defect it exists to prevent: every marker used to end "re-arm to resume", which
+// is true for exactly one of the four states. A pruned peer's re-arm fails "no such
+// peer — join first" — and that is the state a prune leaves behind, so the advice was
+// wrong precisely when a session most needed it.
+func TestMarkerRemedyMatchesBehavior(t *testing.T) {
+	// causeGone: the peer dir is gone, so a re-arm CANNOT work and the marker must say
+	// re-join rather than re-arm.
+	t.Run("gone names re-join because re-arm fails", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("CBUS_DIR", root)
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-g")
+		if _, _, err := Join("ch", "al"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(filepath.Join(root, "ch", "al")); err != nil {
+			t.Fatal(err)
+		}
+		armed := make(chan error, 1)
+		go func() { armed <- ArmLocalTail("ch/al", false) }()
+		select {
+		case err := <-armed:
+			if err == nil {
+				t.Fatal("re-arming a pruned peer unexpectedly succeeded; the marker's advice would change")
+			}
+			if !strings.Contains(err.Error(), "join first") {
+				t.Fatalf("pruned re-arm said %q; the marker assumes it demands a join", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("ArmLocalTail never returned for a pruned peer")
+		}
+		m := causeGone.marker()
+		if !strings.Contains(m, "re-join") {
+			t.Errorf("marker %q must name re-join: a re-arm provably fails in this state", m)
+		}
+		if strings.Contains(m, "— re-arm to resume") {
+			t.Errorf("marker %q tells the user to do the thing that just failed", m)
+		}
+	})
+
+	// causeDisplaced: the peer is alive and held, so a PLAIN re-arm is refused by the
+	// gate and the marker must name --steal.
+	t.Run("displaced names --steal because a plain re-arm is refused", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("CBUS_DIR", root)
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-d")
+		if _, _, err := Join("ch", "al"); err != nil {
+			t.Fatal(err)
+		}
+		armMeta(filepath.Join(root, "ch", "al", "meta.json"), selfStart(t))
+		armed := make(chan error, 1)
+		go func() { armed <- ArmLocalTail("ch/al", false) }()
+		select {
+		case err := <-armed:
+			if err == nil {
+				t.Fatal("a plain re-arm over a live listener succeeded; the marker's advice would change")
+			}
+			if !strings.Contains(err.Error(), "--steal") {
+				t.Fatalf("displaced re-arm said %q; the marker assumes it demands --steal", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("ArmLocalTail never returned; the gate let it through")
+		}
+		if m := causeDisplaced.marker(); !strings.Contains(m, "--steal") {
+			t.Errorf("marker %q must name --steal: a plain re-arm provably fails here", m)
+		}
+	})
+
+	// causeRejoined is the one state where a plain re-arm is genuinely right.
+	t.Run("re-joined names a plain re-arm", func(t *testing.T) {
+		m := causeRejoined.marker()
+		if !strings.Contains(m, "re-arm to resume") || strings.Contains(m, "--steal") {
+			t.Errorf("marker %q should ask for a plain re-arm", m)
+		}
+	})
+
+	// causeRenamed: the old address is gone; the remedy is the NEW alias, not this one.
+	t.Run("renamed points at the new alias", func(t *testing.T) {
+		m := causeRenamed.marker()
+		if !strings.Contains(m, "new alias") {
+			t.Errorf("marker %q must send the user to the new alias; the old address no longer resolves", m)
+		}
+	})
+
+	// and the truthfulness rule still holds across the reworded set
+	for _, c := range []dormancyCause{causeRejoined, causeRenamed, causeGone} {
+		if strings.Contains(c.marker(), "displaced") {
+			t.Errorf("marker %q claims a displacement that did not happen", c.marker())
+		}
+	}
+}

@@ -76,23 +76,32 @@ func (id *listenerIdentity) check() dormancyCause {
 // a message frame (no from/to) so it cannot be mistaken for peer traffic, and it never
 // crosses the wire — this is local stdout to the Monitor.
 //
-// Silence would be the wrong answer: doctrine already trains sessions to re-arm when a
-// tail drops, and a Monitor reporting a bare exit gives the session nothing to act on.
+// Silence would be the wrong answer: a Monitor reporting a bare exit gives the session
+// nothing to act on. But the REMEDY has to be the one that state actually accepts, and
+// it differs per cause — every line used to say "re-arm to resume" and three of the
+// four were wrong. A pruned peer's re-arm fails "no such peer — join first"; a
+// displaced peer's plain re-arm is refused by the displacement gate; a renamed peer
+// only answers to its new alias. A confidently wrong instruction is worse than none,
+// so each cause names what will actually work.
+//
+// TestMarkerRemedyMatchesBehavior pins this against the code rather than against my
+// memory of it: for each cause it asserts the named remedy is the one that state
+// accepts, so the text cannot drift away from the behavior again.
 func (c dormancyCause) marker() string {
-	var why string
+	var line string
 	switch c {
 	case causeDisplaced:
-		why = "displaced by another listener"
+		line = "displaced by another listener — it holds the tail now; re-arm with --steal to take it back"
 	case causeRejoined:
-		why = "peer re-joined; this tail is stale"
+		line = "peer re-joined; this tail is stale — re-arm to resume"
 	case causeRenamed:
-		why = "alias was renamed; this tail is stale"
+		line = "alias was renamed; this tail is stale — re-arm under the new alias"
 	case causeGone:
-		why = "peer registration is gone"
+		line = "peer registration is gone — re-join, then re-arm"
 	default:
 		return ""
 	}
-	return fmt.Sprintf("◀ cbus tail ended: %s — re-arm to resume\n", why)
+	return fmt.Sprintf("◀ cbus tail ended: %s\n", line)
 }
 
 // identityCause is check() with the nil-identity test seam. Production always supplies
