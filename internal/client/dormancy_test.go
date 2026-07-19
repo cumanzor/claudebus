@@ -269,3 +269,50 @@ func TestArmRefusesWithoutAWitness(t *testing.T) {
 		t.Error("a peer armed by this process must read alive; it would otherwise be an instant-dormant tail")
 	}
 }
+
+// TestDisplacementGateRefusesASecondArm is the D5 gate. The rule is uniform: a live
+// listener means refuse, with no exemption for the same session, because arming over
+// your own live tail is the double-listener bug and not a convenience.
+func TestDisplacementGateRefusesASecondArm(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-one")
+	if _, _, err := Join("ch", "al"); err != nil {
+		t.Fatal(err)
+	}
+	meta := filepath.Join(root, "ch", "al", "meta.json")
+	// a LIVE listener: this process, with its real witness
+	armMeta(meta, selfStart(t))
+	if !MetaListenerAlive(meta) {
+		t.Fatal("precondition: the peer must read as live-listening")
+	}
+
+	// BOUNDED, and this is not defensive padding. On regression ArmLocalTail does not
+	// return an error — it arms and blocks in the follower loop forever, in THIS
+	// process. An unbounded call would hang the test binary rather than fail it, which
+	// is how my own gate-removal mutation run wedged twice before I bounded it. A test
+	// that hangs on regression reports a timeout instead of a cause.
+	armed := make(chan error, 1)
+	go func() { armed <- ArmLocalTail("ch/al", false) }()
+	select {
+	case err := <-armed:
+		if err == nil {
+			t.Fatal("the gate let a second listener arm over a live one")
+		}
+		if !strings.Contains(err.Error(), "--steal") {
+			t.Errorf("the refusal must name the escape hatch, got %q", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ArmLocalTail never returned — the gate let it through and it is now following")
+	}
+
+	// and a dead listener is NOT refused: the gate guards live tails, not stale records
+	setMetaFields(t, meta, `"listenerPid":424242,"listenerStart":"1.1"`)
+	if MetaListenerAlive(meta) {
+		t.Fatal("precondition: pid 424242 should not be a live listener")
+	}
+	// ArmLocalTail blocks once it passes the gate, so probe the gate's own condition
+	if m, ok := ReadPeerMeta(meta); !ok || MetaListenerAlive(meta) {
+		t.Errorf("a dead ex-listener must fall through the gate (meta %+v)", m)
+	}
+}

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,4 +154,115 @@ func TestTailRejectsTheRetiredFollowerFlag(t *testing.T) {
 	if err == nil {
 		t.Fatalf("`tail --inbox <path>` succeeded; it must not still act as a follower:\n%s", out)
 	}
+}
+
+// TestStealDisplacesThroughTheRealCLI drives the displacement gate and --steal through
+// the actual binary. In-process coverage would not have exercised the flag parser, the
+// refusal's exit code, or what a displaced follower's Monitor actually sees — which is
+// the class of miss the review doctrine exists for.
+func TestStealDisplacesThroughTheRealCLI(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "cbus")
+	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
+		t.Fatalf("build cbus: %v\n%s", err, out)
+	}
+	root := t.TempDir()
+	env := func(sid string) []string {
+		e := []string{"CBUS_DIR=" + root, "CLAUDE_CODE_SESSION_ID=" + sid}
+		for _, kv := range os.Environ() {
+			switch strings.SplitN(kv, "=", 2)[0] {
+			case "CBUS_DIR", "CLAUDE_CODE_SESSION_ID", "CBUS_UPDATE_CHECK":
+			default:
+				e = append(e, kv)
+			}
+		}
+		return e
+	}
+	run := func(sid string, args ...string) (string, error) {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = env(sid)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := run("sid-a", "join", "ch", "al"); err != nil {
+		t.Fatalf("join: %v\n%s", err, out)
+	}
+
+	// the incumbent tail
+	first := exec.Command(bin, "tail", "ch/al")
+	first.Env = env("sid-a")
+	firstOut, err := first.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.Process.Kill(); _, _ = first.Process.Wait() })
+
+	metaPath := filepath.Join(root, "ch", "al", "meta.json")
+	waitUntil(t, 10*time.Second, func() bool {
+		b, err := os.ReadFile(metaPath)
+		return err == nil && strings.Contains(string(b), `"listenerStart"`) &&
+			!strings.Contains(string(b), `"listenerPid": null`)
+	}, "the first tail to arm")
+
+	// The gate: a second plain arm must be REFUSED, and must say how to proceed.
+	//
+	// BOUNDED on purpose. If the gate regresses, the second arm does not error — it
+	// becomes a follower and blocks forever, so an unbounded CombinedOutput() here would
+	// HANG rather than fail. A test that wedges on regression is worse than one that
+	// fails: it burns a CI slot and reports a timeout instead of a cause. (Found the
+	// hard way: this is exactly how my own gate-removal mutation run wedged.)
+	gateCtx, cancelGate := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelGate()
+	refuse := exec.CommandContext(gateCtx, bin, "tail", "ch/al")
+	refuse.Env = env("sid-b")
+	out, err := refuse.CombinedOutput()
+	if gateCtx.Err() != nil {
+		t.Fatalf("the second arm never exited — the gate let it become a live follower:\n%s", out)
+	}
+	if err == nil {
+		t.Fatalf("a second tail armed over a live one:\n%s", out)
+	}
+	if !strings.Contains(string(out), "--steal") {
+		t.Errorf("the refusal does not name the escape hatch:\n%s", out)
+	}
+
+	// --steal takes over
+	second := exec.Command(bin, "tail", "--steal", "ch/al")
+	second.Env = env("sid-b")
+	if err := second.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Process.Kill(); _, _ = second.Process.Wait() })
+
+	// the displaced follower must END, and say why in words that are TRUE
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(firstOut)
+		done <- string(b)
+	}()
+	select {
+	case tail := <-done:
+		if !strings.Contains(tail, "displaced by another listener") {
+			t.Errorf("displaced follower's last words were %q; want the displacement marker", tail)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the displaced follower never exited — --steal did not displace it")
+	}
+	if err := first.Wait(); err != nil {
+		t.Errorf("displaced follower exited %v; displacement is a deliberate outcome, not a failure", err)
+	}
+}
+
+func waitUntil(t *testing.T, d time.Duration, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }

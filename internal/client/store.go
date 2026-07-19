@@ -372,12 +372,15 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 //
 // It clears listenerStart ONLY, never listenerPid. Both must hold at once:
 //   - identity gone   => the predicate reads dead, so the contract holds
-//   - listenerPid kept => the D4 tri-state still says ever-armed, so the re-arm seeks
-//     EOF instead of replaying from byte 0
+//   - listenerPid kept => the peer still reads ever-armed, which the send gate and the
+//     cursor-less migration rule both depend on
 //
-// Nulling listenerPid would satisfy the first and silently break the second: rename
-// does not truncate the inbox, so the re-arm would re-deliver every message the peer
-// ever received.
+// The second half's REASON changed when the durable cursor landed, and the original
+// wording is no longer true: replay is the cursor's decision now, so with a valid
+// cursor present a null listenerPid would resume at the cursor just the same. What
+// nulling it actually breaks is the CURSOR-LESS case — a peer mid-migration would fall
+// from "seek END once" to a full replay of its entire inbox history — plus the send
+// gate, which reads a null listenerPid as never-armed and accepts unconditionally.
 func renameMeta(dir, newAlias string) error {
 	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if err != nil {
