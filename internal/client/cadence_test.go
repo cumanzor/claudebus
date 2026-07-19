@@ -22,8 +22,8 @@ func BenchmarkIdentityCheck(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if c := id.check(); c != stillListener {
-			b.Fatalf("unexpected cause %d", c)
+		if c := id.check(); c.cause != stillListener {
+			b.Fatalf("unexpected cause %d", c.cause)
 		}
 	}
 }

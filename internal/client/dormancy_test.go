@@ -40,8 +40,8 @@ func TestIdentityCauses(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	_, _, meta, id := armedPeer(t, "ch", "al")
 
-	if got := id.check(); got != stillListener {
-		t.Fatalf("a freshly armed follower must be the listener, got cause %d", got)
+	if got := id.check(); got.cause != stillListener {
+		t.Fatalf("a freshly armed follower must be the listener, got cause %d", got.cause)
 	}
 
 	cases := []struct {
@@ -58,10 +58,6 @@ func TestIdentityCauses(t *testing.T) {
 			setMetaFields(t, meta, `"listenerPid":null,"listenerStart":""`)
 		}, causeRejoined, "peer re-joined"},
 
-		{"alias renamed (witness cleared, pid kept)", func() {
-			setMetaFields(t, meta, fmt.Sprintf(`"listenerPid":%d,"listenerStart":""`, os.Getpid()))
-		}, causeRenamed, "alias was renamed"},
-
 		{"registration gone", func() {
 			if err := os.Remove(meta); err != nil {
 				t.Fatal(err)
@@ -72,8 +68,8 @@ func TestIdentityCauses(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			c.mutate()
 			got := id.check()
-			if got != c.want {
-				t.Errorf("cause = %d, want %d", got, c.want)
+			if got.cause != c.want {
+				t.Errorf("cause = %d, want %d", got.cause, c.want)
 			}
 			if txt := got.marker(); !strings.Contains(txt, c.wantTxt) {
 				t.Errorf("marker %q does not say %q", txt, c.wantTxt)
@@ -83,6 +79,77 @@ func TestIdentityCauses(t *testing.T) {
 				t.Errorf("marker %q claims a displacement that did not happen", txt)
 			}
 		})
+	}
+}
+
+// TestRenameIsDetectedThroughTheRealFlow is F1. The renamed case cannot be staged by
+// editing a meta in place, because a real Rename MOVES the peer directory — the old
+// follower's path stops resolving entirely and the cleared witness lands at the NEW
+// path, which that follower never reads. An in-place fixture produced a state no real
+// flow writes, and it made a genuinely unreachable branch look tested.
+//
+// So this drives Join -> arm -> Rename and asserts on what the follower ACTUALLY sees,
+// including that the remedy names the new address rather than telling the user to
+// re-join a name their peer no longer occupies.
+func TestRenameIsDetectedThroughTheRealFlow(t *testing.T) {
+	root := setupStore(t)
+	if _, _, err := Join("dev", "main"); err != nil {
+		t.Fatal(err)
+	}
+	oldMeta := filepath.Join(root, "dev", "main", "meta.json")
+	start := selfStart(t)
+	armMeta(oldMeta, start)
+	id := &listenerIdentity{pid: os.Getpid(), start: start, metaPath: oldMeta}
+	if d := id.check(); d.cause != stillListener {
+		t.Fatalf("precondition: armed follower reads cause %d", d.cause)
+	}
+
+	if _, _, _, err := Rename("newname", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	d := id.check()
+	if d.cause != causeRenamed {
+		t.Fatalf("a real rename produced cause %d, want causeRenamed(%d) — "+
+			"the old path is gone, so this is the state the follower is actually in",
+			d.cause, causeRenamed)
+	}
+	if d.addr != "dev/newname" {
+		t.Errorf("renamed address = %q, want dev/newname", d.addr)
+	}
+	m := d.marker()
+	if !strings.Contains(m, "dev/newname") {
+		t.Errorf("marker %q must name the new address; the user cannot act on it otherwise", m)
+	}
+	if strings.Contains(m, "re-join") {
+		t.Errorf("marker %q tells the user to re-join, which would resurrect the vacated alias", m)
+	}
+}
+
+// TestPrunedPeerIsNotMistakenForARename: findRenamed must not invent a rename. A peer
+// that was genuinely pruned leaves no sibling bearing our pid, so the cause stays gone
+// and the remedy stays re-join.
+func TestPrunedPeerIsNotMistakenForARename(t *testing.T) {
+	root := setupStore(t)
+	if _, _, err := Join("dev", "main"); err != nil {
+		t.Fatal(err)
+	}
+	// a sibling peer exists in the channel, so the scan has something to walk past
+	seedPeer(t, root, "dev", "watcher", "OTHER")
+	oldMeta := filepath.Join(root, "dev", "main", "meta.json")
+	start := selfStart(t)
+	armMeta(oldMeta, start)
+	id := &listenerIdentity{pid: os.Getpid(), start: start, metaPath: oldMeta}
+
+	if err := os.RemoveAll(filepath.Join(root, "dev", "main")); err != nil {
+		t.Fatal(err)
+	}
+	d := id.check()
+	if d.cause != causeGone {
+		t.Errorf("a pruned peer read cause %d, want causeGone(%d)", d.cause, causeGone)
+	}
+	if !strings.Contains(d.marker(), "re-join") {
+		t.Errorf("marker %q must name re-join for a genuinely pruned peer", d.marker())
 	}
 }
 
@@ -353,7 +420,7 @@ func TestMarkerRemedyMatchesBehavior(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("ArmLocalTail never returned for a pruned peer")
 		}
-		m := causeGone.marker()
+		m := dormancy{cause: causeGone}.marker()
 		if !strings.Contains(m, "re-join") {
 			t.Errorf("marker %q must name re-join: a re-arm provably fails in this state", m)
 		}
@@ -385,31 +452,29 @@ func TestMarkerRemedyMatchesBehavior(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("ArmLocalTail never returned; the gate let it through")
 		}
-		if m := causeDisplaced.marker(); !strings.Contains(m, "--steal") {
+		if m := (dormancy{cause: causeDisplaced}).marker(); !strings.Contains(m, "--steal") {
 			t.Errorf("marker %q must name --steal: a plain re-arm provably fails here", m)
 		}
 	})
 
 	// causeRejoined is the one state where a plain re-arm is genuinely right.
 	t.Run("re-joined names a plain re-arm", func(t *testing.T) {
-		m := causeRejoined.marker()
+		m := dormancy{cause: causeRejoined}.marker()
 		if !strings.Contains(m, "re-arm to resume") || strings.Contains(m, "--steal") {
 			t.Errorf("marker %q should ask for a plain re-arm", m)
 		}
 	})
 
 	// causeRenamed: the old address is gone; the remedy is the NEW alias, not this one.
-	t.Run("renamed points at the new alias", func(t *testing.T) {
-		m := causeRenamed.marker()
-		if !strings.Contains(m, "new alias") {
-			t.Errorf("marker %q must send the user to the new alias; the old address no longer resolves", m)
-		}
-	})
+	// the renamed remedy is asserted against the REAL flow in
+	// TestRenameIsDetectedThroughTheRealFlow, which is the only way to obtain a
+	// genuine causeRenamed and its address.
 
 	// and the truthfulness rule still holds across the reworded set
 	for _, c := range []dormancyCause{causeRejoined, causeRenamed, causeGone} {
-		if strings.Contains(c.marker(), "displaced") {
-			t.Errorf("marker %q claims a displacement that did not happen", c.marker())
+		m := dormancy{cause: c, addr: "dev/x"}.marker()
+		if strings.Contains(m, "displaced") {
+			t.Errorf("marker %q claims a displacement that did not happen", m)
 		}
 	}
 }
