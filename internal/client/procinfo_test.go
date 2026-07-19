@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestProcArgsSelfParse proves the platform argv reader is correct by reading our
@@ -42,8 +43,16 @@ func TestProcArgsDeadPid(t *testing.T) {
 }
 
 // startedChild spawns a long-lived child and returns its pid, killed at test end.
+//
+// The leading sleep is load-bearing on linux, where starttime is USER_HZ ticks
+// (10ms) rather than darwin's microseconds: a child spawned in the same tick as the
+// test binary or as a previously-spawned sibling gets a byte-identical token, and
+// the ordering and distinctness assertions fail spuriously. Separating the spawns is
+// the right fix rather than relaxing those comparisons — a >= ordering would pass on
+// a constant wrong field, which is the exact failure the tests exist to catch.
 func startedChild(t *testing.T) int {
 	t.Helper()
+	time.Sleep(50 * time.Millisecond) // ~5 ticks at USER_HZ=100
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("spawn child: %v", err)
