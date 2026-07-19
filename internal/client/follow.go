@@ -31,95 +31,24 @@ const (
 	ReplaySeekEnd                     // a listenerPid was recorded -> seek EOF (bash from_line "0")
 )
 
-// wire is the follower --from value, byte-identical to bash's from_line so the
-// replay semantics ("0" => seek end; anything else => from start) match exactly.
-func (m ReplayMode) wire() string {
-	if m == ReplaySeekEnd {
-		return "0"
-	}
-	return "+1"
-}
-
-func replayFromWire(s string) ReplayMode {
-	if s == "0" {
-		return ReplaySeekEnd
-	}
-	return ReplayFromStart
-}
-
-// Hidden follower flags for the re-exec'd argv. The --inbox VALUE is the Decision 2
-// compat surface (bash-era meta_listener_alive greps `ps -o args=` for the inbox
-// path); the flag name/position are free but kept stable.
-const (
-	tailFlagInbox = "--inbox"
-	tailFlagFrom  = "--from"
-)
-
-// compatInboxPath is bash inbox_path() VERBATIM (bin/cbus:27): dir + "/" + ch + "/" +
-// al + "/inbox.jsonl", with NO filepath.Clean.
+// InboxPath is a peer's inbox under the live CBUS_DIR.
 //
-// The raw spelling is now VESTIGIAL. It existed so the follower's --inbox argv would
-// byte-match what a grep-based liveness predicate looked for; since P3 made listener
-// identity structural, no reader greps this string to judge a peer this binary armed.
-// The only surviving grep is metaInboxNeedle in liveness_transition.go, which reads
-// PRE-P3 metas and rebuilds the spelling itself, independent of this function.
-//
-// It stays raw purely because the argv it feeds is still emitted, and it goes away
-// with that argv when the re-exec is deleted. File I/O is
-// spelling-agnostic (the kernel collapses '//'), so open/stat may use it directly.
-func compatInboxPath(dir, ch, al string) string {
-	return dir + "/" + ch + "/" + al + "/inbox.jsonl"
-}
-
-// InboxPath is a peer's inbox in the compat spelling under the live CBUS_DIR — the
-// exact string the follower carries in its --inbox argv (and opens).
+// The bash-era raw concatenation (no filepath.Clean) is gone with the argv it fed:
+// nothing greps this string to judge a peer any more. The one surviving grep is
+// metaInboxNeedle in liveness_transition.go, which reads PRE-P3 metas and rebuilds the
+// raw spelling itself, independent of this function.
 func InboxPath(ch, al string) string {
-	return compatInboxPath(CBUSDir(), ch, al)
+	return filepath.Join(CBUSDir(), ch, al, "inbox.jsonl")
 }
 
-// TailArgv is the re-exec'd follower's argv: `<self> tail --inbox <inbox> --from
-// <+1|0>`. self is argv[0]; the inbox path appears verbatim so bash-era liveness
-// recognizes this Go follower regardless of the binary name (cbus-go).
-func TailArgv(self, inbox string, mode ReplayMode) []string {
-	return []string{self, "tail", tailFlagInbox, inbox, tailFlagFrom, mode.wire()}
-}
-
-// ParseTailFollower extracts the follower's inbox + replay mode when a `tail` verb
-// carries the hidden --inbox (i.e. this process IS the re-exec'd follower). ok=false
-// means this is an arm invocation (bare `tail <ch>/<al>`), not the follower.
-func ParseTailFollower(args []string) (inbox string, mode ReplayMode, ok bool) {
-	from := "+1"
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case tailFlagInbox:
-			if i+1 < len(args) {
-				inbox = args[i+1]
-				i++
-			}
-		case tailFlagFrom:
-			if i+1 < len(args) {
-				from = args[i+1]
-				i++
-			}
-		}
-	}
-	if inbox == "" {
-		return "", ReplayFromStart, false
-	}
-	return inbox, replayFromWire(from), true
-}
-
-// ArmLocalTail resolves target, records THIS process as the peer's listener, and
-// re-execs (image-replacing) into the blocking follower. It returns only on failure;
-// on success syscall.Exec never returns.
+// ArmLocalTail resolves target, records THIS process as the peer's listener, and runs
+// the blocking follower IN THIS PROCESS. It returns only on failure.
 //
-// COMPAT(P3 #1) (Decision 2 — dies with P3 structural liveness): the re-exec carries the
-// resolved inbox path as a hidden --inbox arg so the bash-era liveness predicate
-// (meta_listener_alive greps `ps -o args=` for the inbox) reads this Go follower as
-// alive during coexistence. A TRUE syscall.Exec (image replace, not a child fork)
-// keeps the pid, so the listenerPid recorded just below IS the follower's pid — no
-// re-record, no window. os.Environ() is passed EXPLICITLY: a dropped CBUS_DIR would
-// send the re-exec'd follower at the wrong inbox.
+// The Decision 2 re-exec is gone. It existed so the follower's argv would carry the
+// inbox path for a grep-based liveness predicate; identity is structural now, so there
+// is nothing to put in an argv and no reason to replace the process image. The pid
+// recorded just below is still the follower's pid, for the simpler reason that it
+// never stopped being this process.
 func ArmLocalTail(target string) error {
 	ch, al, err := ParseLocal(target)
 	if err != nil {
@@ -142,12 +71,9 @@ func ArmLocalTail(target string) error {
 	if pm, ok := ReadPeerMeta(metaPath); ok && pm.ListenerPid != 0 {
 		mode = ReplaySeekEnd
 	}
-	armMeta(metaPath) // best-effort: listenerPid=own pid, ownerPid, lastActivity (D3)
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve self: %v", err)
-	}
-	return syscall.Exec(self, TailArgv(self, inbox, mode), os.Environ())
+	armMeta(metaPath) // best-effort: listenerPid=own pid, listenerStart, ownerPid, lastActivity
+	RunFollower(inbox, mode)
+	return nil // unreachable: the follower never self-exits (see RunFollower)
 }
 
 // armMeta records this process as the peer's listener: listenerPid=own pid,

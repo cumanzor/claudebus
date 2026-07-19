@@ -8,9 +8,12 @@ import (
 // TRANSITION(P3T2) — argv-grep listener identity, READ SIDE ONLY.
 //
 // This file is the entire surviving remnant of the argv-fingerprint liveness the P3
-// structural-identity work replaced (former COMPAT(P3 #1/#2), port-map D1). It is
-// fenced here so the sweep `grep -rn 'COMPAT(P3' internal/ cmd/` stays empty and the
-// one thing still to delete is one file.
+// structural-identity work replaced (compat-deletion-plan items 1 and 2, port-map
+// D1). It is fenced here so the compat-token sweep stays empty and the one thing left
+// to delete is one file.
+//
+// The old source token is deliberately NOT reproduced anywhere in this file, so the
+// sweep is a clean binary check rather than a grep whose output needs interpreting.
 //
 // WHY IT SURVIVES AT ALL. A follower armed by a PRE-P3 binary recorded a listenerPid
 // but no listenerStart, and its `--inbox <path>` argv is the only ground truth about
