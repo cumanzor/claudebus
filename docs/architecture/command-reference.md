@@ -192,6 +192,14 @@ back to `$CBUS_ALIAS` then `<hostname>-$PPID` (unroutable); remote markers key
 on `nosession-$PPID`. Orphan peers created this way can only be removed by
 `unregister` or `prune` (after the 10-minute grace).
 
+**Warning (M4 N3, port-map D7):** `join`, `send` (local and remote), and local
+`tail` print one stderr line when `CLAUDE_CODE_SESSION_ID` is unset: `cbus: no
+CLAUDE_CODE_SESSION_ID — running sessionless; this session cannot be resolved
+by list/leave/rename and replies to it may be unroutable`. Sessionless is a
+supported mode, not an error — the warning fires once per invocation, never on
+stdout (the follower's stdout is a frame stream and `inbox` is
+script-consumed). `rename`, `leave`, and `whoami` do not call it as of M4.
+
 ---
 
 ## 2. Address grammar
@@ -322,38 +330,57 @@ TaskStops the right Monitor.
    `claude-*` ancestor, ≤16 parent hops) into `meta.json`, then **`exec`s** the
    follower — so the recorded pid *is* the Monitor-managed process. When the
    Monitor kills it, liveness flips to "off" by itself; no trap needed.
+   *(Bash-era mechanics; P3 tranche 2 replaced argv-grep liveness with a
+   structural `(listenerPid, listenerStart)` witness and moved the follower
+   in-process — nothing re-execs any more. This pair of steps was not updated
+   for that landing; flagged, not fixed, out of M4's scope.)*
 2. The inbox path is deliberately kept in the follower's **argv** — liveness
    checks grep `ps -ww -o args=` for it (pid-recycling guard). A port that
    hides the inbox path from the process identity breaks every liveness check.
-3. **Replay semantics:** if the *previous* `listenerPid` was null (fresh join,
-   never armed) the follower replays the whole inbox from byte 0. If **any**
-   previous pid was recorded — alive or dead — it starts at the **end**:
-   messages queued between listener death and re-arm are silently skipped
-   (this is the `send --force` caveat).
+3. **Replay semantics (M4, `cbus-8k9.4`):** a durable per-peer `.cursor`
+   sidecar (behavior-spec.md §8.6) now decides resume position, replacing the
+   null-`listenerPid` tri-state this item used to describe. A fresh join (no
+   cursor, never armed) still replays from byte 0. Everything else — a normal
+   re-arm, a re-arm after `--force` queued mail into a dead gap, a post-rename
+   re-arm, a post-`--steal` re-arm — resumes from the cursor's last delivered
+   frame boundary, with no special case for any of them. Closes `cbus-8no` and
+   the old "`send --force` may never deliver" caveat.
 4. The follower survives a rejoin's truncate / inode swap like `tail -F`
    (reopen on inode change or shrink, 0.2 s poll) and keeps polling if the
    path vanishes. One narrow exception: if the file disappears in the
    stat-succeeded-then-open-failed window during rotation, the follower
    crashes (`ValueError` on a closed file) — the single way it exits on its
    own; the Monitor reports the death and the standard re-arm recovers.
+   *(Go-side: reopen retries until it succeeds instead of crashing, and a
+   rotation now runs the displacement identity check — item 3 below — before
+   reopening, not after.)*
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Unarmed: cbus join (inbox truncated, listenerPid null)
+    [*] --> Unarmed: cbus join (inbox truncated, listenerPid null, .cursor removed)
     Unarmed --> Listening: first cbus tail under Monitor (replays whole inbox)
     Unarmed --> Pruned: never armed and meta.json older than 10 min
     Listening --> Off: Monitor stopped / window closed / session crash (ownerPid dead)
-    Off --> Listening: re-arm (starts at inbox END — gap is lost)
+    Off --> Listening: re-arm (resumes from the .cursor boundary, not from inbox END)
     Off --> Pruned: prune or join auto-prune (departed broadcast)
-    Listening --> [*]: leave / unregister / hook-exit
+    Listening --> [*]: leave / unregister / hook-exit / displaced by --steal
 ```
 
-**Quirk (no arm guard):** local `tail` checks neither ownership nor an
-existing live listener — arming the same address twice leaves **two** live
-followers delivering every message to both Monitors, while `meta.json` tracks
-only the newest pid. The only guard is skill discipline
-("Skip if this session already has a cbus Monitor armed for this address").
-This is the exact inverse of the relay, which enforces last-wins displacement.
+**Displacement gate (M4 N2/N3, `cbus-8k9.4`, closes `cbus-0r8`):** local `tail`
+now refuses a second arm on an already-armed alias — `cbus: <ch>/<al> is
+already being tailed (listener pid <p>) — use --steal to take over` — unless the caller
+passes `--steal`, which takes over losslessly (the cursor belongs to the peer,
+not the follower). A running follower also re-checks its own identity against
+meta at a bounded cadence and, decisively, before every inbox reopen, so a
+foreign rejoin reclaiming the path is caught and the follower goes dormant
+instead of shadow-streaming a stranger's inbox (the old "zombie reattach"
+hazard, behavior-spec.md §8.7). A dormant follower prints one line before
+exiting, naming the remedy for its specific cause (`displaced`, `rejoined`,
+`renamed`, or `gone`) rather than a uniform "re-arm" that was wrong for three of
+the four. This closes the double-listener gap the "Quirk (no arm guard)" note
+used to describe; the exact inverse of the relay's displacement semantics no
+longer holds — local now enforces the same last-wins rule, opt-out via
+`--steal` rather than automatic.
 
 ### Remote arm — the ws source
 
@@ -527,11 +554,15 @@ re-arm the Monitor tool (old tail is now stale; NOT Bash — `cbus tail` blocks 
 ```
 
 **Post-condition (the printed contract):** the live tail is declared stale —
-`/bus-rename` TaskStops it and re-arms on the new address. The re-arm starts
-at the inbox **end**, so a message landing in the rename→re-arm gap is not
-replayed (tracked as issue `cbus-8no`). Mechanically the old follower actually
-keeps delivering via its open fd until re-armed, while `list` shows `off` —
-preserve the printed contract, not the accident.
+`/bus-rename` TaskStops it and re-arms on the new address. As of M4
+(`cbus-8k9.4`), the re-arm resumes from the durable `.cursor` sidecar's last
+delivered frame boundary rather than seeking the inbox end, so a message
+landing in the rename→re-arm gap IS now replayed — `cbus-8no` is closed
+(behavior-spec.md §8.6). Mechanically the old follower actually keeps
+delivering via its open fd until re-armed, while `list` shows `off` — preserve
+the printed contract, not the accident. Separately, the OLD follower now
+detects the rename itself (`cbus-0r8`'s displacement mechanism, §8.7) and stops
+rather than continuing to poll a path a stranger may later reoccupy.
 
 **Quirk:** an all-numeric new alias is stored as a JSON int in `meta.json`.
 
@@ -560,7 +591,7 @@ match); failure → `cbus: no peer "<al>" in your channels — use
 |---|---|
 | Joined, never armed (`listenerPid` null) | Always accepted — the first arm replays the whole inbox, so nothing is lost |
 | Listener alive | Accepted |
-| Listener recorded but **dead** | Refused: `cbus: "<ch>/<al>" is not listening; use --force to queue anyway` (exit 1). With `--force`: stderr warning `cbus: warning: "<ch>/<al>" is not listening — sending anyway`, then queues **best-effort** — a re-arm starts from the inbox end, so the line may never be delivered |
+| Listener recorded but **dead** | Refused: `cbus: "<ch>/<al>" is not listening; use --force to queue anyway` (exit 1). With `--force`: stderr warning `cbus: warning: "<ch>/<al>" is not listening — sending anyway`, then queues. As of M4 (`cbus-8k9.4`) delivery is no longer best-effort: the next re-arm resumes from the durable `.cursor` boundary rather than seeking the inbox end, so a message queued into a dead gap IS delivered (`TestForceIntoDeadGapDelivers`, behavior-spec.md §8.6) |
 
 **`from` default chain (in order):** `--from X` (free text, unvalidated) →
 own registration in the *target* channel → first own registration anywhere
@@ -637,7 +668,10 @@ full contract — **never run this under Bash**.
 - Records `listenerPid`/`ownerPid`, then `exec`s the follower (0.2 s poll,
   reframes each message into the framed block, single buffered write per
   message, UTF-8-safe, survives truncate/rotation).
-- Replay: whole inbox on first-ever arm; from the end on any re-arm.
+- Replay: whole inbox on first-ever arm; any re-arm resumes from the durable
+  `.cursor` sidecar's last delivered frame boundary (M4, behavior-spec.md §8.6)
+  — not from the inbox end. A second arm on an already-armed alias is refused
+  unless `--steal` (M4, §8.7).
 
 ### `cbus tail <ch>@<host>/<alias>` — remote
 
@@ -1715,11 +1749,18 @@ client; they remain for the homogenization/port record.
     the first stderr line to the user, not PostCompact-only.
 
 **Delivery & liveness**
-12. Re-arm never replays: messages queued between listener death and re-arm
-    (`--force` sends) are silently skipped. Remote has the opposite semantics
-    (spool replays).
-13. Local `tail` has no ownership/collision guard — double-arming duplicates
-    delivery; the relay displaces instead (last-wins).
+12. ~~Re-arm never replays~~ **Closed, M4 (`cbus-8k9.4`, `cbus-8no`):** a durable
+    per-peer `.cursor` sidecar now resumes from the last delivered frame
+    boundary on every re-arm, including messages queued via `--force` into a
+    dead gap. Remote still has the same (spool-replays) semantics it always
+    had — this closed the local/remote asymmetry, not remote's behavior.
+13. ~~Local `tail` has no ownership/collision guard~~ **Closed, M4
+    (`cbus-8k9.4`, `cbus-0r8`):** a second local arm on an already-armed alias
+    is refused (`--steal` to take over); a running follower detects a foreign
+    reopen or a rename via a self-identity check and goes dormant instead of
+    double-delivering or shadow-streaming a stranger's inbox. Local now matches
+    the relay's last-wins-with-explicit-opt-in-takeover posture instead of
+    having none.
 14. The 10-minute unarmed grace keys off `meta.json` mtime; any rewrite resets
     it.
 15. Liveness is pid + argv-substring + ownerPid forensics; the inbox path must

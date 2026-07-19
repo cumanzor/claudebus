@@ -56,14 +56,32 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > own §5 contracts (A4) already scoped that observable to "through Phase 2" / "until
 > no bash cbus process can arm a tail anywhere." Two edge cases kept their exact
 > pre-existing observable behavior across the rewrite: rename still invalidates the
-> listener record (old tail reads stale, needs re-arm, re-arm seeks end and loses
-> the gap — `cbus-8no`, unchanged) — deliberately now, where before it worked by
-> the argv needle going stale by accident (port-map D1). And a dead-but-unreaped
+> listener record (old tail reads stale, needs re-arm — deliberately now, where
+> before it worked by the argv needle going stale by accident, port-map D1). The
+> re-arm-loses-the-gap half of that sentence is no longer true: `cbus-8no` closes
+> in M4 via the durable replay cursor (§8.6). And a dead-but-unreaped
 > (zombie) listener still reads dead — pinned since the port by
 > `TestArgvClauseZombieDead` against the argv clause; the structural rewrite
 > regressed it briefly (a zombie's `/proc` stat and `kill -0` both still succeed,
 > so its `(pid, starttime)` token still byte-matches), reproduced then fixed
 > pre-ship (`f853ff2`) so the net observable answer is unchanged from bash.
+>
+> **Doc-refresh note (2026-07-19, `cbus-8k9.4` M4 — D4/D5, local replay + local
+> collision only):** §8.6 below is REWRITTEN, not amended, to describe the durable
+> replay cursor (D4) that now decides local re-arm resume position; the null-
+> `listenerPid` tri-state it replaced is preserved above only as the bash-era
+> record. The rename-window loss (`cbus-8no`) and the `--force`-into-a-dead-gap
+> hole are the same defect wearing two hats — seeking END on every re-arm silently
+> discarded whatever arrived while nobody held the file — and both close via the
+> cursor, with no rename-specific or gap-specific branch anywhere in the decision:
+> see §8.6's table. §8.7's zombie-reattach hazard also closes here, via a
+> displacement gate (D5) plus a follower self-identity check; see the closure note
+> appended to §8.7. Local dormancy markers each name the remedy that actually
+> works for their cause, not a uniform "re-arm" that was wrong three times out of
+> four. One new local-only stderr warning (port-map D7) fires once on join/send/
+> tail/rename/leave/whoami when `CLAUDE_CODE_SESSION_ID` is unset, naming what
+> sessionless mode actually loses. None of this touches the wire, presence, the
+> relay, or remote tail — those replay semantics are unchanged and out of scope.
 
 ## 1. Global invariants
 
@@ -235,11 +253,80 @@ Only body text is wrapped — header and end marker are emitted verbatim whateve
 ### 8.5 Follower loop (:552-577)
 Hand-rolled `tail -F`: readline → empty → sleep 0.2 s → `os.stat`. Partial lines buffered in `pend` until `\n` (:556-562). Reopen when `st_ino` changed OR size < tell (:569) → offset 0, full replay of the fresh file, `pend` reset (survives rejoin truncate/recreate). Path vanished → keep old fd, poll forever — never exits on its own, **except** one narrow rotation race *(the only self-termination mode)*: stat succeeds → file vanishes → reopen `OSError: pass` leaves `f` closed → next `readline()` raises uncaught ValueError → traceback, exit (fill-r1-2 §4; Monitor notifies, standard re-arm recovers). stdout reconfigured UTF-8 `errors="replace"` (:517-520); the `-c` source is pure ASCII (`◀` escaped) for locale independence.
 
-### 8.6 Replay selection (:500,514,553-554)
-Arming shell reads the PREVIOUS `listenerPid` before overwriting: never set → `'+1'` = read from byte 0 (full replay); ever set (alive or dead) → `'0'` = seek END. `'+1'/'0'` are vestigial `tail -n` spellings; python tests only `== "0"`. Rename preserves meta (mv + alias patch) so post-rename re-arm follows from the end.
+### 8.6 Replay selection
+
+**Bash-era mechanism (frozen, historical):** the arming shell read the PREVIOUS
+`listenerPid` before overwriting it: never set → `'+1'` = read from byte 0 (full
+replay); ever set (alive or dead) → `'0'` = seek END. `'+1'/'0'` are vestigial
+`tail -n` spellings; python tests only `== "0"`. Rename preserved meta (mv +
+alias patch) so a post-rename re-arm followed from the end — which is exactly
+`cbus-8no`, the rename-window loss this null-`listenerPid` tri-state could not
+avoid: it could only answer "byte 0 or END," and END silently discards whatever
+arrived while nobody held the file.
+
+**Go mechanism (M4, `internal/client/cursor.go`, local only — REWRITES this
+section, does not amend it):** a durable per-peer sidecar, `.cursor` next to
+`meta.json`/`inbox.jsonl`, records `<dev> <ino> <offset>` for the last frame
+boundary the follower actually delivered, written temp+rename (never torn,
+best-effort — a failed write costs duplicates on the next arm, never a crashed
+follower) and only while this process still holds the identity check (§8.7): a
+displaced or orphaned follower stops moving the cursor, not just stops reading,
+or it would drag the stealer's or the new epoch's resume point past messages it
+never delivered. The offset is the last `\n` actually emitted, not the raw byte
+count off the fd — a partial line still sitting in the read buffer is excluded,
+so a re-arm can never resume mid-frame (F2, `TestCursorNeverPointsMidFrame`: the
+persisted position always sits immediately after a newline).
+
+`resolveResume` is the whole decision, run once per arm before meta is
+overwritten (the migration row needs the PREVIOUS `listenerPid`). It is 8 rows,
+and rename / `--steal` / a `--force`-into-dead-gap re-arm are deliberately NOT
+three of them — each one just satisfies the ordinary "cursor valid" row, which
+is the point: an if-branch naming any of them would mean the design is wrong.
+
+| # | State | Resume at | Why |
+|---|---|---|---|
+| 1 | No `.cursor`, peer never armed (fresh join) | byte 0 | First arm, unchanged from the bash tri-state |
+| 2 | No `.cursor`, peer WAS ever armed (pre-M4 binary, or a join that outran its first cursor write) | seek END, once | The migration rule: reproduces v0.4.0 semantics exactly for the one case with no better information, then self-heals — the follower writes a cursor immediately on open, so this row cannot recur for the same peer |
+| 3 | `.cursor` valid: dev+ino match the open inbox, offset ≤ current size | `.cursor`'s offset | The general case. This ONE row is what a re-arm, a re-arm after a dead `--force` gap, a post-rename re-arm, and a post-`--steal` re-arm all resolve to — none of the four gets its own branch |
+| 4 | `.cursor` present, dev+ino mismatch | byte 0 | The inbox was recreated (a rejoin's `rm`+recreate); join already truncated the new file, so a full replay loses nothing |
+| 5 | `.cursor` present, offset past current EOF | byte 0 | Truncate-in-place; same reasoning as row 4 |
+| 6 | `.cursor` present but unreadable/malformed (not 3 whitespace-separated fields, or an unparseable/negative offset) | byte 0, explicitly NOT row 2's migration path | CORRUPT is a distinct state from ABSENT: a damaged record means the position is genuinely unknown, and seeking END would silently discard whatever it could not account for. Replay costs duplicates instead — the trade this whole mechanism exists to make |
+| 7 | `cbus join` (new epoch) | n/a — deletes `.cursor` beside its inbox truncate, then row 1 or 2 governs the NEXT arm | A join starts a new epoch; the previous epoch's cursor is void by definition. No special join branch in `resolveResume` itself — join just removes the input row 3-6 would otherwise read |
+| 8 | Inbox rotation mid-follow (`rotated()`: dev+ino changed or size shrank) | byte 0 on the reopened file, cursor republished against the NEW inode | Not an arm-time decision (the follower is already running) but the same reasoning as row 4: the file underneath changed identity, so the fresh file is replayed from its start and the sidecar is rewritten so the NEXT arm doesn't read a stale inode |
+
+Local only: the wire, the relay, and remote `tail` have no cursor and are
+untouched — remote replay is the relay spool's business (§10).
 
 ### 8.7 Local arm has NO ownership or collision gate (fill-r2-0 §1)
 `cmd_tail` checks only that the inbox exists (:494) — no `meta_listener_alive` on the previous pid, no sessionId comparison, no session required at all (contrast: join :422 and rename :728 refuse live-listener takeover; the relay displaces). Consequences: double-arm → TWO live followers, every message delivered twice; meta pins to the newest pid only (observable state diverges from delivery topology); second arm starts at END; ownerPid reassigned to the hijacker; simultaneous first-arms both fully replay; **zombie reattach** — a follower orphaned by prune later sees a NEW session's rejoin inode and shadow-replays a stranger's inbox to the old Monitor indefinitely. Missing meta.json is tolerated (`|| true` jsets) → a fully functional listener invisible to list/send/prune. Only guard: skill discipline ("skip if already armed", bus-branch.md:22-23).
+
+**Go-side closure (M4 N2/N3, `internal/client/identity_follow.go` +
+`follow.go`, closes `cbus-0r8`):** two mechanisms together close this section's
+entire hazard class for any peer this binary arms. First, a displacement gate at
+arm time (D5): a second local `tail` on an already-armed alias is refused
+outright — relay-style — unless the caller passes `--steal`, which takes over
+cleanly because the cursor (§8.6) belongs to the peer, not the follower, so the
+stealer resumes exactly where the displaced one stopped. Second, a running
+follower carries proof of which listener it is (its `(listenerPid,
+listenerStart)` witness) and re-checks that meta still agrees, at minimum every
+~5 poll ticks and — this is the part that specifically closes zombie reattach —
+**every time the inbox rotates, checked BEFORE the reopen, never after**: a
+rotation is exactly the foreign-reopen trigger (a stranger's `join` reclaiming
+this path), so if the identity check finds this process is no longer the
+recorded listener, it goes dormant and emits a marker instead of reopening and
+shadow-streaming the stranger's inbox. The polarity is deliberate (R14, frozen):
+anything the check cannot confirm reads NOT-MINE, inverting §1's file-read
+leniency, because the destructive direction is reversed here — a false continue
+leaks another session's traffic into someone else's terminal, where a false
+dormant only costs a quiet window and a re-arm. Dormancy is a one-way door (never
+re-entered) and each of its four causes (`displaced`, `rejoined`, `renamed`,
+`gone`) gets its own marker line naming the remedy that actually works for that
+state — a uniform "re-arm to resume" was wrong for three of the four (`04dfbc8`).
+The gate itself is not atomic and takes no lock (R-B): two arms racing it can
+both pass before either writes meta, but that race self-corrects, since the
+loser's own identity check finds it is not the recorded listener and it goes
+dormant within one interval — a bounded duplicate window, not a permanent second
+listener.
 
 ## 9. Command reference (dispatch :836-914)
 

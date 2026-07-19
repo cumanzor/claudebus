@@ -1,5 +1,162 @@
 # Changelog (detailed)
 
+## [2026-07-19 19:23:43 UTC] [Client/Replay] M4 (cbus-8k9.4): durable replay cursor, follower self-identity, local displacement gate — closes cbus-8no and cbus-0r8
+
+[Attempt #1]
+
+Six commits (`e0ce7de`..`5c1fadc`), M4 of the go-port epic's Phase 3. Closes the
+last two open items from port-map.md's D4/D5 rulings, both of which trace back
+to the same root cause: the bash-era null-`listenerPid` tri-state could only
+answer "resume at byte 0 or at END," and END silently discards whatever arrived
+while nobody held the file.
+
+N1 (`e0ce7de`) adds the durable replay cursor. A `.cursor` sidecar next to
+`meta.json`/`inbox.jsonl` (never a meta.json field — meta is read-modify-written
+as a whole struct, so a cursor field there would race a lost update against the
+identity tuple it depends on) records `<dev> <ino> <offset>`, temp+rename
+written, one writer. `resolveResume` is the whole decision table, and it is a
+CONTRACT worth stating plainly, not just a code comment: **loss is silent and
+unrecoverable; duplication is visible and self-evident.** Every ambiguous branch
+in the table resolves toward duplicates, never toward silence. ABSENT (no
+cursor-aware binary has ever read this peer) and CORRUPT (one did, and the
+record is damaged) are deliberately different states — collapsing them would
+send a damaged cursor down the migration path and seek END, which the table
+forbids. Riders folded in as ruled: P1, join deletes `.cursor` beside its
+existing inbox truncate (a join starts a new epoch; the previous epoch's cursor
+is void — same-session join hits an early return before the cursor could
+matter, cross-session join's `RemoveAll` is the actual delete path, and a
+silently-failed `RemoveAll` is the narrow residue, not the in-place-truncate
+mechanism an earlier draft of this comment claimed and later retracted). P2
+keys the record on dev+ino, matching the live rotation check's strength. P6
+takes identity from the OPEN FD, never a fresh path stat, making disagreement
+with the rotation check structurally impossible. P5's migration self-heal is
+asserted by test, not assumed: the follower writes its cursor immediately on
+open, so the ABSENT/seek-END branch cannot recur for a peer once it has run.
+Dedup itself (reconciling the duplicates this mechanism deliberately produces)
+stays Phase 4 wire work — untouched here.
+
+N2 (`33bd5e2`) gives a follower proof of which listener it is: its
+`(listenerPid, listenerStart)` witness, already-existing state repurposed as a
+generation number (only one process can hold a given pid+starttime pair). One
+predicate — `check()` — closes four things at once: `--steal` displacement, the
+`cbus-0r8` foreign-reopen leak, two arms racing the displacement gate (the
+loser self-terminates instead of becoming a second permanent listener), and the
+post-rename stale tail. Polarity is deliberate and frozen (R14): anything the
+check cannot confirm reads NOT-MINE, which inverts the file-read leniency used
+elsewhere in this codebase (a bad meta read there defaults to "still alive," to
+avoid reaping a live peer on a torn read). The two policies are not in tension —
+they protect against opposite failures. A false dormant here costs a quiet
+window and a re-arm; a false continue streams another session's traffic into
+someone else's terminal, which is the leak this rider exists to close. Cursor
+writes are identity-conditional (P3 of this commit): a displaced or orphaned
+follower must stop MOVING the cursor, not merely stop reading it, or it drags
+the stealer's — or a recreated peer's — resume point past messages it never
+delivered.
+
+N3 (`7ede690`) adds the displacement gate itself: a second local `tail` on an
+already-armed alias is refused (relay-style) unless the caller passes
+`--steal`, which is lossless because the cursor belongs to the peer, not the
+follower. The gate takes no lock and is not atomic by design (R-B) — the
+self-correcting race N2's identity check provides is cheaper than the
+wedged-alias recovery path a lock would trade for atomicity. Rider D7: one
+stderr warning when there is no session id, on the verbs that actually record
+or resolve identity (`join`, `send`, local `tail` — not `rename`/`leave`/
+`whoami`), naming what sessionless mode actually loses rather than pretending
+it's an error. Rider b1: cadence measured, not described — identity check
+17.7us, cursor write 114.5us; a quiet follower performs one check per second and
+ZERO writes (`TestQuietFollowerWritesNothing`); a busy one runs roughly 5
+check+write pairs/sec, ~0.07% of a core. Rider b2: `main.go`'s "unreachable"
+return and `ArmLocalTail`'s returns-only-on-failure contract were both made
+false by dormancy — a nil return is now the designed exit path, and the source
+comments say so; not duplicated here since docs describe behavior, not comment
+history.
+
+A same-day follow-up (`04dfbc8`) fixed the dormancy markers themselves: every
+cause printed "re-arm to resume," which is true for exactly one of the four —
+`pruned` needs a re-join first, `displaced` needs `--steal`, `renamed` only
+answers to its new alias. `TestMarkerRemedyMatchesBehavior` checks the text
+against what the code actually accepts in each state, not against a fixed
+string, so the two cannot drift apart again.
+
+Reviewer findings, both fixed same-session: **F1** (`5c1fadc`) — `causeRenamed`
+was unreachable through the real flow. Rename MOVES the peer directory, so the
+old follower's path stops resolving and it lands in `causeGone`, whose remedy
+(re-join) is actively wrong post-rename (it resurrects the alias the peer just
+vacated). The N2 comment's claimed mechanism (a cleared witness read at the
+OLD path) was never true — that cleared witness lands at the NEW path, which
+the old follower never reads — and is retracted; the test that "proved" it
+manufactured the state by hand-editing a meta no real code path writes. Fixed
+by detection: `findRenamed` scans the channel for a sibling recording OUR pid
+with an empty witness (exactly what `renameMeta` leaves behind) and returns the
+new address so the marker can name it — real rename detection, at most once per
+follower lifetime, never on the poll path. **F2** (`c4b8743`) — the cursor
+persisted `consumed` (raw bytes off the fd), which includes a partial line
+still buffered; a re-arm could resume mid-frame, losing the head of a message
+forever. Fixed by persisting `consumed - len(pend)`, the last frame boundary
+actually emitted; `TestCursorNeverPointsMidFrame` asserts the boundary
+invariant rather than a byte count. Rider n1, folded into the same commit:
+`readCursor` mapped any read error to ABSENT, so an EACCES on a present cursor
+sent an ever-armed peer down the migration path and silently skipped its
+backlog — split on `os.IsNotExist` so present-but-unreadable takes the CORRUPT
+path and replays instead.
+
+Docs: behavior-spec.md §8.6 (replay) is rewritten, not amended, into an 8-row
+resume table — rename, `--steal`, and a `--force`-into-dead-gap re-arm are
+deliberately NOT three of its rows; each resolves to the ordinary "cursor
+valid" row, which is the design point. §8.7's zombie-reattach hazard gets a
+Go-side closure note. port-map.md's D4/D5 rulings, Phase 3 status block, and
+Phase 3 paragraph are marked DONE with the real mechanisms; D7 corrected to
+read "ships with M4 N3," not "at cutover." command-reference.md and
+overview.md's living descriptions of rename's `cbus-8no` window, the
+no-collision-gate quirk, and `--force`'s best-effort caveat are struck through
+with closure notes rather than silently rewritten, so the record shows what was
+believed before and why it changed. Two new standing doctrine entries added to
+`roles/reviewer.md` and `roles/coder.md`: a red test is not proof — a red test
+failing on the assertion aimed at is; and a hand-built test fixture proves a
+mutation fails, not that the state it constructs is reachable — for any state a
+test constructs by hand, ask which real code path writes it, and if none does,
+the fixture is the finding (provenance: F1's own fixture, above). A third
+doctrine addition bars any bare `pkill` pattern that could match live
+infrastructure, scoping kills to harness-tracked pids. Standing doctrine 2 (the
+re-arm-on-drop rule) gains the prune case: a re-arm failing with "no such
+peer" means the peer was pruned, and the remedy is re-JOIN under your alias,
+then re-arm — not a bare re-arm retry. These ship in-repo immediately;
+installed fleets pick them up at the next `cbus selfupdate` release, not before.
+
+[Files Changed]
+internal/client/cursor.go (new), cursor_test.go (new), cursor_regression_test.go
+(new), identity_follow.go (new), dormancy_test.go (new), cadence_test.go (new),
+follow.go, follow_test.go, meta_rewrite_test.go, rename_invalidation_test.go,
+store.go — internal/client. cmd/cbus/sessionless.go (new), main.go,
+tail_inprocess_test.go (new) — cmd/cbus. docs/architecture/behavior-spec.md (§8.6 rewritten,
+§8.7 closure note, new dated preamble note), docs/architecture/port-map.md
+(STATUS block, D4/D5/D7 rows, Phase 3 paragraph, installer parenthetical),
+docs/architecture/command-reference.md (Monitor-arming contract, tail sections,
+sessionless-degradation, quirk index items 12-13, rename/send sections),
+docs/architecture/overview.md (§5.5 decisions table, §6 known limitations) —
+docs/architecture. roles/reviewer.md, roles/coder.md (three new standing
+doctrines, doctrine 2 amended).
+
+[Possible Ripple Effects]
+Local replay behavior changes observably: a re-arm after any gap (rename,
+`--steal`, a dead `--force` queue, a plain listener death) now redelivers
+instead of skipping — sessions that relied on "re-arm always starts fresh" as
+an implicit dedup mechanism will see duplicates, which is the stated trade.
+Wire, presence, the relay, and remote `tail` are untouched. A `.cursor` file
+now exists per armed peer under `$CBUS_DIR` — not covered by any existing
+prune/cleanup path beyond what removing the peer directory already does.
+
+[Testing Notes]
+Full suite green on darwin and in the bookworm container gate. Reviewer
+mutation-verified each rider independently (F1: dropping detection reproduces
+cause 4 on a real Rename+prune flow; F2: restoring raw `consumed` fails the
+70-vs-37 boundary case; N2: removing the identity check fails the
+confidentiality and orphan tests, removing only the P3 write guard requires the
+steal-overlap test specifically, since the rotation check intercepts the orphan
+case first; the marker-remedy fix: restoring the uniform suffix fails 3 of 4
+subtests). Both N3 gate tests are bounded (a regression hangs rather than fails
+cleanly, since a missing gate becomes a blocking follower, not an error).
+
 ## [2026-07-19 05:48:18 UTC] [Client/Liveness] P3 compat tranche 2: structural (pid, starttime) identity, in-process follower, COMPAT items 1-2 deleted
 
 [Attempt #1]
