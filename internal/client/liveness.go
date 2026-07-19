@@ -154,35 +154,33 @@ func PeerDead(metaPath string) bool {
 	return unarmedGraceElapsed(metaPath)
 }
 
-// unarmedGraceElapsed reports whether a never-armed peer is past the grace window.
-// It prefers the dual-written lastActivity field and falls back to the meta file's
-// mtime. COMPAT(P3 #3): the mtime fallback bridges bash-written peers (bash never
-// wrote lastActivity) — it deletes at homogenization (-> lastActivity-only). A missing
-// meta is not dead.
+// unarmedGraceElapsed reports whether a never-armed peer is past the grace window,
+// judged by lastActivity alone (P3: the bash-era mtime fallback is deleted). A
+// missing or unreadable meta is not dead (a read error must not prune); a readable
+// meta with no parseable stamp is past grace by definition — every Go join writes
+// the stamp, so stampless means a pre-port relic or a damaged file, both prunable.
 func unarmedGraceElapsed(metaPath string) bool {
-	if ts, ok := lastActivity(metaPath); ok {
-		return time.Since(ts) > unarmedGrace
-	}
-	fi, err := os.Stat(metaPath)
+	b, err := os.ReadFile(metaPath)
 	if err != nil {
 		return false
 	}
-	return time.Since(fi.ModTime()) > unarmedGrace
+	if ts, ok := parseLastActivity(b); ok {
+		return time.Since(ts) > unarmedGrace
+	}
+	return true
 }
 
-// lastActivity reads the dual-written lastActivity timestamp from a meta.json.
-func lastActivity(metaPath string) (time.Time, bool) {
-	b, err := os.ReadFile(metaPath)
-	if err != nil {
-		return time.Time{}, false
-	}
+// parseLastActivity extracts the lastActivity timestamp from raw meta.json bytes.
+// The store writes the frozen "2006-01-02T15:04:05Z" layout; parsing accepts any
+// RFC3339 form so a format drift can never read a live peer as stampless-dead.
+func parseLastActivity(b []byte) (time.Time, bool) {
 	var m struct {
 		LastActivity string `json:"lastActivity"`
 	}
 	if json.Unmarshal(b, &m) != nil || m.LastActivity == "" {
 		return time.Time{}, false
 	}
-	ts, err := time.Parse("2006-01-02T15:04:05Z", m.LastActivity)
+	ts, err := time.Parse(time.RFC3339, m.LastActivity)
 	if err != nil {
 		return time.Time{}, false
 	}

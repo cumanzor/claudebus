@@ -1,16 +1,13 @@
 package main
 
-// COMPAT(P3 #4): the const below still carries bash's `CBUS_PYTHON (default python3)`
-// env line — a bash-ism (cbus-go has no python dependency). Drop that line at
-// homogenization; it stays now only to keep the help within one ruled delta of bash.
-//
-// usage is `cbus --help`, byte-exact from the bash USAGE heredoc (bin/cbus:856-910)
-// with ONE ruled delta: the obsolete `CC_BRANCH (fork helper path…)` env line is
-// dropped — cbus-go's `branch` is native (P2.5 TerminalForker), so CC_BRANCH is no
-// longer consulted (port-map delta table). Self-id stays `cbus` (Option X): cutover
-// is a pure binary swap. Post-cutover additions with no bash counterpart: the
-// `spawn` block (cbus-ijx.2), the `--model`/`--name` flags on branch/spawn, and the
-// `formation` block. Everything else matches bash byte-for-byte.
+// usage is `cbus --help`, from the bash USAGE heredoc (bin/cbus:856-910, now
+// git-history) with two ruled deltas: the obsolete `CC_BRANCH (fork helper path…)`
+// env line — cbus-go's `branch` is native (P2.5 TerminalForker), so CC_BRANCH is no
+// longer consulted (port-map delta table) — and the `CBUS_PYTHON (default python3)`
+// env line, dropped at P3 homogenization (cbus-go has no python dependency).
+// Self-id stays `cbus` (Option X): cutover was a pure binary swap. Post-cutover
+// additions with no bash counterpart: the `spawn` block (cbus-ijx.2), the
+// `--model`/`--name` flags on branch/spawn, and the `formation` block.
 const usage = `cbus — message bus between live Claude Code sessions, in named channels
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
@@ -140,7 +137,7 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.
 
-env: CBUS_DIR (default ~/.claude-bus), CBUS_PYTHON (default python3),
+env: CBUS_DIR (default ~/.claude-bus),
      CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL (relay endpoints),
      CBUS_REPO (owner/repo for selfupdate; baked into released binaries),
      CBUS_UPDATE_CHECK=1 (opt-in: a once-a-day 'update available' hint)
