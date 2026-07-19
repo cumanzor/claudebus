@@ -13,105 +13,46 @@ import (
 	"claudebus/internal/core"
 )
 
-// ---- Decision 2: inbox path + argv compat surface --------------------------------
+// ---- inbox path + the surviving transition needle -------------------------------
 
-// TestInboxPathByteEqualsBash pins InboxPath to bash inbox_path()'s raw
-// `printf '%s/%s/%s/inbox.jsonl' "$CBUS_DIR" ch al` construction, byte-for-byte, for
-// a clean CBUS_DIR (the supported spelling). This is the string bash-era liveness
-// greps in the follower's argv, so it must match exactly.
-func TestInboxPathByteEqualsBash(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CBUS_DIR", dir)
+// TestInboxPathIsCleaned: the bash-era raw concatenation is gone with the argv it fed.
+// InboxPath is now just a path, so it may be cleaned like any other.
+func TestInboxPathIsCleaned(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("CBUS_DIR", base+"/") // trailing slash: the old raw form kept the '//'
 	got := InboxPath("go-port", "coder")
-	want := dir + "/go-port/coder/inbox.jsonl" // verbatim bash inbox_path() form
+	want := filepath.Join(base, "go-port", "coder", "inbox.jsonl")
 	if got != want {
-		t.Fatalf("InboxPath = %q, want bash form %q", got, want)
+		t.Errorf("InboxPath = %q, want the cleaned %q", got, want)
 	}
 }
 
-// TestInboxPathRawSpellingArgvEqualsNeedle is the F1 regression: under a NON-clean
-// CBUS_DIR spelling (trailing slash), both Decision 2 compat surfaces — the follower's
-// --inbox argv (InboxPath) AND Go's argvContains needle (metaInboxNeedle) — must equal
-// bash inbox_path()'s raw concatenation, in BOTH directions. filepath.Join would clean
-// the '//' away and desync from a live bash follower's argv (bash reads Go off / Go
-// reads bash off).
-func TestInboxPathRawSpellingArgvEqualsNeedle(t *testing.T) {
+// TestTransitionNeedleStaysRaw is the F1 regression, inverted for the transition era.
+// It used to pin InboxPath and metaInboxNeedle to the SAME raw spelling because both
+// fed the argv-grep. InboxPath is cleaned now, so the needle carries that contract
+// ALONE: it must still reproduce bash inbox_path()'s raw concatenation byte-for-byte,
+// because that is what a PRE-P3 follower actually put in its argv and that argv is
+// still on disk in live process tables. A cleaned needle would miss those followers
+// under a trailing-slash CBUS_DIR and reap them at upgrade — the exact stranding the
+// shim exists to prevent.
+func TestTransitionNeedleStaysRaw(t *testing.T) {
 	base := t.TempDir()
 	dir := base + "/" // trailing slash: filepath.Join would clean this
 	t.Setenv("CBUS_DIR", dir)
 	ch, al := "go-port", "coder"
 	bashVerbatim := dir + "/" + ch + "/" + al + "/inbox.jsonl" // bash printf, raw '//'
 
-	argv := InboxPath(ch, al)
-	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json") // built the way callers do (cleaned)
-	needle := metaInboxNeedle(metaPath)
-
-	if argv != bashVerbatim {
-		t.Errorf("--inbox argv = %q, want bash-verbatim %q", argv, bashVerbatim)
-	}
-	if needle != bashVerbatim {
-		t.Errorf("argvContains needle = %q, want bash-verbatim %q", needle, bashVerbatim)
-	}
-	if argv != needle {
-		t.Errorf("argv (%q) != needle (%q) — cross-liveness would desync", argv, needle)
+	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json") // built the way callers do
+	if needle := metaInboxNeedle(metaPath); needle != bashVerbatim {
+		t.Errorf("transition needle = %q, want bash-verbatim %q", needle, bashVerbatim)
 	}
 	// premise: filepath.Join really does clean the trailing slash (the F1 trap).
 	if filepath.Join(CBUSDir(), ch, al, "inbox.jsonl") == bashVerbatim {
 		t.Fatal("premise broken: filepath.Join did not clean '//' — test would be vacuous")
 	}
-}
-
-// TestTailArgvInboxSubstring is the Decision 2 test: the re-exec'd follower's argv
-// carries the inbox path VERBATIM as the value after --inbox, so a bash-era
-// `ps -o args= | grep -qF -- "$inbox"` recognizes this Go follower. Pins the whole
-// argv shape and the replay --from wire values.
-func TestTailArgvInboxSubstring(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CBUS_DIR", dir)
-	inbox := InboxPath("go-port", "coder")
-
-	argv := TailArgv("/opt/cbus-go", inbox, ReplayFromStart)
-	want := []string{"/opt/cbus-go", "tail", "--inbox", inbox, "--from", "+1"}
-	if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("argv = %v, want %v", argv, want)
-	}
-	// the exact inbox string must be a substring of the flattened command line
-	// (what `ps -o args=` yields), not merely a separate argv element.
-	if !strings.Contains(strings.Join(argv, " "), inbox) {
-		t.Fatalf("flattened argv %q lacks the verbatim inbox %q", strings.Join(argv, " "), inbox)
-	}
-	// re-arm carries "0".
-	if got := TailArgv("/opt/cbus-go", inbox, ReplaySeekEnd)[5]; got != "0" {
-		t.Fatalf("re-arm --from = %q, want 0", got)
-	}
-}
-
-// TestParseTailFollower round-trips TailArgv and distinguishes an arm invocation
-// (bare `tail <ch>/<al>`, no --inbox) from the re-exec'd follower.
-func TestParseTailFollower(t *testing.T) {
-	inbox := "/x/go-port/coder/inbox.jsonl"
-	for _, mode := range []ReplayMode{ReplayFromStart, ReplaySeekEnd} {
-		argv := TailArgv("self", inbox, mode)
-		gotInbox, gotMode, ok := ParseTailFollower(argv[2:]) // args after "self tail"
-		if !ok || gotInbox != inbox || gotMode != mode {
-			t.Fatalf("roundtrip mode=%d: inbox=%q mode=%d ok=%v", mode, gotInbox, gotMode, ok)
-		}
-	}
-	if _, _, ok := ParseTailFollower([]string{"go-port/coder"}); ok {
-		t.Fatal("bare `tail <ch>/<al>` must NOT parse as a follower (it is the arm invocation)")
-	}
-}
-
-// TestReplayModeWire pins the tri-state wire values to bash's from_line exactly.
-func TestReplayModeWire(t *testing.T) {
-	if ReplayFromStart.wire() != "+1" || ReplaySeekEnd.wire() != "0" {
-		t.Fatalf("wire: from-start=%q seek-end=%q", ReplayFromStart.wire(), ReplaySeekEnd.wire())
-	}
-	if replayFromWire("+1") != ReplayFromStart || replayFromWire("0") != ReplaySeekEnd {
-		t.Fatal("replayFromWire mapping wrong")
-	}
-	if replayFromWire("anything-else") != ReplayFromStart {
-		t.Fatal("non-\"0\" must map to from-start (bash: only \"0\" seeks end)")
+	// and the two now deliberately DIFFER, which is the whole point of the split
+	if InboxPath(ch, al) == metaInboxNeedle(metaPath) {
+		t.Error("InboxPath should be cleaned while the needle stays raw")
 	}
 }
 
