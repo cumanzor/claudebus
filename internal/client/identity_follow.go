@@ -1,6 +1,11 @@
 package client
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // Follower self-identity (cbus-0r8, D5). A follower holds proof of WHICH listener it
 // is and keeps checking that meta still says so. One predicate closes four things:
@@ -12,8 +17,11 @@ import "fmt"
 //     it is.
 //   - two arms racing the gate: the loser is not in meta and self-terminates, so the
 //     race degrades to one interval of duplicates rather than two permanent listeners.
-//   - post-rename stale tail: renameMeta cleared listenerStart, so the tuple stops
-//     matching and "the old tail is stale, re-arm" is enforced rather than documented.
+//   - post-rename stale tail: the peer DIRECTORY moves, so the old path stops resolving
+//     entirely and the follower stops. (An earlier version of this comment claimed the
+//     cleared listenerStart is what the old follower notices. It is not: that cleared
+//     witness lands at the NEW path, which this follower never reads. The rename is
+//     detected by findRenamed below, not by the tuple.)
 //
 // The identity needs no new state: (listenerPid, listenerStart) already exists, and
 // only one process can hold a given (pid, starttime). The witness IS the generation
@@ -31,6 +39,13 @@ const (
 	causeRenamed
 	causeGone
 )
+
+// dormancy is why a follower stopped, plus whatever the marker needs to name a remedy.
+// addr is the peer's new address, set only for causeRenamed.
+type dormancy struct {
+	cause dormancyCause
+	addr  string
+}
 
 // listenerIdentity is the proof a follower carries. metaPath is captured at arm; note
 // it is a PATH, so a rename moves the peer out from under it and the follower reads the
@@ -50,26 +65,64 @@ type listenerIdentity struct {
 // false dormant costs a quiet window, a visible marker and a re-arm, while a false
 // continue streams another session's traffic into someone else's terminal. One is an
 // inconvenience, the other is a leak.
-func (id *listenerIdentity) check() dormancyCause {
+func (id *listenerIdentity) check() dormancy {
 	m, ok := ReadPeerMeta(id.metaPath)
 	if !ok {
-		return causeGone
+		// Our registration is no longer where we left it, and two very different
+		// realities look identical from this path: the peer was pruned or unregistered
+		// (gone), or it was RENAMED and the whole directory moved. The remedies are
+		// opposite — re-join resurrects a vacated alias, which is wrong after a rename —
+		// so it is worth one directory read to tell them apart.
+		if addr, renamed := id.findRenamed(); renamed {
+			return dormancy{cause: causeRenamed, addr: addr}
+		}
+		return dormancy{cause: causeGone}
 	}
 	if m.ListenerPid == 0 {
-		return causeRejoined
+		return dormancy{cause: causeRejoined}
 	}
 	if m.ListenerPid != id.pid {
-		return causeDisplaced
+		return dormancy{cause: causeDisplaced}
 	}
 	if m.ListenerStart != id.start {
-		if m.ListenerStart == "" {
-			return causeRenamed // renameMeta clears the witness and keeps the pid
-		}
 		// same pid, a DIFFERENT witness: impossible while we are alive, so the meta is
 		// describing someone else. Treat as displacement rather than inventing a case.
-		return causeDisplaced
+		return dormancy{cause: causeDisplaced}
 	}
-	return stillListener
+	return dormancy{cause: stillListener}
+}
+
+// findRenamed looks for this listener's peer under a different alias in the same
+// channel, and returns its new address.
+//
+// The signature is exact: renameMeta moves the directory, keeps listenerPid, and clears
+// listenerStart — so a sibling recording OUR pid with an empty witness is our peer,
+// renamed. A pruned peer leaves no such sibling and correctly stays causeGone.
+//
+// The channel-wide read is affordable because of WHERE it sits: check() only reaches it
+// once the meta at our own path has already failed to resolve, and dormancy is a one-way
+// door, so this runs at most once in a follower's entire life — never on the poll path.
+func (id *listenerIdentity) findRenamed() (string, bool) {
+	peerDir := filepath.Dir(id.metaPath)
+	chDir := filepath.Dir(peerDir)
+	entries, err := os.ReadDir(chDir)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") { // D2 dot-prefix skip
+			continue
+		}
+		sibling := filepath.Join(chDir, e.Name())
+		if sibling == peerDir {
+			continue
+		}
+		if m, ok := ReadPeerMeta(filepath.Join(sibling, "meta.json")); ok &&
+			m.ListenerPid == id.pid && m.ListenerStart == "" {
+			return filepath.Base(chDir) + "/" + e.Name(), true
+		}
+	}
+	return "", false
 }
 
 // marker is the single line a dormant follower emits before exiting. It is visibly not
@@ -87,15 +140,15 @@ func (id *listenerIdentity) check() dormancyCause {
 // TestMarkerRemedyMatchesBehavior pins this against the code rather than against my
 // memory of it: for each cause it asserts the named remedy is the one that state
 // accepts, so the text cannot drift away from the behavior again.
-func (c dormancyCause) marker() string {
+func (d dormancy) marker() string {
 	var line string
-	switch c {
+	switch d.cause {
 	case causeDisplaced:
 		line = "displaced by another listener — it holds the tail now; re-arm with --steal to take it back"
 	case causeRejoined:
 		line = "peer re-joined; this tail is stale — re-arm to resume"
 	case causeRenamed:
-		line = "alias was renamed; this tail is stale — re-arm under the new alias"
+		line = "alias was renamed to " + d.addr + "; this tail is stale — re-arm as " + d.addr
 	case causeGone:
 		line = "peer registration is gone — re-join, then re-arm"
 	default:
@@ -107,9 +160,9 @@ func (c dormancyCause) marker() string {
 // identityCause is check() with the nil-identity test seam. Production always supplies
 // an identity (ArmLocalTail refuses to arm without one, P4); nil is how follow() tests
 // exercise the streaming loop without a meta on disk.
-func identityCause(id *listenerIdentity) dormancyCause {
+func identityCause(id *listenerIdentity) dormancy {
 	if id == nil {
-		return stillListener
+		return dormancy{cause: stillListener}
 	}
 	return id.check()
 }

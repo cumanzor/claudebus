@@ -196,8 +196,8 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 		boundary := consumed - int64(len(pend))
 		idleTicks++
 		if boundary != lastSaved || idleTicks >= identityEvery {
-			if cause := identityCause(id); cause != stillListener {
-				_, _ = out.Write([]byte(cause.marker()))
+			if d := identityCause(id); d.cause != stillListener {
+				_, _ = out.Write([]byte(d.marker()))
 				return // one-way door (R14): dormancy is never re-entered
 			}
 			if boundary != lastSaved {
@@ -215,8 +215,8 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 			// a rotation is the foreign-reopen trigger: the inbox we are about to follow
 			// may belong to a DIFFERENT peer that reclaimed this path. Check before
 			// reopening, never after, so a stranger's bytes are never read at all.
-			if cause := identityCause(id); cause != stillListener {
-				_, _ = out.Write([]byte(cause.marker()))
+			if d := identityCause(id); d.cause != stillListener {
+				_, _ = out.Write([]byte(d.marker()))
 				return
 			}
 			f.Close()
