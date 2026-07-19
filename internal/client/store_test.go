@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"claudebus/internal/core"
 )
@@ -52,8 +53,8 @@ func setupStore(t *testing.T) string {
 	return root
 }
 
-// seedPeer writes a joined-but-never-armed peer (fresh mtime -> not dead) for the
-// given session id, plus an empty inbox.
+// seedPeer writes a joined-but-never-armed peer (fresh lastActivity -> not dead)
+// for the given session id, plus an empty inbox.
 func seedPeer(t *testing.T, root, ch, al, sid string) {
 	t.Helper()
 	seedPeerPid(t, root, ch, al, sid, "null")
@@ -66,7 +67,7 @@ func seedPeerPid(t *testing.T, root, ch, al, sid, pid string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"alias":%q,"channel":%q,"sessionId":%q,"cwd":"/w","listenerPid":%s,"ownerPid":null,"host":"h","ts":"2026-07-13T00:00:00Z"}`, al, ch, sid, pid)
+	body := fmt.Sprintf(`{"alias":%q,"channel":%q,"sessionId":%q,"cwd":"/w","listenerPid":%s,"ownerPid":null,"host":"h","ts":"2026-07-13T00:00:00Z","lastActivity":%q}`, al, ch, sid, pid, time.Now().UTC().Format("2006-01-02T15:04:05Z"))
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

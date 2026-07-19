@@ -136,19 +136,39 @@ func TestPeerDead(t *testing.T) {
 	}
 	write(`{"listenerPid":null}`)
 	setMtime(1 * time.Minute)
+	if !PeerDead(mp) {
+		t.Error("never-armed with no lastActivity stamp must be dead (pre-port relic)")
+	}
+	write(``)
+	if !PeerDead(mp) {
+		t.Error("an empty meta must be dead")
+	}
+	write(`{not json`)
+	if !PeerDead(mp) {
+		t.Error("an unparseable meta must be dead")
+	}
+	_ = os.Remove(mp)
+	if PeerDead(mp) {
+		t.Error("a missing meta must NOT be dead")
+	}
+	// any RFC3339 form counts as stamped, not just the store's frozen layout
+	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, time.Now().UTC().Format("2006-01-02T15:04:05+00:00")))
+	if PeerDead(mp) {
+		t.Error("a fresh RFC3339-offset lastActivity must NOT be dead")
+	}
+	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(0)))
 	if PeerDead(mp) {
 		t.Error("never-armed within the grace window must NOT be dead")
 	}
-	write(`{"listenerPid":null}`)
-	setMtime(11 * time.Minute)
+	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(11*time.Minute)))
 	if !PeerDead(mp) {
 		t.Error("never-armed past the grace window must be dead")
 	}
-	// lastActivity field wins over mtime (D3)
+	// mtime must have no influence in either direction (P3: fallback deleted)
 	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(0)))
 	setMtime(30 * time.Minute)
 	if PeerDead(mp) {
-		t.Error("a fresh lastActivity must win over an old mtime")
+		t.Error("a fresh lastActivity must win despite an old mtime")
 	}
 	write(fmt.Sprintf(`{"listenerPid":null,"lastActivity":%q}`, utc(20*time.Minute)))
 	setMtime(1 * time.Minute)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func seedMeta(t *testing.T, root, ch, al, sid string) {
@@ -13,7 +14,7 @@ func seedMeta(t *testing.T, root, ch, al, sid string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"sessionId":%q}`, sid)
+	body := fmt.Sprintf(`{"sessionId":%q,"lastActivity":%q}`, sid, time.Now().UTC().Format("2006-01-02T15:04:05Z"))
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

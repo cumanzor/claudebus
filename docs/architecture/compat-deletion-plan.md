@@ -15,6 +15,17 @@ so rollback is now a manual copy of `bin/cbus` over `~/.local/bin/cbus` (or
 git-history recovery); item 7 stays frozen. The logos/WSL node (`cbus-dc5`) starts
 on the port directly.
 
+**Tranche 1 executed (2026-07-18):** items 3, 4 and 6 are deleted — the mtime
+fallback (unarmed grace is `lastActivity`-only; a readable meta with no parseable
+stamp is past grace by definition, so pre-port relics become prunable and broadcast
+skips them), the `CBUS_PYTHON` help line, and the bash artifacts `bin/cbus` +
+`bin/cc-branch.sh` along with the p26 bash-differential harnesses
+(`scripts/p26_sweep.sh`, `scripts/p26_rollback.sh` — both exercised the deleted bash
+client, so they retire with it; bash rollback is now git-history recovery only).
+Items 1–2 remain gated on P3 structural liveness: the argv-grep predicate still
+needs the re-exec and the raw inbox spelling until the structural registry replaces
+it. Item 7 stays frozen.
+
 | # | What | Where | Why it exists | Deletes to |
 |---|------|-------|---------------|------------|
 | 1 | **Decision 2 re-exec** — the follower `syscall.Exec`s itself so its argv carries `--inbox <path>` | `follow.go` `ArmLocalTail`, `TailArgv`, `ParseTailFollower` | bash-era `meta_listener_alive` greps `ps -o args=` for the inbox path; a Go follower must put it in argv to read alive to bash | run the follower in-process (no re-exec, no `--inbox`); liveness moves to a structural registry (pidfile / lock) |

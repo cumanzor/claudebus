@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-19 04:30:20 UTC] [Client/Compat] P3 compat tranche 1 (go-port epic, first .4 commit): unarmed-grace liveness is now lastActivity-only -- the D3 mtime fallback is deleted, and a readable meta with no parseable stamp counts as past grace (pre-port relics become prunable; broadcast skips them). Dropped the CBUS_PYTHON env line from --help (second ruled delta vs the bash heredoc). Retired the bash artifacts bin/cbus + bin/cc-branch.sh and the p26 bash-differential harnesses (scripts/p26_{sweep,rollback}.sh); bash rollback is now git-history recovery only. COMPAT items 1-2 (follower re-exec + raw inbox spelling) stay until structural liveness replaces argv-grep.
+
 [2026-07-19 00:55:31 UTC] [Docs] Fold-in: spot-check caught a third stale "relay strips kind" instance at command-reference.md:397-398 (the first pass fixed the presence table + quirk 18 but missed this bullet) -- reworded consistently; repo+dev-docs swept afterward, no other live copies found.
 
 [2026-07-19 00:52:59 UTC] [Docs] Docs-audit remediation (solo round, no reviewer): 27-item punch list from a 3-auditor sweep vs shipped v0.3.0, all verified true and fixed -- README/command-reference/protocol/overview/bus-formation.md in repo (pane target, `cbus close`, relay presence-crosses-relay correction), 2 changelog mechanical fixes (missing `## ` header, one inverted entry pair), dev-docs index.md/architecture.md/behavior-spec.md/port-map.md direct-edited (orphaned SHAs, 70%-per-peer correction, release labels, broken anchors).

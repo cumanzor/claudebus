@@ -1,5 +1,72 @@
 # Changelog (detailed)
 
+## [2026-07-19 04:30:20 UTC] [Client/Compat] P3 compat tranche 1: lastActivity-only grace, help-line drop, bash artifact retirement
+
+[Attempt #1]
+
+First code commit of the go-port epic's P3 phase. compat-deletion-plan.md's
+own notes gate items 1-2 (follower re-exec + raw inbox spelling) on the
+structural-liveness replacement -- argv-grep liveness still consumes them --
+so this tranche deletes only the independently-removable items 3, 4 and 6.
+
+Item 3: unarmedGraceElapsed no longer falls back to the meta file's mtime.
+The stamp is authoritative: every Go join writes lastActivity (store.go
+writes it at both meta-creation sites), so a readable meta without a
+parseable stamp can only be a bash-era relic or a damaged file. New
+semantics: missing meta = not dead (unchanged); stampless-but-readable =
+past grace, i.e. prunable, and broadcast delivery now skips such peers
+(the hook-compact harness caught exactly this -- its seeded watchers were
+stampless and stopped receiving events until the seed helpers wrote stamps,
+which mirrors what real joins do).
+
+Item 4: the CBUS_PYTHON (default python3) env line is dropped from --help;
+cbus-go has no python dependency. The usage comment now records two ruled
+deltas vs the bash heredoc (CC_BRANCH was the first).
+
+Item 6: bin/cbus, bin/cc-branch.sh deleted; scripts/p26_sweep.sh and
+scripts/p26_rollback.sh deleted with them (both are bash-differential
+harnesses that execute the bash client, meaningless once it is gone).
+Bash rollback is now git-history recovery only.
+
+Post-review hardening (gpt-5.2-codex via zen codereview): lastActivity
+parsing relaxed from the frozen write layout to any RFC3339 form, so a
+future format drift can never read a live peer as stampless-dead; the
+stamp read moved into unarmedGraceElapsed (single ReadFile, no
+stat-based TOCTOU) and a read error on a present meta now returns
+not-dead instead of prunable -- only a readable, stampless meta dies.
+TestPeerDead gained empty-file, invalid-JSON and RFC3339-offset cases.
+
+[Files Changed]
+- internal/client/liveness.go: unarmedGraceElapsed rewritten (mtime read
+  deleted, stat-only presence check); lastActivity comment de-dual-write-d.
+- cmd/cbus/usage.go: COMPAT(P3 #4) comment block replaced with the
+  two-ruled-deltas note; CBUS_PYTHON clause removed from the env line.
+- internal/client/liveness_test.go: TestPeerDead stampless cases inverted
+  (stampless = dead now); mtime-non-influence regression cases kept.
+- internal/client/store_test.go, internal/client/identity_test.go:
+  seedPeerPid/seedMeta write a fresh lastActivity stamp, matching real joins.
+- docs/architecture/compat-deletion-plan.md: tranche-1 execution stamped.
+- bin/cbus, bin/cc-branch.sh, scripts/p26_sweep.sh, scripts/p26_rollback.sh:
+  deleted.
+
+[Possible Ripple Effects]
+- Any still-existing pre-cutover stampless meta on MBP/NUC now reads dead:
+  it gets pruned and stops receiving broadcasts. Intended; verify with
+  cbus list after deploy if anything looks missing.
+- Scripts or docs invoking scripts/p26_*.sh or bin/cbus will not find them;
+  cutover-decision-package.md references them as historical evidence, which
+  stays accurate as history.
+- --help output changed by one line; anything diffing help against the bash
+  heredoc must account for the second ruled delta.
+
+[Testing Notes]
+- go build ./... and go test ./... green on darwin (all packages, including
+  relay conformance). The initial run failed 3 hook-compact tests, which was
+  the semantic change working as designed on stampless seeded watchers; seed
+  helpers updated to stamp, suite green.
+- Not yet exercised: a live prune pass against a real pre-cutover relic
+  meta (none exist on this MBP's CBUS_DIR to test against).
+
 ## [2026-07-19 00:55:31 UTC] [Docs] Fold-in: one more stale relay-presence claim, caught by spot-check
 
 [Attempt #1]
