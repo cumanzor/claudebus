@@ -268,12 +268,19 @@ func TestSweepSurfaceTimesOutOnAWedgedOsascript(t *testing.T) {
 		"osascript": "sleep 30",
 	})
 
+	start := time.Now()
 	got := sweepSurface("ttys999")
 	if strings.Contains(got, "already closed") {
 		t.Fatalf("sweep claimed %q while osascript was still wedged", got)
 	}
 	if !strings.Contains(got, "timed out") {
 		t.Errorf("sweep = %q, want a timeout report", got)
+	}
+	// this assertion was missing, and its absence hid the same defect the sibling test
+	// caught: the report string was right while the sweep still ran the fake's full 30s.
+	// A timeout that is only reported and not enforced is the bug wearing the fix's face.
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("sweep took %v — the deadline did not bound it", elapsed)
 	}
 }
 

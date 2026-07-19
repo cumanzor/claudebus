@@ -17,6 +17,32 @@ import (
 // (a var, not a const, only so the timeout path is testable in milliseconds.)
 var surfaceSweepBudget = 5 * time.Second
 
+// boundedWaitDelay is how long after the deadline-kill we still wait for inherited
+// pipes to close before abandoning them. Short: by this point the kill has landed and
+// anything still holding the pipe has escaped the process group.
+const boundedWaitDelay = 200 * time.Millisecond
+
+// boundedCmd is exec.CommandContext with a deadline that actually binds.
+//
+// CommandContext alone kills only the DIRECT child. A forked descendant inherits the
+// stdout pipe, so Wait blocks reading it until that descendant exits on its own and
+// the budget buys nothing. It surfaces per-platform because of the shell: darwin's
+// /bin/sh execs the last command of a script (the direct child IS the long-running
+// process, so the kill lands on it) while debian's dash forks it (verified in a
+// bookworm container: direct child dash with a sleep child, and the sweep ran the
+// full 30s).
+//
+// Setpgid plus a group-directed kill takes the descendants with it. WaitDelay is the
+// backstop for anything that escapes the group with setsid(): it stops waiting and
+// closes the inherited pipes rather than trusting the kill to have reached everyone.
+func boundedCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = boundedWaitDelay
+	return cmd
+}
+
 // CloseReport is one target's outcome. Ok covers "closed" AND "already gone" —
 // a teardown that finds nothing to tear down succeeded (scripted sweeps depend
 // on that; only a live peer we could not end is a failure).
@@ -133,16 +159,16 @@ func sweepSurface(tty string) string {
 	// Only a TIMEOUT is disqualifying, and it is caught once at the end rather than
 	// after each step — an expired context fails every later command immediately, so
 	// control always reaches the check without closing anything on the way.
-	out, err := exec.CommandContext(ctx, "ps", "-t", tty, "-o", "pid=").Output()
+	out, err := boundedCmd(ctx, "ps", "-t", tty, "-o", "pid=").Output()
 	if err == nil && strings.TrimSpace(string(out)) != "" {
 		return "tty busy — surface left alone"
 	}
 	dev := "/dev/" + tty
-	if out, err := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
+	if out, err := boundedCmd(ctx, "tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			f := strings.Fields(line)
 			if len(f) == 2 && f[1] == dev && validTmuxPaneID(f[0]) {
-				if exec.CommandContext(ctx, "tmux", "kill-pane", "-t", f[0]).Run() == nil {
+				if boundedCmd(ctx, "tmux", "kill-pane", "-t", f[0]).Run() == nil {
 					return "tmux pane closed"
 				}
 			}
