@@ -365,8 +365,8 @@ func kickoffNonce(alias string) string {
 // silent ones failed.
 //
 // It is a bounded read of a file with a deadline, NEVER an exec of the tail
-// follower: `cbus tail` image-replaces into a follower that blocks forever, so
-// running one here would hang apply until the process was killed.
+// follower: `cbus tail` blocks in the follower loop forever, so running one here
+// would hang apply until the process was killed.
 // Reading is non-destructive — the applier's Monitor still receives every frame,
 // because a tail follows the file and this only ever opens it for reading.
 func awaitConvergence(rep *ApplyReport, self string, wait time.Duration) {
