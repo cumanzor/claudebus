@@ -16,6 +16,9 @@ relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 > port-map ruling D6 (tool-authored traffic byte-identical; foreign-written-line
 > tie-breaks now deliberate). The follower is an in-process Go loop re-exec'd with
 > `--inbox <path>` in argv — §5.1's "inbox path in argv" invariant still holds.
+> Ancestor-owner identity (§2.2, §2.4) now matches argv[0]'s basename first
+> (`isClaudeName`), `comm` kept only as a fallback — the bun-compiled binary's
+> kernel `comm` is its version string, not `claude`.
 
 Conventions:
 
@@ -405,7 +408,9 @@ survives the Monitor's per-line cap as one multi-line ws text frame:
 1. Typed unmarshal into `{From, To, TS, Text string}`. **Non-JSON payloads, payloads
    with any non-string field, or `Text == ""` pass through byte-identical** — an
    all-or-nothing gate, unlike the local coercing gate (§4.5).
-2. Same header/body/end shape as §4.2, body wrapped at 440 bytes, no `kind` slot.
+2. Same header/body/end shape as §4.2, body wrapped at 440 bytes; renders
+   ` kind=<k>` in the header when the stored line carries one (§3.3) — same
+   position as the local framer.
 3. If the framed total exceeds `wsFrameSafe = 2800` bytes, the header gains
    ` ⚠truncated~<N>B` where **N = `len(m.Text)` in bytes** (original unwrapped text,
    not frame size). The warning rides the header, which is delivered first, so it
@@ -435,7 +440,7 @@ foreign-written lines (hand-appended inbox lines, hand-placed spool files):
 | `text:null` | framed, body `None` (Python repr) | **passthrough** |
 | `from:123`, text ok | framed, `from=123` | **passthrough** (any non-string field aborts) |
 | non-dict JSON | passthrough | passthrough |
-| `kind` present, text ok | framed, header `+ kind=<v>` | framed, **kind dropped** |
+| `kind` present, text ok | framed, header `+ kind=<v>` | framed, header `+ kind=<v>` (identical to local since `cbus-ijx.5`) |
 
 *quirk — a port unifying the framers must pick each tie-break deliberately; the
 `text:null → "None"` body is an artifact nobody would spec.*

@@ -14,8 +14,10 @@ Do not add verbs: the surface is exactly `save | apply | bootstrap | list | show
 
 **save `<name>` [channel]** — capture this channel's peers. Channel defaults to
 this session's own. It records only what the bus knows (alias, sessionId, cwd,
-machine); model, role, origin and profile are hand-maintained — say so, and point
-the user at `cbus formation show <name>` to see what still needs filling in.
+machine); origin and model are auto-stamped from the peer's birth-record when one
+was recorded (launcher-born peers only), while role/profile/split stay
+hand-maintained — say so, and point the user at `cbus formation show <name>` to
+see what still needs filling in.
 
 **show `<name>`** — the peers, flagging stale sids (the recorded transcript is
 gone) and TODO roles. Read this before applying anything.

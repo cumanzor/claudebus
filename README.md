@@ -141,16 +141,18 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 > (see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)); rolling back
 > to it is now a manual copy over `~/.local/bin/cbus`.
 
-> **Forking:** `cbus branch` forks natively (iTerm2 window/tab via osascript, or
-> tmux) and relaunches through `ccs <profile>` when it detects a CCS config dir. The
-> old `bin/cc-branch.sh` helper is no longer consulted.
+> **Forking:** `cbus branch` forks natively (iTerm2 window/tab via osascript, tmux
+> new-window, or — for `pane` — a split of the caller's own surface: `tmux
+> split-window` when `$TMUX` is set, else an iTerm2 session split located by
+> `$ITERM_SESSION_ID`) and relaunches through `ccs <profile>` when it detects a CCS
+> config dir. The old `bin/cc-branch.sh` helper is no longer consulted.
 
 ## Usage
 
 ### Fork a session with the bus pre-wired
 
 ```
-/bus-branch window            # or: tab | tmux — channel defaults to the repo name
+/bus-branch window            # or: tab | tmux | pane — channel defaults to the repo name
 /bus-branch window mytask     # explicit channel name
 ```
 
@@ -428,7 +430,7 @@ cbus active [channel]            only peers currently listening (= list --active
 cbus channels                    channels with peer counts
 cbus whoami                      local memberships + remote identity markers (exit 1 if none)
 cbus inbox <channel>/<alias>     print inbox path
-cbus bootstrap <channel> [parent]  print the canonical fork-child prompt
+cbus bootstrap <channel> [parent] [child-alias]  print the canonical fork-child prompt
 cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
      --model <m>                 launch the child on a specific model
      --name <n>                  fix the child's alias AND session title
@@ -488,6 +490,11 @@ cbus auth status [host]          credential state, masked
 cbus leave [channel]             leave channel(s) this session joined
 cbus rename <new-alias> [channel]  rename this session's local alias (re-arm after)
 cbus unregister <channel>/<alias>  force-remove any peer
+cbus close <channel>/<alias> [...] [--force]
+                                 end peer sessions: SIGTERM the owning process,
+                                 then sweep its terminal surface once the tty is
+                                 dead (local only; already-gone succeeds);
+                                 --force escalates to SIGKILL after the grace
 
 env: CBUS_DIR (default ~/.claude-bus); CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL
      (relay endpoint overrides); CBUS_ALIAS (last-resort local from);
