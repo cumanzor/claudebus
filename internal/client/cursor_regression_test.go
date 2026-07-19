@@ -20,7 +20,7 @@ import (
 func drainInto(t *testing.T, inbox, metaPath string, settle time.Duration) string {
 	t.Helper()
 	resume := resolveResume(inbox, metaPath)
-	armMeta(metaPath)
+	armMeta(metaPath, selfStart(t))
 	buf, _, stopJoin := startFollow(t, inbox, resume)
 	time.Sleep(settle)
 	stopJoin()
