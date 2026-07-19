@@ -14,9 +14,12 @@ relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 > and trailing junk errors on fixed-arity verbs (§1.1's quirks — fixed); the local
 > framer is the shared `core.LocalEmit`, so the §4.5 divergence matrix is unified per
 > port-map ruling D6 (tool-authored traffic byte-identical; foreign-written-line
-> tie-breaks now deliberate). The follower is an in-process Go loop re-exec'd with
-> `--inbox <path>` in argv — §5.1's "inbox path in argv" invariant still holds.
-> Ancestor-owner identity (§2.2, §2.4) now matches argv[0]'s basename first
+> tie-breaks now deliberate). The follower is an in-process Go loop with no re-exec
+> and no argv identity (P3 tranche 2, 2026-07-19) — §5.1's "inbox path in argv"
+> invariant no longer holds for peers this binary arms. Listener identity is
+> structural, `(pid, starttime)` via `procStartTime`; a `TRANSITION(P3T2)` argv
+> fallback applies only to peers armed by a pre-P3 binary and is scoped to one
+> release. Ancestor-owner identity (§2.2, §2.4) now matches argv[0]'s basename first
 > (`isClaudeName`), `comm` kept only as a fallback — the bun-compiled binary's
 > kernel `comm` is its version string, not `claude`.
 
