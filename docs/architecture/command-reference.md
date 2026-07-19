@@ -394,8 +394,10 @@ into one notification):
 - Reply using the header's `from=` — but only when it looks like
   `channel/alias`. A `hostname-PID` from is an unjoined sender with no inbox;
   there is nowhere to reply.
-- `kind=presence` marks presence events (local only — presence never crosses
-  the relay; the relay strips `kind`).
+- `kind=presence` marks presence events. Relay-generated `join`/`departed`
+  cross the relay too (`cbus-ijx.5` phase 1 — `Reframe` renders `kind`, the
+  relay drives it off the ws lifecycle); client-originated `POST /send`
+  presence and `compact-pre`/`compact-post` still stay local-only.
 - Non-JSON inbox lines (or JSON without a `text` key) pass through raw and
   unwrapped; truly blank lines are silently dropped.
 - Remote frames are reframed server-side by the relay into one ws text frame;
