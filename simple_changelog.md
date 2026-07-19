@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-07-19 00:52:59 UTC] [Docs] Docs-audit remediation (solo round, no reviewer): 27-item punch list from a 3-auditor sweep vs shipped v0.3.0, all verified true and fixed -- README/command-reference/protocol/overview/bus-formation.md in repo (pane target, `cbus close`, relay presence-crosses-relay correction), 2 changelog mechanical fixes (missing `## ` header, one inverted entry pair), dev-docs index.md/architecture.md/behavior-spec.md/port-map.md direct-edited (orphaned SHAs, 70%-per-peer correction, release labels, broken anchors).
+
 [2026-07-18 21:26:45 UTC] [Fix] `procZombie` (used by `cbus close`'s wait-for-exit loop) was darwin-only and broke `GOOS=linux` at `make dist` (40eaec2) -- every prior round-2 gate had run on darwin, so the linux cross-build was the first thing to actually compile it. Implemented for linux via `/proc/<pid>/stat`'s state field (`Z` = zombie; unreadable = not-zombie).
 
 [2026-07-18 21:09:13 UTC] [Docs] Amendment: two 2026-07-18 entries claimed formation apply always splits panes off the applier's own surface (19:26:00 UTC dev-trio tab->pane, and 18:38:09 UTC pane fourth-target). Since chain-split anchoring landed today (see below), that's only guaranteed for the FIRST split in a run -- apply now anchors each split at the largest-area pane among the applier and the panes created so far, so later peers often split off each other, not the applier. `branch`/`spawn` are unaffected: their anchor is still always the caller.

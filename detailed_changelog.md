@@ -1,5 +1,84 @@
 # Changelog (detailed)
 
+## [2026-07-19 00:52:59 UTC] [Docs] Docs-audit remediation: v0.3.0 parity pass across both tiers, solo round
+
+[Attempt #1]
+
+Three independent auditors swept every doc surface against shipped v0.3.0
+(main `e27ac1a`) and produced a consolidated punch list (17 repo-tier items,
+10 dev-docs items). This was a solo documenter round -- no reviewer gate --
+so every item was re-verified against source before writing, per standing
+doctrine. Nothing on the list was rejected: all 27 items checked out true and
+were fixed as described; the punch list's "NOT defects" section was left
+untouched.
+
+Repo tier (verified against internal/client/{pane,close,marker,formation_apply}.go,
+internal/core/frame.go, relay/cmd/cbus-relay/main.go, cmd/cbus/usage.go):
+- README.md: added `cbus close` to the CLI reference (near `unregister`),
+  `pane` to the `/bus-branch` target enum and forking prose, `[child-alias]`
+  to the `bootstrap` usage line.
+- docs/architecture/command-reference.md: corrected the presence table and
+  quirk 18 -- relay-generated `join`/`departed` presence crosses the relay as
+  of `cbus-ijx.5` phase 1 (shipped 2026-07-14; `Reframe` renders `kind`, the
+  relay drives it off the ws lifecycle); only client-originated `POST /send`
+  presence and `compact-pre`/`compact-post` stay local-only. Added the two
+  compact-pre/compact-post rows the table was missing.
+- docs/architecture/protocol.md: fixed §4.4/§4.5 to match -- the relay framer
+  does render a `kind` slot now, and the divergence-matrix row for `kind
+  present` is identical on both paths, not "dropped" on the relay side. Added
+  a one-line note that ownerPid ancestor matching is now argv[0]'s basename,
+  `comm` only a fallback.
+- docs/architecture/overview.md (the largest gap -- pre-pane era): added the
+  `pane` row to the terminal-coupling table and fixed the `tab` row (targets
+  the caller's OWNING window via UUID lookup now, not current-window); retired
+  the "tmux is the only terminal-agnostic path" claim (pane is tmux-backed
+  too); added compact-pre/compact-post to the presence decision row and to §6;
+  added `cbus close` to the component map and a new §5.5 decision row (the
+  only lifecycle verb that signals a peer's OS process); added the argv[0]
+  ownerPid note in two places.
+- commands/bus-formation.md: reworded the `save` description -- origin/model
+  are auto-stamped from the birth-record for launcher-born peers, not hand-
+  maintained; only role/profile/split truly are.
+- detailed_changelog.md: restored a `## ` header a rebase-order move had
+  stripped (the 20:23:27 UTC entry), and un-interleaved/reordered the
+  19:17:24 and 19:26:00 UTC entries -- a prior edit had spliced the 19:26:00
+  entry's body into the middle of the 19:17:24 entry without giving it its
+  own header, and left both out of descending order. simple_changelog.md was
+  independently verified fully ordered; not touched.
+
+Dev-docs tier (~/dev-docs/projects/claudebus/, direct edits, no git):
+- index.md + architecture.md: re-pointed orphaned pre-rebase SHAs `d52a264`/
+  `058ea28` (not ancestors of main) to their on-main equivalents `f246e3b`
+  (feat: pane target) / `ff7ceef` (fix: tmux<3.1 retry etc.); corrected a
+  claim that an explicit `split` direction suppresses the 70%-first-split
+  sizing "for the whole run" -- verified against `pane.go`'s
+  `tmuxSplitArgv`/`forkTmuxPane` that only the main-vertical reflow
+  suppression is run-level, the 70% skip is per-peer; labeled the current
+  shipped release (v0.3.0 `40eaec2`; v0.2.0 `9c13055`; v0.1.0 `f833e19`) where
+  neither file named anything past v0.1.0; fixed architecture.md's
+  doc-refresh-note date range (07-14→07-17, when two of its own §10 rows are
+  dated 07-18).
+- behavior-spec.md + port-map.md (frozen pair): fixed one broken cross-link
+  anchor each (index.md's heading moved from `--2026-07-17` to `--2026-07-18`)
+  -- link repair only, no content added, per the standing ruling that these
+  stay annotation-only.
+
+[Files Changed]
+- README.md, commands/bus-formation.md (repo, this commit)
+- docs/architecture/{command-reference,protocol,overview}.md (repo, this commit)
+- detailed_changelog.md, simple_changelog.md (repo, mechanical-fix commit)
+- ~/dev-docs/projects/claudebus/{index,architecture,behavior-spec,port-map}.md
+  (direct edit, no git)
+
+[Possible Ripple Effects]
+- None -- docs/changelog only, no code or test surface touched.
+
+[Testing Notes]
+- Every claim re-verified against the cited source file/line before writing,
+  not transcribed from the punch list on faith (the list itself was compiled
+  from three reports that did verify, but solo-round doctrine required a
+  second look with no reviewer gate downstream).
+
 ## [2026-07-18 21:26:45 UTC] [Fix] `procZombie` was darwin-only -- broke the linux leg of `make dist`
 
 [Attempt #1]
@@ -165,7 +244,7 @@ to participate as a bus peer. File-based/relay-based only; no daemons proposed.
   (OpenCode end-to-end live); Codex Stop-hook continuation is documented but not
   executed — flagged as prototype-first in the doc.
 
-[2026-07-18 20:23:27 UTC] [Client/Forking] formation apply: pane splits chain off the largest-area candidate; envelope peers gain a `split` field
+## [2026-07-18 20:23:27 UTC] [Client/Forking] formation apply: pane splits chain off the largest-area candidate; envelope peers gain a `split` field
 
 [Attempt #1]
 
@@ -302,9 +381,7 @@ included; the exit code is 1 if any target failed.
   with the fix below (internal/client/close_test.go), not in this commit --
   see the 21:06:17 UTC entry.
 
-## [2026-07-18 19:17:24 UTC] [Client/Forking] pane/tab fork fixes: tmux<3.1 retry, tmux stderr surfaced, launcher tmpfile reaped on dispatch failure
-
-[2026-07-18 19:26:00 UTC] [Formations] dev-trio starter targets: tab -> pane
+## [2026-07-18 19:26:00 UTC] [Formations] dev-trio starter targets: tab -> pane
 
 [Attempt #1]
 
@@ -319,6 +396,8 @@ included; the exit code is 1 if any target failed.
 [Testing Notes]
 - Template validates post-flip: formation oneOf accepts pane since f246e3b (unit: formation_test.go); a pane-target template already exercised live through apply --dry-run during the f246e3b review.
 - Real apply smoke deferred to first live dev-trio launch on the new binary; the pane fork path itself carries the f246e3b..fef5cba review ledger (live tmux + iTerm2 door runs).
+
+## [2026-07-18 19:17:24 UTC] [Client/Forking] pane/tab fork fixes: tmux<3.1 retry, tmux stderr surfaced, launcher tmpfile reaped on dispatch failure
 
 [Attempt #1]
 
