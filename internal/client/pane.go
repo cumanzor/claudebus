@@ -156,7 +156,7 @@ func runOsascriptOut(script string) (string, error) {
 // runOsascriptOutCtx is runOsascriptOut under a deadline, for callers that must not
 // hang on a wedged Apple Event (close's surface sweep).
 func runOsascriptOutCtx(ctx context.Context, script string) (string, error) {
-	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
+	cmd := boundedCmd(ctx, "osascript", "-e", script)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
