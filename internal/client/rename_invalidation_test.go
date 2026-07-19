@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,13 @@ import (
 
 // readRawMeta returns meta.json's decoded key/value map, so a test can assert on what
 // is actually ON DISK rather than on what a struct read chose to surface.
+//
+// UseNumber is load-bearing (F4). Decoding into map[string]any turns every JSON number
+// into a float64, and fmt's %v for float64 switches to scientific notation at exactly
+// 1e6 — so a 7-digit pid renders "1.548122e+06" and any string comparison against it
+// fails. That is invisible on darwin (pid_max 99999) and in a small container, and
+// routine on the NUC (pid_max 4194304). json.Number keeps the literal text, so these
+// assertions are pid-size-independent by construction rather than by luck.
 func readRawMeta(t *testing.T, path string) map[string]any {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -17,7 +25,9 @@ func readRawMeta(t *testing.T, path string) map[string]any {
 		t.Fatalf("read meta: %v", err)
 	}
 	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	if err := d.Decode(&m); err != nil {
 		t.Fatalf("parse meta: %v", err)
 	}
 	return m
