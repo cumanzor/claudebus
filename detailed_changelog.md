@@ -1,5 +1,172 @@
 # Changelog (detailed)
 
+## [2026-07-19 05:48:18 UTC] [Client/Liveness] P3 compat tranche 2: structural (pid, starttime) identity, in-process follower, COMPAT items 1-2 deleted
+
+[Attempt #1]
+
+Second code tranche of the go-port epic's P3 phase (cbus-8k9.4), unblocked by
+tranche 1's independently-removable items. Where tranche 1 deleted without
+touching liveness mechanics, this tranche replaces the mechanics themselves:
+compat-deletion-plan.md's items 1-2 (the Decision 2 re-exec and the raw inbox
+spelling) are gone, and the argv-grep three-clause predicate is no longer how
+liveness works for any peer this binary arms.
+
+M1 (3865d52) adds procStartTime(pid), the structural half of a (pid, starttime)
+witness -- darwin reads pbi_start_tvsec/tvusec out of proc_bsdinfo (offsets
+verified against `ps -o lstart`), linux reads /proc/<pid>/stat field 22 prefixed
+with the boot id (jiffies are boot-relative; $CBUS_DIR outlives a reboot). Wired
+to nothing yet. The token is opaque by contract -- callers compare byte equality,
+never parse it as a clock -- and a probe that cannot answer errors DEAD rather
+than guessing (R2: proc-probe failure is dead, distinct from the meta-file read
+leniency elsewhere).
+
+B1 (4337f79) single-sources the token composition into starttime.go as pure
+functions over injected bytes, so the writer that records a token and the
+prober that checks one cannot drift apart, and makes the linux token's field
+index, boot-id variation and newline-trimming provable from darwin instead of
+argued for. Mutation-verified both constants; the mutation run also caught that
+the darwin composition test was tautological (wrote and read at the same
+constant, passed on a wrong offset) -- its fixture now hardcodes the ABI offsets
+so it disagrees with the code when the code is wrong.
+
+F1/F2 (b094b31): the first real linux runtime run (colima, bookworm) found
+linux starttime is USER_HZ ticks (10ms) where darwin is microseconds, so a
+child spawned in the same tick as a sibling carries a byte-identical token,
+breaking the strict-ordering and cross-process-distinctness assertions --
+correctly, since those assertions exist to catch a wrong field, and a `>=`
+relaxation would pass on one. Fixed by construction in the shared startedChild
+test helper (separate spawns by several ticks), not by loosening the
+comparisons.
+
+cbus-w33 (510b595), riding alongside: surfaceSweepBudget did not bound the
+close sweep on linux -- exec.CommandContext kills only the direct child, and
+dash (linux /bin/sh) forks the last command of a script where darwin's sh
+execs it, so the kill landed on the wrong process and a wedged-ps test ran its
+full 30s. boundedCmd now sets Setpgid and kills the process group, plus a
+WaitDelay backstop. Verified in the tree (not assumed from the commit message):
+this bounds every runOsascriptOut caller, not just close.go's four sweep sites
+the commit names -- pane.go's paneSplitScript and paneGeometryScript
+(spawn/branch/formation pane targets) route through the same Ctx variant and
+are bounded too. The window/tab fork path is a SEPARATE function, runOsascript
+(harness.go:387, plain exec.Command), not touched by this fix and still
+unbounded -- a documenter query against the tree caught that the broader "every
+osascript caller" framing didn't hold; ruled an open tracked gap, folded into
+the umbrella item cbus-cih (now naming both unbounded sites: harness.go:349's
+osaForkITerm window path and pane.go:147's tab path).
+
+M2 (4458e83) makes listener identity structural: armMeta records
+listenerStart, the opaque witness from the single composer; MetaListenerAlive
+judges a peer on whether the process at listenerPid is still the process that
+armed it, not on what its argv says. listenerIdentityHolds is the one place
+that answers that question -- its structural and TRANSITION(P3T2) argv
+branches are exclusive by construction (never `structural || argv`), so the
+shim can't resurrect a listener whose recorded starttime says it isn't that
+process. The argv read side survives fenced in the new
+liveness_transition.go, because a follower armed by a pre-P3 binary has no
+witness and its --inbox argv is the only ground truth about it; the write
+side is gone outright (this binary never writes argv identity). Rename now
+clears listenerStart ONLY (not listenerPid) -- clearing listenerPid too would
+still read dead correctly but would flip the re-arm to a full replay, since
+rename does not truncate the inbox. peerMeta carries listenerStart so every
+rewriter preserves it -- a field absent from that struct is not a cosmetic
+omission, encoding/json drops it, which would strip a live peer down to the
+transition branch. Mutation-verified against four distinct wrong
+implementations, each caught by a different test (no-fallback/structural-branch,
+the D4 tri-state assertion, predicate+reap-exposure, and
+TestClosePeerIgnoresARecycledListenerPidStructurally).
+
+M3 (4d53d4e) deletes the re-exec whole: TailArgv, ParseTailFollower, the
+hidden --inbox/--from flags, compatInboxPath, main.go's follower dispatch
+branch, and the os.Executable/os.Environ plumbing that only existed to
+survive the exec. ReplayMode's wire()/replayFromWire go with them. InboxPath
+is now filepath.Join; the raw concatenation was never about file I/O, only
+about byte-matching an argv, and that consumer is gone. metaInboxNeedle
+survives alone, rebuilding the raw spelling independently, because a pre-P3
+follower's argv is still on disk in live process tables. Adds a real-CLI
+harness (the bounded-deadline exception to the never-run-tail-under-a-tool
+doctrine) that arms `cbus tail` as a child and asserts the recorded
+listenerPid IS the streaming process -- the assertion that would catch a
+re-exec or fork coming back.
+
+F3 (f853ff2), reviewer finding: on linux a dead-but-unreaped follower read
+ALIVE -- /proc stat stays readable at state=Z with the ORIGINAL starttime
+intact and kill -0 still succeeds, so the recorded token byte-matched a
+process that had already exited, and the peer passed the send gate, survived
+prune, and kept "receiving" broadcasts with nothing listening. This is a
+regression of a pinned edge: the old argv clause caught it for free (a
+zombie's cmdline is empty) and TestArgvClauseZombieDead has pinned
+zombie=dead since the port. procZombie now guards listenerIdentityHolds above
+the branch split, so the predicate and close.go's owner guard inherit the
+same answer. darwin was already safe (proc_pidinfo errors for a zombie) but
+that was a libproc accident, not a decision -- the guard makes it intended on
+both platforms. Reproduced in bookworm before fixing: the new test failed on
+both assertions, passed after.
+
+[Files Changed]
+- internal/client/procinfo_darwin.go, procinfo_linux.go: procStartTime
+  primitive per platform (M1), reduced to syscall wrappers over starttime.go
+  (B1).
+- internal/client/starttime.go (new): single-sourced token composition,
+  darwinStartToken/linuxStartToken as pure functions over injected bytes.
+- internal/client/procinfo_test.go, procinfo_darwin_test.go,
+  procinfo_linux_test.go, starttime_test.go: offset/field sanity checks,
+  mutation-verified; F1/F2's tick-separated spawn helper.
+- internal/client/liveness.go: listenerIdentityHolds (structural/TRANSITION
+  branch split), procZombie guard (F3).
+- internal/client/liveness_transition.go (new): TRANSITION(P3T2) argv
+  fallback, metaInboxNeedle.
+- internal/client/liveness_structural_test.go, meta_rewrite_test.go,
+  rename_invalidation_test.go (new): M2's mutation-verified coverage.
+- internal/client/follow.go: ArmLocalTail loses the re-exec (M3); InboxPath
+  is filepath.Join.
+- internal/client/store.go: armMeta records listenerStart; rename clears it.
+- cmd/cbus/main.go: follower dispatch branch removed.
+- cmd/cbus/tail_inprocess_test.go (new): real-CLI bounded harness,
+  listenerPid-IS-the-streaming-process assertion.
+- internal/client/close.go, pane.go, close_test.go: boundedCmd + Setpgid +
+  WaitDelay on every runOsascriptOut caller (w33); close.go's owner guard
+  also inherits procZombie (F3).
+- internal/client/formation_apply.go: comment-only, no longer describes
+  `cbus tail` as image-replacing (F3 rider, R11).
+- docs/architecture/compat-deletion-plan.md: tranche-2 stamp, items 1-2
+  marked deleted, TRANSITION(P3T2) documented as a new non-COMPAT artifact,
+  grep-sweep and notes sections corrected (both were stale since tranche 1
+  for items already gone then).
+- docs/architecture/port-map.md: Phase 3 status block, Phase 3 bullet list,
+  D1/D3 rows annotated DONE with commit refs; cbus-6lv (pidfd/kqueue) called
+  out as explicitly deferred.
+- docs/architecture/behavior-spec.md: Go-side-equivalences note corrected
+  (argv grep/re-exec no longer describe this binary); new dated note on the
+  structural liveness delta, the zombie regression-and-fix, and rename
+  invalidation now being deliberate rather than accidental.
+
+[Possible Ripple Effects]
+- Any external tooling or script that greps a NEW peer's argv for its inbox
+  path (the old bash-era liveness check) will no longer find it -- expected,
+  and only reachable if a bash cbus process still exists somewhere to run
+  that grep, which compat-deletion-plan.md's tranche-1/cutover history says
+  is not the case on the MBP or NUC.
+- A peer still armed by a pre-tranche-2 Go binary or a bash follower is read
+  via the TRANSITION(P3T2) fallback, which has a one-release lifespan --
+  upgrading two releases at once without an intermediate re-arm will read
+  those peers as dead once the shim is removed.
+- cbus-cih (broadened per ruling): window/tab fork (runOsascript,
+  harness.go:387 and pane.go:147) still has no deadline; a wedged osascript
+  there can still hang a branch/spawn call the way close's sweep used to
+  before w33.
+
+[Testing Notes]
+- go build ./... and go test ./... green on darwin and in a linux/arm64
+  bookworm container (colima) throughout the chain; F3's new case reproduced
+  FAILING in the container before the fix, passing after.
+- amd64 is compile-verified only (GOOS=linux GOARCH=amd64 go build ./...),
+  not runtime-tested -- it rides the NUC deploy gate. Do not read "verified
+  on linux" in this entry as covering amd64 runtime behavior.
+- Recorded lesson from this tranche: "verified on darwin" is not evidence for
+  process-state code (zombie reads, fork/kill semantics, argv/proc layout) --
+  darwin and linux diverged twice here (w33's dash-fork stall, F3's zombie
+  reads-alive) in ways darwin-only testing structurally cannot catch.
+
 ## [2026-07-19 04:30:20 UTC] [Client/Compat] P3 compat tranche 1: lastActivity-only grace, help-line drop, bash artifact retirement
 
 [Attempt #1]

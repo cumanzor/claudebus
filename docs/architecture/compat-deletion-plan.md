@@ -26,6 +26,31 @@ Items 1–2 remain gated on P3 structural liveness: the argv-grep predicate stil
 needs the re-exec and the raw inbox spelling until the structural registry replaces
 it. Item 7 stays frozen.
 
+**Tranche 2 executed (2026-07-19, `3865d52`..`f853ff2`):** items 1 and 2 are deleted.
+Item 1 (the Decision 2 re-exec) is gone whole — `TailArgv`, `ParseTailFollower`, the
+hidden `--inbox`/`--from` flags, `compatInboxPath`, main.go's follower dispatch
+branch, and the `os.Executable`/`os.Environ` plumbing that only existed to survive
+the exec; `cbus tail` runs the follower in-process from arm to exit, and `InboxPath`
+is plain `filepath.Join`. Item 2 (the raw inbox spelling) is retired as a COMPAT
+artifact for the write side, but a narrower remnant survives under a new name:
+`metaInboxNeedle` in `liveness_transition.go`, tagged `TRANSITION(P3T2)` — a
+pre-P3-armed follower's argv is still on disk in live process tables and has no
+recorded structural witness, so this is the only ground truth about whether it's
+alive. Listener identity is now structural — `(pid, starttime)` via `procStartTime`
+and single-sourced composers (`internal/client/starttime.go`) — by default;
+`listenerIdentityHolds` treats the structural and `TRANSITION(P3T2)` argv branches as
+exclusive by construction, never `structural || argv`, so the shim can't resurrect a
+listener whose recorded starttime says it isn't that process. `TRANSITION(P3T2)` is
+scoped to one release: its removal rides the same future release as the
+`register`/`peers` drop. Rename now deliberately clears `listenerStart` (port-map
+D1) rather than relying on the argv needle going stale by accident. A zombie
+listener (dead but unreaped; linux `state=Z`) reads dead on both branches, matching
+pinned bash-era behavior — a regression introduced mid-tranche by the structural
+rewrite was reproduced then fixed (`f853ff2`) before shipping. Full pidfd/kqueue
+liveness — the stronger mechanism `(pid, starttime)` was scoped as a portable floor
+for — stays out of this tranche, filed separately as `cbus-6lv`. Items 3, 4, 6 stay
+as tranche 1 left them; item 7 stays frozen.
+
 | # | What | Where | Why it exists | Deletes to |
 |---|------|-------|---------------|------------|
 | 1 | **Decision 2 re-exec** — the follower `syscall.Exec`s itself so its argv carries `--inbox <path>` | `follow.go` `ArmLocalTail`, `TailArgv`, `ParseTailFollower` | bash-era `meta_listener_alive` greps `ps -o args=` for the inbox path; a Go follower must put it in argv to read alive to bash | run the follower in-process (no re-exec, no `--inbox`); liveness moves to a structural registry (pidfile / lock) |
@@ -36,13 +61,18 @@ it. Item 7 stays frozen.
 | 6 | **bash artifacts** — `bin/cbus`, `bin/cc-branch.sh` (the installers `install.sh` / `install-cbus-go.sh` were retired at `de07cbe`) | repo root / `bin/` | the bash client + its fork helper; distribution is now `get.sh` + `cbus selfupdate` | remove `bin/cbus` + `bin/cc-branch.sh` at P3 |
 | 7 | **A3/A6 frozen credential-store locations** | `internal/client/cred.go` | keychain / XDG paths frozen so no re-seed is needed across the bash↔Go boundary | may relax, but no reason to — keep frozen |
 
-**Grep-driven sweep:** shims #1–#4 carry a source token — `grep -rn 'COMPAT(P3' internal/ cmd/`
-enumerates them (#1 re-exec, #2 raw spelling ×2 surfaces, #3 mtime fallback, #4 the
-`CBUS_PYTHON` help line). #5 needs no code change (rename), #6 is bash files, #7 stays.
+**Grep-driven sweep:** `grep -rn 'COMPAT(P3' internal/ cmd/` now returns nothing —
+items 1–4 are gone (1–2 in tranche 2, 3–4 in tranche 1). The read-only remnant of
+item 2 carries a new, deliberately different token: `grep -rn 'TRANSITION(P3T2)'
+internal/` finds `liveness_transition.go`'s `metaInboxNeedle` — a one-release shim,
+not a COMPAT item, so it does not answer to the old grep. #5 needed no code change
+(rename), #6 is bash files (gone, tranche 1), #7 stays.
 
 Notes:
-- Items 1–3 are gated on **P3 structural liveness**, not on cutover: they must stay
-  until *no* bash `cbus` process can arm a tail anywhere (all machines homogenized).
-- Item 6 (bash retirement) is the cutover itself, per-machine; items 1–5 wait for the
-  last machine.
+- All items but 7 are now resolved: 3/4/6 in tranche 1 (2026-07-18), 1/2 in tranche 2
+  (2026-07-19), 5 at cutover (2026-07-13, no code change). Item 7 stays frozen by
+  design, not gated on anything.
+- `TRANSITION(P3T2)` (the item-2 remnant, `liveness_transition.go`) is a new,
+  separately-tracked, one-release shim — not one of the seven original items — and
+  is not swept by the `COMPAT(P3` grep above.
 - The `version` verb and the `-ldflags` stamp are **not** compat and stay.

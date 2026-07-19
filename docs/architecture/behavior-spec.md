@@ -28,11 +28,10 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
 >     relay's `/send` body cap.
 >
-> Go-side equivalences: liveness = the same three-clause predicate via sysctl/procfs
-> (no `ps` spawns); follower = in-process Go loop, re-exec'd with `--inbox <path>` in
-> argv (§4's argv grep still matches); local framer = `core.LocalEmit`, shared with
-> the relay (§8.3's divergence matrix unified per port-map D6 — tool-authored traffic
-> byte-identical).
+> Go-side equivalences (superseded 2026-07-19 for liveness/follower — see the dated
+> note below; current as written for the framer): local framer = `core.LocalEmit`,
+> shared with the relay (§8.3's divergence matrix unified per port-map D6 —
+> tool-authored traffic byte-identical).
 >
 > **Doc-refresh note (2026-07-18, cbus-yle):** this file stays frozen to the bash
 > client it audited and is not being expanded with post-cutover Go-native work
@@ -44,6 +43,27 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > §9/§11's `install.sh`/`cc-branch.sh` entries describe the retired bash artifacts
 > as they were, which remains true; `install.sh` itself is deleted from the repo
 > as of 2026-07-18, but this file was never claiming otherwise in the present tense.
+>
+> **Doc-refresh note (2026-07-19, `cbus-8k9.4` P3 tranche 2):** the §4 argv-grep
+> liveness predicate and the re-exec'd follower this file's Go-side-equivalences note
+> described are gone for any peer armed by this binary. Listener identity is
+> structural — `(pid, starttime)`, `internal/client/starttime.go` — with a
+> `TRANSITION(P3T2)` argv-grep fallback that applies only to metas armed by a
+> pre-P3 binary (bash or an earlier Go build) and is scoped to one release. The
+> follower runs in-process from arm to exit; nothing re-execs, so a peer this binary
+> arms carries no inbox path in its own argv at all — a bash-era (or pre-tranche-2
+> Go) `ps`-grep against a NEW peer no longer matches, which is expected: this file's
+> own §5 contracts (A4) already scoped that observable to "through Phase 2" / "until
+> no bash cbus process can arm a tail anywhere." Two edge cases kept their exact
+> pre-existing observable behavior across the rewrite: rename still invalidates the
+> listener record (old tail reads stale, needs re-arm, re-arm seeks end and loses
+> the gap — `cbus-8no`, unchanged) — deliberately now, where before it worked by
+> the argv needle going stale by accident (port-map D1). And a dead-but-unreaped
+> (zombie) listener still reads dead — pinned since the port by
+> `TestArgvClauseZombieDead` against the argv clause; the structural rewrite
+> regressed it briefly (a zombie's `/proc` stat and `kill -0` both still succeed,
+> so its `(pid, starttime)` token still byte-matches), reproduced then fixed
+> pre-ship (`f853ff2`) so the net observable answer is unchanged from bash.
 
 ## 1. Global invariants
 

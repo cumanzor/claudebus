@@ -6,12 +6,20 @@
 > may delete, and in what order to move. It is a plan, not a bug list — as-is behavior lives in
 > the companion documents.
 >
-> **STATUS (2026-07-13): plan executed through Phase 2.** The cutover happened —
-> `cbus` on the MBP and the NUC is the Go binary (27/27 differential parity; decision
-> record: [cutover-decision-package.md](cutover-decision-package.md)). This document
-> is preserved as the planning record. Phase 3 (compat deletion, structural liveness)
-> is pending fleet homogenization per
-> [compat-deletion-plan.md](compat-deletion-plan.md); Phase 4 is unchanged.
+> **STATUS (2026-07-13): plan executed through Phase 2; Phase 3 structural liveness
+> landed 2026-07-19.** The cutover happened — `cbus` on the MBP and the NUC is the Go
+> binary (27/27 differential parity; decision record:
+> [cutover-decision-package.md](cutover-decision-package.md)). This document is
+> preserved as the planning record. Phase 3 (`cbus-8k9.4`) executed in two tranches
+> against [compat-deletion-plan.md](compat-deletion-plan.md): tranche 1 (2026-07-18,
+> `8f79a83`) dropped the mtime grace fallback (D3) and the bash artifacts; tranche 2
+> (2026-07-19, `3865d52`..`f853ff2`) landed the `(pid, starttime)` structural identity
+> primitive (D1) and the in-process follower, deleting COMPAT items 1-2. Full
+> pidfd/kqueue liveness — the stronger mechanism `(pid, starttime)` was scoped as a
+> portable floor for — is filed separately as `cbus-6lv`, not part of Phase 3. The
+> durable replay cursor (D4), the local double-listener displacement gate + `--steal`
+> (D5), leading-dot/dash name rejection, and `list --json` remain open Phase 3 work.
+> Phase 4 is unchanged.
 >
 > Companion documents:
 > - [overview.md](overview.md) — system topology, design pillars, security model
@@ -409,13 +417,17 @@ the logos/WSL node starts on the port directly. Gate: the full Class A/B registr
 including rollback safety.
 
 **Phase 3 — post-homogenization semantic upgrades.** Each rides its own release with doc/skill
-updates, unblocked by deleting the `compat` package: structural liveness ((pid, starttime) /
-pidfd / kqueue; rename explicitly invalidates the listener record to preserve the "old tail is
-stale, re-arm" contract); the durable replay cursor (forces the re-arm-backlog decision; fixes
-the `--force`-into-dead-gap hole and the rename loss window `cbus-8no` in one motion); the
-local double-listener displacement gate + `--steal`; drop the mtime fallback; reject
-leading-dot/leading-dash names client-side (the relay regex stays the wire authority);
-`list --json` (`cbus-oq9`); drop deprecated surfaces after one release of dual support.
+updates, unblocked by deleting the `compat` package: structural liveness — **DONE
+2026-07-19** via the `(pid, starttime)` primitive (tranche 2, `3865d52`..`f853ff2`; full
+pidfd/kqueue deferred as `cbus-6lv`); rename explicitly invalidates the listener record to
+preserve the "old tail is stale, re-arm" contract — **DONE**, same tranche; the durable
+replay cursor (forces the re-arm-backlog decision; fixes the `--force`-into-dead-gap hole
+and the rename loss window `cbus-8no` in one motion) — open; the local double-listener
+displacement gate + `--steal` — open; drop the mtime fallback — **DONE 2026-07-18**
+(tranche 1, D3); reject leading-dot/leading-dash names client-side (the relay regex stays
+the wire authority) — open; `list --json` (`cbus-oq9`) — open; drop deprecated surfaces
+after one release of dual support — open, now also gates `TRANSITION(P3T2)`'s removal
+(compat-deletion-plan.md).
 
 **Phase 4 — wire-touching work (relay + client in lockstep, protocol-versioned).** Explicitly
 out of the port's scope: remote presence (`kind` over the relay, `cbus-ijx.5`); the
@@ -433,9 +445,9 @@ homogenization.**
 
 | # | Tension | Ruling |
 |---|---|---|
-| D1 | argv-fingerprint liveness vs (pid, starttime)/pidfd | Fingerprint verbatim through Phase 2 (via procfs/libproc, not `ps` spawns); structural liveness in Phase 3, with rename explicitly invalidating the listener record |
+| D1 | argv-fingerprint liveness vs (pid, starttime)/pidfd | Fingerprint verbatim through Phase 2 (via procfs/libproc, not `ps` spawns); structural liveness in Phase 3 — **DONE 2026-07-19**: `(pid, starttime)` primary via `listenerIdentityHolds`, exclusive-by-construction with a `TRANSITION(P3T2)` argv fallback for metas with no recorded witness (never `structural \|\| argv`); rename clears `listenerStart` only, invalidating the listener record without forcing a full-inbox replay on re-arm. pidfd/kqueue itself deferred as `cbus-6lv` |
 | D2 | Dot-prefix invisibility vs moving temps/markers out of the data tree | Explicit skip-dot filter from day one; the tree layout stays byte-identical while any bash cbus shares `$CBUS_DIR`; relocation is Phase 3+ and low-value |
-| D3 | mtime grace vs explicit `lastActivity` | Dual-write both in Phase 2; ported `peer_dead` prefers the field, falls back to mtime; drop the fallback in Phase 3 |
+| D3 | mtime grace vs explicit `lastActivity` | Dual-write both in Phase 2; ported `peer_dead` prefers the field, falls back to mtime; drop the fallback in Phase 3 — **DONE 2026-07-18** (tranche 1, `8f79a83`): `lastActivity`-only, mtime read deleted |
 | D4 | Null-`listenerPid` replay heuristic vs durable cursor | Exact tri-state semantics at cutover (internal enum, same on-disk signal); cursor is a Phase 3 semantic change, landing with D5 since they touch the same state |
 | D5 | Local double-listener: fix vs document | Cutover keeps arm behavior bit-identical but adds the dormant-on-foreign-reopen tombstone; the real displacement gate (relay-style, + `--steal` escape hatch) is Phase 3 |
 | D6 | Framer degenerate-input tie-breaks | Relay's typed strictness for parsing; local's `?` placeholders for missing routing fields (visibly unroutable, matching the reply convention); empty text → passthrough; `text:null → "None"` never preserved. Only foreign-written lines are affected; tool-authored traffic is byte-identical either way |
