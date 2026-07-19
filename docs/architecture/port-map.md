@@ -17,9 +17,10 @@
 > primitive (D1) and the in-process follower, deleting COMPAT items 1-2. Full
 > pidfd/kqueue liveness — the stronger mechanism `(pid, starttime)` was scoped as a
 > portable floor for — is filed separately as `cbus-6lv`, not part of Phase 3. The
-> durable replay cursor (D4), the local double-listener displacement gate + `--steal`
-> (D5), leading-dot/dash name rejection, and `list --json` remain open Phase 3 work.
-> Phase 4 is unchanged.
+> durable replay cursor (D4) and the local double-listener displacement gate +
+> `--steal` (D5) landed 2026-07-19 as M4 (`cbus-8k9.4`), closing `cbus-8no` and
+> `cbus-0r8` respectively — see §6 below. Leading-dot/dash name rejection and
+> `list --json` remain open Phase 3 work. Phase 4 is unchanged.
 >
 > Companion documents:
 > - [overview.md](overview.md) — system topology, design pillars, security model
@@ -417,7 +418,9 @@ structured `resolve_self`; the real flag parser behind the frozen verb set; the 
 cc-branch.sh). Installer gains the version stamp and hook-wiring check. Rollout order: MBP
 first (richest usage, fastest feedback), then the NUC (propagate per the memory note), then
 the logos/WSL node starts on the port directly. Gate: the full Class A/B registry of §5,
-including rollback safety.
+including rollback safety. ("Installer gains the version stamp and hook-wiring check" above was
+true when written — both legacy installers were retired at `de07cbe`; the version stamp and
+hook-wiring check now live in `get.sh`/`cbus selfupdate`, not an installer.)
 
 **Phase 3 — post-homogenization semantic upgrades.** Each rides its own release with doc/skill
 updates, unblocked by deleting the `compat` package: structural liveness — **DONE
@@ -425,8 +428,11 @@ updates, unblocked by deleting the `compat` package: structural liveness — **D
 pidfd/kqueue deferred as `cbus-6lv`); rename explicitly invalidates the listener record to
 preserve the "old tail is stale, re-arm" contract — **DONE**, same tranche; the durable
 replay cursor (forces the re-arm-backlog decision; fixes the `--force`-into-dead-gap hole
-and the rename loss window `cbus-8no` in one motion) — open; the local double-listener
-displacement gate + `--steal` — open; drop the mtime fallback — **DONE 2026-07-18**
+and the rename loss window `cbus-8no` in one motion) — **DONE 2026-07-19** (M4 N1 `e0ce7de`,
+F2 `c4b8743`: an 8-row resume table with no rename/steal/dead-gap special case, behavior-spec.md
+§8.6); the local double-listener displacement gate + `--steal` — **DONE 2026-07-19** (M4 N2
+`33bd5e2`/N3 `7ede690`: follower self-identity + a displacement gate, closing `cbus-0r8`,
+behavior-spec.md §8.7); drop the mtime fallback — **DONE 2026-07-18**
 (tranche 1, D3); reject leading-dot/leading-dash names client-side (the relay regex stays
 the wire authority) — open; `list --json` (`cbus-oq9`) — open; drop deprecated surfaces
 after one release of dual support — open, now also gates `TRANSITION(P3T2)`'s removal
@@ -451,10 +457,10 @@ homogenization.**
 | D1 | argv-fingerprint liveness vs (pid, starttime)/pidfd | Fingerprint verbatim through Phase 2 (via procfs/libproc, not `ps` spawns); structural liveness in Phase 3 — **DONE 2026-07-19**: `(pid, starttime)` primary via `listenerIdentityHolds`, exclusive-by-construction with a `TRANSITION(P3T2)` argv fallback for metas with no recorded witness (never `structural \|\| argv`); rename clears `listenerStart` only, invalidating the listener record without forcing a full-inbox replay on re-arm. pidfd/kqueue itself deferred as `cbus-6lv` |
 | D2 | Dot-prefix invisibility vs moving temps/markers out of the data tree | Explicit skip-dot filter from day one; the tree layout stays byte-identical while any bash cbus shares `$CBUS_DIR`; relocation is Phase 3+ and low-value |
 | D3 | mtime grace vs explicit `lastActivity` | Dual-write both in Phase 2; ported `peer_dead` prefers the field, falls back to mtime; drop the fallback in Phase 3 — **DONE 2026-07-18** (tranche 1, `8f79a83`): `lastActivity`-only, mtime read deleted |
-| D4 | Null-`listenerPid` replay heuristic vs durable cursor | Exact tri-state semantics at cutover (internal enum, same on-disk signal); cursor is a Phase 3 semantic change, landing with D5 since they touch the same state |
-| D5 | Local double-listener: fix vs document | Cutover kept arm behavior bit-identical. The dormant-on-foreign-reopen tombstone planned here was **never shipped** (no code, no reverted commit) — the cross-session inbox-leak case (behavior-spec.md §8.7 "zombie reattach") is **OPEN** as of v0.4.0, tracked as `cbus-0r8`. The real displacement gate (relay-style, + `--steal` escape hatch) is Phase 3, closing this in M4 |
+| D4 | Null-`listenerPid` replay heuristic vs durable cursor | Exact tri-state semantics at cutover (internal enum, same on-disk signal); cursor is a Phase 3 semantic change, landing with D5 since they touch the same state — **DONE 2026-07-19** (M4 N1 `e0ce7de`, F2 `c4b8743`): a `.cursor` sidecar per peer (dev+ino+offset, temp+rename, identity-conditional writes) replaces the tri-state for local replay; the decision table is 8 rows with no special case for rename, `--steal`, or a dead `--force` gap — each resolves to the same "cursor valid, resume at offset" row. Closes `cbus-8no`. Wire/relay/remote replay untouched |
+| D5 | Local double-listener: fix vs document | Cutover kept arm behavior bit-identical. The dormant-on-foreign-reopen tombstone planned here was **never shipped** (no code, no reverted commit) — the cross-session inbox-leak case (behavior-spec.md §8.7 "zombie reattach") was **OPEN** as of v0.4.0, tracked as `cbus-0r8` — **DONE 2026-07-19** (M4 N2 `33bd5e2`, N3 `7ede690`): a relay-style displacement gate refuses a second local arm on an already-armed alias unless `--steal`; every follower carries a `(listenerPid, listenerStart)` witness and re-checks it against meta at a bounded cadence and, decisively, before every inbox reopen — so a rotation caused by a stranger's rejoin is caught before the reopen, not after. Closes `cbus-0r8` |
 | D6 | Framer degenerate-input tie-breaks | Relay's typed strictness for parsing; local's `?` placeholders for missing routing fields (visibly unroutable, matching the reply convention); empty text → passthrough; `text:null → "None"` never preserved. Only foreign-written lines are affected; tool-authored traffic is byte-identical either way |
-| D7 | Sessionless operation: silent mode vs error | Both: keep the mode (joins record `sessionId:""`, sends never fail on identity) and add one stderr warning |
+| D7 | Sessionless operation: silent mode vs error | Both: keep the mode (joins record `sessionId:""`, sends never fail on identity) and add one stderr warning — **DONE, ships with M4 N3** (`7ede690`, not at cutover): one stderr line naming what sessionless mode loses (self-resolution for list/leave/rename, a routable reply address), fired only by the verbs that record or resolve identity |
 | D8 | Message marshal byte-compatibility with the python emitter vs canonical-Go encoding | Marshal produces canonical-Go bytes (compact, raw UTF-8, Go's default HTML-escaping, struct field order `from,to,ts,text[,kind,event]`); byte-for-byte parity with the python emitter is explicitly not a contract — protocol.md §3.3 already establishes a parse-only law, and the relay has never byte-matched the client's encoding either. Guarded by an m4 cross-parse assertion (frames lifted from the bash `emit()` corpus decode identically whether marshaled by Go or python). Declined alternative: a python-compatible `MarshalJSON` kept only as Phase-3-deletable ballast |
 
 ---

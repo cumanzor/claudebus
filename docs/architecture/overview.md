@@ -376,7 +376,8 @@ ignored: the spool always queues, so there is nothing to force.
 | **Explicit remote aliases, no remote registry/presence build.** | Scope cut as over-engineering; the relay's one-active-tail rule makes collisions self-evident. |
 | **Presence announcements.** join/leave/rename/departed broadcast `kind=presence` events to every non-dead channel peer; every removal path broadcasts `departed`; `cbus hook-exit` (SessionEnd hook) announces graceful exits immediately, with lazy prune as the hard-kill backstop. PreCompact/PostCompact hooks (`cbus hook-compact pre\|post`) broadcast `compact-pre`/`compact-post` the same way, to every LOCAL channel joined — local-only for now (`D-zig-1`). | Peers used to come and go silently. Targeting uses the same `!peer_dead` rule as send so joined-but-unarmed peers still get presence (replayed at first arm). Deliberately app-agnostic (no tmux/iTerm2 integration). Remote presence now crosses the relay too (`cbus-ijx.5` shipped — the relay renders `kind` and generates join/departed from the ws lifecycle; protocol.md §8). What remains open is ijx.5 phase 2: client-originated `leave`/`rename` and offline catch-up. |
 | **Arm-before-fork ordering.** The parent arms its Monitor *before* forking. | The alternative (arm after fork, to avoid a cosmetic note in the child) was empirically disproven — `--fork-session` reads the transcript at child *boot* regardless — and additionally opened a child-announce race. The child's "no completion record" note is cosmetic and unavoidable; the skill explicitly forbids reordering to suppress it. |
-| **`cbus rename` is a true rename, local-only.** Moves the peer dir, rewrites `meta.alias`, preserves inbox history; the skill re-arms the Monitor. | A companion feature (auto-setting the CC session title) was dropped after research proved the live TUI title is not externally settable. Remote aliases are relay-side. Known window: a message landing between the `mv` and the re-arm is not replayed (filed `cbus-8no`). |
+| **`cbus rename` is a true rename, local-only.** Moves the peer dir, rewrites `meta.alias`, preserves inbox history; the skill re-arms the Monitor. | A companion feature (auto-setting the CC session title) was dropped after research proved the live TUI title is not externally settable. Remote aliases are relay-side. The `mv`→re-arm window used to drop a message landing in it (`cbus-8no`) — closed M4 (`cbus-8k9.4`): the re-arm resumes from a durable per-peer cursor instead of seeking the inbox end, so the gap is now replayed. |
+| **Local `tail` displacement gate + `--steal` (M4, closes `cbus-0r8`).** A second local arm on an already-armed alias is refused unless `--steal`; a running follower re-checks its own `(listenerPid, listenerStart)` identity against meta and goes dormant — printing a cause-specific remedy — rather than double-delivering or shadow-streaming a stranger's inbox after a foreign reopen. | Brings local arming to the same last-wins posture the relay already enforced for remote tails; local's version is opt-in-to-steal rather than automatic, since a local arm has no server to referee it. |
 | **`cbus close` ends a peer's OS process, never touches its registration.** SIGTERM the owning process (derived from `ownerPid`, falling back to the armed listener's ancestry when null), wait ≤5s, `--force` escalates to SIGKILL, then sweep the leftover terminal surface once the tty reads dead. Local-only; refuses this session itself and a pid whose argv no longer contains `claude`. | Every other lifecycle verb (`leave`, `rename`, `unregister`, prune) only ever touches the *registration* — none of them end the process behind a stuck peer (`close.go: ClosePeer`). "Already gone" reports success, not an error, so a scripted sweep can close the same roster twice. |
 
 ### Dogfooding
@@ -405,9 +406,11 @@ Documented, accepted, or tracked — none are silent.
 
 **Delivery semantics**
 
-- `--force` is best-effort: a re-arm follows from the inbox end, so lines queued while the
-  listener was dead may never be delivered locally. (The remote path has the opposite semantics —
-  the spool queues and replays.)
+- ~~`--force` is best-effort: a re-arm follows from the inbox end, so lines queued while the
+  listener was dead may never be delivered locally.~~ **Closed, M4 (`cbus-8k9.4`).** A durable
+  per-peer `.cursor` sidecar now resumes the next re-arm from the last delivered frame boundary,
+  so `--force`-queued mail into a dead gap is delivered, not merely queued. Remote is unchanged —
+  the spool always queued and replayed.
 - End-to-end the bus is **at-least-once** with two duplication points (a `send` that fails after
   the relay already spooled it has no idempotency key, so a retry is a new message; a displacement
   handover can deliver one in-flight message twice) and one silent loss point: after an abrupt
@@ -422,11 +425,15 @@ Documented, accepted, or tracked — none are silent.
   the 500-char line cap and the ~3000-char notification ceiling, so a long local message is no
   longer silently cut — detection no longer relies solely on the missing `◀ cbus end` marker.
   Chunked delivery + a dedicated local warning are still tracked as `cbus-mew`.
-- The rename `mv`→re-arm gap can drop messages (`cbus-8no`).
-- Local arming has no collision or ownership check: arming the same address twice leaves two live
+- ~~The rename `mv`→re-arm gap can drop messages (`cbus-8no`).~~ **Closed, M4** — see the cursor
+  fix above; the same mechanism covers this window.
+- ~~Local arming has no collision or ownership check: arming the same address twice leaves two live
   followers delivering everything twice, with liveness state pinned to the newer pid only — the
   only guard is skill discipline ("skip if already armed"). The exact inverse of the relay's
-  displacement semantics.
+  displacement semantics.~~ **Closed, M4 (`cbus-0r8`).** A second local arm on an armed alias is
+  now refused unless `--steal`, and a running follower detects a foreign reopen or a rename via a
+  self-identity check and goes dormant instead of continuing to deliver. Local now enforces the
+  same last-wins posture the relay always did.
 
 **Availability / operations**
 
