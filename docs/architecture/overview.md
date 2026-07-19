@@ -22,6 +22,10 @@
 >   decision record and rollback procedure
 > - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash
 >   artifacts deleted at P3
+> - [behavior-spec.md](behavior-spec.md) — frozen bash-era spec (every command, state file,
+>   wire format, quirk), `file:line`-anchored; the port's verification contract
+> - [commit-timeline.md](commit-timeline.md) — condensed SHA-by-SHA history, bash-era
+>   through the Go-port cutover and everything shipped since
 
 ---
 
