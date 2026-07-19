@@ -178,3 +178,82 @@ func TestFollowerPersistsCursor(t *testing.T) {
 		t.Errorf("cursor offset %d, want %d (everything read)", off, fi.Size())
 	}
 }
+
+// TestCursorNeverPointsMidFrame is F2. consumed counts bytes pulled off the fd, which
+// includes a partial line still buffered in pend. Persisting that points the next arm
+// INTO a message: the writer completes the line, the resuming follower starts mid-frame,
+// the head is lost and the tail surfaces as a raw fragment. Silent loss — the one
+// outcome the cursor trades duplicates to avoid.
+//
+// The assertion is on the BOUNDARY, not on a byte count, so it stays true if framing
+// changes: whatever is persisted must be a position the follower could legitimately
+// resume from, i.e. immediately after a newline.
+func TestCursorNeverPointsMidFrame(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	peer, inbox, _, id := armedPeer(t, "ch", "al")
+
+	complete := `{"from":"p","to":"q","text":"whole"}` + "\n"
+	partial := `{"from":"p","to":"q","text":"half` // no newline: still in pend
+	if err := os.WriteFile(inbox, []byte(complete+partial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	defer stopJoin()
+
+	boundary := int64(len(complete))
+	waitFor(t, func() bool {
+		_, _, off, st := readCursor(peer)
+		return st == cursorValid && off > 0
+	}, "the cursor to land")
+	time.Sleep(200 * time.Millisecond) // let several idle ticks pass
+
+	_, _, off, st := readCursor(peer)
+	if st != cursorValid {
+		t.Fatalf("cursor state %d", st)
+	}
+	if off > boundary {
+		t.Errorf("cursor %d is %d bytes past the last complete frame (boundary %d) — "+
+			"a re-arm would resume MID-FRAME and lose the head of that message",
+			off, off-boundary, boundary)
+	}
+	// and the persisted position must actually be a frame boundary in the file
+	if off > 0 {
+		b, err := os.ReadFile(inbox)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b[off-1] != '\n' {
+			t.Errorf("cursor %d does not sit just after a newline; byte before it is %q", off, b[off-1])
+		}
+	}
+}
+
+// TestUnreadableCursorIsNotAbsent is rider n1. Absent means "no cursor-aware binary has
+// read this peer" and routes an ever-armed peer to seek END; unreadable means the
+// position is unknown. Collapsing them makes an EACCES silently skip everything queued
+// while the peer was away, which is the exact polarity the design forbids.
+func TestUnreadableCursorIsNotAbsent(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: an unreadable file is still readable")
+	}
+	dir := t.TempDir()
+	writeCursor(dir, 1, 2, 3)
+	if err := os.Chmod(cursorPath(dir), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cursorPath(dir), 0o644) })
+
+	if _, _, _, st := readCursor(dir); st != cursorCorrupt {
+		t.Errorf("unreadable cursor read state %d, want cursorCorrupt — ABSENT would send an "+
+			"ever-armed peer to seek END and skip its backlog", st)
+	}
+	// and the decision table must then replay rather than migrate
+	inbox := filepath.Join(dir, "inbox.jsonl")
+	if err := os.WriteFile(inbox, []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta := writeMetaJSON(t, dir, "4242") // ever armed
+	if got := resolveResume(inbox, meta); got.seekEnd {
+		t.Error("an unreadable cursor took the migration path; it must replay from 0")
+	}
+}

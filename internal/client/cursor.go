@@ -61,7 +61,15 @@ const (
 func readCursor(peerDir string) (dev, ino uint64, off int64, state cursorState) {
 	b, err := os.ReadFile(cursorPath(peerDir))
 	if err != nil {
-		return 0, 0, 0, cursorAbsent
+		if os.IsNotExist(err) {
+			return 0, 0, 0, cursorAbsent
+		}
+		// Present but unreadable (EACCES, EIO, a directory in its place). This is NOT
+		// absent: absent means "no cursor-aware binary has read this peer" and sends an
+		// ever-armed peer down the migration path to seek END, which would silently skip
+		// everything queued while it was away. A cursor we cannot read is a position we
+		// do not know, which is the corrupt case: replay and pay duplicates.
+		return 0, 0, 0, cursorCorrupt
 	}
 	f := strings.Fields(strings.TrimSpace(string(b)))
 	if len(f) != 3 {
