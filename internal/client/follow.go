@@ -30,14 +30,18 @@ func InboxPath(ch, al string) string {
 }
 
 // ArmLocalTail resolves target, records THIS process as the peer's listener, and runs
-// the blocking follower IN THIS PROCESS. It returns only on failure.
+// the blocking follower IN THIS PROCESS.
+//
+// It returns on failure OR on dormancy. The second case is new: a follower that stops
+// being the recorded listener emits its marker and returns normally, so a nil return
+// now means "the follower ended deliberately", not "unreachable".
 //
 // The Decision 2 re-exec is gone. It existed so the follower's argv would carry the
 // inbox path for a grep-based liveness predicate; identity is structural now, so there
 // is nothing to put in an argv and no reason to replace the process image. The pid
 // recorded just below is still the follower's pid, for the simpler reason that it
 // never stopped being this process.
-func ArmLocalTail(target string) error {
+func ArmLocalTail(target string, steal bool) error {
 	ch, al, err := ParseLocal(target)
 	if err != nil {
 		return err
@@ -54,6 +58,23 @@ func ArmLocalTail(target string) error {
 		return fmt.Errorf("no such peer %q — join first", ch+"/"+al)
 	}
 	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json")
+	// THE DISPLACEMENT GATE (D5). A second local listener on an already-armed alias is
+	// refused by default, relay-style. The rule is uniform on purpose: it does not
+	// exempt the same session, because a session arming over its own live tail is the
+	// double-listener bug rather than a convenience — every message would be delivered
+	// twice and meta would pin to the newest pid only.
+	//
+	// The gate is NOT atomic and deliberately takes no lock (R-B): two arms can both
+	// pass it before either writes meta. That race self-corrects, because the loser's
+	// identity check finds it is not the recorded listener and it goes dormant within
+	// one interval. A lock would buy atomicity at the price of a wedged-alias recovery
+	// path, which is the worse failure.
+	if !steal {
+		if m, ok := ReadPeerMeta(metaPath); ok && MetaListenerAlive(metaPath) {
+			return fmt.Errorf("%s is already being tailed (listener pid %d) — use --steal to take over",
+				ch+"/"+al, m.ListenerPid)
+		}
+	}
 	// P4: establish the witness BEFORE anything else. A follower that cannot prove which
 	// listener it is would be judged on the TRANSITION argv branch, where a follower this
 	// binary armed has no inbox in its argv and reads dead — so arming anyway would
@@ -68,7 +89,7 @@ func ArmLocalTail(target string) error {
 	resume := resolveResume(inbox, metaPath)
 	armMeta(metaPath, start) // listenerPid=own pid, listenerStart, ownerPid, lastActivity
 	RunFollower(inbox, resume, &listenerIdentity{pid: os.Getpid(), start: start, metaPath: metaPath})
-	return nil // unreachable: the follower never self-exits (see RunFollower)
+	return nil // the follower ended: displaced, renamed, re-joined or unregistered
 }
 
 // armMeta records this process as the peer's listener: listenerPid=own pid,
@@ -97,9 +118,12 @@ func armMeta(metaPath, start string) {
 }
 
 // RunFollower is the blocking local tail: it streams framed inbox events to stdout,
-// one write per frame, FOREVER. ArmLocalTail calls it directly, in this process; the
-// Monitor tool stops it by killing the process — the follower NEVER self-exits (a
-// vanished inbox is polled until it returns; a rotation is followed like tail -F).
+// one write per frame. ArmLocalTail calls it directly, in this process.
+//
+// It returns in exactly one case: this process stopped being the recorded listener, so
+// the follower went dormant (see listenerIdentity). Everything else is still followed
+// forever — a vanished inbox is polled until it returns, a rotation is followed like
+// tail -F, and the Monitor stopping it means killing the process.
 func RunFollower(inbox string, resume resumePoint, id *listenerIdentity) {
 	follow(inbox, resume, id, os.Stdout, followPoll, nil)
 }

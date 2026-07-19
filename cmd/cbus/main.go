@@ -119,6 +119,7 @@ func runSend(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus send <target> [--from ch/al] [--force] TEXT")
 	}
+	warnIfSessionless()
 	if client.IsRemote(args[0]) {
 		return runSendRemote(args)
 	}
@@ -191,21 +192,35 @@ func runSendRemote(args []string) int {
 	return 0
 }
 
+const tailUsage = "usage: cbus tail [--steal] <channel>/<alias>"
+
 func runTail(args []string) int {
-	if len(args) == 0 {
-		return die("usage: cbus tail <channel>/<alias>")
-	}
-	if err := noExtra(args, 1, "usage: cbus tail <channel>/<alias>"); err != nil {
+	p, err := splitVerbArgs(args, nil, map[string]bool{"--steal": true}, true)
+	if err != nil {
 		return die("%v", err)
 	}
-	if client.IsRemote(args[0]) {
-		return runTailRemote(args[0])
+	if len(p.pos) == 0 {
+		return die(tailUsage)
 	}
+	if err := noExtra(p.pos, 1, tailUsage); err != nil {
+		return die("%v", err)
+	}
+	if client.IsRemote(p.pos[0]) {
+		if p.flags["--steal"] {
+			// remote displacement is the relay's, and it already happens on attach
+			return die("--steal is local-only; a remote tail displaces on attach")
+		}
+		return runTailRemote(p.pos[0])
+	}
+	warnIfSessionless()
 	// local tail: arm this session as the listener and run the follower in-process.
-	if err := client.ArmLocalTail(args[0]); err != nil {
+	if err := client.ArmLocalTail(p.pos[0], p.flags["--steal"]); err != nil {
 		return die("%v", err)
 	}
-	return 0 // unreachable: the follower blocks until the process is killed
+	// reached when the follower goes dormant (displaced, renamed, re-joined,
+	// unregistered). Exit 0: losing the listener slot is a deliberate outcome, and the
+	// marker line on stdout has already said which one.
+	return 0
 }
 
 // runTailRemote prints the ws arm-spec and writes this session's identity marker.
@@ -553,6 +568,7 @@ func runJoin(args []string) int {
 	if err := noExtra(args, 2, "usage: cbus join <channel> [alias]"); err != nil {
 		return die("%v", err)
 	}
+	warnIfSessionless()
 	ch := args[0]
 	alias := ""
 	if len(args) > 1 {
