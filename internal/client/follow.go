@@ -109,9 +109,9 @@ func armMeta(metaPath string) {
 }
 
 // RunFollower is the blocking local tail: it streams framed inbox events to stdout,
-// one write per frame, FOREVER. It is the re-exec target of ArmLocalTail; the Monitor
-// tool stops it by killing the process — the follower NEVER self-exits (a vanished
-// inbox is polled until it returns; a rotation is followed like tail -F).
+// one write per frame, FOREVER. ArmLocalTail calls it directly, in this process; the
+// Monitor tool stops it by killing the process — the follower NEVER self-exits (a
+// vanished inbox is polled until it returns; a rotation is followed like tail -F).
 func RunFollower(inbox string, mode ReplayMode) {
 	follow(inbox, mode, os.Stdout, followPoll, nil)
 }

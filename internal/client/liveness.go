@@ -111,6 +111,19 @@ func MetaListenerAlive(metaPath string) bool {
 // process, which is exactly the recycled pid this milestone exists to reject.
 // TestPredicateStructuralDoesNotFallBack pins that shape.
 func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
+	// A zombie is EXITED but unreaped, and on linux it defeats the structural witness
+	// on its own terms: /proc/<pid>/stat stays readable at state=Z with the ORIGINAL
+	// starttime, and kill -0 still succeeds, so the recorded token byte-matches a
+	// process that is no longer listening. The argv clause used to catch this for free
+	// (a zombie's cmdline is empty) and zombie=dead is a pinned edge, so the guard is
+	// explicit here rather than left to a platform accident — on darwin proc_pidinfo
+	// happens to error for a zombie, which is safe but is not a decision.
+	//
+	// It sits above the branch so BOTH callers inherit it: the predicate and close.go's
+	// owner guard must not disagree about whether a corpse is a listener.
+	if procZombie(m.ListenerPid) {
+		return false
+	}
 	if m.ListenerStart == "" {
 		return transitionArgvIdentity(m.ListenerPid, metaPath)
 	}
