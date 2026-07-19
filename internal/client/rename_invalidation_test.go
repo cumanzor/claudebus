@@ -78,9 +78,12 @@ func TestRenameInvalidatesListenerIdentity(t *testing.T) {
 	if MetaListenerAlive(newMeta) {
 		t.Error("renamed peer must read dead until it re-arms")
 	}
-	// the tri-state consequence asserted directly, not inferred from the raw field
+	// ever-armed-ness asserted directly, not inferred from the raw field. Its REASON
+	// changed with the cursor: listenerPid no longer decides replay (the cursor does),
+	// but it still drives the send gate and the cursor-less migration rule, so a rename
+	// must not silently demote a renamed peer to never-armed.
 	if pm, ok := ReadPeerMeta(newMeta); !ok || pm.ListenerPid == 0 {
-		t.Error("renamed peer must still read as ever-armed, so the re-arm is ReplaySeekEnd")
+		t.Error("renamed peer must still read as ever-armed (send gate + migration rule)")
 	}
 }
 
