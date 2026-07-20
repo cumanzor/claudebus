@@ -92,6 +92,15 @@ window, with no other file and no channel history.
     form for 15 and 16 both: verify the probe touches the thing it claims to
     measure — one is "the mutant was never there," the other is "the signal
     never arrived." (Reviewer-confirmed, M5 verdict.)
+17. Quote bus message bodies with single quotes, not double. A double-quoted
+    body in a shell `cbus send` command-substitutes backticks and expands
+    `$vars` — the reporting channel itself can execute or leak what it merely
+    mentions. Live-observed twice this cycle: a documenter correction message
+    ate its own text on an unescaped backtick (harmless); a reviewer gates
+    message with backticks around an install-roles reference EXECUTED it
+    against the real store (impact verified nil, the class is not). If the
+    body needs a literal single quote, close/escape/reopen (`'...'\''...'`) or
+    use a heredoc — never fall back to double quotes to dodge it.
 
 ## Process rules
 

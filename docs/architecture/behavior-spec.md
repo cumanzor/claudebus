@@ -391,6 +391,15 @@ comment naming the difference so the next reader doesn't unify them by eye.
   choking (no silent caps).
 - `--active` (R22) drops a non-listening peer, then drops a channel left with
   zero peers — identical to the text path, which prints no row for either.
+- **The zero-peers drop is unconditional, not `--active`-gated (`cbus-vjo`,
+  post-release).** A channel with an empty `peers` array is dropped from the
+  unfiltered path too, matching `list`/`channels`/`channels --json`, all three
+  of which already agreed on this — `list --json` was the lone dissenter,
+  emitting any peerless store-root directory (e.g. `$CBUS_DIR/roles`, written
+  by `install-roles` beside the channels) as a phantom channel. Legacy v1 stays
+  exempt from the drop (`legacyV1: true`, `peers: []`) — it is peerless BY
+  CONSTRUCTION, predating the alias level, and R18 wants it visible so a GUI
+  can surface the prune remedy.
 - An empty store is a valid document with an empty `channels` array, not the
   text path's `no peers registered` sentence.
 

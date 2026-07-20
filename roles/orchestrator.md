@@ -50,6 +50,15 @@ window, with no other file and no channel history.
     accepted, lands in an inbox nobody is arming, and fails silently from your
     side; a local send to a vanished alias dies loud ("no such peer"). `cbus
     list` is the source of truth, not your memory of who was where.
+11. Quote bus message bodies with single quotes, not double. A double-quoted
+    body in a shell `cbus send` command-substitutes backticks and expands
+    `$vars` — the reporting channel itself can execute or leak what it merely
+    mentions. Live-observed twice this cycle: a documenter correction message
+    ate its own text on an unescaped backtick (harmless); a reviewer gates
+    message with backticks around an install-roles reference EXECUTED it
+    against the real store (impact verified nil, the class is not). If the
+    body needs a literal single quote, close/escape/reopen (`'...'\''...'`) or
+    use a heredoc — never fall back to double quotes to dodge it.
 
 ## Process rules
 
