@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -167,12 +168,25 @@ func normalizer(t *testing.T, pid int, workdir string) func(string) string {
 	return func(s string) string {
 		s = strings.ReplaceAll(s, real, "<CWD>")
 		s = strings.ReplaceAll(s, workdir, "<CWD>")
-		// anchored on the "pid=" prefix, not the bare digits: a bare-number replace
-		// would corrupt any other digit in the output that happened to match.
-		s = strings.ReplaceAll(s, "pid="+strconv.Itoa(pid), "pid=<PID>")
+		s = strings.ReplaceAll(s, pidField(strconv.Itoa(pid)), pidField(pidToken))
 		return strings.ReplaceAll(s, host, "<HOST>")
 	}
 }
+
+// pidToken is 5 characters, the same as a 5-digit pid, so substituting it inside the
+// padded field leaves the column width untouched and the goldens unchanged.
+const pidToken = "<PID>"
+
+// pidField renders the pid column the way the row does. Normalizing the whole padded
+// FIELD, not the digits inside it, is the fix for cbus-fi3: `pid=%-7s` is fixed-width,
+// so replacing only the digits left the trailing padding varying with digit count and
+// the goldens matched for 5-digit pids alone. Darwin usually obliges; a container or a
+// freshly booted machine hands out 2-4 digit pids and the test failed there.
+//
+// Anchoring on "pid=" is still deliberate — a bare-number replace would corrupt any
+// other digit in the output that happened to match — but owning the value was never
+// enough. A normalizer has to own the whole column.
+func pidField(v string) string { return fmt.Sprintf("pid=%-7s", v) }
 
 func shortHostnameForTest(t *testing.T) string {
 	t.Helper()
@@ -193,3 +207,36 @@ const activeGolden = "listen  alpha/one                    pid=<PID>   <HOST>  <
 const listAlphaGolden = "listen  alpha/one                    pid=<PID>   <HOST>  <CWD>\noff     alpha/two                    pid=?       <HOST>  <CWD>\n"
 
 const channelsGolden = "alpha                2 peers (1 listening)\nbeta                 1 peers (0 listening)\n"
+
+// TestNormalizerIsPidWidthIndependent is cbus-fi3 pinned directly, without needing a
+// live child to hand out a pid of a convenient length. Every width the kernel can
+// produce must normalize to the SAME bytes, or the goldens only hold on machines that
+// happen to allocate 5-digit pids.
+//
+// The upper bound is 7 digits: linux pid_max tops out at 4194304 and darwin at 99999,
+// and 7 characters is exactly what the "pid=%-7s" field holds, so the placeholder and
+// the widest real pid still pad to the same column.
+func TestNormalizerIsPidWidthIndependent(t *testing.T) {
+	workdir := t.TempDir()
+	host := shortHostnameForTest(t)
+
+	row := func(pid int) string {
+		return fmt.Sprintf("%-7s %-28s pid=%-7s %s  %s\n",
+			"listen", "alpha/one", strconv.Itoa(pid), host, workdir)
+	}
+
+	var want string
+	for _, pid := range []int{1, 99, 999, 9999, 99999, 999999, 4194304} {
+		got := normalizer(t, pid, workdir)(row(pid))
+		if want == "" {
+			want = got
+			if !strings.Contains(got, "pid="+pidToken) {
+				t.Fatalf("normalized row does not carry the pid token: %q", got)
+			}
+			continue
+		}
+		if got != want {
+			t.Errorf("pid %d normalized to\n %q\nbut pid 1 gave\n %q\n(the padded field must not depend on digit count)", pid, got, want)
+		}
+	}
+}
