@@ -245,8 +245,11 @@ byte-identical. Notable admissions (as of M5, two of the four below are
 additionally tightened client-side — see below; the wire regex itself is
 unchanged):
 
-- **All-digit names are legal** — and `jset` stores them as JSON *ints* in
-  `meta.json` (`cbus rename 42` → `"alias": 42`). Still an open quirk.
+- **All-digit names are legal.** Still an open quirk — untouched by M5.
+  ~~`jset` stores them as JSON *ints* in `meta.json`~~ (`cbus rename 42` →
+  `"alias": 42`) is **bash-era only**: the Go port's `renameMeta` always writes
+  `alias` as a JSON *string*, dropping the digit→int coercion (`internal/client/
+  store.go:383`, a documented C-delta, port-map row 16).
 - **No length cap** — filesystem `NAME_MAX` (~255 bytes) is the only bound.
   Still an open quirk.
 - ~~Leading-dot names are legal but invisible~~ — **REJECTED at creation, M5
@@ -558,7 +561,11 @@ the first):
 
 If neither: prints `not joined in this session` (to stdout) and **exits 1** —
 the only read-only command with a nonzero "empty" exit. Scripts using it as an
-am-I-joined probe must expect nonzero. Extra args are silently dropped.
+am-I-joined probe must expect nonzero. ~~Extra args are silently dropped~~ —
+stale since cutover (`581b1c7`), unrelated to M5: the Go port's `noExtra` guard
+makes trailing junk a hard error, `cbus: usage: cbus whoami [--json]` (rc 1),
+matching the top-of-file delta list's own item 6 (`cbus whoami junk`) that this
+line contradicted.
 
 **`cbus whoami --json` (M5, `cbus-8k9.4`):**
 

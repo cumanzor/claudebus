@@ -65,6 +65,12 @@ window, with no other file and no channel history.
     meta edit no code path performs).
 13. Never a bare `pkill` pattern that can match live infrastructure. Scope
     kills to harness-tracked pids.
+14. An absence claim from a partial read is not evidence. Before claiming a
+    guard, comment, mechanism, or field doesn't exist, confirm your read
+    covered where it would live — a range anchored at a symbol's declaration
+    line excludes the doc comment sitting above it, and a truncated read
+    excludes whatever came after the cutoff. Applies to your own reports as
+    much as to a reviewer's findings against you.
 
 ## Process rules
 

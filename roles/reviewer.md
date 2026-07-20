@@ -81,6 +81,7 @@ window, with no other file and no channel history.
     "golden insensitive" — both wrong, since the run never touched the code
     path under test. This is mutation testing's version of doctrine 12: the
     run proves the harness executed, not what you think it tested.
+    (Reviewer-confirmed, M5 verdict.)
 16. When the assertion under test is an exit code, run the binary bare
     (`cmd >/dev/null; echo $?`) or read `PIPESTATUS`/`pipestatus` explicitly —
     never `$?` after a pipe, which reports only the LAST stage (M5.3: `cbus
@@ -90,7 +91,7 @@ window, with no other file and no channel history.
     stage succeeds while the command you actually care about didn't. General
     form for 15 and 16 both: verify the probe touches the thing it claims to
     measure — one is "the mutant was never there," the other is "the signal
-    never arrived."
+    never arrived." (Reviewer-confirmed, M5 verdict.)
 
 ## Process rules
 

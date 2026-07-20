@@ -50,6 +50,13 @@ window, with no other file and no channel history.
     accepted, lands in an inbox nobody is arming, and fails silently from your
     side; a local send to a vanished alias dies loud ("no such peer"). `cbus
     list` is the source of truth, not your memory of who was where.
+11. An absence claim from a partial read is not evidence. Before writing that
+    something is missing, was never documented, or never happened, confirm
+    your own read covered where it would live — a truncated file read or a
+    range anchored at a declaration excludes what sits above it or past the
+    cutoff. Applies just as much to what a peer reports to you: a claimed
+    absence is a hypothesis until the read behind it is verified, not a fact
+    ready for the record.
 
 ## Process rules
 
