@@ -88,15 +88,31 @@ and gains `--json` subsections under `list`/`channels`/`whoami`; explicitly
 NOT touched — the Local-arm-mechanics lines under Sec 3, which are
 `cbus-2c8`'s separate open item. `behavior-spec.md` gains a new Sec 9.1, JSON
 output contract, covering the same envelope/refusal/one-shape facts at the
-mechanism level. One new standing doctrine added to `roles/reviewer.md`: an
-absence claim from a partial read is not evidence — before claiming something
-is missing, uncited, or undocumented, confirm the read actually covered where
-it would live, since a range anchored at a symbol's declaration excludes the
-doc comment sitting above it. This effort's second partial-read miss (the
-first, a malformed legacy-envelope fixture in M5.1, was self-caught before it
-shipped as a wrong finding); the M5.2(b) review's own `n2` citation-missing
-finding is the one this doctrine traces to, and is struck from the verdict —
-`n1` stands as ruled.
+mechanism level. Three new standing doctrines added to `roles/reviewer.md`,
+all self-caught by the reviewer before shipping as wrong findings against
+correct code. An absence claim from a partial read is not evidence — before
+claiming something is missing, uncited, or undocumented, confirm the read
+actually covered where it would live, since a range anchored at a symbol's
+declaration excludes the doc comment sitting above it. This effort's second
+partial-read miss (the first, a malformed legacy-envelope fixture in M5.1, was
+also self-caught); the M5.2(b) review's own `n2` citation-missing finding is
+the one this doctrine traces to, and is struck from the verdict — `n1` stands
+as ruled. A mutation verdict is evidence only after the mutant is proven on
+disk (assert the replace count, grep the mutated line, or check a non-empty
+`git diff`) BEFORE reading the test result, and confirmed back at baseline
+after: reviewing M5.2a, a heredoc mutation of the `"off   "` display literal
+used space indentation against a tab-indented file and silently matched
+nothing, while an unchained shell command in the same block still ran the go
+test against unmutated code and printed all-PASS — readable as either
+"mutation survived" or "golden insensitive," both wrong, since the run never
+touched the code path under test (mutation testing's version of doctrine 12:
+the run proves the harness executed, not what it tested). And an exit-code
+assertion must run the binary bare or read `PIPESTATUS` explicitly, never `$?`
+after a pipe: the M5.3 live smoke probed `whoami --json`'s unjoined exit code
+with `cbus whoami --json | jq -c .; echo rc=$?`, which reports `jq`'s rc (0,
+since the doc parses fine) rather than whoami's — `pipefail` would not have
+caught this either, since it reports that some stage failed, not which, and
+still reads 0 when the masking stage succeeds.
 
 [Files Changed]
 cmd/cbus/jsonout.go (new), jsonout_test.go (new), list_golden_test.go (new),
