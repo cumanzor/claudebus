@@ -545,19 +545,25 @@ func dropJSONFlag(args []string) []string {
 // runWhoami prints this session's local registrations (channel/alias) and remote
 // from-default markers; exits 1 when the session has neither (bin/cbus:775-792).
 func runWhoami(args []string) int {
-	if err := noExtra(args, 0, "usage: cbus whoami"); err != nil {
+	jsonMode := hasJSONFlag(args)
+	rest := args
+	if jsonMode {
+		rest = dropJSONFlag(args)
+	}
+	if err := noExtra(rest, 0, "usage: cbus whoami [--json]"); err != nil {
 		return die("%v", err)
 	}
-	any := false
-	for _, reg := range client.ResolveSelf() {
+	local, remote := client.ResolveSelf(), client.SessionMarkers()
+	if jsonMode {
+		return emitWhoamiJSON(local, remote)
+	}
+	for _, reg := range local {
 		fmt.Printf("%s/%s\n", reg.Channel, reg.Alias)
-		any = true
 	}
-	for _, m := range client.SessionMarkers() {
+	for _, m := range remote {
 		fmt.Printf("%s@%s/%s (remote from-default — reachability: cbus list @%s)\n", m.Channel, m.Host, m.Alias, m.Host)
-		any = true
 	}
-	if !any {
+	if len(local) == 0 && len(remote) == 0 {
 		fmt.Println("not joined in this session")
 		return 1
 	}

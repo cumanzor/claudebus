@@ -131,6 +131,57 @@ func emitChannelsJSON(snap client.StoreSnapshot) int {
 	return emitJSON(doc)
 }
 
+type whoamiJSON struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	SessionID     string `json:"sessionId"`
+	// Joined is the answer the exit code also carries, spelled out so a consumer that
+	// only reads stdout does not have to infer it from two array lengths.
+	Joined bool `json:"joined"`
+	// Local and Remote are separate keys rather than one list with a kind field: they
+	// are genuinely different identities (a local registration has no host, a remote
+	// from-default marker always does), and the split is what makes that legible.
+	Local  []localRegJSON  `json:"local"`
+	Remote []remoteRegJSON `json:"remote"`
+}
+
+type localRegJSON struct {
+	Channel string `json:"channel"`
+	Alias   string `json:"alias"`
+}
+
+type remoteRegJSON struct {
+	Channel string `json:"channel"`
+	Host    string `json:"host"`
+	Alias   string `json:"alias"`
+}
+
+// emitWhoamiJSON renders ONE document shape whether or not the session is joined: an
+// unjoined session gets the same keys with empty arrays, never a different document
+// and never a sentence, so a consumer parses one thing. The exit code stays 1 when
+// both collections are empty — frozen behavior scripts already branch on.
+func emitWhoamiJSON(local []client.LocalReg, remote []client.RemoteReg) int {
+	doc := whoamiJSON{
+		SchemaVersion: jsonSchemaVersion,
+		SessionID:     client.SessionID(),
+		Joined:        len(local) > 0 || len(remote) > 0,
+		Local:         []localRegJSON{},
+		Remote:        []remoteRegJSON{},
+	}
+	for _, r := range local {
+		doc.Local = append(doc.Local, localRegJSON{Channel: r.Channel, Alias: r.Alias})
+	}
+	for _, r := range remote {
+		doc.Remote = append(doc.Remote, remoteRegJSON{Channel: r.Channel, Host: r.Host, Alias: r.Alias})
+	}
+	if rc := emitJSON(doc); rc != 0 {
+		return rc
+	}
+	if !doc.Joined {
+		return 1
+	}
+	return 0
+}
+
 // emitJSON writes one indented document to stdout. HTML escaping is off for the same
 // reason the formation writer turns it off: a cwd containing & or < must round-trip as
 // itself, not as an entity.
