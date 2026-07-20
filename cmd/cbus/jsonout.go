@@ -32,6 +32,11 @@ type channelJSON struct {
 	// LegacyV1 marks a pre-channels bash entry. It is rendered EXPLICITLY rather than
 	// omitted (no silent caps) and carries an empty peers array rather than a half-peer,
 	// so a consumer iterating channels[].peers[] gets nothing for it instead of choking.
+	//
+	// It is also the ONE peerless channel this document still carries: everything else
+	// with an empty peers array is dropped, so a consumer can read "channel present"
+	// as "channel with peers, or a legacy entry that wants pruning" and never as "some
+	// directory in the store root".
 	LegacyV1 bool       `json:"legacyV1,omitempty"`
 	Peers    []peerJSON `json:"peers"`
 }
@@ -101,9 +106,14 @@ func emitListJSON(snap client.StoreSnapshot, active bool, chosen string) int {
 				Model:       p.Model,
 			})
 		}
-		// --active drops a channel that has no live peer left, matching the text path,
-		// which prints no row for it either.
-		if active && len(out.Peers) == 0 {
+		// A channel with no peers to show is dropped, matching the text path, which
+		// prints no row for it, and matching `channels`, which skips it. This covers
+		// two cases that used to be treated differently for no reason: --active
+		// filtering every peer out, and a directory in the store root that was never a
+		// channel at all. $CBUS_DIR/roles is the live example — install-roles writes it
+		// beside the channels, it holds no alias dirs, and emitting it made list --json
+		// the only surface claiming a channel the other three deny (cbus-vjo).
+		if len(out.Peers) == 0 {
 			continue
 		}
 		doc.Channels = append(doc.Channels, out)
