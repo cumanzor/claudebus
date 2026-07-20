@@ -3,7 +3,6 @@ package client
 import (
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -43,12 +42,12 @@ func TestLocalSendLiveAccepted(t *testing.T) {
 	root := setupStore(t)
 	seedPeer(t, root, "dev", "target", "OTHER")
 	inboxPath := filepath.Join(root, "dev", "target", "inbox.jsonl")
-	live := exec.Command("tail", "-f", inboxPath) // inbox in argv = a real live listener
+	live := exec.Command("tail", "-f", inboxPath) // a real live process to arm against
 	if err := live.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = live.Process.Kill() }()
-	seedPeerPid(t, root, "dev", "target", "OTHER", strconv.Itoa(live.Process.Pid))
+	seedPeerArmed(t, root, "dev", "target", "OTHER", live.Process.Pid)
 	if _, _, warn, err := LocalSend("dev/target", "x", false, "hi"); err != nil || warn {
 		t.Errorf("a live listener should accept without a warning: warn=%v err=%v", warn, err)
 	}

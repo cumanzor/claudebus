@@ -27,8 +27,8 @@ type peerMeta struct {
 	// Structural identity witness (P3): the listener's opaque start-time token, so a
 	// recycled pid does not read as the process that armed. omitempty because bash-era
 	// and pre-P3 metas have none and must rewrite byte-identically; an armed meta
-	// without it falls to the TRANSITION argv branch. EVERY rewriter must carry this
-	// field or it silently strips a live peer down to that branch.
+	// without it now reads DEAD. EVERY rewriter must carry this field or it silently
+	// kills a live peer.
 	ListenerStart string `json:"listenerStart,omitempty"`
 	Host          string `json:"host"`
 	TS            string `json:"ts"`

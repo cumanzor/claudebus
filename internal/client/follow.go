@@ -21,10 +21,8 @@ const followPoll = 200 * time.Millisecond
 
 // InboxPath is a peer's inbox under the live CBUS_DIR.
 //
-// The bash-era raw concatenation (no filepath.Clean) is gone with the argv it fed:
-// nothing greps this string to judge a peer any more. The one surviving grep is
-// metaInboxNeedle in liveness_transition.go, which reads PRE-P3 metas and rebuilds the
-// raw spelling itself, independent of this function.
+// The bash-era raw concatenation (no filepath.Clean) is gone with the argv it fed, and
+// so is the last reader of that spelling: nothing greps this string to judge a peer.
 func InboxPath(ch, al string) string {
 	return filepath.Join(CBUSDir(), ch, al, "inbox.jsonl")
 }
@@ -75,11 +73,10 @@ func ArmLocalTail(target string, steal bool) error {
 				ch+"/"+al, m.ListenerPid)
 		}
 	}
-	// P4: establish the witness BEFORE anything else. A follower that cannot prove which
-	// listener it is would be judged on the TRANSITION argv branch, where a follower this
-	// binary armed has no inbox in its argv and reads dead — so arming anyway would
-	// produce a tail that is instantly and invisibly not the listener. Refuse loudly
-	// instead of arming into that trap.
+	// P4: establish the witness BEFORE anything else. The witness is now the ONLY thing
+	// that can prove which listener this is, so arming without one would produce a tail
+	// that is instantly and invisibly not the listener — armed, streaming, and read dead
+	// by every peer. Refuse loudly instead of arming into that trap.
 	start, err := procStartTime(os.Getpid())
 	if err != nil {
 		return fmt.Errorf("cannot establish listener identity: %v — refusing to arm", err)

@@ -33,15 +33,18 @@ func TestMetaListenerAlive(t *testing.T) {
 	mp := filepath.Join(dir, "meta.json")
 	writeMeta := func(body string) { _ = os.WriteFile(mp, []byte(body), 0o644) }
 
-	// a live process whose argv references the inbox path (tail -f blocks and
-	// keeps the path in argv, like the real follower)
+	// a live process standing in for the follower
 	live := exec.Command("tail", "-f", inbox)
 	if err := live.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = live.Process.Kill() }()
+	liveStart := startTokenOf(t, live.Process.Pid)
 
-	// a live process whose argv does NOT reference the inbox
+	// a SECOND live process, spawned after a deliberate gap: linux starttime counts
+	// 10ms ticks, so two children started back to back can share a token and the
+	// mismatch case below would silently stop being a mismatch (the F2 trap).
+	time.Sleep(50 * time.Millisecond)
 	other := exec.Command("sleep", "30")
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
@@ -53,56 +56,25 @@ func TestMetaListenerAlive(t *testing.T) {
 	_ = dead.Run()
 	deadPid := dead.Process.Pid
 
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d}`, live.Process.Pid))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, live.Process.Pid, liveStart))
 	if !MetaListenerAlive(mp) {
-		t.Error("live listener with the inbox in argv should be listening")
+		t.Error("a live listener whose recorded witness is its own should be listening")
 	}
 	writeMeta(`{"listenerPid":null}`)
 	if MetaListenerAlive(mp) {
 		t.Error("null listenerPid must be off")
 	}
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d}`, other.Process.Pid))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, other.Process.Pid, liveStart))
 	if MetaListenerAlive(mp) {
-		t.Error("a pid whose argv lacks the inbox must be off (recycling guard)")
+		t.Error("a live pid wearing another process's witness must be off (recycling guard)")
 	}
 	writeMeta(fmt.Sprintf(`{"listenerPid":%d}`, deadPid))
 	if MetaListenerAlive(mp) {
 		t.Error("a dead pid must be off")
 	}
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"ownerPid":%d}`, live.Process.Pid, deadPid))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q,"ownerPid":%d}`, live.Process.Pid, liveStart, deadPid))
 	if MetaListenerAlive(mp) {
 		t.Error("a dead owner must make it off (crash-orphan guard)")
-	}
-}
-
-// TestArgvClauseZombieDead pins F1: a zombie (kill -0 still succeeds) must FAIL
-// the argv clause. On darwin KERN_PROCARGS2 keeps returning the cached argv, so
-// without the SZOMB guard a zombie follower would read ALIVE while bash reads it
-// dead ("<defunct>"); on linux the cmdline goes empty. Either way, once the child
-// is a zombie the argv clause must read dead.
-func TestArgvClauseZombieDead(t *testing.T) {
-	cmd := exec.Command("true") // exits immediately; not Wait()ed -> zombie
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	pid := cmd.Process.Pid
-	defer func() { _ = cmd.Wait() }() // reap the zombie
-
-	// argvContains is true while "true" runs; once it's a zombie the clause must
-	// go false. If the F1 bug were present (darwin cached argv), it stays true.
-	deadline := time.Now().Add(3 * time.Second)
-	for argvContains(pid, "true") && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if argvContains(pid, "true") {
-		t.Fatal("zombie argv clause still reads its cached argv (F1 inversion) — must read dead")
-	}
-	if !pidAlive(pid) {
-		t.Skip("child was reaped before the zombie window could be asserted (kernel timing)")
-	}
-	// the tri-state: kill -0 succeeds (zombie exists) yet the argv clause is dead
-	if pidAlive(pid) && argvContains(pid, "true") {
-		t.Error("zombie must be argv-dead despite kill -0 succeeding")
 	}
 }
 
@@ -126,7 +98,7 @@ func TestPeerDead(t *testing.T) {
 	dead := exec.Command("true")
 	_ = dead.Run()
 
-	write(fmt.Sprintf(`{"listenerPid":%d}`, live.Process.Pid))
+	write(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, live.Process.Pid, startTokenOf(t, live.Process.Pid)))
 	if PeerDead(mp) {
 		t.Error("armed + live listener must NOT be dead")
 	}
@@ -175,4 +147,17 @@ func TestPeerDead(t *testing.T) {
 	if !PeerDead(mp) {
 		t.Error("an old lastActivity must be dead despite a fresh mtime")
 	}
+}
+
+// startTokenOf is the structural witness armMeta records for a pid. Every "this peer
+// is armed" fixture needs one now: with the transition branch gone, a listenerPid
+// with no witness can never read alive, so a fixture without it would be asserting
+// the stampless rule by accident instead of whatever it means to assert.
+func startTokenOf(t *testing.T, pid int) string {
+	t.Helper()
+	start, err := procStartTime(pid)
+	if err != nil {
+		t.Fatalf("procStartTime(%d): %v", pid, err)
+	}
+	return start
 }

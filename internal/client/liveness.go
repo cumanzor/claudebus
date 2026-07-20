@@ -19,7 +19,7 @@ const unarmedGrace = 10 * time.Minute
 type PeerMeta struct {
 	ListenerPid   int    // 0 if null/absent
 	OwnerPid      int    // 0 if null/absent
-	ListenerStart string // "" if absent — a pre-P3 arm, judged on the TRANSITION branch
+	ListenerStart string // "" if absent — a pre-P3 arm, which now reads dead
 	Host          string
 	Cwd           string
 	Alias         string
@@ -105,16 +105,15 @@ func MetaListenerAlive(metaPath string) bool {
 // pid? It is the one place that answers it, so the predicate and close.go's owner
 // guard can never drift into disagreeing about who a listener is.
 //
-// The two branches are EXCLUSIVE by construction, chosen on whether a structural
-// witness was recorded — deliberately not `structural(m) || argv(m)`. An or would let
-// the transition branch resurrect a listener whose starttime says it is not that
-// process, which is exactly the recycled pid this milestone exists to reject.
-// TestPredicateStructuralDoesNotFallBack pins that shape.
+// There is exactly ONE way to answer it: the recorded witness against the process now
+// wearing the pid. The argv-grep fallback that answered for pre-P3 metas is deleted, so
+// a meta with no witness has nothing to be judged on and reads dead — do not add a
+// second opinion here, an `or` would resurrect the recycled pids this rejects.
 func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
 	// A zombie is EXITED but unreaped, and on linux it defeats the structural witness
 	// on its own terms: /proc/<pid>/stat stays readable at state=Z with the ORIGINAL
 	// starttime, and kill -0 still succeeds, so the recorded token byte-matches a
-	// process that is no longer listening. The argv clause used to catch this for free
+	// process that is no longer listening. The deleted argv clause caught this for free
 	// (a zombie's cmdline is empty) and zombie=dead is a pinned edge, so the guard is
 	// explicit here rather than left to a platform accident — on darwin proc_pidinfo
 	// happens to error for a zombie, which is safe but is not a decision.
@@ -125,7 +124,7 @@ func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
 		return false
 	}
 	if m.ListenerStart == "" {
-		return transitionArgvIdentity(m.ListenerPid, metaPath)
+		return false // no witness, no identity: R1's posture for a stampless meta
 	}
 	cur, err := procStartTime(m.ListenerPid)
 	if err != nil {

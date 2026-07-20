@@ -119,9 +119,13 @@ func TestRenameKeepsEverythingElse(t *testing.T) {
 
 // TestReapExposureUnchangedAcrossRename is B3. A renamed-not-yet-rearmed peer was
 // ALREADY reapable before P3 (the argv needle followed the new alias while the
-// follower's argv kept the old path), so this milestone must not widen that window —
-// and both branches have to agree, or a renamed peer's fate would depend only on
-// which binary armed it.
+// follower's argv kept the old path), so the structural rewrite must not widen that
+// window.
+//
+// The structural subtest carries B3 alone now. Its transition-branch twin asserted
+// that a pre-P3 armed peer with a matching argv was NOT dead before its rename, a
+// premise the deleted argv clause supplied; with one branch left there is no second
+// binary's arming to agree with.
 func TestReapExposureUnchangedAcrossRename(t *testing.T) {
 	t.Run("structural branch", func(t *testing.T) {
 		root := setupStore(t)
@@ -134,30 +138,6 @@ func TestReapExposureUnchangedAcrossRename(t *testing.T) {
 		}
 		if !PeerDead(filepath.Join(root, "dev", "newname", "meta.json")) {
 			t.Error("renamed peer must be PeerDead (same exposure as before P3)")
-		}
-	})
-
-	t.Run("transition branch", func(t *testing.T) {
-		f := newStructuralFixture(t)
-		// a pre-P3 armed peer: live listener, no structural witness, argv carries the
-		// inbox path under its CURRENT dir.
-		f.write(t, fmt.Sprintf(`{"listenerPid":%d}`, f.live))
-		if PeerDead(f.metaPath) {
-			t.Fatal("pre-P3 armed peer with matching argv must NOT be dead before a rename")
-		}
-		// simulate the rename: the needle is derived from the meta PATH, so judging the
-		// same meta from a different alias dir is exactly what rename produces.
-		moved := filepath.Join(filepath.Dir(filepath.Dir(f.metaPath)), "renamed")
-		if err := os.MkdirAll(moved, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		movedMeta := filepath.Join(moved, "meta.json")
-		b, _ := os.ReadFile(f.metaPath)
-		if err := os.WriteFile(movedMeta, b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if !PeerDead(movedMeta) {
-			t.Error("pre-P3 peer judged under a new alias must be dead — argv still names the old path")
 		}
 	})
 }
