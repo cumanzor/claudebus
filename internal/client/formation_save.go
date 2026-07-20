@@ -127,6 +127,15 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// A NEW envelope is a name this client mints (.formations/<name>.json, which
+	// ListFormations skips when dot-prefixed, so a dotted one saves and then cannot be
+	// listed). Refreshing an EXISTING file is not a mint, so a legacy dotted envelope
+	// can still be re-saved rather than stranded.
+	if !fileExists(path) {
+		if err := checkStoreName("formation name", name); err != nil {
+			return nil, nil, err
+		}
+	}
 	roster, err := ChannelRoster(ch)
 	if err != nil {
 		return nil, nil, err

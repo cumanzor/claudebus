@@ -80,8 +80,9 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
 		return "", "", fmt.Errorf("bad model %q", model)
 	}
-	// name IS the child's alias now, so it must be alias-legal (and not flag-shaped).
-	if name != "" && (!core.ValidName(name) || strings.HasPrefix(name, "-")) {
+	// name IS the child's alias now, so it must pass the store rule the reservation
+	// enforces. Checked here too, pre-fork, so the error names the flag.
+	if name != "" && !core.ValidStoreName(name) {
 		return "", "", fmt.Errorf("bad name %q", name)
 	}
 	addr = address
@@ -107,7 +108,7 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 			title, prompt = addr, SpawnPrompt(addr) // alias unknowable — child picks
 		}
 	} else {
-		if !core.ValidName(addr) {
+		if !core.ValidStoreName(addr) {
 			return "", "", fmt.Errorf("bad channel %q", addr)
 		}
 		// spawn is always a fresh, blank-transcript session (cbus-m9l birth-record).

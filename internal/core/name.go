@@ -1,6 +1,9 @@
 package core
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // nameRe is the ONE name-validation rule shared verbatim by the client
 // (bin/cbus:24 `valid_name`) and the relay (formerly main.go:33-37 `validName`).
@@ -22,4 +25,23 @@ var nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 //     `--` terminator.
 func ValidName(s string) bool {
 	return s != "." && s != ".." && nameRe.MatchString(s)
+}
+
+// ValidStoreName is the client-side tightening ValidName's doc earmarks: it gates a
+// name the client is about to CREATE as a store path segment. Two of the quirks above
+// are rejected here, both because the name survives creation and then misbehaves:
+//
+//   - leading '.' — the client's own traversals skip dot-prefixed entries to stay
+//     blind to the .remote/.reap trees, so a dot-named peer or channel is written
+//     successfully and is thereafter invisible to list, channels, and ResolveSelf;
+//   - leading '-' — flag-shaped, so it cannot be passed as a CLI filter without a
+//     `--` terminator, and a forked child's CLI parses it as a flag.
+//
+// It is ADDITIVE and never a replacement. ValidName remains the wire authority (the
+// relay gates /send and /tail on it), so a name this rejects can still arrive from an
+// older or third-party client, and ADDRESSING an existing name still goes through
+// ValidName — otherwise `cbus unregister <ch>/.foo`, the only cleanup path for a
+// legacy bad name, would be unable to name its target.
+func ValidStoreName(s string) bool {
+	return ValidName(s) && !strings.HasPrefix(s, ".") && !strings.HasPrefix(s, "-")
 }
