@@ -50,7 +50,7 @@ func run(args []string) int {
 		return runAuth(args[1:])
 	case "send":
 		return runSend(args[1:])
-	case "list", "peers":
+	case "list":
 		return runList(args[1:])
 	case "active":
 		// dispatch prepends --active; for a remote target this defeats remote
@@ -69,8 +69,6 @@ func run(args []string) int {
 
 	case "join":
 		return runJoin(args[1:])
-	case "register": // deprecated: v1 alias for the global channel
-		return runJoin(append([]string{"global"}, args[1:]...))
 	case "leave":
 		return runLeave(args[1:])
 	case "rename":
