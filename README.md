@@ -505,7 +505,9 @@ env: CBUS_DIR (default ~/.claude-bus); CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_U
 `--help` still prints a vestigial `CBUS_PYTHON` line for byte-parity with the bash client; the
 Go client ignores it. A `--` terminator ends flag parsing; flags must precede message text.
 
-`cbus register <alias>` is kept as a deprecated v1 alias for `cbus join global <alias>`.
+`cbus register` and `cbus peers`, the deprecated v1 aliases for `cbus join global` and
+`cbus list`, are gone as of v0.7.0 — both now exit 1 as unknown commands. Use the verbs
+they aliased.
 
 ## Security & network model
 
