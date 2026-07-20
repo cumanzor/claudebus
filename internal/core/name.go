@@ -14,15 +14,17 @@ var nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // ValidName reports whether s is an acceptable channel/alias/host name. It is the
 // wire authority — the relay gates `/send` and `/tail` on it, so a port must keep
-// it byte-identical. Documented properties preserved as-is (protocol.md §1.1),
-// each a quirk a later phase may tighten CLIENT-side only:
+// it byte-identical. Documented properties preserved as-is (protocol.md §1.1). The
+// first two are still open quirks a later phase may tighten CLIENT-side only; the last
+// two HAVE been tightened, in ValidStoreName below — do not "fix" them here, narrowing
+// this regex would change the wire:
 //
 //   - no length cap (de-facto bound is filesystem NAME_MAX);
 //   - all-digit names are legal (the client's jset then stores them as JSON ints);
 //   - leading-dot names pass ("." / ".." excepted) yet collide with the invisible
-//     .remote/.reap trees and every `*/` glob;
+//     .remote/.reap trees and every `*/` glob — REJECTED at creation by ValidStoreName;
 //   - leading-hyphen names pass (`-a`, `--force`), unusable as CLI filters with no
-//     `--` terminator.
+//     `--` terminator — REJECTED at creation by ValidStoreName.
 func ValidName(s string) bool {
 	return s != "." && s != ".." && nameRe.MatchString(s)
 }

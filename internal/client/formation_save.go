@@ -43,6 +43,11 @@ type RosterPeer struct {
 // does NOT prune: a formation is saved precisely when an effort pauses and its
 // peers are dying or dead, and a roster that dropped them would empty the file it
 // was asked to record. Liveness is reported, never acted on.
+// NOT ScanStore (roster.go), and the two must not be unified without a ruling: this
+// one takes ONE channel, ERRORS when it is absent, and DROPS a peer whose meta.json is
+// torn, because a save must never record a peer it could not read. ScanStore keeps
+// that peer with blank fields, because `list` has always shown it rather than hiding
+// it. Same walk, opposite answer to the same two questions.
 func ChannelRoster(ch string) ([]RosterPeer, error) {
 	if !core.ValidName(ch) {
 		return nil, fmt.Errorf("channel must be [A-Za-z0-9._-]")

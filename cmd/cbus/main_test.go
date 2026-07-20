@@ -195,17 +195,17 @@ func TestChannelsAndListLocal(t *testing.T) {
 		t.Errorf("channels = %q", ch)
 	}
 
-	li := captureStdout(t, func() { runListLocal(false, "") })
+	li := captureStdout(t, func() { runListLocal(false, "", false) })
 	if !strings.Contains(li, "dev/mbp") || !strings.Contains(li, "pid=?") || !strings.HasPrefix(li, "off   ") {
 		t.Errorf("list = %q", li)
 	}
 
-	act := captureStdout(t, func() { runListLocal(true, "") })
+	act := captureStdout(t, func() { runListLocal(true, "", false) })
 	if strings.TrimSpace(act) != "no active listeners" {
 		t.Errorf("--active with no live listeners = %q", act)
 	}
 
-	empty := captureStdout(t, func() { runListLocal(false, "nonexistent") })
+	empty := captureStdout(t, func() { runListLocal(false, "nonexistent", false) })
 	if strings.TrimSpace(empty) != "no peers registered" {
 		t.Errorf("empty list = %q", empty)
 	}
