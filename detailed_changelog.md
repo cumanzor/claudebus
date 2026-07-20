@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-07-20 03:01:14 UTC] [Client/JSON] v0.6.1 — cbus-vjo: a store-root directory is not a channel
+
+[Attempt #1]
+
+Field finding filed the same day v0.6.0 shipped: `list --json`'s unfiltered
+path emitted any peerless directory in the store root as a phantom channel
+with an empty `peers` array. `$CBUS_DIR/roles` — written by `install-roles`
+beside the channel directories — is the live case, so every real store hit
+this, and the shipped v0.6.0 reported it. Text `list` prints no row for one;
+`channels` and `channels --json` both skip it; `list --json`'s unfiltered
+path was the sole dissenter from three surfaces that already agreed. The
+drop rule already existed, just gated on `--active` for no real reason — a
+channel every peer got filtered out of and a directory that was never a
+channel at all are the same thing to a consumer, and applying the existing
+rule unconditionally (`8ee5dbc`) closes both with one line. Legacy v1 stays
+exempt: it is peerless BY CONSTRUCTION (predates the alias level), and R18
+wants it visible so a GUI can surface the prune remedy — its own regression
+test guards that exemption specifically, since a careless version of this
+fix is exactly the one that would break it.
+
+Caught because the fix was verified against the REAL store rather than a
+fixture. The regression fixture mints the peerless directory the way the
+real one is minted — `cbus install-roles`, not `os.MkdirAll` — which is also
+why no earlier test reached this state: every test channel came from `join`,
+and `join` always writes a peer alongside the directory it creates, so a
+peerless channel dir was unreachable in a store built only by joining.
+
+Docs: `behavior-spec.md` Sec 9.1's `--active` bullet gains a parity note —
+the zero-peers drop is unconditional, not `--active`-gated, with the same
+`$CBUS_DIR/roles` provenance and the R18 legacy-v1 exemption spelled out
+(`045a059`). Riding the same commit: a new standing doctrine in all four role
+files (orchestrator #11, coder #15, documenter #12, reviewer #17) — bus
+message bodies are single-quoted in a shell `cbus send`, never double, since
+a double-quoted body command-substitutes backticks and expands `$vars` and
+the reporting channel itself can execute or leak what it merely mentions.
+Provenance for the doctrine, both from this same evening: a documenter
+correction message ate its own text on an unescaped backtick (harmless —
+the substituted command just errored); a reviewer gates message with
+backticks around an install-roles reference EXECUTED it against the real
+store (impact verified nil, but the class of mistake is not).
+
+[Files Changed]
+`cmd/cbus/jsonout.go` (the unconditional drop, `legacyV1` doc comment),
+`cmd/cbus/vjo_parity_test.go` (new) — coder's commit `8ee5dbc`.
+`docs/architecture/behavior-spec.md` (Sec 9.1 parity note), `roles/
+orchestrator.md`, `roles/coder.md`, `roles/documenter.md`, `roles/
+reviewer.md` (quoting doctrine) — documenter's commit `045a059`, both on
+branch `vjo-parity` off `m5-json`. `simple_changelog.md`,
+`detailed_changelog.md` (this entry).
+
 ## [2026-07-20 00:51:16 UTC] [Client/JSON] M5 (cbus-8k9.4): client-side name tightening + list/channels/whoami --json
 
 [Attempt #1]
