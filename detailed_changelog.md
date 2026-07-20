@@ -1,5 +1,144 @@
 # Changelog (detailed)
 
+## [2026-07-20 03:51:31 UTC] [Client] v0.7.0 — M6 deprecation-drop: closes cbus-8k9.4
+
+[Attempt #1]
+
+Three commits (`75e352d`..`1601f13`), M6 of the go-port epic — its final
+milestone. `cbus-8k9.4` (P3 homogenization) closes with this release: every
+item on its Phase 3 semantic-upgrades list is now DONE.
+
+**M6.1 (`75e352d`) drops the deprecated `register` verb and `peers` alias.**
+`register` was a v1 alias for `join global`; `peers` a v1 alias for `list`.
+Both now fall through to the existing default and exit 1 with the frozen
+`cbus: unknown command '<verb>' (cbus --help)` — no new error path needed.
+Nothing programmatic depended on either (verified: not in the usage text, no
+test invoked either verb, no skill or script calls them), so the drop needed
+no compatibility shim. The tests go through the CLI door on purpose — the
+thing being deleted IS a dispatch entry, and calling `runJoin`/`runList`
+directly could never prove the verb no longer reaches them. `register`'s own
+case is pinned specifically: it must not create the `global` channel on its
+way to failing, since a verb that errors after doing its work is the worse
+outcome.
+
+**M6.2 (`9a3a075`) deletes the `TRANSITION(P3T2)` argv-grep liveness shim
+whole.** `liveness_transition.go` is gone; `listenerIdentityHolds` has one
+branch left — the recorded `(pid, starttime)` witness against the process now
+wearing the pid. An armed meta with no witness reads dead, the posture R1
+already took for a stampless meta, so there is no longer a second answer for
+a pre-P3 arm to fall into. Field impact was verified nil before the drop, not
+assumed: every armed meta on the Mac carried a `listenerStart` (9 of 9), and
+the NUC's store held no peer metas at all — no pre-P3 arm survived anywhere
+in the fleet at drop time. `procArgs` itself does not die with the shim —
+`transitionArgvIdentity`, `argvContains`, and `metaInboxNeedle` go, but
+`procArgs` stays for `close.go:96` (the owner guard) and `marker.go:79`
+(`ownerFromPid`); following the dead-code chain one hop further would have
+broken owner detection silently. The TRANSITION token is gone from the tree
+including the comment explaining its history — the sweep is meant to be a
+clean binary check, so the prose now says "the argv-grep branch" instead.
+
+**FLEET COMPATIBILITY STATEMENT (verbatim, also riding the GitHub release
+body):** a pre-P3 (pre-v0.4.0) binary arming against a shared `CBUS_DIR`
+after this upgrade writes metas the fleet reads as dead — the argv read shim
+is gone and listener identity is structural-only; fleet binaries must be
+v0.4.0+.
+
+**`cbus-p8g`, closed MOOT at merge.** `TestArgvClauseZombieDead` called
+`argvContains` directly and died with the shim file, along with
+`TestTransitionNeedleStaysRaw` and `TestPredicateTransitionBranch` (replaced
+by `TestPredicateStamplessArmedReadsDead`, which uses a genuinely LIVE pid so
+the missing witness is the only possible cause of the verdict). The
+zombie=dead contract `TestArgvClauseZombieDead` used to pin is carried
+forward by `TestPredicateStructuralZombieReadsDead` — the inheritance chain
+is recorded in `9a3a075`'s own commit message, and the reviewer ran that pin
+directly in the linux container rather than trusting the message. Separately,
+`TestClosePeerIgnoresAForeignListenerPid` is removed as VACUOUS — and that is
+this milestone's own find, not incidental fallout: it kept passing after the
+collapse while pinning nothing, because its stampless fixture now read dead
+for an unrelated reason once the branch it originally exercised was gone. A
+test that survives a deletion by accident is worse than one that breaks,
+since nothing announces that it stopped testing anything. Its contract is
+already held by `TestClosePeerIgnoresARecycledListenerPidStructurally` — post
+collapse, a foreign live follower wearing the recorded pid and a recycled
+stranger wearing it are the same case (witness mismatch), so re-seeding a
+second foreign case would run one path twice under two names.
+
+**`cbus-fi3` (`1601f13`, test-only).** The golden rows render the pid through
+a fixed-width field, `pid=%-7s`, and the normalizer replaced only the digit
+run inside it — so the trailing padding varied with digit count and the
+goldens silently only matched a 5-digit pid. Darwin usually obliges, which is
+why this survived to the release gate; a container hands out 2-4 digit pids,
+and the M6.2 gate run failed there on all four pid-bearing subtests.
+Normalizing the whole padded field fixes it with zero golden churn, because
+the placeholder is five characters like a 5-digit pid and pads to the same
+column — the four golden constants are byte-identical to before this commit.
+A new property test proves width-independence directly over 1 through
+4,194,304 (linux `pid_max`), so no live child has to hand out a pid of a
+convenient length for the property to hold. What went wrong is worth naming:
+the old line was anchored on the `"pid="` prefix on purpose, with a comment
+explaining that a bare-digit replace would corrupt other numbers in the
+output — that reasoning was right and incomplete. It closed the
+false-positive hazard and never asked whether the field around the value was
+fixed-width. A normalizer has to own the whole column, not the value inside
+it.
+
+**Docs**, all in `docs/architecture/`: `command-reference.md` sweeps every
+live `register`/`peers` mention — the bash-era dispatch table rows (§1) gain
+forward pointers rather than being rewritten (they remain accurate for the
+retired `bin/cbus`, which still has both verbs); the "Reserved / conventional
+names" bullet drops `register` from the list of things that target `global`;
+the `### cbus register` subsection is rewritten from "deprecated" to
+"removed"; `cbus list`'s heading drops the `(alias: cbus peers)` parenthetical;
+§15's table rows and port note are struck through with closure notes. Found
+during the sweep, not on the coder's flagged-line list: `cbus list`'s own
+heading at the old line 754 also carried the `peers` alias mention — caught
+by grepping the file myself rather than trusting the flagged-line list was
+exhaustive. `behavior-spec.md` gets a matching sweep (the §9 dispatch row, the
+§13 quirk-registry item) plus a new dated preamble note closing out the
+`TRANSITION(P3T2)` mechanism the 2026-07-19 P3-tranche-2 note had described as
+scoped to one release. `port-map.md`'s Phase 3 bullet list and the D1 ruling
+table row are marked DONE for every remaining open item (name tightening and
+`list --json`, both actually shipped in M5 but never stamped in this file
+until now; the deprecated-surfaces drop and the TRANSITION shim removal, both
+M6) — Phase 3 as a whole is now stamped fully executed.
+`compat-deletion-plan.md` gains a Tranche 3 paragraph and is stamped CLOSED:
+all seven original items now have a final, executed disposition (1–2 deleted
+tranche 2, 3/4/6 deleted tranche 1, 5 resolved at cutover with no code
+change, 7 deliberately kept frozen), and the `TRANSITION(P3T2)` remnant
+tranche 2 introduced as a temporary shim is itself deleted in tranche 3.
+
+[Files Changed]
+`cmd/cbus/deprecated_drop_test.go` (new), `cmd/cbus/list_golden_test.go`,
+`cmd/cbus/main.go` — `cmd/cbus`. `internal/client/close.go`, `close_test.go`,
+`dormancy_test.go`, `follow.go`, `follow_test.go`, `formation_plan_test.go`,
+`liveness.go`, `liveness_structural_test.go`, `liveness_test.go`,
+`liveness_transition.go` (deleted), `meta_rewrite_test.go`,
+`rename_invalidation_test.go`, `send_test.go`, `store.go`, `store_test.go` —
+`internal/client`. `README.md` (coder's M6.1 commit, one `register` reference
+replaced with a removed-as-of-v0.7.0 note; the relay's `GET /peers` HTTP API
+docs deliberately untouched — different surface). `docs/architecture/
+command-reference.md`, `behavior-spec.md`, `port-map.md`,
+`compat-deletion-plan.md` — this docs commit. `simple_changelog.md`,
+`detailed_changelog.md` (this entry).
+
+[Possible Ripple Effects]
+The FLEET COMPATIBILITY statement above is the load-bearing one: any machine
+still running a pre-v0.4.0 binary against a shared `CBUS_DIR` will see its
+own arms read as dead by every v0.7.0+ peer, with no shim left to fall back
+on. Field-verified nil impact on the MBP+NUC fleet specifically, not a
+guarantee for any other `CBUS_DIR` this binary might be pointed at. `register`
+and `peers` are now indistinguishable from any other typo — any muscle-memory
+use surfaces the standard unknown-command error, not a deprecation notice.
+
+[Testing Notes]
+`deprecated_drop_test.go` goes through the CLI door (`run()`), asserting both
+the exit code/error text AND that `register`'s failed path left no trace (no
+`global` channel created). `cbus-fi3`'s new property test covers pid widths 1
+through 4,194,304. Full suite green; `cbus-p8g` verified reviewer-side by
+running `TestPredicateStructuralZombieReadsDead` directly in the linux
+container rather than trusting the inheritance-chain claim in the commit
+message.
+
 ## [2026-07-20 03:01:14 UTC] [Client/JSON] v0.6.1 — cbus-vjo: a store-root directory is not a channel
 
 [Attempt #1]

@@ -61,18 +61,45 @@ as tranche 1 left them; item 7 stays frozen.
 | 6 | **bash artifacts** — `bin/cbus`, `bin/cc-branch.sh` (the installers `install.sh` / `install-cbus-go.sh` were retired at `de07cbe`) | repo root / `bin/` | the bash client + its fork helper; distribution is now `get.sh` + `cbus selfupdate` | remove `bin/cbus` + `bin/cc-branch.sh` at P3 |
 | 7 | **A3/A6 frozen credential-store locations** | `internal/client/cred.go` | keychain / XDG paths frozen so no re-seed is needed across the bash↔Go boundary | may relax, but no reason to — keep frozen |
 
+**Tranche 3 executed (2026-07-19/20, `9a3a075`, M6.2 of `cbus-8k9.4`):** the
+`TRANSITION(P3T2)` remnant of item 2 — `metaInboxNeedle`, `liveness_transition.go`
+whole — is deleted. `listenerIdentityHolds` has one branch left: the structural
+`(pid, starttime)` witness; an armed meta with no witness now reads dead outright,
+the same posture already held for a stampless meta, so there is no longer a second
+answer for a pre-P3 arm to fall into. Field impact was verified nil before the
+drop, not assumed: every armed meta on the Mac carried a `listenerStart` (9 of 9),
+and the NUC's peer store held none at all — no pre-P3 arm survived anywhere in the
+fleet at drop time. `register`/`peers` are dropped in the same release (M6.1,
+`75e352d`) — the pairing this plan predicted two paragraphs up ("its removal rides
+the same future release as the `register`/`peers` drop") held exactly, both
+landing in v0.7.0. Riding the same span: `cbus-fi3` (`1601f13`), a test-only
+golden normalizer fix the tranche's own container liveness gate exposed (a
+pid-width assumption unrelated to the shim itself).
+
+**Consequence for the fleet, stated plainly because it is a compatibility line,
+not a subtle one:** a pre-P3 (pre-v0.4.0) binary arming against a shared
+`CBUS_DIR` after this upgrade writes metas the fleet reads as dead — the argv
+read shim is gone and listener identity is structural-only; fleet binaries must
+be v0.4.0+.
+
+**Plan closed (v0.7.0).** All seven original items now have a final, executed
+disposition: 1–2 deleted in tranche 2, 3/4/6 deleted in tranche 1, 5 resolved at
+cutover with no code change, 7 deliberately kept frozen. The `TRANSITION(P3T2)`
+remnant tranche 2 introduced as a temporary one-release shim is itself deleted in
+tranche 3. Nothing further rides this plan.
+
 **Grep-driven sweep:** `grep -rn 'COMPAT(P3' internal/ cmd/` now returns nothing —
-items 1–4 are gone (1–2 in tranche 2, 3–4 in tranche 1). The read-only remnant of
-item 2 carries a new, deliberately different token: `grep -rn 'TRANSITION(P3T2)'
-internal/` finds `liveness_transition.go`'s `metaInboxNeedle` — a one-release shim,
-not a COMPAT item, so it does not answer to the old grep. #5 needed no code change
-(rename), #6 is bash files (gone, tranche 1), #7 stays.
+items 1–4 are gone (1–2 in tranche 2, 3–4 in tranche 1). `grep -rn
+'TRANSITION(P3T2)' internal/` also now returns nothing as of tranche 3 —
+`liveness_transition.go` is deleted whole. #5 needed no code change (rename), #6
+is bash files (gone, tranche 1), #7 stays.
 
 Notes:
 - All items but 7 are now resolved: 3/4/6 in tranche 1 (2026-07-18), 1/2 in tranche 2
   (2026-07-19), 5 at cutover (2026-07-13, no code change). Item 7 stays frozen by
   design, not gated on anything.
-- `TRANSITION(P3T2)` (the item-2 remnant, `liveness_transition.go`) is a new,
-  separately-tracked, one-release shim — not one of the seven original items — and
-  is not swept by the `COMPAT(P3` grep above.
+- ~~`TRANSITION(P3T2)` (the item-2 remnant, `liveness_transition.go`) is a new,
+  separately-tracked, one-release shim~~ — **deleted, tranche 3 (2026-07-19/20,
+  `9a3a075`)**. It was never one of the seven original items and never answered
+  to the `COMPAT(P3` grep; both grep and shim are gone together now.
 - The `version` verb and the `-ldflags` stamp are **not** compat and stay.

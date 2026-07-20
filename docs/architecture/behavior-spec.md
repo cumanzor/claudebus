@@ -66,6 +66,29 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > so its `(pid, starttime)` token still byte-matches), reproduced then fixed
 > pre-ship (`f853ff2`) so the net observable answer is unchanged from bash.
 >
+> **Doc-refresh note (2026-07-19/20, `cbus-8k9.4` M6.2 — TRANSITION(P3T2) shim
+> closure, `9a3a075`):** the fallback the note above named is now gone.
+> `liveness_transition.go` is deleted whole; `listenerIdentityHolds` has one
+> branch left — the recorded `(pid, starttime)` witness against the process now
+> wearing the pid. An armed meta with no witness reads dead, the same posture R1
+> already took for a stampless meta, so there is no longer a second answer for a
+> pre-P3 arm to fall into. `procArgs` itself survives (it backs `close`'s owner
+> guard, close.go:96, and `ownerFromPid`, marker.go:79 — unrelated call sites);
+> what is gone is the fallback BRANCH, and the TRANSITION token with it. Field
+> impact was verified nil before the drop, not assumed: every armed meta on the
+> Mac carried a `listenerStart` (9 of 9), and the NUC's store held no peer metas
+> at all — no pre-P3 arm survived anywhere in the fleet at drop time. The
+> consequence going forward, stated plainly because it is a fleet compatibility
+> line, not a subtle one: **a pre-P3 (pre-v0.4.0) binary arming against a shared
+> `CBUS_DIR` after this upgrade writes metas the fleet reads as dead — the argv
+> read shim is gone and listener identity is structural-only; fleet binaries
+> must be v0.4.0+.** Riding the same span, unrelated to the shim itself:
+> `cbus-fi3` (`1601f13`), a test-only golden-normalizer fix (a fixed-width pid
+> column was normalized by digit-count, not by column, so the goldens only held
+> for 5-digit pids — a container running this milestone's own gate exposed it).
+> Also this span, M6.1 (`75e352d`): the deprecated `register`/`peers` verbs are
+> removed, not just deprecated — see command-reference.md §15.
+>
 > **Doc-refresh note (2026-07-19, `cbus-8k9.4` M4 — D4/D5, local replay + local
 > collision only):** §8.6 below is REWRITTEN, not amended, to describe the durable
 > replay cursor (D4) that now decides local re-arm resume position; the null-
@@ -335,7 +358,7 @@ Usage heredoc → stdout, exit 0 on no-args/`-h`/`--help` (:854-912); unknown co
 | Command | Anchor | Spec |
 |---|---|---|
 | `join <ch> [alias]` | :394-438 | Auto-prune channel first (may emit `departed`s). Idempotent per (session, channel): prints `already joined "<ch>" as "<alias>"` + arm reminder, **requested alias ignored** on this path. Auto-alias: `main` else lowest free `fork-N` (`pick_alias` :387-392), claimed by bare `mkdir` (≤50 retries — pick keys on meta.json, claim on the dir: can spin on a half-created sibling). Explicit alias: live-listener slot refused (`taken by a live listener`); dead slot → **`rm -rf` destroys the dead peer's queued inbox** (no departed broadcast — asymmetric with rename's reclaim). Fresh truncated inbox; meta with `listenerPid:null`; `join` presence; 3-line stdout ending in the arm-via-Monitor warning (:435-437) |
-| `register [alias]` | :838 | deprecated ≡ `join global` (documented only at README:266) |
+| `register [alias]` | :838 | deprecated ≡ `join global` (documented only at README:266). Row is bash-era only — **removed from the Go client, M6.1 (`75e352d`, v0.7.0)**, falls through to unknown-command |
 | `send` | §7 | |
 | `tail <ch>/<al>` (local) | :487-578 | **Monitor-only; blocks forever under Bash.** Records pids, execs follower (§8.5-8.7) |
 | `tail <ch>@<host>/<al>` | :272-293 | Instant Bash command. Needs token only (no CF pair). Writes/overwrites the session marker; prints the ws arm spec: `url: wss://…/tail?channel=<ch>&alias=<al>`, `protocols: ["bearer.cbus.<token>"]` (token in cleartext by design), `description: cbus:<ch>@<host>/<al>` persistent. No alias-free pre-flight — collisions surface as displacement |
@@ -538,7 +561,7 @@ Preserve-or-rethink flags for a port; dispositions in [port-map.md](port-map.md)
 7. `leave` broadcasts before removal (safe only because the subject is skipped); prune removes then broadcasts (:665-666 vs :374-375).
 8. `hostname -s || hostname` portability dance ×3 (:259,433,478); relay's empty-from spelling is `"unknown"` — two unroutable-sender spellings system-wide.
 9. Column widths (`%-28s`) are cosmetic contracts; do not parse `list` by column (:308,596,608).
-10. Deprecated surfaces kept: `register` (≡ join global), `peers` (≡ list, documented nowhere), legacy v1 entries, legacy machine-global markers — zero programmatic callers.
+10. ~~Deprecated surfaces kept: `register` (≡ join global), `peers` (≡ list, documented nowhere)~~ — **dropped, M6.1 (`75e352d`, v0.7.0)**: zero programmatic callers meant the drop needed no compat shim; both now answer to unknown-command. Legacy v1 entries and legacy machine-global markers are untouched by this drop and remain live surfaces.
 11. Marker `ownerPid` fallback `$PPID` outside a claude tree = transient shell pid → marker is immediate sweep-bait (:284).
 12. The `.remote/<host>/<name>` namespace rule: FILE at channel level = legacy/garbage, swept unconditionally; DIR = per-session markers (:193-221).
 13. `cbus tail` is two verbs in one name: local = blocking Monitor source; remote = instant Bash spec-printer with identity side effects (:487-488).

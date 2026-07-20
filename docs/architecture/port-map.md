@@ -338,7 +338,8 @@ is deleted wholesale in one commit once the fleet is homogeneous.
   `hook-exit` always 0.
 - The CLI verb set + argument shapes the skills call: join, tail, send, branch, rename, prune,
   list, auth (+ hook-exit via settings.json). `register`/`peers` have zero programmatic
-  callers — keep-or-drop is free.
+  callers — keep-or-drop is free. **Dropped, M6.1 (`75e352d`, v0.7.0)**: both now fall
+  through to the frozen unknown-command error.
 - The unroutable-`from` convention (`<host>-PID` = "cannot reply").
 
 ### Class C — free to change (note observable deltas in release notes)
@@ -346,8 +347,8 @@ is deleted wholesale in one commit once the fleet is homogeneous.
 Everything python; error dialects/prose/stderr channel choices; `list` column widths; the
 `'+1'/'0'` sentinels and `.reap.$$` naming (keep the dot prefix); soft failures promoted to
 hard errors (unknown host, malformed `ws_url` scheme); silent trailing-arg discards; auth-status
-host-validation gap; deprecated surfaces (`register`, `peers`, legacy v1 entries,
-machine-global markers — keep the sweeps one release, then drop); explicit HTTP timeouts
+host-validation gap; deprecated surfaces (`register`, `peers` — **dropped M6.1, `75e352d`,
+v0.7.0**; legacy v1 entries, machine-global markers stay, not part of that drop); explicit HTTP timeouts
 (new, safe — but no retry-on-timeout without an idempotency story, since the relay acks after
 spooling).
 
@@ -434,9 +435,15 @@ F2 `c4b8743`: an 8-row resume table with no rename/steal/dead-gap special case, 
 `33bd5e2`/N3 `7ede690`: follower self-identity + a displacement gate, closing `cbus-0r8`,
 behavior-spec.md §8.7); drop the mtime fallback — **DONE 2026-07-18**
 (tranche 1, D3); reject leading-dot/leading-dash names client-side (the relay regex stays
-the wire authority) — open; `list --json` (`cbus-oq9`) — open; drop deprecated surfaces
-after one release of dual support — open, now also gates `TRANSITION(P3T2)`'s removal
-(compat-deletion-plan.md).
+the wire authority) — **DONE 2026-07-19** (M5.1 `d4d34ac`: `core.ValidStoreName`, additive
+over `core.ValidName`, wired at the three store chokepoints + the fork pre-validators);
+`list --json` (`cbus-oq9`) — **DONE 2026-07-19** (M5.2/M5.3: `list`/`channels`/`whoami --json`,
+`cmd/cbus/jsonout.go`; absorbs `cbus-oq9.4`); drop deprecated surfaces — **DONE 2026-07-19**
+(M6.1 `75e352d`: `register`/`peers` now fall through to unknown-command), which in turn
+closed the gate on `TRANSITION(P3T2)`'s removal — **DONE 2026-07-19/20** (M6.2 `9a3a075`:
+`liveness_transition.go` deleted whole, single structural branch, field-verified nil impact;
+see compat-deletion-plan.md's tranche 3). **Phase 3 is now fully executed — every item in
+this bullet is DONE; nothing outstanding rides `cbus-8k9.4`.**
 
 **Phase 4 — wire-touching work (relay + client in lockstep, protocol-versioned).** Explicitly
 out of the port's scope: remote presence (`kind` over the relay, `cbus-ijx.5`); the
@@ -454,7 +461,7 @@ homogenization.**
 
 | # | Tension | Ruling |
 |---|---|---|
-| D1 | argv-fingerprint liveness vs (pid, starttime)/pidfd | Fingerprint verbatim through Phase 2 (via procfs/libproc, not `ps` spawns); structural liveness in Phase 3 — **DONE 2026-07-19**: `(pid, starttime)` primary via `listenerIdentityHolds`, exclusive-by-construction with a `TRANSITION(P3T2)` argv fallback for metas with no recorded witness (never `structural \|\| argv`); rename clears `listenerStart` only, invalidating the listener record without forcing a full-inbox replay on re-arm. pidfd/kqueue itself deferred as `cbus-6lv` |
+| D1 | argv-fingerprint liveness vs (pid, starttime)/pidfd | Fingerprint verbatim through Phase 2 (via procfs/libproc, not `ps` spawns); structural liveness in Phase 3 — **DONE 2026-07-19**: `(pid, starttime)` primary via `listenerIdentityHolds`, exclusive-by-construction with a `TRANSITION(P3T2)` argv fallback for metas with no recorded witness (never `structural \|\| argv`); rename clears `listenerStart` only, invalidating the listener record without forcing a full-inbox replay on re-arm. **The `TRANSITION(P3T2)` fallback itself is now gone too — DONE 2026-07-19/20** (M6.2 `9a3a075`): one branch left, the structural witness alone; a witness-less armed meta reads dead outright, no second answer to fall into. pidfd/kqueue itself deferred as `cbus-6lv` |
 | D2 | Dot-prefix invisibility vs moving temps/markers out of the data tree | Explicit skip-dot filter from day one; the tree layout stays byte-identical while any bash cbus shares `$CBUS_DIR`; relocation is Phase 3+ and low-value |
 | D3 | mtime grace vs explicit `lastActivity` | Dual-write both in Phase 2; ported `peer_dead` prefers the field, falls back to mtime; drop the fallback in Phase 3 — **DONE 2026-07-18** (tranche 1, `8f79a83`): `lastActivity`-only, mtime read deleted |
 | D4 | Null-`listenerPid` replay heuristic vs durable cursor | Exact tri-state semantics at cutover (internal enum, same on-disk signal); cursor is a Phase 3 semantic change, landing with D5 since they touch the same state — **DONE 2026-07-19** (M4 N1 `e0ce7de`, F2 `c4b8743`): a `.cursor` sidecar per peer (dev+ino+offset, temp+rename, identity-conditional writes) replaces the tri-state for local replay; the decision table is 8 rows with no special case for rename, `--steal`, or a dead `--force` gap — each resolves to the same "cursor valid, resume at offset" row. Closes `cbus-8no`. Wire/relay/remote replay untouched |

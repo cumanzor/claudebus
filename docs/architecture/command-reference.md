@@ -154,10 +154,10 @@ No other command reads stdin.
 | Invocation | Handler | Notes |
 |---|---|---|
 | `cbus join ...` | `cmd_join` | |
-| `cbus register [alias]` | `cmd_join global` | **Deprecated** v1 alias (§15) |
+| `cbus register [alias]` | `cmd_join global` | **Deprecated** v1 alias (§15). **Dropped from the Go client, M6.1 (v0.7.0)** — bash-era row only |
 | `cbus send ...` | `cmd_send` | Routes to remote on `@` in target |
 | `cbus tail ...` | `cmd_tail` | Routes to remote on `@` in target |
-| `cbus list ...` / `cbus peers ...` | `cmd_list` | `peers` is an undocumented alias (§15) |
+| `cbus list ...` / `cbus peers ...` | `cmd_list` | `peers` is an undocumented alias (§15). **Dropped from the Go client, M6.1 (v0.7.0)** — bash-era row only |
 | `cbus active [ch]` | `cmd_list --active` | |
 | `cbus channels` | `cmd_channels` | Extra args silently dropped |
 | `cbus prune [ch]` | `cmd_prune` | |
@@ -289,7 +289,8 @@ dot-named peer or channel was created successfully and thereafter invisible to
 ### Reserved / conventional names
 
 - Channel `global` is reserved **by convention** as the machine-wide
-  orchestrator bus; `register` and `branch`'s no-repo fallback both target it.
+  orchestrator bus; `branch`'s no-repo fallback targets it. ~~`register`~~ did
+  too, but the verb is dropped from the Go client as of M6.1 (v0.7.0) — see §15.
 - Auto-picked aliases: `main` first, then lowest free `fork-N` starting at
   `fork-1`.
 - Remote aliases are explicit by convention (short hostname/role: `mbp`, `nuc`).
@@ -543,10 +544,16 @@ cbus join dev reviewer         # explicit alias
 cbus join global               # the machine-wide orchestrator bus (by convention)
 ```
 
-### `cbus register [alias]` — deprecated
+### `cbus register [alias]` — bash-era only, removed from the Go client
 
-Exactly `cbus join global [alias]`. Kept as the v1 compatibility alias from
-before named channels. Nothing programmatic calls it; see §15.
+Was exactly `cbus join global [alias]`, kept as the v1 compatibility alias from
+before named channels. **Dropped, M6.1 (`75e352d`, `cbus-8k9.4`, v0.7.0):**
+`register` now falls through to the frozen unknown-command error, `cbus:
+unknown command 'register' (cbus --help)`, exit 1 — no new error path, since
+nothing programmatic called it (verified: not in the usage text, no test
+invoked it, no skill or script calls it). The row above describes `bin/cbus`,
+the retired bash client, which still has it; see §15 for the current
+disposition.
 
 ### `cbus whoami`
 
@@ -751,7 +758,10 @@ for nonexistent peers, exit 0.
 
 ## 6. Commands: presence & discovery
 
-### `cbus list [--active|-a] [channel]` (alias: `cbus peers`)
+### `cbus list [--active|-a] [channel]`
+
+~~(alias: `cbus peers`)~~ — **dropped, M6.1 (v0.7.0); see §15.** `peers` now
+falls through to unknown-command.
 
 Lists local peers. Per-peer line (fixed-width, cosmetic — don't parse by
 column):
@@ -1833,14 +1843,19 @@ prompt is not secret).
 
 | Surface | Status | Behavior |
 |---|---|---|
-| `cbus register [alias]` | Deprecated v1 alias | ≡ `cbus join global [alias]`; channel hardwired to `global`. Documented only in the README's one-liner; no skill or script calls it |
-| `cbus peers ...` | Undocumented alias | Full synonym of `cbus list` including flags and `@host` remote form. Documented nowhere but here; present since the initial commit |
+| ~~`cbus register [alias]`~~ | **Removed, M6.1 (v0.7.0)** | Was ≡ `cbus join global [alias]`; channel hardwired to `global`. Now falls through to unknown-command, exit 1. Row describes the bash-era Go client's deprecated-but-working state; `bin/cbus` (retired bash) still has it as a live verb |
+| ~~`cbus peers ...`~~ | **Removed, M6.1 (v0.7.0)** | Was a full synonym of `cbus list` including flags and `@host` remote form. Now falls through to unknown-command, exit 1 |
 | Legacy v1 registry entries | Auto-detected | A `meta.json` directly at channel level (pre-channels flat bus). `list` renders `legacy v1 entry — run: cbus prune`; `channels` skips them; `prune` removes the whole channel dir when dead |
 | Legacy machine-global remote markers | Auto-migrated | A plain FILE at `.remote/<host>/<channel>` (pre-session-scoping). Always swept by a bare `cbus prune`; replaced on the next remote `tail` |
 | `session` target in cc-branch.sh | Vestigial | Accepted as a `tab` synonym by the helper only; `cbus branch` rejects it; no doc mentions it |
 
-Port note: nothing programmatic depends on `register`/`peers` — a port may
-drop them (delete the README one-liner) or keep them for muscle memory.
+~~Port note: nothing programmatic depends on `register`/`peers` — a port may
+drop them (delete the README one-liner) or keep them for muscle memory.~~ —
+**resolved, M6.1 (`75e352d`, v0.7.0): dropped.** Nothing programmatic depended
+on either (verified: not in the usage text, no test invoked either verb, no
+skill or script called them), so the drop needed no compatibility shim — both
+verbs now answer to the same frozen `cbus: unknown command '<X>' (cbus
+--help)` every other unrecognized verb gets.
 
 ---
 
