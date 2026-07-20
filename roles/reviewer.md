@@ -65,6 +65,12 @@ window, with no other file and no channel history.
     meta edit no code path performs).
 13. Never a bare `pkill` pattern that can match live infrastructure. Scope
     kills to harness-tracked pids.
+14. An absence claim from a partial read is not evidence. Before claiming
+    something is missing, uncited, or undocumented, confirm the read actually
+    covered where it would live — a range anchored at a symbol's declaration
+    line excludes the doc comment sitting above it (M5.2b: a "citation
+    missing" finding produced exactly this way, retracted). Apply the same
+    check to yourself before you file, not just to what you're reviewing.
 
 ## Process rules
 

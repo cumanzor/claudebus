@@ -237,19 +237,51 @@ skip validation**.
 
 ### Name validity
 
-`valid_name` (bin/cbus:24) — identical to the relay's `validName`:
-`^[A-Za-z0-9._-]+$`, and not literally `.` or `..`. Applies to channels,
-aliases, and hosts. Notable admissions (all quirks to rethink in a port):
+`valid_name` (bin/cbus:24) — identical to the relay's `validName`, and now to
+the Go client's `core.ValidName`: `^[A-Za-z0-9._-]+$`, and not literally `.` or
+`..`. Applies to channels, aliases, and hosts, and **remains the wire
+authority** — the relay gates `/send` and `/tail` on it, so a port must keep it
+byte-identical. Notable admissions (as of M5, two of the four below are
+additionally tightened client-side — see below; the wire regex itself is
+unchanged):
 
 - **All-digit names are legal** — and `jset` stores them as JSON *ints* in
-  `meta.json` (`cbus rename 42` → `"alias": 42`).
-- **Leading-dot names are legal but invisible** — every `*/` glob skips
-  dotdirs, and `.remote` collides with the marker tree.
-- **Flag-shaped names are legal** (`-a`, `--force`, `--help`, …) and there is
-  no `--` terminator anywhere in the CLI. Almost everything still works
-  positionally; the one dead spot: channels named `-a` or `--active` can never
-  be used as a `list`/`active` filter.
+  `meta.json` (`cbus rename 42` → `"alias": 42`). Still an open quirk.
 - **No length cap** — filesystem `NAME_MAX` (~255 bytes) is the only bound.
+  Still an open quirk.
+- ~~Leading-dot names are legal but invisible~~ — **REJECTED at creation, M5
+  (`cbus-8k9.4`, `core.ValidStoreName`).** Still legal on the wire.
+- ~~Flag-shaped names are legal~~ (leading `-`) — **REJECTED at creation, M5**,
+  same mechanism. Still legal on the wire.
+
+#### Client-side name tightening (M5, `internal/core.ValidStoreName`)
+
+`ValidStoreName(s) = ValidName(s) && !strings.HasPrefix(s, ".") &&
+!strings.HasPrefix(s, "-")`. It is **additive, never a replacement**: `ValidName`
+stays the wire authority, so a name it rejects can still arrive from an older
+or third-party client. The damage it closes is real — every client traversal
+skips dot-prefixed entries to stay blind to the `.remote`/`.reap` trees, so a
+dot-named peer or channel was created successfully and thereafter invisible to
+`list`, `channels`, and `whoami`; a leading dash is flag-shaped and, with no
+`--` terminator anywhere in the CLI, reaches a forked child's CLI as a flag.
+
+- **Wired at creation only** — the three store chokepoints every creation path
+  funnels through (`Join`, `ReserveAlias`, `Rename`) and the `branch`/`spawn`
+  pre-validators (channel positional and `--name`), which now share one
+  predicate instead of five ad-hoc `HasPrefix("-")` checks. `branch`'s
+  pre-validator specifically closes a leak the others don't have: without it, a
+  rejected `--name` still left a parent registration behind, because `branch`
+  joins before it reserves.
+- **Addressing an existing name stays permissive (R20)** — `ParseLocal`/
+  `ParseRemote`, `rename`'s channel selector, formation `Validate` (which also
+  runs on load), and the remote marker tree are all untouched. Otherwise
+  `cbus unregister <ch>/.foo` — the only cleanup path for a legacy bad name —
+  would be unable to name its target.
+- **A derived channel is sanitized, not rejected.** `branch`/`spawn`'s
+  git-basename default (`branchChannelFromGit`) strips leading dots and dashes
+  rather than refusing outright, so a repo at `~/.dotfiles` keeps working
+  instead of hard-failing with no lever but an explicit channel every call;
+  falls back to `global` if nothing survives the strip.
 
 ### Reserved / conventional names
 
@@ -528,6 +560,25 @@ If neither: prints `not joined in this session` (to stdout) and **exits 1** —
 the only read-only command with a nonzero "empty" exit. Scripts using it as an
 am-I-joined probe must expect nonzero. Extra args are silently dropped.
 
+**`cbus whoami --json` (M5, `cbus-8k9.4`):**
+
+```json
+{"schemaVersion": 1, "sessionId": "...", "joined": true,
+ "local": [{"channel": "dev-trio", "alias": "documenter"}],
+ "remote": [{"channel": "dev", "host": "nuc", "alias": "mbp"}]}
+```
+
+**One document shape regardless of join state** — an unjoined session gets the
+same keys with empty `local`/`remote` arrays, never a different document and
+never the `not joined in this session` sentence, so a consumer parses one thing
+and never has to infer "not joined" from two array lengths (`joined` spells it
+out directly in the body). The **exit code is preserved**: still `1` when both
+collections are empty, matching the text path's probe semantics — scripts
+already branch on it. `local` and `remote` are **separate keys**, not one list
+with a kind discriminator, because they are genuinely different identities: a
+local registration has no host, a remote from-default marker always does — the
+split makes that legible without a reader having to inspect a field.
+
 ### `cbus rename <new-alias> [channel]`
 
 Renames this session's **local** peer: `mv`s the peer dir and rewrites
@@ -711,6 +762,66 @@ listen|off     <ch>/<alias>                 pid=<pid|?>   <host|?>  <cwd|?>
   (hidden by `--active`).
 - Empty: `no active listeners` / `no peers registered`, exit 0.
 
+#### `cbus list --json [--active] [channel]` (M5, `cbus-8k9.4`)
+
+Machine-readable, **local targets only** — see the remote refusal below.
+`client.ScanStore` is the single traversal both the text renderer and the JSON
+encoder consume, so the two can never disagree about who is listening (a
+divergence a GUI consumer would surface first and a text-only test would never
+catch). `ScanStore` is deliberately not `ChannelRoster` (the `rename`-path
+lookup): that one drops a peer whose meta is torn, since a save must not record
+what it couldn't read; `ScanStore` keeps it with blank fields, matching `list`'s
+own long-standing `?`-column behavior — hiding a peer is how a user loses track
+of a session.
+
+```json
+{
+  "schemaVersion": 1,
+  "host": "carlos-mbp",
+  "channels": [
+    {
+      "name": "dev-trio",
+      "peers": [
+        {"alias": "orchestrator", "sessionId": "...", "listening": true,
+         "listenerPid": 16510, "host": "carlos-mbp", "cwd": "...",
+         "scope": "local", "origin": "spawn", "model": "sonnet"}
+      ]
+    }
+  ]
+}
+```
+
+- **Every level is an object, never a bare array** — a level can gain sibling
+  keys later without breaking a consumer; peers are objects with named keys so
+  windowing identity (window/pane/term — not yet landed) arrives as purely
+  additive fields.
+- `schemaVersion` bumps only on a **breaking** change; adding a field is not
+  one, and a consumer that treats an unknown key as fatal is the one at fault.
+  These field names are a public contract — the oq9.5 menubar GUI shells
+  `cbus list --json` to render the channel/peer tree, so an internal rename
+  must not change them by accident.
+- `listenerPid` is **omitted**, never `0`, when the peer has never armed — `0`
+  is itself a real pid-shaped value and would read as one.
+- `scope` is pinned `"local"` for now; the key exists before `"remote"` does so
+  a consumer written today keeps working once it appears.
+- A legacy v1 channel entry is rendered **explicitly** (`"legacyV1": true`,
+  `"peers": []`) rather than omitted or half-populated, so a consumer iterating
+  `channels[].peers[]` gets nothing for it instead of choking.
+- `--active` filters identically to the text path: drops non-listening peers,
+  then drops a channel left with zero peers.
+- An empty store is a valid document with an empty `channels` array, not a
+  sentence — `--json` never prints `no peers registered`.
+- **`--json` is local-only and refuses a relay target loudly, in both flag
+  orders.** `cbus list @host --json` reaches the remote renderer, which never
+  reads the remaining args and would silently drop the flag; `cbus list --json
+  @host` never reaches remote detection (it inspects `args[0]` only) and would
+  silently turn the `@`-target into a local channel filter. Both are refused
+  instead: `cbus: --json is local-only; "<target>" is a relay target and the
+  remote shape rides the relay-wire follow-up. Drop --json, or drop the @
+  target.` `cbus active <ch>@<host> --json` inherits the same refusal (`active`
+  routes through the same `runList`). The pre-existing `--active @host` dead
+  quirk (§6, `cbus active`) is untouched when `--json` is absent.
+
 ### `cbus list [<ch>]@<host>` — remote
 
 Thin render of the relay's `/peers`:
@@ -741,11 +852,24 @@ filter: you get `no active listeners` without the relay being contacted.
 Combined with the discard quirk above, **no active-only remote view exists by
 any argument order**.
 
-### `cbus channels`
+### `cbus channels [--json]`
 
 Lists every local channel with ≥1 peer: `<channel>  N peers (M listening)`.
 Skips legacy v1 entries. Empty: `no channels`. Exit 0. Local only; extra args
-are silently dropped.
+are silently dropped (the `--json` token is stripped before the arity check —
+`cbus channels --json` does not count as a trailing positional).
+
+**`--json` (M5, `cbus-8k9.4`):**
+
+```json
+{"schemaVersion": 1, "host": "carlos-mbp",
+ "channels": [{"name": "dev-trio", "peers": 4, "listening": 3}]}
+```
+
+Same envelope conventions as `list --json` above (object-at-every-level,
+`schemaVersion` semantics). Skips legacy v1 entries and channels with zero
+peers, matching the text path. No remote form exists for `channels`, so there
+is no analogous refusal to document.
 
 ### Presence events
 

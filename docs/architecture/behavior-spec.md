@@ -354,6 +354,79 @@ Usage heredoc → stdout, exit 0 on no-args/`-h`/`--help` (:854-912); unknown co
 | `auth set <host> [--token V] [--cf-id V] [--cf-secret V]` | :739-761 | `V='-'` reads stdin (one per invocation); values whitespace-stripped, non-empty; reports Keychain vs dir |
 | `auth status [host=nuc]` | :762-770 | `set (…last4)` / `absent` per field; never full secrets; **always exit 0**. **Quirk**: host arg is the only unvalidated `auth_get` entry — Linux `../` traversal reads arbitrary `token/cf-id/cf-secret` files (masked); values <4 chars display `set (…)` empty under bash |
 
+### 9.1 JSON output contract (M5, `cbus-8k9.4`, `cmd/cbus/jsonout.go` — Go-native, no bash counterpart)
+
+`list`, `channels`, and `whoami` each grow a `--json` mode. The DTOs are
+deliberately separate from `client`'s internal view types: the field names are
+a **public contract**, parsed by the oq9.5 menubar GUI (which shells `cbus list
+--json`), so an internal rename cannot change them by accident.
+
+**Envelope discipline.** Every level is an OBJECT, never a bare array, so a
+level can gain sibling keys without breaking a consumer; `list`'s peers carry
+named keys rather than positional ones so windowing identity (window/pane/term
+— not landed yet) arrives as purely additive fields when it does. `schemaVersion`
+(currently `1`) bumps only on a BREAKING change — adding a field is not one,
+and a consumer that treats an unknown key as fatal is the one at fault.
+
+**`list --json` / `active --json`.** `emitListJSON` renders the same
+`client.ScanStore` snapshot the text path renders, under the same `--active`
+and channel filters, so the two renderings can never drift on who is listening
+— the divergence a GUI would surface first and a text-only test would never
+see. `ScanStore` is deliberately NOT `ChannelRoster` (the rename-path lookup,
+which errors on an absent channel and drops a peer whose meta is torn, since a
+save must not record what it couldn't read): `ScanStore` keeps a torn peer with
+blank fields, because `list` has always shown it with `?` columns and hiding a
+peer is how a user loses track of a session. Both functions now carry a
+comment naming the difference so the next reader doesn't unify them by eye.
+
+- `listenerPid` is `omitempty` — absent, never `0`, when the peer never armed;
+  `0` is itself a real pid-shaped value and would read as one if emitted.
+- `scope` is pinned `"local"` — the key exists now, before `"remote"` does, so
+  a consumer written today survives `"remote"` appearing later.
+- A legacy v1 channel entry is marked explicitly (`legacyV1: true`) and carries
+  an empty `peers` array rather than being omitted or half-populated, so a
+  consumer iterating `channels[].peers[]` gets nothing for it instead of
+  choking (no silent caps).
+- `--active` (R22) drops a non-listening peer, then drops a channel left with
+  zero peers — identical to the text path, which prints no row for either.
+- An empty store is a valid document with an empty `channels` array, not the
+  text path's `no peers registered` sentence.
+
+**Remote refusal (R15).** `--json` is local-only in M5; `refuseRemoteJSON`
+refuses BOTH ways of asking for it remotely, because each reaches a different
+silently-wrong answer if left unguarded: `list @host --json` would reach
+`runListRemote`, which never reads the remaining args and drops the flag
+(silently answering the text-mode question instead); `list --json @host` would
+never reach remote detection at all (it inspects `args[0]` only), so the
+`@`-target falls through and is misread as a local channel filter. `active
+<ch>@<host> --json` inherits the same refusal — `active` routes through the
+same `runList`/`refuseRemoteJSON` path (dispatch just prepends `--active`). The
+pre-existing `--active @host` dead quirk (§9 table, `list`/`active` rows) is
+untouched when `--json` is absent — this milestone does not touch remote JSON
+at all; that shape rides the relay-wire follow-up.
+
+**`channels --json`.** `emitChannelsJSON` — same envelope conventions, one
+count object per channel (`name`, `peers`, `listening`), same skip rules as
+text (legacy v1, zero-peer channels). No remote form exists for `channels`, so
+there is no analogous refusal.
+
+**`whoami --json` (R16).** `emitWhoamiJSON` emits ONE document shape whether or
+not the session is joined: an unjoined session gets the same keys with empty
+`local`/`remote` arrays, never a different document and never the text path's
+`not joined in this session` sentence — a consumer parses one thing. `joined`
+is spelled out in the body (the same answer the exit code carries) so a
+consumer reading only stdout never has to infer it from two array lengths. The
+**exit code is preserved**: still `1` when both collections are empty, matching
+the text path's probe semantics that scripts already branch on. `local` and
+`remote` are separate keys rather than one list with a kind field — they are
+genuinely different identities (a local registration has no host; a remote
+from-default marker always does), and the split makes that legible without a
+discriminator. The remote fixture in the test suite is written by
+`WriteRemoteMarker`, the same writer `cbus tail <ch>@<host>` calls, rather than
+staged by hand — and a marker with no local registration still counts as
+`joined`, pinned as its own case since the flag and the exit code must agree in
+every combination, not just the common one.
+
 ## 10. Relay spec
 
 ### Startup (main.go:391-420)

@@ -1,5 +1,143 @@
 # Changelog (detailed)
 
+## [2026-07-20 00:51:16 UTC] [Client/JSON] M5 (cbus-8k9.4): client-side name tightening + list/channels/whoami --json
+
+[Attempt #1]
+
+Five commits (`d4d34ac`..`5f746bb`), M5 of the go-port epic's Phase 3. Two
+independent deliverables land together: `core.ValidStoreName` (M5.1, `d4d34ac`)
+rejects leading-dot and leading-dash names at the point the client CREATES
+them, and `list`/`channels`/`whoami` gain a `--json` mode (M5.2a/b/M5.3,
+`cae64d0`..`6ba1624`, C2 fold `5f746bb`) that absorbs `cbus-oq9.4`.
+
+`ValidStoreName` is additive over `core.ValidName` (`name.go`'s own doc
+earmarked it "a later phase may tighten CLIENT-side only"): `ValidName` remains
+the wire authority the relay gates `/send`/`/tail` on, unchanged, so a name it
+rejects can still arrive from an older or third-party client. The damage it
+closes is real today — every client traversal skips dot-prefixed entries to
+stay blind to the `.remote`/`.reap` trees, so a `.foo`-named peer or channel
+was created successfully and thereafter invisible to `list`/`channels`/
+`whoami`; a leading dash is flag-shaped, and with no `--` terminator anywhere
+in the CLI, reaches a forked child's CLI as a flag. Wired at the three store
+chokepoints every creation path funnels through (`Join`, `ReserveAlias`,
+`Rename`) and at the `branch`/`spawn` pre-validators, which now share one
+predicate instead of five ad-hoc `HasPrefix("-")` checks — `branch`'s own
+pre-validator isn't redundant: without it, a rejected `--name` still left a
+parent registration behind, since `branch` joins before it reserves.
+Addressing stays permissive (R20): `ParseLocal`/`ParseRemote`, `rename`'s
+channel selector, formation `Validate`, and the remote marker tree are
+untouched, so `cbus unregister <ch>/.foo` — the only cleanup path for a legacy
+bad name — can still name its target. A DERIVED channel is sanitized rather
+than rejected: `branchChannelFromGit` strips leading dots and dashes, so a repo
+at `~/.dotfiles` keeps deriving a channel instead of hard-failing with no lever
+but an explicit channel every call.
+
+M5.2a (`cae64d0`) pins the rendered bytes of `list`, `active`, and `channels`
+in a byte-level golden test — the rig M5.2b's refactor needed, since "the
+refactor didn't change the output" is otherwise a claim the reviewer has to
+verify by reading a diff. M5.2b (`7d066de`) then routes both the text renderer
+and a new JSON encoder through one traversal, `client.ScanStore`: the two can
+never disagree about who is listening, which is the failure a GUI consumer
+would surface first and a text-only test would never see. `ScanStore` is
+deliberately not `ChannelRoster` (the rename-path lookup, which drops a peer
+whose meta is torn because a save must not record what it couldn't read) —
+`ScanStore` keeps that peer with blank fields, matching `list`'s own
+long-standing `?`-column behavior, and both functions now carry a comment
+naming the difference. The JSON schema is an object at every level, never a
+bare array, so a level can gain sibling keys later; `listenerPid` is
+`omitempty` (absent, never `0`, when never armed — `0` is itself a real pid);
+`scope` is pinned `"local"` now so a consumer written today survives `"remote"`
+landing later; a legacy v1 entry is marked explicit with an empty `peers`
+array rather than omitted or half-populated. Two riders folded into the same
+commit: `--json` no longer falls through `runList`'s last-non-flag-wins loop as
+a channel filter (previously `cbus list --json` would have printed "no peers
+registered" at exit 0); and `--active`'s filter now tests a bool rather than
+comparing against the padded display literal `"off   "`, a coupling the golden
+rig exposed. `refuseRemoteJSON` (R15) refuses BOTH ways of asking for `--json`
+remotely, since each would otherwise reach a different silently-wrong answer:
+`list @host --json` reaches `runListRemote`, which never reads the remaining
+args and drops the flag; `list --json @host` never reaches remote detection at
+all (it inspects `args[0]` only), so the `@`-target is misread as a local
+channel filter. `active <ch>@host --json` inherits the same refusal for free,
+since `active` routes through the same `runList`. C1 fold from the M5.1
+review: `name.go`'s quirk list no longer claims all four admissions await
+tightening, since two of them now have one.
+
+M5.3 (`6ba1624`) gives `whoami --json` one document shape whichever state the
+session is in: an unjoined session gets the same keys with empty
+`local`/`remote` arrays rather than a different document or the text path's
+"not joined in this session" sentence, so a consumer parses one thing. The
+exit code is preserved — still `1` when both collections are empty, matching
+the probe semantics scripts already branch on — and `joined` is spelled out in
+the body so a consumer reading only stdout never has to infer it from two
+array lengths. `local` and `remote` are separate keys rather than one list
+with a kind field, since they're genuinely different identities: a local
+registration has no host, a remote from-default marker always does. The remote
+fixture is written by `WriteRemoteMarker`, the same writer `cbus tail
+<ch>@<host>` calls, rather than staged by hand; a marker with no local
+registration still counts as `joined`, pinned as its own case since the flag
+and the exit code have to agree in every combination. The C2 fold (`5f746bb`)
+adds the missing audience to `jsonout.go`'s extensibility comment: the DTOs are
+a public contract parsed by the oq9.5 menubar GUI, which is what makes "do not
+rename these fields" actionable rather than a matter of taste — and closes
+`cbus-oq9.4`, whose own notes already pointed here.
+
+Docs: `command-reference.md`'s Name validity section documents the tightening
+inline, mirroring `name.go`'s own two-of-four-admissions-tightened framing,
+and gains `--json` subsections under `list`/`channels`/`whoami`; explicitly
+NOT touched — the Local-arm-mechanics lines under Sec 3, which are
+`cbus-2c8`'s separate open item. `behavior-spec.md` gains a new Sec 9.1, JSON
+output contract, covering the same envelope/refusal/one-shape facts at the
+mechanism level. One new standing doctrine added to `roles/reviewer.md`: an
+absence claim from a partial read is not evidence — before claiming something
+is missing, uncited, or undocumented, confirm the read actually covered where
+it would live, since a range anchored at a symbol's declaration excludes the
+doc comment sitting above it. This effort's second partial-read miss (the
+first, a malformed legacy-envelope fixture in M5.1, was self-caught before it
+shipped as a wrong finding); the M5.2(b) review's own `n2` citation-missing
+finding is the one this doctrine traces to, and is struck from the verdict —
+`n1` stands as ruled.
+
+[Files Changed]
+cmd/cbus/jsonout.go (new), jsonout_test.go (new), list_golden_test.go (new),
+name_tighten_test.go (new), whoami_json_test.go (new), main.go, main_test.go,
+usage.go — cmd/cbus. internal/client/roster.go (new), storename_test.go (new),
+formation_save.go, harness.go, spawn.go, store.go — internal/client.
+internal/core/name.go, name_test.go — internal/core. docs/architecture/
+command-reference.md (Name validity section, --json subsections under list/
+channels/whoami), docs/architecture/behavior-spec.md (new Sec 9.1). roles/
+reviewer.md (one new standing doctrine). simple_changelog.md,
+detailed_changelog.md (this entry).
+
+[Possible Ripple Effects]
+`--json`'s field names are now a public contract consumed by the oq9.5 menubar
+GUI — a future rename must bump `schemaVersion` or land as an addition, never
+a silent rename. Any peer, channel, or formation with a leading dot or dash
+created BEFORE M5 is untouched (`ValidStoreName` only gates new creation) — it
+stays exactly as invisible to `list`/`channels`/`whoami` as before, cleaned up
+only via the existing bad-name-agnostic `cbus unregister`/`prune` paths, not a
+new one. `branchChannelFromGit` already restricted its output to
+`[A-Za-z0-9._-]` before this landed, so the added `TrimLeft` of leading
+dots/dashes is the only new derived-channel behavior change, and it affects
+only repos whose basename itself starts with `.` or `-`.
+
+[Testing Notes]
+`name_tighten_test.go` exercises the tightening through the CLI door (`run()`),
+not `client.Join` directly, across `join`'s channel and alias positions,
+`rename`, and `spawn`/`branch`'s `--name` and channel positional — asserting
+refusal AND that the store gained nothing, not just a nonzero exit.
+`list_golden_test.go` pins `list`/`active`/`channels`' rendered bytes from a
+REAL arm (a child `cbus tail` killed on cleanup) plus one hand-staged legacy v1
+fixture (the only hand-built one, since only the retired bash v1 client ever
+wrote a channel-level `meta.json`) — verified under mutation that a
+list-polling arm-wait dies on its own precondition (10s timeout) where the
+meta-polling wait fails the golden in under a second. `jsonout_test.go` and
+`whoami_json_test.go` cover both remote-refusal flag orders, the
+`legacyV1`/empty-`peers` shape, `listenerPid` omission, and joined/unjoined
+`whoami` parity including the marker-only (no local registration) joined case.
+Full suite green; C1/C2 folds landed same-session per the M5.1 review's own
+class-C disposition, no re-review needed.
+
 ## [2026-07-19 19:23:43 UTC] [Client/Replay] M4 (cbus-8k9.4): durable replay cursor, follower self-identity, local displacement gate — closes cbus-8no and cbus-0r8
 
 [Attempt #1]
