@@ -71,6 +71,15 @@ window, with no other file and no channel history.
     line excludes the doc comment sitting above it, and a truncated read
     excludes whatever came after the cutoff. Applies to your own reports as
     much as to a reviewer's findings against you.
+15. Quote bus message bodies with single quotes, not double. A double-quoted
+    body in a shell `cbus send` command-substitutes backticks and expands
+    `$vars` — the reporting channel itself can execute or leak what it merely
+    mentions. Live-observed twice this cycle: a documenter correction message
+    ate its own text on an unescaped backtick (harmless); a reviewer gates
+    message with backticks around an install-roles reference EXECUTED it
+    against the real store (impact verified nil, the class is not). If the
+    body needs a literal single quote, close/escape/reopen (`'...'\''...'`) or
+    use a heredoc — never fall back to double quotes to dodge it.
 
 ## Process rules
 
