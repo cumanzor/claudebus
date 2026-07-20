@@ -10,8 +10,9 @@ import (
 
 // The machine-readable shape of the read-only verbs (cbus-8k9.4 M5). These DTOs are
 // deliberately separate from client's view types: the field names here are a public
-// contract a GUI parses, and an internal rename must not be able to change them by
-// accident.
+// contract, parsed by the oq9.5 menubar GUI, which shells `cbus list --json` to render
+// the channel/peer tree with its listen/off state. An internal rename must not be able
+// to change them by accident.
 //
 // FORWARD COMPATIBILITY, since windowing identity is not landed yet: every level is an
 // OBJECT, never a bare array, so a level can gain sibling keys without breaking a
