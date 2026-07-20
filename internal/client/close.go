@@ -81,7 +81,7 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		// walk, see ownerFromPid) — derive the owner NOW from the armed listener's
 		// ancestry rather than false-succeeding on a live peer. The listener must
 		// still be THIS peer's follower (the SAME identity test MetaListenerAlive
-		// applies, structural or TRANSITION argv, via listenerIdentityHolds): a
+		// applies, via listenerIdentityHolds): a
 		// recycled listenerPid that now belongs to a process under a DIFFERENT claude
 		// session would otherwise donate that session's pid to the TERM below, killing
 		// a window nobody asked to close. This is the highest-consequence caller of

@@ -21,7 +21,7 @@ func armPeer(t *testing.T, ch, alias string) {
 	if err := os.WriteFile(inbox, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("tail", "-f", metaInboxNeedle(filepath.Join(dir, "meta.json")))
+	cmd := exec.Command("tail", "-f", inbox)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,14 @@ func armPeer(t *testing.T, ch, alias string) {
 		t.Fatal(err)
 	}
 	m.ListenerPid = json.RawMessage(strconv.Itoa(cmd.Process.Pid))
+	// the structural witness, the way armMeta records it: with the argv branch gone,
+	// a listenerPid alone can never read alive, so a fixture without this is a peer
+	// the predicate is right to call dead.
+	start, serr := procStartTime(cmd.Process.Pid)
+	if serr != nil {
+		t.Fatalf("procStartTime on the fake follower: %v", serr)
+	}
+	m.ListenerStart = start
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)
 	}

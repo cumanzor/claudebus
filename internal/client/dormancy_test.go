@@ -296,8 +296,8 @@ func TestDisplacedFollowerStopsMovingTheCursor(t *testing.T) {
 
 // TestArmRefusesWithoutAWitness is rider P4. armMeta used to record no witness when the
 // probe failed, which looks harmless and is not: a peer with a listenerPid and no
-// listenerStart is judged on the TRANSITION argv branch, and a follower THIS binary
-// armed has no inbox in its argv, so it reads dead the instant it starts. The session
+// listenerStart has no witness to be judged on, so it reads dead the instant it
+// starts — and since the argv fallback is gone, permanently. The session
 // would get a tail that is silently not the listener — armed, streaming, invisible to
 // every peer, and reaped by the next prune.
 //

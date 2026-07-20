@@ -30,9 +30,10 @@ import (
 //     nothing to close.
 //   - both pids are killed on cleanup.
 //
-// listenerArg is placed in the CHILD's argv, standing in for the --inbox path a real
-// armed follower carries: close's null-ownerPid fallback greps for it before trusting
-// the pid, so tests can present both a genuine follower and a recycled stranger.
+// listenerArg is placed in the CHILD's argv. Nothing reads it any more — identity is
+// (pid, starttime) against the meta's own record — so it survives as scene-setting:
+// a candidate that LOOKS like this peer's follower in every visible way, which is what
+// makes the guard's refusals meaningful rather than lucky.
 func fakeSessionTree(t *testing.T, name, listenerArg string) (ownerPid, childPid int) {
 	t.Helper()
 	if _, err := exec.LookPath("perl"); err != nil {
@@ -140,11 +141,16 @@ func TestClosePeerDerivesOwnerFromNullOwnerPid(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
-	// the listener must look like THIS peer's follower, so it carries the inbox path
-	// close greps for — the same identity test MetaListenerAlive applies
-	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	// a listener that looks like THIS peer's follower in every visible way; what makes
+	// it genuine is the recorded witness seeded below, the same identity test
+	// MetaListenerAlive applies
+	needle := filepath.Join(root, "ch", "peer", "inbox.jsonl")
 	owner, child := fakeSessionTree(t, "claude", needle)
-	seedClosePeer(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child))
+	start, err := procStartTime(child)
+	if err != nil {
+		t.Fatalf("procStartTime(child): %v", err)
+	}
+	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child), start)
 
 	rep := ClosePeer("ch", "peer", false)
 	if !rep.Ok {
@@ -176,33 +182,6 @@ func TestClosePeerStillReportsGoneWhenTheListenerIsDead(t *testing.T) {
 	rep := ClosePeer("ch", "peer", false)
 	if !rep.Ok || !strings.Contains(rep.Detail, "already gone") {
 		t.Errorf("want an already-gone success, got ok=%v %q", rep.Ok, rep.Detail)
-	}
-}
-
-// TestClosePeerIgnoresAForeignListenerPid is the wrong-session-kill guard: a stored
-// listenerPid can be recycled onto a process under a DIFFERENT claude session, and
-// walking its ancestry would hand that innocent session's pid to the SIGTERM. The
-// pid here is alive and IS descended from a claude-shaped owner — only the argv
-// needle says it is not this peer's follower, and that alone must stop the close.
-func TestClosePeerIgnoresAForeignListenerPid(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("CBUS_DIR", root)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
-	// a plausible follower argv, but for a DIFFERENT peer's inbox
-	foreign := metaInboxNeedle(filepath.Join(root, "other", "stranger", "meta.json"))
-	owner, child := fakeSessionTree(t, "claude", foreign)
-	seedClosePeer(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child))
-
-	rep := ClosePeer("ch", "peer", false)
-	if !rep.Ok || !strings.Contains(rep.Detail, "already gone") {
-		t.Errorf("a foreign listener must read as nothing-to-close, got ok=%v %q", rep.Ok, rep.Detail)
-	}
-	// the assertion that matters: the stranger's session was never signalled
-	if !pidAlive(owner) || procZombie(owner) {
-		t.Fatalf("close SIGTERMed a session it had no business touching (owner %d)", owner)
-	}
-	if !pidAlive(child) {
-		t.Errorf("the foreign listener %d was signalled", child)
 	}
 }
 
@@ -302,21 +281,27 @@ func TestSweepSurfaceNeedsATTY(t *testing.T) {
 	}
 }
 
-// TestClosePeerIgnoresARecycledListenerPidStructurally is the structural-branch twin
-// of TestClosePeerIgnoresAForeignListenerPid, and the highest-consequence use of the
-// identity test anywhere in the codebase: a wrong answer here hands an innocent
+// TestClosePeerIgnoresARecycledListenerPidStructurally is the highest-consequence use
+// of the identity test anywhere in the codebase: a wrong answer here hands an innocent
 // session's pid to SIGTERM and closes a window nobody asked to close.
 //
 // The setup is deliberately the hardest one for the guard. The listener pid is alive,
-// IS descended from a claude-shaped owner, and its argv DOES carry this peer's inbox
-// path — everything the pre-P3 needle looked at says "this is my follower". Only the
-// recorded listenerStart disagrees, which is precisely what a recycled pid looks like
-// once structural identity is in play. That single mismatch must stop the close.
+// IS descended from a claude-shaped owner, and its argv even carries this peer's inbox
+// path, so every surface clue says "this is my follower". Only the recorded
+// listenerStart disagrees, and that single mismatch must stop the close.
+//
+// The inbox path in the child's argv is now decoration: nothing reads it, since
+// identity is (pid, starttime) against this meta's own record. It is kept because the
+// adversarial STORY is the point — a candidate that looks right in every visible way
+// must still be refused. It is also why the foreign-listener case is not a separate
+// test any more: a foreign live follower wearing the recorded pid and a recycled
+// stranger wearing it are the same case, witness mismatch, and pinning it twice under
+// two names would be fake coverage.
 func TestClosePeerIgnoresARecycledListenerPidStructurally(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
-	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	needle := filepath.Join(root, "ch", "peer", "inbox.jsonl")
 	owner, child := fakeSessionTree(t, "claude", needle)
 
 	// a start token that is well-formed but belongs to some other process
@@ -338,7 +323,7 @@ func TestClosePeerAcceptsAMatchingStructuralListener(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
-	needle := metaInboxNeedle(filepath.Join(root, "ch", "peer", "meta.json"))
+	needle := filepath.Join(root, "ch", "peer", "inbox.jsonl")
 	owner, child := fakeSessionTree(t, "claude", needle)
 	start, err := procStartTime(child)
 	if err != nil {

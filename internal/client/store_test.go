@@ -61,6 +61,29 @@ func seedPeer(t *testing.T, root, ch, al, sid string) {
 }
 
 // seedPeerPid writes a peer whose listenerPid is the given raw JSON (null or an int).
+// seedPeerArmed writes a peer armed the way armMeta arms one: the listener pid AND
+// its structural witness. seedPeerPid stays for the cases that want a raw pid with no
+// witness (never-armed "null", or an armed-but-dead pid that is dead either way).
+func seedPeerArmed(t *testing.T, root, ch, al, sid string, pid int) {
+	t.Helper()
+	start, err := procStartTime(pid)
+	if err != nil {
+		t.Fatalf("procStartTime(%d): %v", pid, err)
+	}
+	dir := filepath.Join(root, ch, al)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"alias":%q,"channel":%q,"sessionId":%q,"cwd":"/w","listenerPid":%d,"listenerStart":%q,"ownerPid":null,"host":"h","ts":"2026-07-13T00:00:00Z","lastActivity":%q}`,
+		al, ch, sid, pid, start, time.Now().UTC().Format("2006-01-02T15:04:05Z"))
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "inbox.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedPeerPid(t *testing.T, root, ch, al, sid, pid string) {
 	t.Helper()
 	dir := filepath.Join(root, ch, al)

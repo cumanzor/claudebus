@@ -27,35 +27,6 @@ func TestInboxPathIsCleaned(t *testing.T) {
 	}
 }
 
-// TestTransitionNeedleStaysRaw is the F1 regression, inverted for the transition era.
-// It used to pin InboxPath and metaInboxNeedle to the SAME raw spelling because both
-// fed the argv-grep. InboxPath is cleaned now, so the needle carries that contract
-// ALONE: it must still reproduce bash inbox_path()'s raw concatenation byte-for-byte,
-// because that is what a PRE-P3 follower actually put in its argv and that argv is
-// still on disk in live process tables. A cleaned needle would miss those followers
-// under a trailing-slash CBUS_DIR and reap them at upgrade — the exact stranding the
-// shim exists to prevent.
-func TestTransitionNeedleStaysRaw(t *testing.T) {
-	base := t.TempDir()
-	dir := base + "/" // trailing slash: filepath.Join would clean this
-	t.Setenv("CBUS_DIR", dir)
-	ch, al := "go-port", "coder"
-	bashVerbatim := dir + "/" + ch + "/" + al + "/inbox.jsonl" // bash printf, raw '//'
-
-	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json") // built the way callers do
-	if needle := metaInboxNeedle(metaPath); needle != bashVerbatim {
-		t.Errorf("transition needle = %q, want bash-verbatim %q", needle, bashVerbatim)
-	}
-	// premise: filepath.Join really does clean the trailing slash (the F1 trap).
-	if filepath.Join(CBUSDir(), ch, al, "inbox.jsonl") == bashVerbatim {
-		t.Fatal("premise broken: filepath.Join did not clean '//' — test would be vacuous")
-	}
-	// and the two now deliberately DIFFER, which is the whole point of the split
-	if InboxPath(ch, al) == metaInboxNeedle(metaPath) {
-		t.Error("InboxPath should be cleaned while the needle stays raw")
-	}
-}
-
 // ---- rotation predicate + reopen retry -------------------------------------------
 
 // TestRotatedPredicate exercises the dev+ino-change and size-regression branches.

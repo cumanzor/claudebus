@@ -15,9 +15,9 @@ import (
 // from peerMeta is therefore not a cosmetic omission: it is deleted from a live peer's
 // meta by the next rewrite that touches it.
 //
-// For listenerStart specifically that would strip an armed peer down to the TRANSITION
-// branch, where a follower armed by THIS binary has no inbox in its argv and reads
-// DEAD. A peer would go quietly off the bus mid-session.
+// For listenerStart specifically that would strip an armed peer of the only proof of
+// its identity, and a witnessless armed meta reads DEAD. A peer would go quietly off
+// the bus mid-session.
 func TestPeerMetaRoundTripsLossless(t *testing.T) {
 	full := peerMeta{
 		Alias: "a", Channel: "c", SessionID: "sid", Cwd: "/w",
