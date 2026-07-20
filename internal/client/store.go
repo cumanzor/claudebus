@@ -116,12 +116,29 @@ func chSuffix(ch string) string {
 	return " to " + strconv.Quote(ch)
 }
 
+// checkStoreName gates a name this client is about to CREATE as a store path segment.
+// The two-step shape is deliberate: a charset failure keeps its frozen message, and
+// the tightening gets its own line naming what would go wrong, since a name that
+// passes the wire regex and is rejected here needs a reason the user can act on.
+//
+// Only creation goes through here. Addressing an existing name stays on ValidName
+// (addr.go), so a legacy bad name remains reachable by `cbus unregister`.
+func checkStoreName(kind, s string) error {
+	if !core.ValidName(s) {
+		return fmt.Errorf("%s must be [A-Za-z0-9._-]", kind)
+	}
+	if !core.ValidStoreName(s) {
+		return fmt.Errorf("%s %q may not start with '.' or '-': a leading dot hides it from list/channels/whoami, a leading dash is flag-shaped", kind, s)
+	}
+	return nil
+}
+
 // Join joins ch, auto-picking or claiming alias. Returns the resolved alias and
 // alreadyJoined=true when this session already held a registration in ch (no-op).
 // It auto-prunes the channel and broadcasts a join event (bin/cbus:394-438).
 func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
-	if !core.ValidName(ch) {
-		return "", false, fmt.Errorf("channel must be [A-Za-z0-9._-]")
+	if err := checkStoreName("channel", ch); err != nil {
+		return "", false, err
 	}
 	// Birth-record (cbus-m9l): capture it BEFORE PruneChannel. A resume-rejoin's own
 	// meta carries a DEAD listener, so prune would reap it (and with it the origin) an
@@ -145,8 +162,8 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 			return "", false, err
 		}
 	} else {
-		if !core.ValidName(alias) {
-			return "", false, fmt.Errorf("alias must be [A-Za-z0-9._-]")
+		if err := checkStoreName("alias", alias); err != nil {
+			return "", false, err
 		}
 		dir = filepath.Join(root, ch, alias)
 		metaPath := filepath.Join(dir, "meta.json")
@@ -230,8 +247,8 @@ func birthForJoin(metaPath, selfSid string) (origin, model string) {
 // child's join can carry them into the real-sid meta. Blank when the caller does not
 // know (never a guess).
 func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
-	if !core.ValidName(ch) {
-		return "", fmt.Errorf("channel must be [A-Za-z0-9._-]")
+	if err := checkStoreName("channel", ch); err != nil {
+		return "", err
 	}
 	PruneChannel(ch)
 	root := CBUSDir()
@@ -241,8 +258,8 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 			return "", err
 		}
 	} else {
-		if !core.ValidName(want) {
-			return "", fmt.Errorf("alias must be [A-Za-z0-9._-]")
+		if err := checkStoreName("alias", want); err != nil {
+			return "", err
 		}
 		for _, reg := range ResolveSelf() { // reclaim below would eat our own registration
 			if reg.Channel == ch && reg.Alias == want {
@@ -315,9 +332,11 @@ func Unregister(ch, al string) error {
 // reclaiming a dead name-holder with a departed event (bin/cbus:706-737). Returns
 // the channel, old alias, and alreadyNamed=true when new==old (no-op).
 func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err error) {
-	if !core.ValidName(newAlias) {
-		return "", "", false, fmt.Errorf("alias must be [A-Za-z0-9._-]")
+	if err := checkStoreName("alias", newAlias); err != nil {
+		return "", "", false, err
 	}
+	// wantCh SELECTS an existing registration, it never creates one — addressing stays
+	// on ValidName so a session sitting in a legacy bad channel can still rename out.
 	if wantCh != "" && !core.ValidName(wantCh) {
 		return "", "", false, fmt.Errorf("bad channel %q", wantCh)
 	}

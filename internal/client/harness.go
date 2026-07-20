@@ -166,15 +166,16 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	if model != "" && (!core.ValidName(model) || strings.HasPrefix(model, "-")) {
 		return "", "", "", fmt.Errorf("bad model %q", model)
 	}
-	// name IS the child's alias now, so it must be alias-legal (and not flag-shaped).
-	if name != "" && (!core.ValidName(name) || strings.HasPrefix(name, "-")) {
+	// name IS the child's alias now, so it must pass the store rule the reservation
+	// enforces. Checked here too, pre-fork, so the error names the flag.
+	if name != "" && !core.ValidStoreName(name) {
 		return "", "", "", fmt.Errorf("bad name %q", name)
 	}
 	ch = channel
 	if ch == "" {
 		ch = branchChannelFromGit()
 	}
-	if !core.ValidName(ch) {
+	if !core.ValidStoreName(ch) {
 		return "", "", "", fmt.Errorf("bad channel %q", ch)
 	}
 	if _, _, jerr := Join(ch, ""); jerr != nil {
@@ -215,7 +216,10 @@ func branchChannelFromGit() string {
 	if err != nil {
 		return "global"
 	}
-	if c := keepNameChars(filepath.Base(strings.TrimSpace(string(out)))); c != "" {
+	// a DERIVED name gets sanitized, not rejected: the user never typed it, so a repo
+	// living at ~/.dotfiles must not make branch/spawn unusable there. The leading dot
+	// it would otherwise carry is exactly what ValidStoreName refuses downstream.
+	if c := strings.TrimLeft(keepNameChars(filepath.Base(strings.TrimSpace(string(out)))), ".-"); c != "" {
 		return c
 	}
 	return "global"
