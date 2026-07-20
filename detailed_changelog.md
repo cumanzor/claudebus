@@ -114,6 +114,29 @@ since the doc parses fine) rather than whoami's — `pipefail` would not have
 caught this either, since it reports that some stage failed, not which, and
 still reads 0 when the masking stage succeeds.
 
+Reviewer verdict on the docs commit: CONDITIONAL APPROVE, two binding fixes
+folded in before merge. F1: `behavior-spec.md` §9.1 mischaracterized
+`ChannelRoster` as "the rename-path lookup" — it has no rename call site; it's
+the formation-save roster reader (`formation_save.go:51`, called from
+`formation_save.go:144` and `formation_plan.go:113`), corrected. F2:
+`command-reference.md`'s all-digit-names bullet conflated two different
+claims under one "still an open quirk" — name LEGALITY is genuinely still
+open, but the `jset` int-coercion MECHANISM is bash-era only: the Go port's
+`renameMeta` always writes `alias` as a JSON string (`store.go:383`, a
+documented C-delta, port-map row 16), split into two sentences. Class-C fold
+C3: the pre-existing "Extra args are silently dropped" line in the `whoami`
+section, sitting one line above the new `--json` subsection, has been stale
+since the P2.5 harness layer (`581b1c7`) — `whoami`'s `noExtra` guard makes
+trailing junk a hard error, contradicting both the top-of-file delta list's
+own item 6 (`cbus whoami junk`) and this milestone's own subsection; struck
+through with a provenance note. Separately, the orchestrator ruled doctrine 14
+(absence-from-partial-read) universal — it traces to two reviewer instances
+plus an M4 coder variant, all in the same negative-claim family — and
+propagated it to `roles/coder.md` and `roles/documenter.md` as their own
+role-specific addition (14 and 11 respectively, since each file's list was a
+different length); doctrines 15/16 stay reviewer-only and are marked
+reviewer-confirmed per this verdict.
+
 [Files Changed]
 cmd/cbus/jsonout.go (new), jsonout_test.go (new), list_golden_test.go (new),
 name_tighten_test.go (new), whoami_json_test.go (new), main.go, main_test.go,
@@ -121,9 +144,10 @@ usage.go — cmd/cbus. internal/client/roster.go (new), storename_test.go (new),
 formation_save.go, harness.go, spawn.go, store.go — internal/client.
 internal/core/name.go, name_test.go — internal/core. docs/architecture/
 command-reference.md (Name validity section, --json subsections under list/
-channels/whoami), docs/architecture/behavior-spec.md (new Sec 9.1). roles/
-reviewer.md (one new standing doctrine). simple_changelog.md,
-detailed_changelog.md (this entry).
+channels/whoami, F2/C3 fixes), docs/architecture/behavior-spec.md (new Sec
+9.1, F1 fix). roles/reviewer.md (three new standing doctrines, 15/16 marked
+reviewer-confirmed), roles/coder.md, roles/documenter.md (doctrine 14
+propagated to each). simple_changelog.md, detailed_changelog.md (this entry).
 
 [Possible Ripple Effects]
 `--json`'s field names are now a public contract consumed by the oq9.5 menubar

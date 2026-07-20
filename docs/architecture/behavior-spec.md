@@ -372,9 +372,11 @@ and a consumer that treats an unknown key as fatal is the one at fault.
 `client.ScanStore` snapshot the text path renders, under the same `--active`
 and channel filters, so the two renderings can never drift on who is listening
 — the divergence a GUI would surface first and a text-only test would never
-see. `ScanStore` is deliberately NOT `ChannelRoster` (the rename-path lookup,
-which errors on an absent channel and drops a peer whose meta is torn, since a
-save must not record what it couldn't read): `ScanStore` keeps a torn peer with
+see. `ScanStore` is deliberately NOT `ChannelRoster` (the formation-save roster
+reader, `formation_save.go:51`, called from `formation_save.go:144` and
+`formation_plan.go:113` — no rename call site), which errors on an absent
+channel and drops a peer whose meta is torn, since a save must not record what
+it couldn't read: `ScanStore` keeps a torn peer with
 blank fields, because `list` has always shown it with `?` columns and hiding a
 peer is how a user loses track of a session. Both functions now carry a
 comment naming the difference so the next reader doesn't unify them by eye.
