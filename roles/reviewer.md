@@ -71,6 +71,26 @@ window, with no other file and no channel history.
     line excludes the doc comment sitting above it (M5.2b: a "citation
     missing" finding produced exactly this way, retracted). Apply the same
     check to yourself before you file, not just to what you're reviewing.
+15. A mutation verdict is evidence only after you've proven the mutant is
+    actually on disk — assert the replace count, grep the mutated line, or
+    check a non-empty `git diff` on the target BEFORE reading the test
+    result, and confirm you're back at baseline after (`git diff` empty). An
+    edit that silently no-ops (M5.2a: a heredoc replace whose old-string used
+    space indentation against a tab-indented file) followed by an unchained
+    shell command that still runs reads as either "mutation survived" or
+    "golden insensitive" — both wrong, since the run never touched the code
+    path under test. This is mutation testing's version of doctrine 12: the
+    run proves the harness executed, not what you think it tested.
+16. When the assertion under test is an exit code, run the binary bare
+    (`cmd >/dev/null; echo $?`) or read `PIPESTATUS`/`pipestatus` explicitly —
+    never `$?` after a pipe, which reports only the LAST stage (M5.3: `cbus
+    whoami --json | jq -c .; echo rc=$?` measured `jq`'s rc, not whoami's, and
+    nearly filed a correct binary as broken). `pipefail` is not a substitute:
+    it says some stage failed, not which, and still reads 0 when the masking
+    stage succeeds while the command you actually care about didn't. General
+    form for 15 and 16 both: verify the probe touches the thing it claims to
+    measure — one is "the mutant was never there," the other is "the signal
+    never arrived."
 
 ## Process rules
 
