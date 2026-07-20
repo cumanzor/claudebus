@@ -404,6 +404,10 @@ func runSpawn(args []string) int {
 }
 
 func runList(args []string) int {
+	jsonMode := hasJSONFlag(args)
+	if err := refuseRemoteJSON(args, jsonMode); err != nil {
+		return die("%v", err)
+	}
 	if len(args) > 0 && client.IsRemote(args[0]) {
 		return runListRemote(args[0])
 	}
@@ -412,59 +416,71 @@ func runList(args []string) int {
 		switch a {
 		case "--active", "-a":
 			active = true
+		case "--json", "-json":
 		default:
 			chosen = a // last non-flag wins (bash overwrite semantics)
 		}
 	}
-	return runListLocal(active, chosen)
+	return runListLocal(active, chosen, jsonMode)
+}
+
+// refuseRemoteJSON is the R15 gate: --json is local-only in M5, and BOTH ways of
+// asking for it remotely are silent wrong answers today. `list @host --json` reaches
+// runListRemote, which never looks at the remaining args and drops the flag; `list
+// --json @host` never reaches it, because remote detection inspects args[0] only, so
+// the @-target falls through and becomes a local channel filter. Once --json is a
+// contract, a request it cannot serve has to fail loudly instead of answering a
+// different question.
+func refuseRemoteJSON(args []string, jsonMode bool) error {
+	if !jsonMode {
+		return nil // the --active @host dead quirk is untouched
+	}
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if client.IsRemote(a) {
+			return fmt.Errorf("--json is local-only; %q is a relay target and the remote shape rides the relay-wire follow-up. Drop --json, or drop the @ target", a)
+		}
+	}
+	return nil
 }
 
 // runListLocal renders local peers with listen/off + pid + host + cwd
-// (bin/cbus:589-611); --active shows only live listeners.
-func runListLocal(active bool, chosen string) int {
-	root := client.CBUSDir()
-	channels, _ := os.ReadDir(root)
+// (bin/cbus:589-611); --active shows only live listeners. Text and JSON walk the SAME
+// snapshot, so the two renderings can never disagree about who is listening.
+func runListLocal(active bool, chosen string, jsonMode bool) int {
+	snap := client.ScanStore()
+	if jsonMode {
+		return emitListJSON(snap, active, chosen)
+	}
 	any := false
-	for _, chE := range channels {
-		if !chE.IsDir() || strings.HasPrefix(chE.Name(), ".") {
+	for _, ch := range snap.Channels {
+		if chosen != "" && ch.Name != chosen {
 			continue
 		}
-		ch := chE.Name()
-		if chosen != "" && ch != chosen {
-			continue
-		}
-		chDir := filepath.Join(root, ch)
-		if fileExists(filepath.Join(chDir, "meta.json")) { // legacy v1 entry
+		if ch.LegacyV1 {
 			if active {
 				continue
 			}
 			any = true
-			fmt.Printf("%-7s %-28s legacy v1 entry — run: cbus prune\n", "off   ", ch)
+			fmt.Printf("%-7s %-28s legacy v1 entry — run: cbus prune\n", "off   ", ch.Name)
 			continue
 		}
-		aliases, _ := os.ReadDir(chDir)
-		for _, alE := range aliases {
-			if !alE.IsDir() || strings.HasPrefix(alE.Name(), ".") {
-				continue
-			}
-			metaPath := filepath.Join(chDir, alE.Name(), "meta.json")
-			if !fileExists(metaPath) {
-				continue
-			}
-			live := "off   "
-			if client.MetaListenerAlive(metaPath) {
-				live = "listen"
-			}
-			if active && live == "off   " {
+		for _, p := range ch.Peers {
+			if active && !p.Listening {
 				continue
 			}
 			any = true
-			m, _ := client.ReadPeerMeta(metaPath)
-			pid := "?"
-			if m.ListenerPid != 0 {
-				pid = strconv.Itoa(m.ListenerPid)
+			live := "off   "
+			if p.Listening {
+				live = "listen"
 			}
-			fmt.Printf("%-7s %-28s pid=%-7s %s  %s\n", live, ch+"/"+alE.Name(), pid, orQ(m.Host), orQ(m.Cwd))
+			pid := "?"
+			if p.ListenerPid != 0 {
+				pid = strconv.Itoa(p.ListenerPid)
+			}
+			fmt.Printf("%-7s %-28s pid=%-7s %s  %s\n", live, ch.Name+"/"+p.Alias, pid, orQ(p.Host), orQ(p.Cwd))
 		}
 	}
 	if !any {
@@ -478,45 +494,52 @@ func runListLocal(active bool, chosen string) int {
 }
 
 func runChannels(args []string) int {
-	if err := noExtra(args, 0, "usage: cbus channels"); err != nil {
+	jsonMode := hasJSONFlag(args)
+	rest := args
+	if jsonMode {
+		rest = dropJSONFlag(args)
+	}
+	if err := noExtra(rest, 0, "usage: cbus channels [--json]"); err != nil {
 		return die("%v", err)
 	}
-	root := client.CBUSDir()
-	channels, _ := os.ReadDir(root)
+	snap := client.ScanStore()
+	if jsonMode {
+		return emitChannelsJSON(snap)
+	}
 	any := false
-	for _, chE := range channels {
-		if !chE.IsDir() || strings.HasPrefix(chE.Name(), ".") {
+	for _, ch := range snap.Channels {
+		if ch.LegacyV1 || len(ch.Peers) == 0 { // legacy v1 is not a channel
 			continue
 		}
-		chDir := filepath.Join(root, chE.Name())
-		if fileExists(filepath.Join(chDir, "meta.json")) { // legacy v1, not a channel
-			continue
-		}
-		aliases, _ := os.ReadDir(chDir)
-		total, live := 0, 0
-		for _, alE := range aliases {
-			if !alE.IsDir() || strings.HasPrefix(alE.Name(), ".") {
-				continue
-			}
-			metaPath := filepath.Join(chDir, alE.Name(), "meta.json")
-			if !fileExists(metaPath) {
-				continue
-			}
-			total++
-			if client.MetaListenerAlive(metaPath) {
+		live := 0
+		for _, p := range ch.Peers {
+			if p.Listening {
 				live++
 			}
 		}
-		if total == 0 {
-			continue
-		}
 		any = true
-		fmt.Printf("%-20s %d peers (%d listening)\n", chE.Name(), total, live)
+		fmt.Printf("%-20s %d peers (%d listening)\n", ch.Name, len(ch.Peers), live)
 	}
 	if !any {
 		fmt.Println("no channels")
 	}
 	return 0
+}
+
+// dropJSONFlag removes the --json/-json token so a verb's positional count is
+// unchanged by it (`cbus channels --json` must not read as one trailing positional).
+func dropJSONFlag(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		if a == "--json" || a == "-json" {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // runWhoami prints this session's local registrations (channel/alias) and remote

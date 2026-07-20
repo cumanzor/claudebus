@@ -24,8 +24,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    (a joined-but-not-yet-armed peer is always
                                    accepted: its first arm replays the inbox)
   cbus list [--active] [channel]   peers with listen/off state, host, cwd
+       --json                      machine-readable; local targets only
   cbus active [channel]            only peers currently listening (= list --active)
-  cbus channels                    channels with peer counts
+  cbus channels [--json]           channels with peer counts
   cbus whoami                      this session's channel/alias registrations
   cbus inbox <channel>/<alias>     print inbox path
   cbus bootstrap <channel> [parent] [child-alias]  print the canonical fork-child
