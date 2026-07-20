@@ -1873,11 +1873,16 @@ client; they remain for the homogenization/port record.
    live marker.
 10. `whoami` exits 1 when empty (unlike `list`/`channels`); `auth status`
     always exits 0.
-11. `channels`/`whoami`/`hook-exit` silently drop extra args; `hook-compact`
-    too, past its `phase` positional — not to dodge rc-2 blocking (a `die`
-    here would be rc 1, which doesn't block anything) but because a hook must
-    never fail: either hook exiting nonzero surfaces a hook-error notice plus
-    the first stderr line to the user, not PostCompact-only.
+11. ~~`channels`/`whoami` silently drop extra args~~ — **stale since the P2.5
+    harness layer (`581b1c7`)**: both now go through `noExtra` and die on
+    trailing junk (`cbus: usage: cbus channels [--json]` / `cbus: usage: cbus
+    whoami [--json]`, rc 1), matching the top-of-file delta list's own item 6.
+    `hook-exit` still silently drops extra args (dispatch never passes them
+    through); `hook-compact` too, past its `phase` positional — not to dodge
+    rc-2 blocking (a `die` here would be rc 1, which doesn't block anything)
+    but because a hook must never fail: either hook exiting nonzero surfaces a
+    hook-error notice plus the first stderr line to the user, not
+    PostCompact-only.
 
 **Delivery & liveness**
 12. ~~Re-arm never replays~~ **Closed, M4 (`cbus-8k9.4`, `cbus-8no`):** a durable

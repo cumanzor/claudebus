@@ -137,6 +137,14 @@ role-specific addition (14 and 11 respectively, since each file's list was a
 different length); doctrines 15/16 stay reviewer-only and are marked
 reviewer-confirmed per this verdict.
 
+Same false-claim family, ruled in before the reviewer's confirmation pass
+rather than deferred: Quirk index item 11 also claimed `channels`/`whoami`
+silently drop extra args, alongside the genuinely-still-accurate
+`hook-exit`/`hook-compact` half. Split: the first half struck through with the
+same `581b1c7` provenance C3 used (both verbs now go through `noExtra` and die
+on trailing junk, rc 1); `hook-exit`/`hook-compact` left as-is — verified
+neither calls `noExtra` and dispatch never passes their args through.
+
 [Files Changed]
 cmd/cbus/jsonout.go (new), jsonout_test.go (new), list_golden_test.go (new),
 name_tighten_test.go (new), whoami_json_test.go (new), main.go, main_test.go,
@@ -144,10 +152,11 @@ usage.go — cmd/cbus. internal/client/roster.go (new), storename_test.go (new),
 formation_save.go, harness.go, spawn.go, store.go — internal/client.
 internal/core/name.go, name_test.go — internal/core. docs/architecture/
 command-reference.md (Name validity section, --json subsections under list/
-channels/whoami, F2/C3 fixes), docs/architecture/behavior-spec.md (new Sec
-9.1, F1 fix). roles/reviewer.md (three new standing doctrines, 15/16 marked
-reviewer-confirmed), roles/coder.md, roles/documenter.md (doctrine 14
-propagated to each). simple_changelog.md, detailed_changelog.md (this entry).
+channels/whoami, F2/C3 fixes, Quirk index item 11 split). docs/architecture/
+behavior-spec.md (new Sec 9.1, F1 fix). roles/reviewer.md (three new standing
+doctrines, 15/16 marked reviewer-confirmed), roles/coder.md,
+roles/documenter.md (doctrine 14 propagated to each). simple_changelog.md,
+detailed_changelog.md (this entry).
 
 [Possible Ripple Effects]
 `--json`'s field names are now a public contract consumed by the oq9.5 menubar
