@@ -103,6 +103,12 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
+  cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]
+                                   bridge a codex app-server thread to this
+                                   alias's inbox: each bus message becomes a
+                                   codex turn (steer if a turn is active, else
+                                   start one). join the alias first; --thread
+                                   adopts an existing thread, else one is made
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined
