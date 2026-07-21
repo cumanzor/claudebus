@@ -292,3 +292,136 @@ daemon, not less.
   beside the store rather than replacing the store.
 - The relay stands as the measured cost of a broker if one is ever genuinely
   forced: local design + spool + tokens + deploy surface.
+
+## 7. The injection boundary generalized: foreign harnesses (2026-07-21)
+
+Written when the Codex integration probes (bdx `cbus-6ij.4`, round 2) proved
+that push delivery into a live Codex session requires attaching to its
+`app-server` socket — which on first contact reads like this doc's own §5.1
+rejection walking back in the door. It is not, and this section records why
+once, in the same spirit as the rest of the file.
+
+### 7.1 Constraint 3 was always the harness's, not ours
+
+Re-read §1. Constraints 1 (durability by construction) and 2 (no daemon) are
+*design choices*. Constraint 3 — "a session consumes events only as stdout
+lines from a process it spawns, or as ws frames the Monitor dials out to" — is
+not a choice at all: it is a **measurement of Claude Code**, the same species
+of fact as the 500-char line cap. cbus never chose stdout-into-Monitor as a
+transport ideal; it terminated the bus in the only injection surface the
+harness offers.
+
+Stated generally: *a session consumes events only through its harness's native
+injection surface; any transport must terminate in that surface.* Per harness,
+measured:
+
+| Harness | Native injection surface | cbus adapter (the last hop) |
+|---|---|---|
+| Claude Code | Monitor tool: stdout of a spawned process, or a ws source it dials | follower → stdout (today, unchanged) |
+| Codex CLI | its own `app-server` socket: `turn/start` / `turn/steer` JSON-RPC over ws-on-UDS | follower → ws client write ("the bridge") |
+| Grok Build | `monitor` tool ≡ Claude's | follower → stdout, byte-identical |
+| OpenCode | in-process plugin calling `client.session.prompt` | follower spawned by the plugin |
+
+Every row keeps the same left-hand side of the system: `inbox.jsonl` is the
+only durable hop, the follower is the only reader, cursor/steal/dormancy/
+liveness semantics are untouched (the bridge *is* a follower — same loop, same
+identity checks, different sink for the framed output). What varies per
+harness is only where the follower's frames go after the loop emits them. The
+last hop was never file-shaped for Claude either — it is an anonymous pipe
+into an in-memory batcher. "Files for some, daemon for others" is therefore
+the wrong description of the end state. The accurate one: **files for all;
+native injection surface per harness.**
+
+### 7.2 Why the Codex app-server is not the §5.1 daemon
+
+The broker bill in §5.1 itemizes what a daemon costs: someone owns the socket,
+a spool for offline delivery, auth tokens, a deploy surface, one failure
+domain over every channel, upgrade coordination. Check the app-server against
+each line:
+
+- **Ownership/lifecycle.** It ships inside Codex, is versioned by Codex, and
+  is updated by `codex update` — it is harness machinery, exactly as the
+  Monitor tool is. cbus spawns it per peer and it dies with the pane. cbus
+  still ships one binary; `cbus selfupdate` still updates everything cbus owns.
+- **Spool.** Not needed — the app-server holds no bus state. If the socket is
+  down, messages keep accumulating in `inbox.jsonl` (constraint 1 does the
+  work) and the bridge re-delivers on reconnect. Compare the relay, which had
+  to *build* a Maildir spool because ws frames were its only medium.
+- **Failure domain.** One session. A crashed app-server takes down exactly one
+  peer's conversation — the same blast radius as a crashed Claude session, and
+  strictly smaller than the §5.1 broker (all channels) it superficially
+  resembles. There is no shared machine daemon in the design: one socket per
+  peer, filesystem-permission-guarded UDS, no ports, no tokens locally.
+- **The exception clause was already written.** The multi-harness exploration's
+  simplicity rule reads "no new daemons *unless a harness leaves no
+  alternative*." Codex leaves none for push: a plain TUI binds no socket
+  (probed), MCP cannot push unsolicited content, `notify` is send-only, and
+  the Stop-hook park holds the composer hostage in a human session. The
+  clause fires on its own terms.
+
+What *is* honestly charged (this doc's style demands the ledger): one extra
+process per Codex peer; a ws-over-UDS client inside cbus; an **experimental,
+unversioned protocol** that must be pinned and integration-tested per Codex
+release (its `generate-json-schema` output is the pin); the ~104-byte
+`SUN_LEN` cap forcing socket paths outside the deep channel dirs; and
+unprobed thread-unload behavior after ~30 min idle. That bill is real but it
+buys the one thing no file arrangement can: waking an idle foreign session
+whose harness polls nothing.
+
+### 7.3 The relay does not change
+
+The relay was already the harness-agnostic half (bearer-subprotocol ws,
+channel/alias addressing, presence from connection lifecycle). A remote Claude
+peer receives by having its Monitor dial the relay directly; a remote Codex
+peer receives by having its bridge dial the same leg and pump frames into the
+local UDS socket. The bridge is one process with two selectable sources —
+local inbox file, or relay ws — and one sink, mirroring exactly the
+local/remote duality Claude already has. No new relay concepts, endpoints, or
+message kinds; the relay cannot tell a Codex peer from a Claude one, which is
+the correct amount of knowledge for it to have.
+
+### 7.4 Reachability tiers (the "can I join freely?" answer)
+
+Claude sessions are join-anytime because the Monitor primitive exists in every
+session unconditionally; the model can arm a tail mid-conversation. Codex
+reachability is decided *at launch*:
+
+1. **cbus-spawned peers** (spawn/formations): socket stood up by the launcher;
+   first-class, full push.
+2. **Wrapper-launched sessions** (a `cbus`-provided wrapper or shell alias that
+   runs `codex app-server --listen` + `codex --remote`): first-class, and
+   adoptable onto any channel *after* launch — `thread/loaded/list` names the
+   live thread, so an adopt verb can join it to the bus at any time. Habitual
+   use of the wrapper restores join-anytime parity in practice.
+3. **Plain-launched `codex`**: send-side works immediately (any shell-capable
+   agent can `cbus send`); push receive is impossible to retrofit (probed — no
+   control socket exists to attach to). The recovery is cheap, though:
+   relaunch reachable with the conversation intact via `codex resume` under
+   the wrapper. Retrofit cost = one process restart, zero conversation loss.
+
+This asymmetry is a harness fact, not a cbus design debt; it should be
+documented per-harness rather than papered over.
+
+### 7.5 The provider seam — when to extract it
+
+Two concrete harnesses (Claude shipped, Codex designed) make the interface
+visible; the exploration doc's increment 5 already names it. The seams are
+exactly four: identity source (env var | hook stdin | banner), launcher argv
+(fresh/resume/fork flags), delivery sink (monitor-stdout | uds-push |
+plugin-prompt | stop-hook-poll), and bootstrap prompt template (how the peer
+is told to arm). Resist extracting the abstraction before the second concrete
+case *ships*: one of the two implementations rides an experimental API, and an
+interface frozen against it would enshrine the wrong seam. Extract when the
+third harness (Grok or OpenCode) arrives and the pattern has survived contact
+twice — the same discipline that kept the roles doctrine duplicated until it
+proved stable.
+
+### 7.6 What would reopen this section
+
+- Codex ships a Monitor-equivalent (background process → context injection):
+  delete the bridge, move Codex to the Claude/Grok row, this section shrinks.
+- The app-server protocol churns faster than pinning absorbs: fall back to the
+  parked Stop-hook listener for workers (proven viable, `cbus-6ij.4` round 2)
+  and demote interactive Codex peers to send + boundary delivery.
+- A third harness's native surface fits none of the four sink shapes: the
+  provider seam (§7.5) gets extracted early instead of on schedule.

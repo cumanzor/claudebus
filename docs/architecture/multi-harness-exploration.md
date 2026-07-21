@@ -31,10 +31,11 @@ harness is cosmetic, not protocol. The relay is fully agnostic: bearer-subprotoc
 channel/alias addressing, presence from connection lifecycle. The remote path is
 *more* portable than the local one.
 
-Liveness note for hand-rolled followers: `MetaListenerAlive` requires the listener
-pid's argv to contain the raw inbox path (`liveness.go:93,138-144`). A literal
-`tail -f ~/.claude-bus/ch/al/inbox.jsonl` passes by accident; a cwd-relative
-invocation does not.
+~~Liveness note for hand-rolled followers: `MetaListenerAlive` requires the listener
+pid's argv to contain the raw inbox path.~~ **Obsolete since M6.2 (9a3a075,
+2026-07-20):** liveness is purely structural now — (pid, proc-start-time)
+witness plus non-zombie, no argv or comm clause. A foreign follower reads
+alive with no argv requirement at all.
 
 ## 2. Grok Build — near drop-in
 
@@ -117,7 +118,19 @@ No `--fork-session` analogue → gate `branch`, support `spawn`.
 **Verdict: one small plugin away.** Most work of the two easy harnesses, best
 runtime behavior once wired.
 
-## 4. Codex CLI — compromised listener, fine sender/worker
+## 4. Codex CLI — ~~compromised listener~~ full push via app-server (updated 2026-07-21)
+
+> **Update 2026-07-21 (supersedes this section's verdict; probes on bdx
+> `cbus-6ij.4`).** Live spikes on codex-cli 0.145.0 proved: (a) the Stop-hook
+> block-continuation works, chains indefinitely, and the hook timeout is
+> configurable past 600s — a "parked listener" long-poll makes a worker peer
+> permanently reachable; (b) `codex app-server --listen unix://` speaks
+> WebSocket-over-UDS, and an external client's `turn/start` wakes an idle
+> thread AND renders inside a live `codex --remote` TUI, composer intact.
+> True push exists. The v2 path below is therefore promoted to primary (per-
+> peer socket, no machine daemon — reconciliation with the simplicity rule in
+> design-space.md §7), with the Stop-hook park as the worker/fallback path.
+> The original analysis below stands as the record of the pre-probe picture.
 
 `openai/codex` (Rust core behind a Node shim on npm installs — track the native child
 whose comm is `codex`, not the `node` parent).
