@@ -1,5 +1,170 @@
 # Changelog (detailed)
 
+## [2026-07-21 23:34:19 UTC] [Client/Multi-harness] cbus-6ij.4 tranche A — Codex CLI as a first-class bus peer (increment 4)
+
+[Attempt #1]
+
+Coder-executed, reviewer-gated, second build increment of the multi-harness
+effort, landing on top of cbus-6ij.1's identity/liveness seams. Orchestrated
+on the same dogfooded "harness" formation. Two reviewer FINDINGS rounds are
+folded into this single entry rather than written piecemeal, per doctrine —
+both fixes landed and were confirmed before this record was written.
+
+Phase-0 spike (recorded separately on cbus-6ij.4, not part of this commit
+set) had reshaped the build: real-time push via `codex app-server`'s
+ws-over-UDS protocol was proven live and promoted to the primary delivery
+path, with the Stop-hook verb parked as an exec-flow fallback (`hook-join`).
+A follow-up A1 probe round, also pre-commit, fixed three protocol facts the
+bridge's delivery ladder depends on: `turn/steer` lands in-turn (steered
+content answers within the same turnId, no new turn) but needs an active
+turn, so a bare `turn/start` after an init/MCP-load gap returns `-32600
+no-active-turn` and needs a bounded retry; a cold-restarted server rejects a
+bare `turn/start` on an existing thread (`-32600 thread-not-found`) and
+needs `thread/resume` first, except on a zero-turn thread which has no
+rollout to resume from, where the bare `turn/start` is the correct
+fallback; and only `thread/resume`, not a bare `turn/start`, subscribes to
+the full event stream (`turn/started`, item events, `turn/completed`) — a
+bare client sees only `thread/status/changed`. These three facts are the
+`resume-attach always, steer-first busy, bootstrap-turn-then-resume for
+zero-turn threads` shape the bridge ships with.
+
+A2 build then surfaced a harder finding: `SessionStart` hooks configured on
+the app-server process, driven purely over the ws protocol, never fire —
+Codex hooks are exec/interactive-only, not app-server-topology, and
+app-server has no `--dangerously-bypass-hook-trust` flag to even attempt it.
+The shipped rendezvous instead uses a passive pre-connected app-server client
+that observes the TUI's own `thread/started` notification (carries the full
+thread object, id and cwd, at ~190ms) — the interactive TUI launches with
+zero hook config and zero trust bypass, a security/UX improvement over the
+originally gated hook-based design, not a workaround for it.
+
+[Files Changed]
+- `internal/client/codexws.go`, `internal/client/codexws_test.go` (8da523c)
+  — stdlib WebSocket-over-UDS JSON-RPC client for a codex app-server
+  (masking, ext-length, ping/pong, close, fragmented reads). The handshake
+  reader threads into the read loop so a first frame arriving in the same
+  segment as the HTTP 101 upgrade isn't dropped (C1); a 16 MiB frame cap
+  turns a corrupt length into an error instead of an unbounded allocation
+  (C2); hand-rolled base64 replaced with stdlib (C5).
+- `internal/client/codexbridge.go`, `internal/client/codexbridge_test.go`
+  (8da523c, reworked 9ae66d6) — the bridge. Attaches via `thread/resume`
+  (survives a server restart, subscribes to the turn stream) and delivers
+  each framed bus message on a steer -> turn/start -> resume+retry ladder,
+  steering an in-flight turn when one is active. 9ae66d6 fixes a race on a
+  zero-turn thread adopt: the opener `turn/start` returned before the
+  rollout flushed to disk, so the immediate re-resume raced it and died
+  `-32600 no rollout found`, killing the bridge on every fresh-thread adopt
+  (masked earlier because the test fake persisted rollouts synchronously —
+  the second fake-fidelity divergence this tranche, after the
+  initialize-required gap). `attach` now waits bounded for the opener turn
+  to idle (a bare client already receives `thread/status/changed`, no
+  subscription needed) before resuming with short bounded backoff; a resume
+  error that isn't `no-rollout` surfaces without an opener. The fake gained
+  an async-rollout mode (`startFakeCodexAdopt`) plus a regression test
+  reproducing the race and a pin on the resume-error gate.
+- `internal/client/follow.go`, `internal/client/follow_test.go` (8da523c) —
+  new `frameSink` seam so the follower tags each frame by kind. The CLI tail
+  path stays byte-identical; the codex sink routes on kind (inject chat +
+  the dormancy marker, skip presence) instead of parsing the rendered head —
+  closes C4, a confirmed defect where a hostile `--from` value containing
+  space-kind-equals could forge a presence token and silently drop a
+  genuine message from the codex side while Claude peers still saw it.
+  `RunFollower` deleted as redundant (one caller, zero test references at
+  ef180c9, no vacuous-test exposure).
+- `internal/client/codexwrap.go`, `internal/client/codexwrap_test.go`,
+  `internal/client/harness.go`, `internal/client/harness_test.go`
+  (d8ef18a) — `cbus codex [--channel CH] [--alias AL] [codex args...]`:
+  stands up a per-peer app-server, launches a `codex --remote` TUI attached
+  to it, opens its own passive app-server connection before launch and
+  bounded-waits (45s + cause-naming diagnostic) for the TUI's own
+  `thread/started`, hard-verifies `thread.cwd == wrapper cwd` (mismatch is a
+  loud refusal naming both paths), joins the bus as that thread via
+  `OverrideSessionID(threadId)` + `Join` (the cbus-6ij.1 seam the
+  `--session-id` flag exposes), then bridges. A bridge that fails to start,
+  or exits while the TUI still lives, kills the TUI and exits nonzero (F2:
+  fail-whole-unit — a deaf bridge must not leave a peer looking healthy).
+  Socket at `$CBUS_DIR/.sock/<short>.sock`, dot-prefixed so channel walkers
+  skip it, 0700, SUN_LEN-bounded with an `os.TempDir()` fallback and a
+  per-launch nonce; teardown group-kills the app-server's native child
+  (an npm codex install runs a 3-pid tree — killing only the node parent
+  orphans the native server).
+- `internal/client/harness.go`, `internal/client/harness_test.go` (also
+  d8ef18a) — new `cbus hook-join`: harness-neutral `SessionStart` auto-join
+  from lenient stdin (`session_id`/`sessionId`) and `$CBUS_CHANNEL`, silent,
+  exit 0 always. Serves exec/stop-hook flows where hooks do fire; optionally
+  writes the session id to `$CBUS_CODEX_RENDEZVOUS`, unused by the wrapper
+  itself but retained for tranche-B exec-flow tooling.
+- `cmd/cbus/codex_bridge_test.go`, `cmd/cbus/codex_wrap_test.go`,
+  `cmd/cbus/main.go`, `cmd/cbus/usage.go` — `codex-bridge` and `codex`/
+  `hook-join` verb dispatch and usage lines.
+
+[Possible Ripple Effects]
+- No `SessionEnd` hook is wired yet, so a wrapper peer lingers as a dead
+  listener until lazy prune — earmarked for tranche B / cbus-6ij.5
+  (`hooks.SessionEnd` -> `cbus hook-exit`, once hooks fire at all in this
+  topology).
+- Teardown is SIGTERM-only, no SIGKILL escalation; the timeout path kills
+  the TUI without a `Wait`. Both record-only for now.
+- `thread/list` was probed and found to return the user's global,
+  paginated `~/.codex` history rather than anything scoped to the serving
+  process — any future adopt/discovery flow built on it must filter by
+  status and cwd itself; this tranche's rendezvous does not use it.
+- Fleet/relay untouched — the bridge is a second consumer of the existing
+  ws leg, per the design-space.md §7 ruling (f1d4363).
+
+[Testing Notes]
+- Two fake-fidelity divergences surfaced this tranche, both the same
+  shape: the hand-written app-server fake was too forgiving, so unit tests
+  stayed green while the real attach failed. First: app-server requires the
+  `initialize` handshake before any thread/turn call (`-32600 Not
+  initialized`); the unit fake didn't model this, so the gap was caught
+  only by the mandatory real-binary smoke, not by the suite — the fake was
+  fixed to pin the initialize-first requirement with a strict test. Second:
+  the fake persisted rollouts synchronously where the real server is async,
+  masking the zero-turn adopt race described above until a fresh-thread
+  field smoke hit it; the fake gained an async-rollout mode
+  (`startFakeCodexAdopt`) so the adopt path is honestly testable going
+  forward.
+- Reviewer gate ran FINDINGS twice before PASS. First pass (pre-existing
+  code read): C1/C2/C4/C5 routed to coder as described above, C3 (trailing-
+  newline trim on injection) ruled an R2 clarification and not a defect,
+  C6 (dormancy marker must inject as a turn, not get filtered) ruled and
+  implemented with a test. Post-build re-gate found the async-rollout race
+  (fixed 9ae66d6) and the silent-bridge-death gap (closed by the
+  fail-whole-unit design). Final re-gate found one small coverage gap: the
+  attach resume-error gate (rollout vs other errors) had lost its only pin
+  when an obsolete test was deleted — reviewer proved the gap by mutating
+  the gate away and watching the suite stay green; closed with one test
+  (a non-rollout resume error must abort attach without running the
+  opener).
+- Mutation testing, all proven on disk and restored: hook-join minus the
+  override fails its empty-sid assertion; rendezvous-write removal fails
+  its pin; SUN_LEN-bound removal fails the TempDir-fallback pin (sock len
+  235 vs 103); the async-race-fix mutant killed with the verbatim field
+  error; `TestJoinAs` override mutant killed; disabling `waitOpenerIdle`
+  entirely and letting backoff alone ride the flush lag confirmed the
+  no-sole-reliance-on-ordering redundancy bound.
+- Field smokes on real codex 0.145.0, both coder- and reviewer-run
+  independently: a real `cbus send` landed in a live codex thread as the
+  verbatim frame and the model replied in-thread; a real join presence
+  event reached the peer inbox but zero extra codex turns fired (R3
+  verified two-sided); a real fresh-thread opener race was ridden out live
+  (wrapper armed in ~22s); steal-displacement killed the TUI within ~2s of
+  bridge dormancy and teardown reaped the socket and server, demonstrating
+  F2 by observable effect (reviewer noted the exact stderr line/exit code
+  weren't captured live since tmux killed first — confirmed instead by
+  code-read and the unit pin); app-server's SUN_LEN refusal on a long
+  socket path and the 3-pid npm teardown tree were both confirmed live,
+  not just in the design ruling.
+- Full `go test ./...` green incl. `-race`; `GOOS=linux` amd64 and arm64
+  built; each of the three commits verified standalone-buildable (A3's
+  remainder stashed, A2 alone builds and tests green; same for the race-fix
+  commit against the wrapper commit). Working tree byte-identical to HEAD
+  after each verify pass. No session trailers, conventional commit format.
+- Not pushed — outward step stays gated. cbus-6ij.1 (802520e, 21f1b37,
+  cc115b9) and this tranche (8da523c, 9ae66d6, d8ef18a) now both sit on
+  main.
+
 ## [2026-07-21 21:17:31 UTC] [Client/Multi-harness] cbus-6ij.1 — harness-neutral identity + liveness seams (increment 1)
 
 [Attempt #1]
