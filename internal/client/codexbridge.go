@@ -20,14 +20,21 @@ import (
 // ceremony), but the cursor still advances over them.
 
 // steerRetries/steerRetryDelay bound the init-gap retry (a just-started turn is briefly
-// inProgress but not yet steerable). Vars, not consts, so tests can shrink the delay.
+// inProgress but not yet steerable). openerWait/resumeRetries/resumeRetryDelay bound the
+// zero-turn adopt: after the opener turn we wait (bounded) for it to go idle, then resume with
+// a short backoff for residual rollout-flush lag. Vars, not consts, so tests can shrink them.
 var (
-	steerRetries    = 4
-	steerRetryDelay = 250 * time.Millisecond
+	steerRetries     = 4
+	steerRetryDelay  = 250 * time.Millisecond
+	openerWait       = 60 * time.Second
+	resumeRetries    = 10
+	resumeRetryDelay = 200 * time.Millisecond
 )
 
 // defaultOpener seeds a zero-turn adopted thread so it gains a rollout (thread/resume errors
-// without one). A3's wrapper passes the real bus bootstrap; this is the A2 standalone default.
+// without one) and orients the codex peer. It is the same for the standalone bridge and the
+// wrapper; wiring a per-peer bus bootstrap here is a follow-up (a codex peer currently learns
+// the bus format from the injected frames themselves).
 const defaultOpener = "Connected to a cbus channel as a codex peer. Bus messages will arrive as turns; reply on the bus."
 
 type codexBridge struct {
@@ -61,8 +68,11 @@ func RunCodexBridge(target, sock, thread string) error {
 // (thread/start subscribes the creating connection, no rollout needed). Adopting an existing
 // thread goes through thread/resume, which both loads the rollout (surviving a server
 // restart/unload) and subscribes to the turn/notification stream. A zero-turn thread has no
-// rollout, so resume errors; there the bridge opens it with the bootstrap turn first, then
-// resumes.
+// rollout, so resume errors -32600; there the bridge opens it with the opener turn, waits for
+// that turn to go idle, then resumes with a short backoff for residual rollout-flush lag.
+//
+// attach reads the notifications channel directly (to observe the opener turn's idle); this is
+// safe because trackTurns is not started until attach returns, so nothing else drains it yet.
 func (b *codexBridge) attach() error {
 	// the app-server rejects every thread/turn call with -32600 "Not initialized" until
 	// the connection has been initialized.
@@ -81,16 +91,67 @@ func (b *codexBridge) attach() error {
 		}
 		return nil
 	}
-	if _, err := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID}); err != nil {
-		// zero-turn thread (no rollout): open it, then resume to subscribe.
-		if _, oerr := b.conn.call("turn/start", turnParams(b.threadID, b.opener)); oerr != nil {
-			return fmt.Errorf("resume failed (%v) and opener turn failed: %w", err, oerr)
-		}
-		if _, rerr := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID}); rerr != nil {
-			return rerr
+	_, err := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID})
+	if err == nil {
+		return nil // thread had a rollout; resume subscribed us
+	}
+	if !isRPCCode(err, -32600, "rollout") {
+		return fmt.Errorf("resume: %w", err) // a real failure, not the zero-turn no-rollout case
+	}
+	// zero-turn thread: open it, wait (bounded) for the opener turn to finish flushing a
+	// rollout, then resume with a short backoff for residual lag.
+	if _, oerr := b.conn.call("turn/start", turnParams(b.threadID, b.opener)); oerr != nil {
+		return fmt.Errorf("opener turn/start on the zero-turn thread: %w", oerr)
+	}
+	b.waitOpenerIdle(openerWait)
+	return b.resumeWithBackoff()
+}
+
+// waitOpenerIdle waits (bounded) for the opener turn to complete — thread/status/changed to
+// idle, which a bare turn/start client receives (A1 iii) — so the rollout is flushed. It is
+// best-effort: on timeout it returns rather than blocking, and the caller's resume backoff
+// tolerates any residual flush lag, so this never relies on event ordering alone.
+func (b *codexBridge) waitOpenerIdle(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case note := <-b.conn.notifications():
+			if note.Method == "thread/status/changed" && statusIsIdle(note.Params) {
+				return
+			}
+		case <-timer.C:
+			return
 		}
 	}
-	return nil
+}
+
+// resumeWithBackoff resumes the thread, tolerating residual rollout-flush lag after the opener
+// turn with a short bounded retry on -32600. Bounded overall; a persistent failure surfaces
+// with a named cause rather than spinning.
+func (b *codexBridge) resumeWithBackoff() error {
+	var err error
+	for i := 0; i < resumeRetries; i++ {
+		if _, err = b.conn.call("thread/resume", map[string]any{"threadId": b.threadID}); err == nil {
+			return nil
+		}
+		if !isRPCCode(err, -32600, "rollout") {
+			return fmt.Errorf("resume after opener: %w", err)
+		}
+		time.Sleep(resumeRetryDelay)
+	}
+	return fmt.Errorf("thread/resume still reports no rollout after the opener turn and %d retries (%s total): %w", resumeRetries, time.Duration(resumeRetries)*resumeRetryDelay, err)
+}
+
+// statusIsIdle reports whether a thread/status/changed payload is the idle transition.
+func statusIsIdle(params json.RawMessage) bool {
+	var p struct {
+		Status struct {
+			Type string `json:"type"`
+		} `json:"status"`
+	}
+	_ = json.Unmarshal(params, &p)
+	return p.Status.Type == "idle"
 }
 
 // trackTurns keeps activeTurn current from the subscribed stream: a turn/started makes the

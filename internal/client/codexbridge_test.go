@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -65,27 +66,61 @@ func TestBridgeAttachAdoptResume(t *testing.T) {
 	}
 }
 
-func TestBridgeAttachZeroTurnOpensThenResumes(t *testing.T) {
-	resumes := 0
-	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
-		switch req["method"] {
-		case "thread/resume":
-			resumes++
-			if resumes == 1 { // zero-turn: no rollout yet
-				s.replyErr(req["id"], -32600, "thread not found")
-			} else {
-				s.reply(req["id"], map[string]any{})
-			}
-		default:
-			s.reply(req["id"], map[string]any{})
-		}
-	})
-	b := bridgeOn(t, f, "T2")
+// TestBridgeAttachZeroTurnAsyncRollout is the F1 regression: on a zero-turn adopt the opener
+// turn/start returns before the rollout is flushed, so an immediate re-resume dies -32600
+// no-rollout. The fix waits for the opener to go idle then resumes with backoff. Runs against
+// the async-rollout fake; the pre-fix single re-resume fails here.
+func TestBridgeAttachZeroTurnAsyncRollout(t *testing.T) {
+	oldD, oldW := resumeRetryDelay, openerWait
+	resumeRetryDelay, openerWait = time.Millisecond, 2*time.Second
+	defer func() { resumeRetryDelay, openerWait = oldD, oldW }()
+
+	f := startFakeCodexAdopt(t, 1) // rollout flushes only after >1 post-opener resume attempt
+	b := bridgeOn(t, f, "TZERO")
+	// NOTE: no trackTurns here — attach drains the notifications itself (waitOpenerIdle), same
+	// as production, which starts trackTurns only after attach returns.
 	if err := b.attach(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("attach must ride out the async rollout flush (wait-idle + backoff): %v", err)
 	}
-	if got := f.recorded(); !reflect.DeepEqual(got, []string{"initialize", "thread/resume", "turn/start", "thread/resume"}) {
-		t.Errorf("zero-turn path = %v, want [initialize thread/resume turn/start thread/resume]", got)
+	calls := f.recorded()
+	tsIdx := slices.Index(calls, "turn/start")
+	if tsIdx < 0 {
+		t.Fatalf("opener turn/start never ran: %v", calls)
+	}
+	resumesAfter := 0
+	for _, c := range calls[tsIdx+1:] {
+		if c == "thread/resume" {
+			resumesAfter++
+		}
+	}
+	if resumesAfter < 2 {
+		t.Errorf("expected >=2 resumes after the opener (flush lag + backoff), got %d; calls=%v", resumesAfter, calls)
+	}
+}
+
+// TestBridgeAttachResumeErrorNoOpener pins the resume-error gate: a resume failure that is NOT
+// the zero-turn no-rollout case (here thread-not-found) must SURFACE, and the bridge must NOT
+// run an opener turn on a thread the server genuinely does not have. Deleting the old
+// zero-turn test orphaned this branch (its only feeder); this is its dedicated pin. Fails
+// under the widened gate (open on any resume error).
+func TestBridgeAttachResumeErrorNoOpener(t *testing.T) {
+	oldW, oldD := openerWait, resumeRetryDelay
+	openerWait, resumeRetryDelay = 50*time.Millisecond, time.Millisecond // keep the mutant fast
+	defer func() { openerWait, resumeRetryDelay = oldW, oldD }()
+
+	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		if req["method"] == "thread/resume" {
+			s.replyErr(req["id"], -32600, "thread not found")
+			return
+		}
+		s.reply(req["id"], map[string]any{})
+	})
+	b := bridgeOn(t, f, "GHOST")
+	if err := b.attach(); err == nil {
+		t.Fatal("a non-rollout resume error must surface, not be opened over")
+	}
+	if slices.Contains(f.recorded(), "turn/start") {
+		t.Errorf("attach ran an opener on a non-rollout resume error: %v", f.recorded())
 	}
 }
 

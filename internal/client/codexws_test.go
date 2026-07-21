@@ -85,6 +85,38 @@ func startFakeCodexStrict(t *testing.T, handle func(s *fakeSrv, req map[string]a
 	return startFakeCodexOpt(t, handle, true)
 }
 
+// startFakeCodexAdopt models a zero-turn adopted thread with ASYNC rollout persistence,
+// reproducing the F1 race the synchronous fake hid: thread/resume returns -32600 no-rollout
+// until MORE than flushAfter resume attempts have followed the opener turn/start (the rollout
+// is written lazily), and turn/start emits status active then idle so the bridge can observe
+// opener completion without a subscription. flushAfter is the delay knob; 0 = resumable on the
+// first post-opener attempt, higher = more flush lag the backoff must ride out. The handler
+// runs single-goroutine per connection, so the counters need no lock.
+func startFakeCodexAdopt(t *testing.T, flushAfter int) *fakeCodex {
+	openerStarted := false
+	resumeAfterOpener := 0
+	return startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		switch req["method"] {
+		case "thread/resume":
+			if openerStarted {
+				resumeAfterOpener++
+			}
+			if openerStarted && resumeAfterOpener > flushAfter {
+				s.reply(req["id"], map[string]any{}) // rollout finally flushed
+			} else {
+				s.replyErr(req["id"], -32600, "no rollout found for thread")
+			}
+		case "turn/start":
+			openerStarted = true
+			s.reply(req["id"], map[string]any{"turn": map[string]any{"id": "OPENER"}})
+			s.notify("thread/status/changed", map[string]any{"status": map[string]any{"type": "active"}})
+			s.notify("thread/status/changed", map[string]any{"status": map[string]any{"type": "idle"}})
+		default:
+			s.reply(req["id"], map[string]any{})
+		}
+	})
+}
+
 func startFakeCodexOpt(t *testing.T, handle func(s *fakeSrv, req map[string]any), requireInit bool) *fakeCodex {
 	t.Helper()
 	f := &fakeCodex{sock: shortSock(t), handle: handle, requireInit: requireInit}
