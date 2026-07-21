@@ -1,5 +1,71 @@
 # Changelog (detailed)
 
+## [2026-07-21 06:22:02 UTC] [Docs] design-space.md — store/transport rationale captured
+
+[Attempt #1]
+
+Docs-only. A design-review thread (2026-07-20/21, v0.7.0 era) stress-tested the
+store/transport choices against the standard alternatives; this capture makes
+the analysis durable so the next reviewer starts from conclusions instead of
+re-deriving them. Doc written via the topic-capture skill, deep-dive mode: two
+discovery agents mapped overlap in the existing docs and symbol-verified every
+code claim before writing.
+
+[Files Changed]
+- `docs/architecture/design-space.md` — NEW. Six sections: (1) the three
+  constraints that pin the design (durable store-and-forward by construction /
+  no daemon / Monitor stdout-or-ws boundary) with a table of which constraint
+  each alternative breaks; (2) the idle-poll cost ledger (~12-15 syscalls/s,
+  page-cache hot, ~0.003% core; latency priced against LLM turnaround) and the
+  kqueue/fsnotify rejection; (3) the --steal takeover cadence (identityEvery ×
+  followPoll ≈ 1s window, duplicates-never-loss, opt-in-not-last-wins, R-B
+  no-lock ruling); (4) the harness truncation boundary (cbus rejects-never-
+  truncates at MaxMessageBytes; the two measured caps differ in kind —
+  per-line is cooperative/dodgeable via BodyWrap, per-notification is hard —
+  and the mark-and-fetch-vs-fragment ruling) plus the size-funnel table
+  (1 MiB → ~128 KiB argv → ~3 KB displayed); (5) rejected alternatives — local
+  ws broker (the relay is the priced bill), p2p ws (no such protocol mode;
+  asynchrony dies), RPC/IPC family (FIFOs/mq/shm/D-Bus/XPC each fail a
+  constraint; RPC is the wrong shape — schema + deadline vs freeform + none),
+  SQLite (no cross-process notification, one lock domain vs per-peer failure
+  domains, glass-box store is load-bearing), Redis (Streams ≈ native superset
+  of the M4 machinery incl. XAUTOCLAIM ≈ --steal, but daemon returns and
+  durability inverts to configuration); (6) reopen triggers (no-LLM traffic,
+  hundreds of peers, sub-100ms fan-out, history-as-asset → SQLite index
+  beside the store, not instead of it).
+- `docs/architecture/overview.md` — companion-documents list gains the
+  design-space.md line (between prior-art and cutover-decision-package).
+- `docs/prior-art-and-cc-internals.md` — §5 Pointers gains a lead entry
+  pointing to the new doc as the forward-looking companion to §3/§4.
+- `simple_changelog.md` / `detailed_changelog.md` — this entry.
+
+[Possible Ripple Effects]
+- None functional (no code touched). Doc-graph only: design-space.md links
+  behavior-spec §8.6/8.7, protocol §4/§13, prior-art §3/§4, overview §5; those
+  anchors are section numbers, so renumbering any of them would orphan links.
+- The doc cites symbols (followPoll, identityEvery, rotated, LocalSend,
+  appendInbox, handleSend, Reframe, spool Write) rather than line numbers, so
+  it survives edits but a rename of any of those would need a doc sweep.
+
+[Testing Notes]
+- scan-references.sh validated all 6 code-path references (internal/client{,/
+  follow.go,/presence.go,/send.go}, internal/core/frame.go,
+  relay/internal/spool/spool.go).
+- Symbol verification by discovery agent this session: appendInbox is in
+  presence.go (NOT store.go — corrected before writing), opens
+  O_APPEND|O_CREATE|O_WRONLY with a single write; relay handleSend uses
+  http.MaxBytesReader(core.MaxMessageBytes) at relay/cmd/cbus-relay/main.go;
+  spool.Write is Maildir tmp→new.
+- Not committed — awaiting Carlos's call per repo practice.
+- Post-review fixes (parent session review over the bus, verified against
+  code): (1) the truncation-detection redundancy claim scoped honestly —
+  triple on the relay path, double on local (the ⚠ marker is Reframe-only;
+  LocalEmit adds no oversize warning), with the harness ...(truncated) leg
+  flagged as a revocable 2026-07-13 delta; (2) the idle cost ledger labeled
+  derived-from-loop-shape-not-measured and corrected to include the 5 sleep
+  wakeups (~20 syscalls/s all-in, was ~12-15); (3) the FIFO kernel-buffer
+  figure platform-qualified (16-64 KiB, was Linux-only 64 KB).
+
 ## [2026-07-20 03:51:31 UTC] [Client] v0.7.0 — M6 deprecation-drop: closes cbus-8k9.4
 
 [Attempt #1]
