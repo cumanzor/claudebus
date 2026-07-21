@@ -88,6 +88,38 @@ func TestCodexRemoteArgs(t *testing.T) {
 	}
 }
 
+// TestCodexRemoteEnvScrubsLauncherIds pins the identity fix: the codex TUI env must have the
+// whole SessionID() chain scrubbed (so codex's cbus commands cannot inherit and speak as the
+// launcher) and CBUS_ALIAS/CBUS_CHANNEL set (so they self-identify as the peer). Unrelated env
+// survives.
+func TestCodexRemoteEnvScrubsLauncherIds(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "LAUNCHER")
+	t.Setenv("CBUS_SESSION_ID", "LAUNCHER2")
+	t.Setenv("GROK_SESSION_ID", "LAUNCHER3")
+	t.Setenv("CBUS_ALIAS", "stale-inherited") // a stale inherited value must be replaced, not kept
+	t.Setenv("CBXWRAP_KEEP", "survivor")
+
+	m := map[string]string{}
+	for _, kv := range codexRemoteEnv("cxch", "cxpeer") {
+		k, v, _ := strings.Cut(kv, "=")
+		m[k] = v
+	}
+	for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID"} {
+		if _, present := m[leaked]; present {
+			t.Errorf("%s leaked into the codex TUI env (must be scrubbed)", leaked)
+		}
+	}
+	if m["CBUS_ALIAS"] != "cxpeer" {
+		t.Errorf("CBUS_ALIAS = %q, want cxpeer (self-identify as the peer)", m["CBUS_ALIAS"])
+	}
+	if m["CBUS_CHANNEL"] != "cxch" {
+		t.Errorf("CBUS_CHANNEL = %q, want cxch", m["CBUS_CHANNEL"])
+	}
+	if m["CBXWRAP_KEEP"] != "survivor" {
+		t.Errorf("unrelated env var not preserved: CBXWRAP_KEEP=%q", m["CBXWRAP_KEEP"])
+	}
+}
+
 // TestThreadStartedInfo: id + cwd are pulled out of a thread/started payload.
 func TestThreadStartedInfo(t *testing.T) {
 	id, cwd := threadStartedInfo([]byte(`{"thread":{"id":"T1","cwd":"/work","name":null}}`))

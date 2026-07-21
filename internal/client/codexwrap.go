@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -66,6 +67,31 @@ func randNonce() (string, error) {
 // discovers the thread itself.
 func codexRemoteArgs(sock string, passthrough []string) []string {
 	return append([]string{"--remote", "unix://" + sock}, passthrough...)
+}
+
+// codexRemoteEnv is the environment for the codex --remote TUI: the launcher's env with the
+// session-id vars SCRUBBED and CBUS_ALIAS/CBUS_CHANNEL SET. Scrubbing is the identity fix
+// (cbus-6ij.4, found live): the codex model runs shell commands that inherit this env, and a
+// leaked launcher CLAUDE_CODE_SESSION_ID / CBUS_SESSION_ID / GROK_SESSION_ID would make its
+// `cbus send` resolve the LAUNCHER's registration and speak with spoofed provenance. With the
+// whole SessionID() chain gone, cbus falls to the CBUS_ALIAS path and the codex peer
+// self-identifies as itself. The thread id is unknown at spawn (discovery completes later), so
+// alias-based identity is the mechanism, not a session-id env.
+func codexRemoteEnv(channel, alias string) []string {
+	drop := map[string]bool{
+		"CLAUDE_CODE_SESSION_ID": true,
+		"CBUS_SESSION_ID":        true,
+		"GROK_SESSION_ID":        true,
+		"CBUS_ALIAS":             true, // set below; drop any inherited value first
+		"CBUS_CHANNEL":           true,
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); !drop[k] {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "CBUS_ALIAS="+alias, "CBUS_CHANNEL="+channel)
 }
 
 // threadStartedInfo pulls the thread id and cwd out of a thread/started notification.
@@ -179,8 +205,11 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 		return fmt.Errorf("initialize discovery connection: %w", err)
 	}
 
-	// 3. the TUI, attached to the app-server; it takes over the terminal. No hook, no CBUS env.
+	// 3. the TUI, attached to the app-server; it takes over the terminal. The env scrubs the
+	//    launcher session-ids and sets CBUS_ALIAS so codex's own cbus commands self-identify as
+	//    the peer, not the launcher (the identity leak found live).
 	tui := exec.Command("codex", codexRemoteArgs(sock, passthrough)...)
+	tui.Env = codexRemoteEnv(channel, alias)
 	tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := tui.Start(); err != nil {
 		return fmt.Errorf("start codex --remote: %w", err)
