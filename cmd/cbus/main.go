@@ -117,7 +117,9 @@ func runSend(args []string) int {
 	if len(args) == 0 {
 		return die("usage: cbus send <target> [--from ch/al] [--force] TEXT")
 	}
-	warnIfSessionless()
+	// warnIfSessionless lives in the sub-handlers, AFTER a --session-id override is
+	// applied — evaluating it here would print a false sessionless warning for a send
+	// that supplies its own id.
 	if client.IsRemote(args[0]) {
 		return runSendRemote(args)
 	}
@@ -128,10 +130,14 @@ func runSendLocal(args []string) int {
 	target := args[0]
 	// unknown --flags are NOT strict here: a message body may legitimately start with
 	// '-' (and `--` terminates option parsing — the ruled delta).
-	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true}, map[string]bool{"--force": true}, false)
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true, "--session-id": true}, map[string]bool{"--force": true}, false)
 	if err != nil {
 		return die("%v", err)
 	}
+	if sid, ok := p.has("--session-id"); ok && sid != "" {
+		defer client.OverrideSessionID(sid)()
+	}
+	warnIfSessionless()
 	from, fromSet := p.has("--from")
 	force := p.flags["--force"]
 	if fromSet && from == "" {
@@ -162,10 +168,14 @@ func runSendRemote(args []string) int {
 	}
 	// --force is accepted but ignored remotely (the spool always queues); `--`
 	// terminates option parsing (ruled delta) so a body may start with '-'.
-	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true}, map[string]bool{"--force": true}, false)
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--from": true, "--session-id": true}, map[string]bool{"--force": true}, false)
 	if err != nil {
 		return die("%v", err)
 	}
+	if sid, ok := p.has("--session-id"); ok && sid != "" {
+		defer client.OverrideSessionID(sid)()
+	}
+	warnIfSessionless()
 	from, fromSet := p.has("--from")
 	// an explicit empty --from dies (bash ${2:?} null-check) rather than silently
 	// falling back to the default — that would mask an unset-$VAR scripting bug.
@@ -326,6 +336,24 @@ func extractForkFlags(args []string) (model, name string, rest []string, err err
 		return "", "", nil, err
 	}
 	return model, name, rest, nil
+}
+
+// applySessionIDFlag pulls a `--session-id VALUE` pair out of args (anywhere, via
+// extractFlag) and applies it as the in-process session override, returning the remaining
+// args and a restore func the caller defers. The override outranks the $*_SESSION_ID env
+// chain, so a hook or a scripted multi-session driver can act as a named session without
+// exporting one. Absent or empty flag => a no-op restore. Used by the identity-recording
+// verbs (join/leave/rename); send threads it through splitVerbArgs so a message body may
+// still contain the literal token.
+func applySessionIDFlag(args []string) (rest []string, restore func(), err error) {
+	sid, rest, err := extractFlag(args, "--session-id")
+	if err != nil {
+		return nil, func() {}, err
+	}
+	if sid == "" {
+		return rest, func() {}, nil
+	}
+	return rest, client.OverrideSessionID(sid), nil
 }
 
 func runBranch(args []string) int {
@@ -589,6 +617,11 @@ func runInbox(args []string) int {
 }
 
 func runJoin(args []string) int {
+	args, restore, err := applySessionIDFlag(args)
+	if err != nil {
+		return die("%v", err)
+	}
+	defer restore()
 	if len(args) == 0 {
 		return die("usage: cbus join <channel> [alias]")
 	}
@@ -621,6 +654,11 @@ func runJoin(args []string) int {
 }
 
 func runLeave(args []string) int {
+	args, restore, err := applySessionIDFlag(args)
+	if err != nil {
+		return die("%v", err)
+	}
+	defer restore()
 	if err := noExtra(args, 1, "usage: cbus leave [channel]"); err != nil {
 		return die("%v", err)
 	}
@@ -650,6 +688,11 @@ func runLeave(args []string) int {
 }
 
 func runRename(args []string) int {
+	args, restore, err := applySessionIDFlag(args)
+	if err != nil {
+		return die("%v", err)
+	}
+	defer restore()
 	if len(args) == 0 {
 		return die("usage: cbus rename <new-alias> [channel]")
 	}
