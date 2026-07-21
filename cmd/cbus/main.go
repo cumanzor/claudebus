@@ -92,6 +92,8 @@ func run(args []string) int {
 		return runSpawn(args[1:])
 	case "formation": // post-cutover Go-native verb — no bash counterpart
 		return runFormation(args[1:])
+	case "codex-bridge": // cbus-6ij.4: bridge a codex app-server thread to a cbus inbox
+		return runCodexBridge(args[1:])
 	case "install-commands": // cbus-7sg: write the embedded /bus-* skills to ~/.claude/commands
 		return runInstallCommands(args[1:])
 	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
@@ -276,6 +278,38 @@ func runHookCompact(args []string) int {
 	}
 	if err := client.HookCompact(phase, os.Stdin); err != nil {
 		fmt.Fprintf(os.Stderr, "cbus: hook-compact: %v\n", err)
+	}
+	return 0
+}
+
+// runCodexBridge wires `cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]`. The peer
+// must already be joined (the bridge arms as its listener); --thread adopts an existing
+// codex thread, and its absence makes the bridge create one. Blocks in the follower loop.
+func runCodexBridge(args []string) int {
+	const use = "usage: cbus codex-bridge <channel>/<alias> --sock PATH [--thread ID]"
+	sock, args, err := extractFlag(args, "--sock")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	thread, args, err := extractFlag(args, "--thread")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if len(args) == 0 {
+		return die("%s", use)
+	}
+	if err := noExtra(args, 1, use); err != nil {
+		return die("%v", err)
+	}
+	if sock == "" {
+		return die("--sock PATH is required (%s)", use)
+	}
+	if client.IsRemote(args[0]) {
+		return die("codex-bridge is local-only (a codex app-server is a local UDS)")
+	}
+	warnIfSessionless()
+	if err := client.RunCodexBridge(args[0], sock, thread); err != nil {
+		return die("%v", err)
 	}
 	return 0
 }

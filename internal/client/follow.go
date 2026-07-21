@@ -40,6 +40,14 @@ func InboxPath(ch, al string) string {
 // recorded just below is still the follower's pid, for the simpler reason that it
 // never stopped being this process.
 func ArmLocalTail(target string, steal bool) error {
+	return armLocalTailTo(target, steal, writerSink{os.Stdout})
+}
+
+// armLocalTailTo is ArmLocalTail with the follower's output as a seam: writerSink{os.Stdout}
+// for the CLI tail, a codexSink for `cbus codex-bridge`. Arming, the displacement gate,
+// cursor/replay resolution and listener identity are all identical — only where the framed
+// events go differs, so a bridge is a tail whose frames become codex turns.
+func armLocalTailTo(target string, steal bool, sink frameSink) error {
 	ch, al, err := ParseLocal(target)
 	if err != nil {
 		return err
@@ -85,8 +93,42 @@ func ArmLocalTail(target string, steal bool) error {
 	// migration rule reads the PREVIOUS value to tell an upgraded peer from a fresh one.
 	resume := resolveResume(inbox, metaPath)
 	armMeta(metaPath, start) // listenerPid=own pid, listenerStart, ownerPid, lastActivity
-	RunFollower(inbox, resume, &listenerIdentity{pid: os.Getpid(), start: start, metaPath: metaPath})
+	follow(inbox, resume, &listenerIdentity{pid: os.Getpid(), start: start, metaPath: metaPath}, sink, followPoll, nil)
 	return nil // the follower ended: displaced, renamed, re-joined or unregistered
+}
+
+// frameSink receives each frame the follower emits, tagged with the KIND the follower knows
+// before rendering: "" for a chat message, "presence" for a presence event, kindDormant for
+// the tail-ended marker. every presence event (join/leave/departed/compact-*/rename) carries
+// the same kind "presence" — the event field, not the kind, is what distinguishes them
+// (presence.go sets Kind: "presence" for all of them), so the sink routes on kind alone. the
+// CLI tail (writerSink) writes the rendered bytes to stdout and ignores the kind; the codex
+// bridge routes on it. passing the kind here is the C4 fix: re-deriving it from the rendered
+// head let a spoofed --from fake " kind=presence".
+type frameSink interface {
+	emit(kind string, rendered []byte)
+}
+
+// kindDormant tags the dormancy marker so a sink can format it, while still delivering it
+// (C6): a peer whose tail ended must learn its delivery stopped. It is an internal tag, never
+// a wire kind — no inbox message carries it.
+const kindDormant = "dormant"
+
+// writerSink adapts an io.Writer to a frameSink by writing the rendered bytes and dropping
+// the kind, so the stdout tail path is byte-for-byte what it always was.
+type writerSink struct{ w io.Writer }
+
+func (s writerSink) emit(_ string, rendered []byte) { _, _ = s.w.Write(rendered) }
+
+// frameKind reads the kind off a raw inbox line. A chat message has no kind field ("");
+// presence events set kind "presence". A non-JSON / torn line yields "" and is treated as a
+// message — never silently dropped.
+func frameKind(line []byte) string {
+	var m struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(line, &m)
+	return m.Kind
 }
 
 // armMeta records this process as the peer's listener: listenerPid=own pid,
@@ -114,24 +156,13 @@ func armMeta(metaPath, start string) {
 	_ = writeMeta(filepath.Dir(metaPath), m)
 }
 
-// RunFollower is the blocking local tail: it streams framed inbox events to stdout,
-// one write per frame. ArmLocalTail calls it directly, in this process.
-//
-// It returns in exactly one case: this process stopped being the recorded listener, so
-// the follower went dormant (see listenerIdentity). Everything else is still followed
-// forever — a vanished inbox is polled until it returns, a rotation is followed like
-// tail -F, and the Monitor stopping it means killing the process.
-func RunFollower(inbox string, resume resumePoint, id *listenerIdentity) {
-	follow(inbox, resume, id, os.Stdout, followPoll, nil)
-}
-
 // follow is the follower loop. It is the counterpart of the embedded python follower
 // (bin/cbus:552-577): open + optional seek-to-EOF, then readline/pend/emit with a
-// poll+rotation tail. Framing is core.LocalEmit — one write+flush per frame (the
-// Monitor batches the frame's lines into one notification). out/poll/stop are seams:
-// production passes os.Stdout, followPoll, and a nil stop (never stops); tests inject
-// a buffer, a fast poll, and a stop channel.
-func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Writer, poll time.Duration, stop <-chan struct{}) {
+// poll+rotation tail. Framing is core.LocalEmit — one emit per frame (the Monitor batches
+// the frame's lines into one notification). sink/poll/stop are seams: production passes
+// writerSink{os.Stdout} (or a codexSink), followPoll, and a nil stop (never stops); tests
+// inject a writerSink over a buffer, a fast poll, and a stop channel.
+func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSink, poll time.Duration, stop <-chan struct{}) {
 	f, ok := openFollow(inbox, resume, poll, stop)
 	if !ok {
 		return // only reachable via stop (test); production openFollow retries forever
@@ -162,7 +193,7 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 			pend += chunk
 			if strings.HasSuffix(pend, "\n") {
 				if frame := core.LocalEmit([]byte(pend)); frame != nil {
-					_, _ = out.Write(frame) // one write per frame
+					sink.emit(frameKind([]byte(pend)), frame) // one emit per frame; kind from the raw line
 				}
 				pend = ""
 			}
@@ -194,7 +225,7 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 		idleTicks++
 		if boundary != lastSaved || idleTicks >= identityEvery {
 			if d := identityCause(id); d.cause != stillListener {
-				_, _ = out.Write([]byte(d.marker()))
+				sink.emit(kindDormant, []byte(d.marker()))
 				return // one-way door (R14): dormancy is never re-entered
 			}
 			if boundary != lastSaved {
@@ -213,7 +244,7 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, out io.Write
 			// may belong to a DIFFERENT peer that reclaimed this path. Check before
 			// reopening, never after, so a stranger's bytes are never read at all.
 			if d := identityCause(id); d.cause != stillListener {
-				_, _ = out.Write([]byte(d.marker()))
+				sink.emit(kindDormant, []byte(d.marker()))
 				return
 			}
 			f.Close()

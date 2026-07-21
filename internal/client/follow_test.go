@@ -129,7 +129,7 @@ func startFollowAs(t *testing.T, inbox string, resume resumePoint, id *listenerI
 	buf = &syncBuf{}
 	stop := make(chan struct{})
 	done := make(chan struct{})
-	go func() { defer close(done); follow(inbox, resume, id, buf, 3*time.Millisecond, stop) }()
+	go func() { defer close(done); follow(inbox, resume, id, writerSink{buf}, 3*time.Millisecond, stop) }()
 	running = func() bool {
 		select {
 		case <-done:
