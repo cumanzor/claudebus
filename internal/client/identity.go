@@ -21,9 +21,37 @@ func CBUSDir() string {
 	return filepath.Join(home, ".claude-bus")
 }
 
-// SessionID is this session's $CLAUDE_CODE_SESSION_ID (empty if unset — the
-// sessionless mode, where identity lookups yield nothing).
-func SessionID() string { return os.Getenv("CLAUDE_CODE_SESSION_ID") }
+// sessionOverride is the in-process session id set by OverrideSessionID. It outranks
+// every env var in SessionID(): a hook or a --session-id caller names the session it
+// acts as, and a stray exported CBUS_SESSION_ID must not shadow that. Not goroutine-safe
+// — the CLI is single-threaded per invocation and the hooks call it straight-line.
+var sessionOverride string
+
+// OverrideSessionID pins the in-process session id to sid and returns a func that
+// restores the previous value. It outranks all env vars in SessionID()'s lookup. An
+// empty sid is a no-op override (SessionID falls back to the env chain), so a caller
+// with nothing to pin can call it unconditionally.
+func OverrideSessionID(sid string) (restore func()) {
+	prev := sessionOverride
+	sessionOverride = sid
+	return func() { sessionOverride = prev }
+}
+
+// SessionID is this session's id by an ordered lookup: the in-process override
+// (OverrideSessionID / the --session-id flag), then $CBUS_SESSION_ID (harness-neutral),
+// then $CLAUDE_CODE_SESSION_ID (Claude Code), then $GROK_SESSION_ID (grok). Empty when
+// none is set — the sessionless mode, where identity lookups yield nothing.
+func SessionID() string {
+	if sessionOverride != "" {
+		return sessionOverride
+	}
+	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // LocalReg is one channel/alias this session is registered under.
 type LocalReg struct {

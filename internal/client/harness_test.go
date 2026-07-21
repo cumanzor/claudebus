@@ -91,7 +91,129 @@ func TestHookExitStdinBeatsEnv(t *testing.T) {
 	}
 }
 
+// TestHookExitCamelCase: a grok-style camelCase sessionId on stdin is decoded (lenient
+// decode) and beats the environment — hook-exit leaves the CAMELID session's reg, not the
+// env one, proving the camel field is read rather than the env fallback.
+func TestHookExitCamelCase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "CAMELID")
+	if _, _, err := Join("chA", ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "ENVID") // env now points elsewhere
+	HookExit(strings.NewReader(`{"sessionId":"CAMELID"}`))
+	if dirExists(filepath.Join(root, "chA")) {
+		t.Error("hook-exit must decode the camelCase sessionId and leave chA")
+	}
+}
+
+// TestHookExitBothFieldsSnakeWins: given both spellings, hook-exit acts as the snake_case
+// session (the Claude Code / codex spelling), leaving ITS registration and sparing the
+// camelCase one.
+func TestHookExitBothFieldsSnakeWins(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "SNAKEID")
+	if _, _, err := Join("snakeCh", ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "CAMELID")
+	if _, _, err := Join("camelCh", ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "ENVID")
+	HookExit(strings.NewReader(`{"session_id":"SNAKEID","sessionId":"CAMELID"}`))
+	if dirExists(filepath.Join(root, "snakeCh")) {
+		t.Error("hook-exit must leave the snake_case session (SNAKEID)")
+	}
+	if !dirExists(filepath.Join(root, "camelCh")) {
+		t.Error("hook-exit must NOT touch the camelCase session (CAMELID) when snake_case is present")
+	}
+}
+
+// TestHookExitStdinBeatsStrayCbusEnv pins gate-(a): the trap the override closes. A stray
+// exported CBUS_SESSION_ID ranks ABOVE CLAUDE_CODE_SESSION_ID in SessionID(), so the old
+// os.Setenv(CLAUDE_CODE_SESSION_ID, sid) round-trip would leave the STRAY session's
+// registrations instead of the hook's. The override outranks every env, so hook-exit acts
+// as its stdin sid regardless. Fails under the os.Setenv mechanism.
+func TestHookExitStdinBeatsStrayCbusEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "")
+	t.Setenv("GROK_SESSION_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "STDINID") // register the peer under STDINID
+	if _, _, err := Join("chA", ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CBUS_SESSION_ID", "STRAY") // now a stray var outranks CLAUDE_CODE_SESSION_ID
+	HookExit(strings.NewReader(`{"session_id":"STDINID"}`))
+	if dirExists(filepath.Join(root, "chA")) {
+		t.Error("hook-exit must leave the STDIN session (STDINID); a stray CBUS_SESSION_ID must not shadow the hook sid")
+	}
+}
+
+// TestHookInputSid: the lenient decode resolves session_id / sessionId, snake winning when
+// both are present, and yields "" for an absent field or non-JSON.
+func TestHookInputSid(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`{"session_id":"SNAKE","sessionId":"CAMEL"}`, "SNAKE"},
+		{`{"session_id":"SNAKE"}`, "SNAKE"},
+		{`{"sessionId":"CAMEL"}`, "CAMEL"},
+		{`{"trigger":"auto"}`, ""},
+		{`{}`, ""},
+		{`not json at all`, ""},
+	} {
+		if got := readHookInput(strings.NewReader(tc.in)).sid(); got != tc.want {
+			t.Errorf("sid(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // ---- hook-compact ----------------------------------------------------------------
+
+// TestHookCompactCamelCase: a camelCase sessionId reaches ResolveSelf (via the override)
+// and broadcasts, decoded rather than taken from the divergent env.
+func TestHookCompactCamelCase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "CAMELID")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "ENVID") // env points elsewhere
+	if err := HookCompact("pre", strings.NewReader(`{"sessionId":"CAMELID","trigger":"auto"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(compactEvents(readPeerInbox(t, root, "chA", "watcher"))); n != 1 {
+		t.Errorf("camelCase-stdin compact delivered %d events, want 1 (camelCase not decoded, or env used)", n)
+	}
+}
+
+// TestHookCompactStdinBeatsStrayCbusEnv is the gate-(a) mirror for compaction: a stray
+// CBUS_SESSION_ID must not shadow the hook's stdin sid, so the notice reaches the STDINID
+// session's channel watcher and no other. Fails under the os.Setenv round-trip (which sets
+// CLAUDE_CODE_SESSION_ID, outranked by the stray CBUS_SESSION_ID -> ResolveSelf finds
+// nothing under STRAY and broadcasts zero events).
+func TestHookCompactStdinBeatsStrayCbusEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "")
+	t.Setenv("GROK_SESSION_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "STDINID")
+	seedMeta(t, root, "chA", "watcher", "OTHER")
+	if _, _, err := Join("chA", "me"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CBUS_SESSION_ID", "STRAY")
+	if err := HookCompact("pre", strings.NewReader(`{"session_id":"STDINID","trigger":"auto"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(compactEvents(readPeerInbox(t, root, "chA", "watcher"))); n != 1 {
+		t.Errorf("compact must broadcast under the stdin sid (STDINID), got %d events; a stray CBUS_SESSION_ID shadowed the hook sid", n)
+	}
+}
 
 // readPeerInbox decodes a peer's inbox.jsonl. A missing inbox is no lines, not a failure —
 // several cases assert that nothing was delivered at all.
