@@ -26,16 +26,12 @@ func HookExit(stdin io.Reader) {
 	if sid == "" {
 		return
 	}
-	// bash runs cmd_leave in a subshell with CLAUDE_CODE_SESSION_ID exported (and a
-	// "not joined" die contained to that subshell); Leave reads the id via SessionID().
-	prev, had := os.LookupEnv("CLAUDE_CODE_SESSION_ID")
-	_ = os.Setenv("CLAUDE_CODE_SESSION_ID", sid)
+	// override, not os.Setenv: with CBUS_SESSION_ID ranked ahead of CLAUDE_CODE_SESSION_ID
+	// in SessionID(), a stray exported CBUS_SESSION_ID would shadow the hook's sid and the
+	// hook would leave the WRONG session's registrations. The override outranks every env;
+	// Leave reads the id via SessionID().
+	defer OverrideSessionID(sid)()
 	_, _ = Leave("") // local registrations only; a "not joined" error is ignored
-	if had {
-		_ = os.Setenv("CLAUDE_CODE_SESSION_ID", prev)
-	} else {
-		_ = os.Unsetenv("CLAUDE_CODE_SESSION_ID")
-	}
 }
 
 // HookCompact runs the PreCompact/PostCompact hooks: it tells every LOCAL channel this
@@ -55,22 +51,17 @@ func HookCompact(phase string, stdin io.Reader) error {
 		return fmt.Errorf("phase must be pre|post, got %q", phase)
 	}
 	in := readHookInput(stdin)
-	sid := in.SessionID
+	sid := in.sid()
 	if sid == "" {
-		sid = os.Getenv("CLAUDE_CODE_SESSION_ID")
+		sid = SessionID() // env-chain fallback; the hook env may not export any id
 	}
 	if sid == "" {
 		return nil
 	}
-	// ResolveSelf reads the id via SessionID(); the hook env may not export it.
-	prev, had := os.LookupEnv("CLAUDE_CODE_SESSION_ID")
-	_ = os.Setenv("CLAUDE_CODE_SESSION_ID", sid)
+	// override, not os.Setenv (see HookExit): ResolveSelf reads the id via SessionID().
+	restore := OverrideSessionID(sid)
 	regs := ResolveSelf()
-	if had {
-		_ = os.Setenv("CLAUDE_CODE_SESSION_ID", prev)
-	} else {
-		_ = os.Unsetenv("CLAUDE_CODE_SESSION_ID")
-	}
+	restore()
 	text := compactText(phase, in.Trigger)
 	for _, reg := range regs {
 		BroadcastPresence(reg.Channel, reg.Alias, "compact-"+phase, text, reg.Alias)
@@ -97,10 +88,22 @@ func compactText(phase, trigger string) string {
 
 // hookInput is the subset of a hook's stdin JSON the harness reads. Payloads differ per
 // event (trigger is PreCompact/PostCompact only), every field is optional, and a
-// non-JSON payload yields the zero value — a hook must never fail on its input.
+// non-JSON payload yields the zero value — a hook must never fail on its input. The
+// session id is read under BOTH spellings: session_id (Claude Code, codex) and sessionId
+// (grok's camelCase); sid() resolves the two.
 type hookInput struct {
-	SessionID string `json:"session_id"`
-	Trigger   string `json:"trigger"` // PreCompact/PostCompact: manual|auto
+	SessionID      string `json:"session_id"`
+	SessionIDCamel string `json:"sessionId"`
+	Trigger        string `json:"trigger"` // PreCompact/PostCompact: manual|auto
+}
+
+// sid returns the hook's session id, snake_case winning over camelCase when a payload
+// carries both — session_id is the documented Claude Code / codex spelling.
+func (in hookInput) sid() string {
+	if in.SessionID != "" {
+		return in.SessionID
+	}
+	return in.SessionIDCamel
 }
 
 func readHookInput(stdin io.Reader) hookInput {
@@ -110,13 +113,13 @@ func readHookInput(stdin io.Reader) hookInput {
 	return in
 }
 
-// hookSessionID reads {"session_id":...} off the hook's stdin (tolerant of any
-// non-JSON / missing-field payload), falling back to the environment.
+// hookSessionID reads the session id off the hook's stdin under either spelling (tolerant
+// of any non-JSON / missing-field payload), falling back to the SessionID() env chain.
 func hookSessionID(stdin io.Reader) string {
-	if sid := readHookInput(stdin).SessionID; sid != "" {
+	if sid := readHookInput(stdin).sid(); sid != "" {
 		return sid
 	}
-	return os.Getenv("CLAUDE_CODE_SESSION_ID")
+	return SessionID()
 }
 
 // ForkSpec is the terminal-agnostic description of a forked child session: what to
