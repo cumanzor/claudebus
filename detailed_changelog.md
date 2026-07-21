@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-07-21 23:43:53 UTC] [Fix] codex identity leak — spoofed provenance from an inherited launcher session-id env
+
+[Attempt #1]
+
+Found by the tranche-A live dogfood smoke, run immediately after gate PASS
+(per the plan recorded at task creation: "join a live codex peer to this
+same harness channel as the integration's own smoke test"). The
+wrapper-launched codex peer joined the real "harness" formation channel as
+`harness/codex`; the bridge armed and delivered a message into its TUI, the
+model ran the requested `cbus send` — and the reply landed on the bus as
+`harness/orchestrator`, not `harness/codex`.
+
+[Files Changed]
+- `internal/client/codexwrap.go`, `internal/client/codexwrap_test.go`
+  (5ad7ff2) — `codex --remote` runs shell commands (`cbus` among them) that
+  inherit the wrapper process's environment. If the wrapper's own launcher
+  had `CLAUDE_CODE_SESSION_ID`, `CBUS_SESSION_ID`, or `GROK_SESSION_ID` set,
+  codex's own `cbus send` resolved through `SessionID()`'s ordered lookup
+  (cbus-6ij.1) straight to the LAUNCHER's registration — a session-identity
+  seam built for harness-neutral hooks became a spoofing vector for a
+  wrapper-launched peer with a shell in the loop. `codexRemoteEnv` now
+  scrubs the entire `SessionID()` chain from the TUI's env and pins
+  `CBUS_ALIAS`/`CBUS_CHANNEL`, so codex's `cbus` invocations fall through to
+  the alias path and self-identify as the peer instead. The bridge's own
+  thread id isn't known yet at TUI spawn time (discovery via the passive
+  connection finishes after launch, per d8ef18a), so alias identity is the
+  only mechanism available here, not a session-id override.
+
+[Possible Ripple Effects]
+- Recorded v1 limitation, not fixed here: `--from` on a codex-originated
+  send resolves to the bare alias (the pre-existing `CBUS_ALIAS` fallback),
+  not a richer per-thread identity. Acceptable for a single wrapper-owned
+  peer; would need revisiting if a wrapper ever manages multiple codex
+  threads concurrently.
+- The same inherited-env shape could recur for any future wrapper that
+  shells out on behalf of a launched peer; the scrub-and-pin pattern in
+  `codexRemoteEnv` is the model to reuse rather than re-deriving it.
+
+[Testing Notes]
+- Found live, not by a written probe or a reviewer read — the dogfood smoke
+  is what caught it, underscoring why the field-experiment step was kept in
+  the plan rather than treated as optional polish after the gate.
+- Coder-run pre-commit: full `go test ./...` green, `-race` clean,
+  `GOOS=linux` amd64 and arm64 built, working tree byte-identical to HEAD
+  after verify. No session trailer, conventional commit format. Standalone
+  commit on top of tranche A (8da523c, 9ae66d6, d8ef18a); not pushed.
+- Re-verification against the live `harness/codex` peer is the next step to
+  confirm the fix closes the leak end to end (not yet reported as of this
+  entry).
+
 ## [2026-07-21 23:34:19 UTC] [Client/Multi-harness] cbus-6ij.4 tranche A — Codex CLI as a first-class bus peer (increment 4)
 
 [Attempt #1]
