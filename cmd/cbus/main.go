@@ -84,6 +84,8 @@ func run(args []string) int {
 		return runHookExit()
 	case "hook-compact": // PreCompact/PostCompact hooks: announce compaction (never fails the session)
 		return runHookCompact(args[1:])
+	case "hook-join": // cbus-6ij.4: SessionStart hook — harness-neutral auto-join (never fails the session)
+		return runHookJoin()
 	case "bootstrap":
 		return runBootstrap(args[1:])
 	case "branch":
@@ -94,6 +96,8 @@ func run(args []string) int {
 		return runFormation(args[1:])
 	case "codex-bridge": // cbus-6ij.4: bridge a codex app-server thread to a cbus inbox
 		return runCodexBridge(args[1:])
+	case "codex": // cbus-6ij.4: launch a codex --remote TUI as a first-class cbus peer
+		return runCodexWrap(args[1:])
 	case "install-commands": // cbus-7sg: write the embedded /bus-* skills to ~/.claude/commands
 		return runInstallCommands(args[1:])
 	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
@@ -278,6 +282,38 @@ func runHookCompact(args []string) int {
 	}
 	if err := client.HookCompact(phase, os.Stdin); err != nil {
 		fmt.Fprintf(os.Stderr, "cbus: hook-compact: %v\n", err)
+	}
+	return 0
+}
+
+// runHookJoin runs the SessionStart hook: auto-join $CBUS_CHANNEL under the stdin session id
+// (alias $CBUS_ALIAS or auto), optionally writing the id to $CBUS_CODEX_RENDEZVOUS. It ALWAYS
+// returns 0 and writes NOTHING to stdout — a SessionStart hook must never fail the session and
+// its stdout is parsed as hook directives.
+func runHookJoin() int {
+	client.HookJoin(os.Stdin, os.Getenv("CBUS_CHANNEL"), os.Getenv("CBUS_ALIAS"), os.Getenv("CBUS_CODEX_RENDEZVOUS"))
+	return 0
+}
+
+// runCodexWrap wires `cbus codex [--channel CH] [--alias AL] [codex args...]`: it launches a
+// codex --remote TUI as a bus peer and blocks until it exits. --channel defaults to the git
+// repo name; --alias defaults to "codex" (the wrapper must know the alias to bridge it).
+// Remaining args pass through to codex.
+func runCodexWrap(args []string) int {
+	const use = "usage: cbus codex [--channel CH] [--alias AL] [codex args...]"
+	channel, args, err := extractFlag(args, "--channel")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	alias, args, err := extractFlag(args, "--alias")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if alias == "" {
+		alias = "codex"
+	}
+	if err := client.RunCodexWrap(channel, alias, args); err != nil {
+		return die("%v", err)
 	}
 	return 0
 }

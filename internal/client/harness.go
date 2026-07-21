@@ -69,6 +69,35 @@ func HookCompact(phase string, stdin io.Reader) error {
 	return nil
 }
 
+// HookJoin runs a SessionStart hook: it auto-joins this session to `channel` under its stdin
+// session id, so a fresh harness session registers on the bus BEFORE its first turn. It is
+// harness-neutral — the id is read leniently (session_id or sessionId) and the channel comes
+// from the caller's env (CBUS_CHANNEL), so any harness that fires a SessionStart-shaped hook
+// with the channel set joins. When rendezvous is non-empty it also writes the session id
+// there on success: the codex wrapper reads that to bridge the TUI's OWN thread, since the
+// SessionStart session_id IS the app-server threadId (cbus-6ij.4 A3.0). Best-effort and
+// SILENT — it writes NOTHING to stdout (a hook's stdout is parsed as directives) and never
+// fails the session. alias "" auto-picks.
+func HookJoin(stdin io.Reader, channel, alias, rendezvous string) {
+	if channel == "" {
+		return // no channel: nothing to join
+	}
+	sid := hookSessionID(stdin)
+	if sid == "" {
+		return // sessionless: no identity to record, so no useful registration
+	}
+	defer OverrideSessionID(sid)()
+	if _, _, err := Join(channel, alias); err != nil {
+		return // best-effort; a taken/already-joined error must not fail the session
+	}
+	if rendezvous != "" {
+		// the rendezvous file means "joined, and here is my threadId". Written only on a
+		// successful join; a failure leaves no file, and the wrapper's bounded wait diagnoses
+		// the miss rather than bridging a thread whose alias never registered.
+		_ = os.WriteFile(rendezvous, []byte(sid), 0o600)
+	}
+}
+
 // compactText renders the peer-visible line. A follower renders kind but never the
 // event value, so the text carries the whole meaning on its own. The trigger is an
 // ALLOWLIST of the two documented values, not a passthrough: an arbitrary payload must
