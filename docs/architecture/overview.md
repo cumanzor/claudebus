@@ -18,6 +18,8 @@
 > - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the landscape survey and the
 >   Claude Code internals probes that justified building this at all (the design research, summarized
 >   and kept as the historical record)
+> - [design-space.md](design-space.md) — why append-only files + a polling follower beat
+>   ws/RPC/IPC/SQLite/Redis: the constraint analysis and rejected alternatives
 > - [cutover-decision-package.md](cutover-decision-package.md) — the executed cutover's
 >   decision record and rollback procedure
 > - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash

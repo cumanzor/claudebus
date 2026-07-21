@@ -294,6 +294,10 @@ failure mode. This is a direct application of the ███ gap identified in §
 
 ## 5. Pointers
 
+- [architecture/design-space.md](architecture/design-space.md) — the forward-looking
+  companion to §3/§4: the constraint analysis for the store/transport choices and the
+  rejected alternatives (local ws broker, p2p ws, RPC/IPC, SQLite, Redis), captured
+  from a v0.7.0-era design review.
 - The full landscape write-up this section condenses:
   `█████████████████████████████████████████` from the research session (fork-1)
   — session-scratchpad-ephemeral, not expected to survive; this document is its
