@@ -108,7 +108,7 @@ func TestOwnerFromPidMatchesArgv0(t *testing.T) {
 	// the premise: comm does NOT identify this process as claude
 	if comm, _, err := procParent(owner); err != nil {
 		t.Fatal(err)
-	} else if isClaudeName(comm) {
+	} else if isHarnessComm(commBase(comm)) {
 		t.Skipf("this platform reports comm %q, so the fake cannot exercise the argv path", comm)
 	}
 
