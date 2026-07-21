@@ -1,6 +1,148 @@
 # Changelog (detailed)
 
-## [2026-07-21 06:22:02 UTC] [Docs] design-space.md — store/transport rationale captured
+## [2026-07-21 21:17:31 UTC] [Client/Multi-harness] cbus-6ij.1 — harness-neutral identity + liveness seams (increment 1)
+
+[Attempt #1]
+
+Coder-executed, reviewer-gated, first build increment of the multi-harness
+effort (cbus-6ij epic) to make cbus harness-neutral ahead of the Codex
+integration (cbus-6ij.4). Orchestrated as a dogfooded formation on the
+"harness" cbus channel: orchestrator anchor, coder implements, reviewer gates
+before commit, documenter (this entry) records. Two spec deltas were
+coder-declared and orchestrator-sanctioned before implementation: the hook
+no-stdin-sid fallback resolves through the full `SessionID()` chain rather
+than `CLAUDE_CODE_SESSION_ID` alone (harness-neutral consistency — the
+stray-env trap only applies when stdin carries a sid, which the override
+closes); `warnIfSessionless` relocates to after the `--session-id` override
+so the flag doesn't trigger a false sessionless warning.
+
+[Files Changed]
+- `internal/client/identity.go` (802520e) — `SessionID()` ordered lookup:
+  in-process override > `CBUS_SESSION_ID` > `CLAUDE_CODE_SESSION_ID` >
+  `GROK_SESSION_ID`. New `OverrideSessionID(sid)` returns a restore func and
+  outranks all env.
+- `internal/client/harness.go` (802520e) — `HookExit`/`HookCompact` use the
+  override instead of the `os.Setenv` round-trip, closing the stray-
+  `CBUS_SESSION_ID` shadow trap (ranked ahead of `CLAUDE_CODE_SESSION_ID`, a
+  stray exported var could otherwise shadow a hook's stdin sid). Lenient hook
+  stdin decode: `session_id` (Claude Code, codex) or `sessionId` (grok
+  camelCase), snake wins when both present.
+- `internal/client/harness_test.go`, `internal/client/identity_test.go`
+  (802520e) — ordered-lookup table tests, camelCase hook stdin mirrors,
+  both-fields case.
+- `cmd/cbus/main.go`, `cmd/cbus/usage.go` (21f1b37) — `--session-id` flag on
+  join/leave/rename via `applySessionIDFlag` (`extractFlag`-based); `send`
+  threads it through `splitVerbArgs`' valued-flag set so a message body may
+  still contain the literal token. `warnIfSessionless` moved out of
+  `runSend` into the send sub-handlers, evaluated after the override.
+- `cmd/cbus/session_id_flag_test.go` (21f1b37) — CLI door tests incl.
+  flag-beats-env and CBUS-beats-CLAUDE precedence.
+- `internal/client/marker.go` (cc115b9) — `isClaudeName` replaced by pure
+  `isHarnessComm(base)` over the exact set {claude, grok, xai-grok-pager,
+  opencode, codex} plus the `claude-` prefix; basename split factored into
+  `commBase()`. `ownerFromPid` applies both to kernel comm and argv[0].
+  Codex npm installs exec the native codex child under a node shim; the
+  ancestor walk hits codex before node, so an exact entry suffices (node and
+  grokd stay false).
+- `internal/client/marker_test.go`, `internal/client/close_test.go`
+  (cc115b9) — `isHarnessComm` table incl. claude-3 true, node false, grokd
+  false.
+
+[Possible Ripple Effects]
+- cbus-6ij.4 (codex bridge) depends on this landing first; the epic's
+  sequencing already reflects that — held for that assignment, not pushed.
+- Fleet binaries pre-dating this change do not recognize non-Claude comm
+  names in the `ownerPid` walk; no fleet-compat shim was scoped (matches the
+  epic's stated blast radius — grok pilot, opencode plugin, codex stop-hook
+  tasks all still pending, this is core-seams only).
+
+[Testing Notes]
+- Coder gates: full `go test ./... -count=1` green; `GOOS=linux` amd64 and
+  arm64 builds OK; real-CLI `join`/`leave --session-id` verified door-to-door.
+- Reviewer independently reproduced all coder gates plus: full suite, linux
+  amd64/arm64 builds, CLI door matrix (flag-beats-env, CBUS-beats-CLAUDE),
+  six mutations all killed on aimed assertions with tree cmp-restored
+  between mutants.
+- Reviewer verdict: FINDINGS, not a clean PASS. F1 actionable — the
+  stray-`CBUS_SESSION_ID`-vs-hook-stdin trap had no pinning test; reviewer
+  proved the gap by reverting `HookExit` to the setenv round-trip on disk
+  and watching the full suite stay green regardless. Fix:
+  `TestHookExitStdinBeatsStrayCbusEnv` plus a `HookCompact` mirror, confirmed
+  to fail under the setenv mechanism. Folded in and closed before merge.
+- Three record-only micro-notes, no fix required: n1, `send --session-id`
+  verified at the CLI door but has no automated row; n2, `warnIfSessionless`
+  wording still names only `CLAUDE_CODE_SESSION_ID`, stale for a
+  harness-neutral bus, deferred; n3, explicit empty `--session-id` no-ops to
+  ambient identity while `--from` dies on explicit empty — documented-
+  intended asymmetry, not a bug.
+- No session trailers (repo policy, verified). Not pushed — held pending the
+  `.4` codex bridge assignment.
+
+## [2026-07-21 19:38:43 UTC] [Docs] design-space.md §7 — injection boundary generalized for foreign harnesses
+
+[Attempt #1]
+
+Docs-only. Trigger: Carlos flagged that the Codex integration direction (per-peer
+`codex app-server` + `--remote` TUI, proven same-day by the cbus-6ij.4 round-2
+probes) reads like a contradiction of design-space.md's opinionated file-first
+doctrine, and asked for a well-founded reconciliation before any build — plus
+answers on the relay story, a provider-pattern trigger, and whether Codex
+sessions are join-anytime like Claude's.
+
+[Files Changed]
+- `docs/architecture/design-space.md` — NEW §7 (six subsections), appended after
+  §6. Core moves: (7.1) §1's constraint 3 ("the Monitor boundary") reclassified
+  as a *measurement of Claude Code*, not a design choice — generalized to "any
+  transport must terminate in the harness's native injection surface," with a
+  four-harness table (Claude/Grok: monitor stdout; Codex: turn/start over
+  ws-on-UDS; OpenCode: plugin session.prompt). Everything left of the last hop
+  is invariant: inbox.jsonl the only durable hop, the bridge IS a follower
+  (same loop/identity/cursor), so "files for some, daemon for others" is
+  rejected as the frame in favor of "files for all, native injection per
+  harness." (7.2) app-server vs the §5.1 broker bill, line by line: harness-
+  owned lifecycle (ships/updates with codex), no spool needed (inbox already
+  is one — constraint 1 does the work), one-session blast radius, no ports/
+  tokens locally; plus the exploration doc's own "unless a harness leaves no
+  alternative" clause firing (plain TUI unreachable, MCP can't push, notify
+  send-only, Stop-hook park hostile to a human composer). Honest cost ledger
+  kept: +1 process/peer, experimental protocol pinned via generate-json-schema,
+  SUN_LEN ~104 cap, unprobed 30-min thread unload. (7.3) relay unchanged —
+  bridge dials the existing ws leg as a second source; relay stays harness-
+  blind. (7.4) the three reachability tiers answering the join-anytime
+  question: spawned (first-class), wrapper-launched (first-class + adoptable
+  any time via thread/loaded/list), plain-launched (send-only; push retrofit
+  impossible — probed; recovery is a `codex resume` relaunch under the
+  wrapper, zero conversation loss). (7.5) provider seam named (identity
+  source / launcher argv / delivery sink / prompt template) with extraction
+  deferred until the third harness ships — same discipline as the roles
+  doctrine duplication. (7.6) reopen conditions: Codex ships a Monitor
+  equivalent (delete the bridge), protocol churn beats pinning (fall back to
+  the parked Stop-hook), or a third harness fits no sink shape (extract
+  early).
+- `docs/architecture/multi-harness-exploration.md` — §4 heading struck-through
+  and retitled ("full push via app-server"), dated update block inserted
+  summarizing the round-2 probe results and pointing at design-space §7 +
+  cbus-6ij.4; original analysis preserved below as the pre-probe record. The
+  §1 liveness note (follower argv must contain the inbox path) struck and
+  corrected — obsolete since M6.2 (9a3a075) made liveness purely structural.
+
+[Possible Ripple Effects]
+- design-space §1's constraint-3 wording is now reinterpreted by §7 rather
+  than edited in place — a reader of §1 alone still sees the Claude-specific
+  phrasing; §7 is the corrective lens. If that trips a future reviewer, the
+  fix is a one-line forward pointer in §1, not a rewrite.
+- The cbus-6ij epic's increments 4/5 (bdx) now trail the docs: increment 4's
+  build shape should follow the task's round-2 notes (app-server bridge
+  primary, stop-hook fallback) — the epic design field itself was NOT edited.
+- behavior-spec's "Harness assumptions" catalog (A1-A17) does not yet have
+  rows for the codex surface; deferred to the .4 build.
+
+[Testing Notes]
+- Docs-only; no code, no tests. All probe claims trace to executed spikes
+  recorded on cbus-6ij.4 (session artifacts in the session scratchpad):
+  Stop-hook chain (ZERO→THREE), 615s hold under timeout=1200, hook: Stop
+  Failed on overrun, ws-over-UDS 101 upgrade, turn/start into the TUI's own
+  thread rendering PURPLE with composer intact.
 
 [Attempt #1]
 
