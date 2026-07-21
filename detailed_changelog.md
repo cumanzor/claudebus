@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-07-21 23:46:15 UTC] [Amendment] 5ad7ff2 field-falsified — TUI-only env scrub was the wrong locus
+
+[Attempt #1]
+
+Corrects the entry immediately below (2026-07-21 23:43:53 UTC, `5ad7ff2`)
+by append, per doctrine — that entry is not deleted or edited, because it
+accurately reported what was believed true at commit+gate time. This entry
+records what the next round of field verification found.
+
+The orchestrator ran a post-land provenance round-trip against the
+relaunched live `harness/codex` peer: a message in, a reply out. The reply
+still carried `from=harness/orchestrator`. The fix did not close the leak
+it claimed to close.
+
+Root cause: `5ad7ff2` scrubbed the session-id env vars from the `codex
+--remote` TUI process's environment. But in this topology, tool shells
+(`cbus` among them) that the model invokes execute inside the APP-SERVER
+process tree, not the TUI process — the wrapper spawns the app-server with
+the launcher's environment fully intact, since only the TUI env was ever a
+target. The scrub landed on the wrong process.
+
+[Files Changed]
+- None yet. This entry documents the falsification and diagnosis; the
+  re-fix (scrub both processes, app-server env primary) is in flight and
+  will land as its own commit with its own changelog entry once
+  field-confirmed — not folded in here, so the sequence stays legible: what
+  was tried, why it looked right, what field testing actually showed.
+
+[Possible Ripple Effects]
+- New gate doctrine recorded on cbus-6ij.4: env-mediated properties in the
+  `codex --remote`/app-server topology require live-topology verification
+  before a fix is accepted — a CLI-door proof of "resolution given a
+  scrubbed env" is not evidence about which process actually executes the
+  shell. Both the coder's original CLI proof and the reviewer's mini-gate
+  tested the former, not the latter, and both missed this.
+- This is the fourth exec-mode-vs-remote-topology divergence surfaced in
+  one day on this task (after: hooks require exec/interactive and never
+  fire over the app-server protocol; `thread/list` is global and not
+  per-server scoped; `SessionStart` doesn't fire in the remote topology at
+  all). The pattern is now itself the lesson: assume nothing proven under
+  `codex exec` transfers to `codex --remote` without a live check.
+
+[Testing Notes]
+- Falsified by a live round-trip against the actual relaunched peer, not by
+  a unit test or a code read — the same category of check (real topology,
+  not a proxy for it) that has caught every divergence on this task so far.
+- Acceptance for the re-fix is field-only: the observed `from` field on a
+  real reply, stated verbatim in the report, is the bar — not a green
+  suite.
+
 ## [2026-07-21 23:43:53 UTC] [Fix] codex identity leak — spoofed provenance from an inherited launcher session-id env
 
 [Attempt #1]
