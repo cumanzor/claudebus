@@ -1,5 +1,45 @@
 # Changelog (detailed)
 
+## [2026-07-21 23:56:19 UTC] [Fix] codex identity leak closed at the execution locus — app-server env scrub
+
+[Attempt #1]
+
+Closes the leak documented in the 23:46:15 UTC amendment immediately
+below: `5ad7ff2` scrubbed the wrong process's environment. This entry is
+the confirmed fix, verified against the actual live topology rather than a
+CLI-door proxy, per the gate doctrine that falsification produced.
+
+[Files Changed]
+- `internal/client/codexwrap.go`, `internal/client/codexwrap_test.go`
+  (c0d5b70) — `codexCommands` now builds both the app-server process and
+  the `codex --remote` TUI process with the scrubbed environment (the
+  entire `SessionID()` chain removed) plus `CBUS_ALIAS`/`CBUS_CHANNEL`
+  pinned. Previously only the TUI env was scrubbed; the app-server is where
+  a model-invoked tool shell (`cbus` among them) actually executes in this
+  topology, so it needed the same treatment.
+
+[Possible Ripple Effects]
+- None beyond what the original 5ad7ff2 entry already noted (from resolves
+  to the bare alias, a recorded v1 limitation) — the locus changes, the
+  mechanism and its limitation don't.
+- Closes out the gate-doctrine item from the falsification: this fix was
+  accepted only on field evidence (see Testing Notes), not a green suite
+  alone, matching the acceptance bar the orchestrator set when the doctrine
+  was written.
+
+[Testing Notes]
+- Field re-gate PASS: the reviewer independently reproduced the failure
+  condition (a poisoned launcher env) and observed `from=codexgate` on the
+  reply — the actual execution locus, not a CLI-door proxy for it. This is
+  the same live-topology check that caught the original leak and falsified
+  the first fix.
+- Coder-run pre-commit: full `go test ./...` green, `-race` clean, `GOOS=
+  linux` amd64 and arm64 built, working tree byte-identical to HEAD after
+  verify. No session trailer, conventional commit format.
+- Sequence now fully on record: leak found live (dogfood smoke) -> first
+  fix (5ad7ff2) -> falsified live (amendment) -> root-caused -> re-fix
+  (c0d5b70) -> confirmed live. Not pushed.
+
 ## [2026-07-21 23:46:15 UTC] [Amendment] 5ad7ff2 field-falsified — TUI-only env scrub was the wrong locus
 
 [Attempt #1]
