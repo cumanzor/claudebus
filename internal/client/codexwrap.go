@@ -94,6 +94,21 @@ func codexRemoteEnv(channel, alias string) []string {
 	return append(env, "CBUS_ALIAS="+alias, "CBUS_CHANNEL="+channel)
 }
 
+// codexCommands constructs the two child processes the wrapper launches — the per-peer
+// app-server and the codex --remote TUI — both with the scrubbed CBUS_ALIAS env. This is the
+// identity fix: codex's tool shells execute in the APP-SERVER process tree in the remote
+// topology (not the TUI), so scrubbing the TUI alone left the launcher session-id reachable and
+// the leak live; scrubbing the app-server (the execution locus) closes it, and scrubbing the
+// TUI too is defense in depth. The caller sets SysProcAttr/streams and starts each in order.
+func codexCommands(channel, alias, sock string, passthrough []string) (srv, tui *exec.Cmd) {
+	env := codexRemoteEnv(channel, alias)
+	srv = exec.Command("codex", "app-server", "--listen", "unix://"+sock)
+	srv.Env = env
+	tui = exec.Command("codex", codexRemoteArgs(sock, passthrough)...)
+	tui.Env = env
+	return srv, tui
+}
+
 // threadStartedInfo pulls the thread id and cwd out of a thread/started notification.
 func threadStartedInfo(params json.RawMessage) (id, cwd string) {
 	var p struct {
@@ -177,8 +192,10 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 	}
 	_ = os.Remove(sock)
 
-	// 1. per-peer app-server in its own process group, so teardown takes the native child.
-	srv := exec.Command("codex", "app-server", "--listen", "unix://"+sock)
+	// 1. per-peer app-server in its own process group, so teardown takes the native child. Both
+	//    the app-server and the TUI get the scrubbed CBUS_ALIAS env (codexCommands); the
+	//    app-server is the execution locus for codex's tool shells, so its scrub is the fix.
+	srv, tui := codexCommands(channel, alias, sock, passthrough)
 	srv.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	srv.Stderr = os.Stderr
 	if err := srv.Start(); err != nil {
@@ -205,11 +222,8 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 		return fmt.Errorf("initialize discovery connection: %w", err)
 	}
 
-	// 3. the TUI, attached to the app-server; it takes over the terminal. The env scrubs the
-	//    launcher session-ids and sets CBUS_ALIAS so codex's own cbus commands self-identify as
-	//    the peer, not the launcher (the identity leak found live).
-	tui := exec.Command("codex", codexRemoteArgs(sock, passthrough)...)
-	tui.Env = codexRemoteEnv(channel, alias)
+	// 3. the TUI, attached to the app-server; it takes over the terminal. Its env is already the
+	//    scrubbed one (codexCommands); it takes the terminal streams here.
 	tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := tui.Start(); err != nil {
 		return fmt.Errorf("start codex --remote: %w", err)

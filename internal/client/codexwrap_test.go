@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,6 +118,38 @@ func TestCodexRemoteEnvScrubsLauncherIds(t *testing.T) {
 	}
 	if m["CBXWRAP_KEEP"] != "survivor" {
 		t.Errorf("unrelated env var not preserved: CBXWRAP_KEEP=%q", m["CBXWRAP_KEEP"])
+	}
+}
+
+// TestCodexCommandsScrubBothProcesses pins the identity fix at BOTH launch sites: codex's tool
+// shells execute in the APP-SERVER process tree (not the TUI), so the app-server env scrub is
+// the load-bearing one and the TUI scrub is defense in depth. Both must carry the scrubbed env.
+func TestCodexCommandsScrubBothProcesses(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "LAUNCHER")
+	t.Setenv("CBUS_SESSION_ID", "LAUNCHER2")
+	t.Setenv("GROK_SESSION_ID", "LAUNCHER3")
+
+	srv, tui := codexCommands("cxch", "cxpeer", "/tmp/x.sock", nil)
+	for name, cmd := range map[string]*exec.Cmd{"app-server": srv, "tui": tui} {
+		if cmd.Env == nil {
+			t.Fatalf("%s env not set — its tool shells would inherit the launcher session-id", name)
+		}
+		m := map[string]string{}
+		for _, kv := range cmd.Env {
+			k, v, _ := strings.Cut(kv, "=")
+			m[k] = v
+		}
+		for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID"} {
+			if _, present := m[leaked]; present {
+				t.Errorf("%s: %s leaked (both processes must scrub — tool shells run in the app-server tree)", name, leaked)
+			}
+		}
+		if m["CBUS_ALIAS"] != "cxpeer" {
+			t.Errorf("%s: CBUS_ALIAS = %q, want cxpeer", name, m["CBUS_ALIAS"])
+		}
+		if m["CBUS_CHANNEL"] != "cxch" {
+			t.Errorf("%s: CBUS_CHANNEL = %q, want cxch", name, m["CBUS_CHANNEL"])
+		}
 	}
 }
 
