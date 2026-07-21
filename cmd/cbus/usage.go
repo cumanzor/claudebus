@@ -103,6 +103,17 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
+  cbus codex [--channel CH] [--alias AL] [codex args...]
+                                   launch a codex --remote TUI as a bus peer: a
+                                   per-peer app-server, the wrapper learns the
+                                   TUI's thread and joins as it, and a bridge
+                                   delivers bus messages into that thread (steer
+                                   if busy, else a new turn). --channel auto-
+                                   derives from the git repo; --alias defaults to
+                                   codex
+  cbus hook-join                   SessionStart hook: auto-join $CBUS_CHANNEL
+                                   (alias $CBUS_ALIAS or auto) under the stdin
+                                   session id; harness-neutral, silent, exit 0
   cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]
                                    bridge a codex app-server thread to this
                                    alias's inbox: each bus message becomes a

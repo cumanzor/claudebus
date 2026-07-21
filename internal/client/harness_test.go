@@ -440,6 +440,119 @@ func TestHookCompactKeepsRemoteMarkers(t *testing.T) {
 	}
 }
 
+// ---- hook-join -------------------------------------------------------------------
+
+// clearAllSessionEnv blanks the whole $*_SESSION_ID chain for a hook-join test that drives
+// identity purely through stdin or a single set var.
+func clearAllSessionEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} {
+		t.Setenv(k, "")
+	}
+}
+
+// TestHookJoinRegistersUnderStdinSid: the SessionStart hook joins $CBUS_CHANNEL under the
+// stdin session id, before any turn.
+func TestHookJoinRegistersUnderStdinSid(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"session_id":"CODEXSID","source":"startup"}`), "codexch", "coder", "")
+	meta := filepath.Join(root, "codexch", "coder", "meta.json")
+	if !fileExists(meta) {
+		t.Fatal("hook-join did not register the peer")
+	}
+	if got := metaSessionID(meta); got != "CODEXSID" {
+		t.Errorf("registered sid = %q, want CODEXSID", got)
+	}
+}
+
+// TestHookJoinCamelCase: grok-style camelCase sessionId is honored.
+func TestHookJoinCamelCase(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"sessionId":"GROKSID"}`), "grokch", "peer", "")
+	if got := metaSessionID(filepath.Join(root, "grokch", "peer", "meta.json")); got != "GROKSID" {
+		t.Errorf("registered sid = %q, want GROKSID (camelCase not decoded)", got)
+	}
+}
+
+// TestHookJoinEnvFallback: an empty stdin falls back to the SessionID() env chain, so a
+// harness that exports CBUS_SESSION_ID but sends no stdin id still joins.
+func TestHookJoinEnvFallback(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	t.Setenv("CBUS_SESSION_ID", "ENVSID")
+	HookJoin(strings.NewReader(`{}`), "codexch", "coder", "")
+	if got := metaSessionID(filepath.Join(root, "codexch", "coder", "meta.json")); got != "ENVSID" {
+		t.Errorf("registered sid = %q, want ENVSID (env fallback)", got)
+	}
+}
+
+// TestHookJoinNoChannelNoop: no CBUS_CHANNEL => nothing is joined.
+func TestHookJoinNoChannelNoop(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"session_id":"X"}`), "", "coder", "")
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Errorf("no-channel hook-join created %d entries, want 0", len(entries))
+	}
+}
+
+// TestHookJoinNoSidNoop: no id on stdin and none in env => no registration (a sessionless
+// join records an unresolvable peer, so it is skipped).
+func TestHookJoinNoSidNoop(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`not json at all`), "codexch", "coder", "")
+	if dirExists(filepath.Join(root, "codexch")) {
+		t.Error("no-sid hook-join must not register")
+	}
+}
+
+// TestHookJoinAutoAlias: an empty alias auto-picks (main for the first peer).
+func TestHookJoinAutoAlias(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"session_id":"S"}`), "codexch", "", "")
+	if !dirExists(filepath.Join(root, "codexch", "main")) {
+		t.Error("auto-alias hook-join should register codexch/main")
+	}
+}
+
+// TestHookJoinWritesRendezvous: with a rendezvous path set, the joined session id is written
+// there (== the app-server threadId, cbus-6ij.4 A3.0) for the codex wrapper to bridge.
+func TestHookJoinWritesRendezvous(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	rz := filepath.Join(t.TempDir(), "rendezvous")
+	HookJoin(strings.NewReader(`{"session_id":"RZSID"}`), "codexch", "coder", rz)
+	b, err := os.ReadFile(rz)
+	if err != nil {
+		t.Fatalf("rendezvous file not written: %v", err)
+	}
+	if string(b) != "RZSID" {
+		t.Errorf("rendezvous = %q, want RZSID", b)
+	}
+}
+
+// TestHookJoinNoRendezvousWhenUnset: no rendezvous path => no file, but the join still happens.
+func TestHookJoinNoRendezvousWhenUnset(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"session_id":"S"}`), "codexch", "coder", "")
+	if !dirExists(filepath.Join(root, "codexch", "coder")) {
+		t.Error("hook-join must still join when no rendezvous is set")
+	}
+}
+
 // ---- bootstrap -------------------------------------------------------------------
 
 // TestBootstrapPromptSubstitution: $ch (4x) and $parent (1x) expand correctly and the
