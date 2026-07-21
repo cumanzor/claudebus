@@ -12,6 +12,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
                                    prunes dead peers in the channel first)
+       --session-id <id>           act AS this session id on join/leave/rename/
+                                   send (overrides the $*_SESSION_ID env chain);
+                                   for hooks and scripted multi-session drivers
   cbus tail <channel>/<alias>      stream inbox — arm under the Monitor tool,
                                    NEVER in Bash (it blocks forever)
   cbus send <target> [opts] TEXT   append a message to a peer's inbox;
