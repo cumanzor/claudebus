@@ -61,11 +61,11 @@ func OwnerPID() (int, bool) {
 }
 
 // ownerFromPid walks up from pid: the first ancestor within 16 hops that IS a
-// claude session. Identity is argv[0]'s basename ("claude"/"claude-*"), NOT the
-// kernel comm — the bun-compiled CLI sets its accounting name to its version
+// coding-harness session. Identity is argv[0]'s basename (see isHarnessComm), NOT the
+// kernel comm — the bun-compiled Claude CLI sets its accounting name to its version
 // string (ucomm "2.1.214"), which starved every Go-era registration of its
 // ownerPid until close's false-success exposed it. comm is kept as a fallback
-// for any build where it still reads "claude".
+// for any build where it still reads a real harness name.
 func ownerFromPid(pid int) (int, bool) {
 	p := pid
 	for depth := 0; p > 1 && depth < 16; depth++ {
@@ -73,11 +73,11 @@ func ownerFromPid(pid int) (int, bool) {
 		if err != nil {
 			return 0, false
 		}
-		if isClaudeName(comm) {
+		if isHarnessComm(commBase(comm)) {
 			return p, true
 		}
 		if argv, aerr := procArgs(p); aerr == nil {
-			if f := strings.Fields(argv); len(f) > 0 && isClaudeName(f[0]) {
+			if f := strings.Fields(argv); len(f) > 0 && isHarnessComm(commBase(f[0])) {
 				return p, true
 			}
 		}
@@ -89,12 +89,26 @@ func ownerFromPid(pid int) (int, bool) {
 	return 0, false
 }
 
-// isClaudeName reports whether a command path/name's basename is claude or
-// claude-* — argv[0]-shaped identity, immune to prompt text elsewhere in argv.
-func isClaudeName(name string) bool {
-	base := name
-	if i := strings.LastIndexByte(base, '/'); i >= 0 {
-		base = base[i+1:]
+// commBase is the basename of a command path/name (the segment after the last '/'),
+// so identity is argv[0]-shaped and immune to a leading path.
+func commBase(name string) string {
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		return name[i+1:]
 	}
-	return base == "claude" || strings.HasPrefix(base, "claude-")
+	return name
+}
+
+// isHarnessComm reports whether base (a command basename) names a known coding-harness
+// session process: claude / claude-* (Claude Code), grok and xai-grok-pager (grok CLI),
+// opencode, or codex. Exact match on the set plus the claude-* prefix — argv[0]-shaped,
+// immune to prompt text elsewhere in argv. Codex npm installs exec the native `codex`
+// child under a node shim, and the ancestor walk hits codex before node, so an exact
+// entry suffices (node and grokd stay false: the walk stops at the real session, and a
+// suffix like grokd is not the harness).
+func isHarnessComm(base string) bool {
+	switch base {
+	case "claude", "grok", "xai-grok-pager", "opencode", "codex":
+		return true
+	}
+	return strings.HasPrefix(base, "claude-")
 }

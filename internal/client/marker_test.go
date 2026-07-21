@@ -94,27 +94,58 @@ func TestRemoteTailSpec(t *testing.T) {
 	}
 }
 
-// TestIsClaudeName: identity is argv[0]'s BASENAME being claude or claude-*. The
-// first two false rows are the blocker itself — "2.1.214" is what the bun-compiled
-// CLI reports as its kernel comm, and "/x/claudebus" is this repo's own binary,
-// which a substring match would have happily claimed as a claude session.
-func TestIsClaudeName(t *testing.T) {
-	for name, want := range map[string]bool{
-		"2.1.214":                  false, // the bug: the CLI's comm is its version string
-		"/opt/x/claudebus":         false, // substring, not basename — cbus is not a session
-		"claudebus":                false,
-		"myclaude":                 false, // suffix must not match either
-		"Claude":                   false, // exact case, no folding
-		"":                         false,
-		"sh":                       false,
-		"claude":                   true,
-		"/usr/local/bin/claude":    true,
-		"claude-code":              true,
-		"claude-":                  true, // degenerate but in-contract for claude-*
-		"/nix/store/abc/claude-v2": true,
+// TestIsHarnessComm: the pure predicate over a command BASENAME. The harness set is
+// claude/claude-* (Claude Code), grok + xai-grok-pager (grok), opencode, codex. The
+// false rows guard the blocker and the near-misses: "2.1.214" is the bun CLI's kernel
+// comm (its version string), "claudebus" is this repo's own binary a substring match
+// would claim, "grokd"/"myclaude" are suffix/prefix look-alikes that are not the harness.
+func TestIsHarnessComm(t *testing.T) {
+	for base, want := range map[string]bool{
+		"claude":         true,
+		"claude-3":       true,
+		"claude-code":    true,
+		"claude-":        true, // degenerate but in-contract for claude-*
+		"grok":           true,
+		"xai-grok-pager": true,
+		"opencode":       true,
+		"codex":          true,
+		"node":           false, // codex runs under a node shim; the walk hits codex first
+		"grokd":          false, // suffix look-alike, not an exact member
+		"myclaude":       false, // prefix look-alike, not claude-*
+		"claudebus":      false, // this repo's binary — not "claude-" (no dash)
+		"2.1.214":        false, // the bug: the bun CLI's comm is its version string
+		"Claude":         false, // exact case, no folding
+		"codexd":         false,
+		"":               false,
+		"sh":             false,
 	} {
-		if got := isClaudeName(name); got != want {
-			t.Errorf("isClaudeName(%q) = %v, want %v", name, got, want)
+		if got := isHarnessComm(base); got != want {
+			t.Errorf("isHarnessComm(%q) = %v, want %v", base, got, want)
 		}
+	}
+}
+
+// TestCommBase: identity is argv[0]'s BASENAME, so a leading path is stripped before the
+// predicate. Together with isHarnessComm this reproduces the old whole-path behavior —
+// "/opt/x/claudebus" is not a session (substring, not basename), "/usr/local/bin/claude"
+// is.
+func TestCommBase(t *testing.T) {
+	for name, wantBase := range map[string]string{
+		"claude":                   "claude",
+		"/usr/local/bin/claude":    "claude",
+		"/nix/store/abc/claude-v2": "claude-v2",
+		"/opt/x/claudebus":         "claudebus",
+		"/usr/bin/node":            "node",
+		"":                         "",
+	} {
+		if got := commBase(name); got != wantBase {
+			t.Errorf("commBase(%q) = %q, want %q", name, got, wantBase)
+		}
+	}
+	if isHarnessComm(commBase("/opt/x/claudebus")) {
+		t.Error("/opt/x/claudebus is this repo's binary, not a session")
+	}
+	if !isHarnessComm(commBase("/usr/local/bin/claude")) {
+		t.Error("/usr/local/bin/claude is a claude session")
 	}
 }
