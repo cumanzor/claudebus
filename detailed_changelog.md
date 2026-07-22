@@ -1,5 +1,71 @@
 # Changelog (detailed)
 
+## [2026-07-22 05:49:29 UTC] [Fix] codex wrapper — claim listenership at join, print teardown cause last
+
+[Attempt #1]
+
+Two field-driven fixes from cbus-6ij.5's parallel-review experiment: the
+codex peer `harness/sol` reviewed the v0.8.1 tranche in parallel with the
+authoritative Claude reviewer, whose own independent verdict had been PASS.
+Adjudication amended that to FINDINGS after sol surfaced a bug the
+reviewer's own mutation coverage had exercised only partially. Two of
+sol's three findings survived adversarial adjudication and blocked the
+commit; this is their fix, landed as one tranche.
+
+[Files Changed]
+- `internal/client/codexwrap.go`, `internal/client/codexarming_test.go`
+  (new file) (6c6b85a) — sol-HIGH. The wrapper now claims listenership at
+  join, before the bridge finishes arming — `cbus list` previously showed
+  the codex peer as `off pid=?` for the tens of seconds arming takes, and a
+  sweep misread that window as dead and killed a live TUI. The claim seeds
+  the replay cursor at offset 0 first and verifies the round-trip through
+  `readCursor`, then records the wrapper's own (pid, start-time) witness.
+  The ordering is deliberate: both writes are best-effort, so committing
+  the listenerPid witness before an independently-failed seed would leave
+  listenerPid-set with the cursor absent — `resolveResume` reads that
+  combination as an ever-armed migration and seeks the first arm straight
+  to EOF, silently dropping every message queued in the gap. Seeding
+  first, and skipping the claim entirely on an unverified seed, makes that
+  loss state unreachable by construction rather than merely unlikely. This
+  is the concrete fix for the finding recorded on cbus-6ij.5 as "claim-
+  before-seed ordering; partial seed I/O failure yields listenerPid-set
+  cursor-absent seek-END silent loss."
+- `internal/client/follow.go`, `internal/client/follow_test.go`
+  (6c6b85a) — the displacement gate now exempts the exact same process
+  (pid and start-time both self), so the wrapper's own same-process bridge
+  arm isn't refused as if it were a second listener taking over. F3,
+  record-only per sol-MED-2: this makes one-arm-per-process a caller-owned
+  invariant with no runtime enforcement, and the exemption's contract
+  comment now says so explicitly — including that the pre-exemption gate
+  was itself the enforcement this change removes. Reviewer spot-checked
+  the landed comment wording against the orchestrator's own refined
+  phrasing.
+- `internal/client/codexwrap.go`, `internal/client/dormancy_test.go`
+  (6c6b85a) — sol-MED-1. `killServer` now reaps the app-server first,
+  bounded and escalating to SIGKILL, so its dying WebSocket-reset stderr
+  flushes before the bridge's own teardown cause, which now prints last.
+  Both reap waits are bounded, so an app-server wedged in D-state can't
+  suppress the cause line forever — printing outranks reaping.
+
+[Possible Ripple Effects]
+- The one-arm-per-process invariant is now explicitly documented as
+  caller-owned rather than runtime-enforced; any future caller that arms
+  the same process twice on the same peer (accidentally or by a bug
+  elsewhere) will not be refused by this gate anymore. No such caller
+  exists today; flagged here so a future reviewer knows where to look if
+  one appears.
+- Confirms the pattern already established across this task: a genuinely
+  independent second reviewer (here, a different harness entirely) found a
+  real gap in the primary reviewer's own mutation coverage. Worth keeping
+  in mind for future gates on this codebase, not just this task.
+
+[Testing Notes]
+- Full suite PASS, `-race` PASS, `GOOS=linux` amd64+arm64 compile PASS,
+  client tests PASS in a `golang:1.26-bookworm` container. All pins
+  mutation-verified. 5 files changed, +482/-33.
+- No session trailer, conventional commit format, working tree clean.
+  Not pushed (push stays Carlos-gated).
+
 ## [2026-07-22 00:16:55 UTC] [Client/Multi-harness] cbus-6ij.4 tranche B — Stop-hook fallback for exec workers (final tranche, increment 4 build complete)
 
 [Attempt #1]
