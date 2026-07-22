@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,4 +399,25 @@ func selfStart(t *testing.T) string {
 		t.Fatalf("procStartTime(self): %v", err)
 	}
 	return s
+}
+
+// foreignLiveListener writes metaPath as a live listener that is NOT this process: a real
+// running foreign pid (the test binary's parent) with its true start witness and no owner,
+// so MetaListenerAlive reads it alive while the displacement gate's exact-self exemption does
+// not apply. It is how a "second arm over someone ELSE's live tail" is simulated now that a
+// self pid+start is recognised as the same process re-arming its own claim.
+func foreignLiveListener(t *testing.T, metaPath string) {
+	t.Helper()
+	ppid := os.Getppid()
+	if ppid <= 1 || ppid == os.Getpid() {
+		t.Skipf("no usable foreign live pid (ppid=%d)", ppid)
+	}
+	start, err := procStartTime(ppid)
+	if err != nil {
+		t.Fatalf("procStartTime(ppid=%d): %v", ppid, err)
+	}
+	setMetaFields(t, metaPath, fmt.Sprintf(`"listenerPid":%d,"listenerStart":%q,"ownerPid":null`, ppid, start))
+	if !MetaListenerAlive(metaPath) {
+		t.Fatalf("precondition: foreign pid %d must read as a live listener", ppid)
+	}
 }

@@ -5,10 +5,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -170,6 +172,49 @@ func joinAs(sid, channel, alias string) error {
 	return err
 }
 
+// claimListenerAtJoin makes the codex peer read as a LIVE listener the instant it joins,
+// closing the tens-of-seconds window before the bridge arms during which `cbus list` shows
+// `off pid=?` and operators (or a sweep) misread the peer as dead. The bridge arms in THIS
+// process (RunCodexBridge runs in a goroutine of the wrapper), so the wrapper's own pid and
+// start-time are an honest structural witness immediately; the durable inbox queues any
+// pre-arm message and the bridge's first arm delivers it.
+//
+// The replay cursor seed is load-bearing: committing listenerPid makes resolveResume read a
+// cursor-absent peer as an ever-armed migration and seek the real arm to EOF, silently
+// dropping everything queued in the window. A seeded cursor moves the arm onto the
+// cursor-valid path (resume at offset 0 = full replay). ORDER MATTERS: armMeta and writeCursor
+// are both void best-effort, so committing listenerPid before a seed that independently fails
+// (ENOSPC/EIO/a rename race) would leave listenerPid-set + cursor-absent, the exact seek-END
+// mail-loss state the seed exists to prevent. So seed FIRST, VERIFY it round-trips through
+// readCursor, and only then armMeta — an unverified seed skips the claim entirely, which
+// leaves listenerPid null and keeps resolveResume on the never-armed byte-0 full-replay path.
+// The listenerPid-set + cursor-absent state is unreachable by construction.
+//
+// Best-effort throughout: a missing witness or a seed that will not round-trip degrades to the
+// pre-fix display bug (`off pid=?`), never to mail loss and never to a phantom listener. A
+// claim-then-attach-failure leaves the wrapper's real pid recorded; when the wrapper exits,
+// that pid is dead and MetaListenerAlive reads it dead, so liveness handles it structurally.
+func claimListenerAtJoin(channel, alias string) {
+	peerDir := filepath.Join(CBUSDir(), channel, alias)
+	start, err := procStartTime(os.Getpid())
+	if err != nil {
+		return // no witness: a claim would read dead anyway
+	}
+	st, serr := os.Stat(InboxPath(channel, alias))
+	if serr != nil {
+		return
+	}
+	dev, ino, ok := statDevIno(st)
+	if !ok {
+		return
+	}
+	writeCursor(peerDir, dev, ino, 0)
+	if cd, ci, co, state := readCursor(peerDir); state != cursorValid || cd != dev || ci != ino || co != 0 {
+		return // seed did not round-trip: skip the claim rather than risk seek-END mail loss
+	}
+	armMeta(filepath.Join(peerDir, "meta.json"), start)
+}
+
 // RunCodexWrap is `cbus codex`. It blocks until the TUI exits, then tears down the app-server
 // (and its native child — the npm codex runs one under a node shim, A2) via a group kill.
 func RunCodexWrap(channel, alias string, passthrough []string) error {
@@ -201,10 +246,30 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("start codex app-server: %w", err)
 	}
-	defer func() {
-		_ = syscall.Kill(-srv.Process.Pid, syscall.SIGTERM)
-		_ = os.Remove(sock)
-	}()
+	// killServer takes down the app-server GROUP (SIGTERM, escalating to SIGKILL) and REAPS
+	// it, so the app-server's dying stderr — the "WebSocket protocol error: Connection reset"
+	// line — has flushed to the terminal by the time it returns. The teardown path calls it
+	// BEFORE printing the bridge cause so the cause is the last thing on screen; the defer is
+	// the backstop for every early-return and the normal-quit path. sync.Once makes the two
+	// callers idempotent (srv.Wait must run once).
+	var serverDown sync.Once
+	killServer := func() {
+		serverDown.Do(func() {
+			_ = syscall.Kill(-srv.Process.Pid, syscall.SIGTERM)
+			reaped := make(chan struct{})
+			go func() { _, _ = srv.Process.Wait(); close(reaped) }()
+			if !reapWithin(reaped, serverReapWait) {
+				_ = syscall.Kill(-srv.Process.Pid, syscall.SIGKILL)
+				// BOTH waits are bounded: an app-server wedged in D-state does not reap even
+				// on SIGKILL, and a bare receive here would suppress the teardown cause forever.
+				// Printing the cause outranks reaping (the ruled never-suppress property), so on
+				// expiry we leave the orphan for process-exit to reap and press on.
+				reapWithin(reaped, serverReapWait)
+			}
+			_ = os.Remove(sock)
+		})
+	}
+	defer killServer()
 	if err := waitForSocket(sock, codexServerUp); err != nil {
 		return err
 	}
@@ -240,13 +305,14 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 		_ = tui.Process.Kill()
 		return fmt.Errorf("join %s/%s as the codex thread: %w", channel, alias, err)
 	}
+	claimListenerAtJoin(channel, alias) // read as a live listener before the bridge arms
 
 	// 5. bridge the alias inbox into the TUI thread. RunCodexBridge blocks in the follower for
 	//    the wrapper's lifetime; if it ever returns (startup failure OR the listener going
 	//    dormant) while the TUI still lives, the peer is deaf. Fail the WHOLE unit: kill the TUI
 	//    so the human sees the session end instead of a healthy-looking window with no delivery
-	//    (the session is recoverable via codex resume). The bridge cause is signalled before the
-	//    kill and printed to the real stderr after the alternate screen tears down.
+	//    (the session is recoverable via codex resume). The bridge queues its cause BEFORE the
+	//    kill, so a bridge-driven teardown has it ready the instant tui.Wait returns.
 	bridgeExit := make(chan error, 1)
 	go func() {
 		berr := RunCodexBridge(channel+"/"+alias, sock, threadID)
@@ -254,17 +320,71 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 		_ = tui.Process.Kill()
 	}()
 
-	// 6. the human drives the TUI; teardown (deferred) runs when it exits.
+	// 6. the human drives the TUI; when it exits, resolve the cause and print it LAST.
 	werr := tui.Wait()
+	return teardownOutcome(werr, bridgeExit, killServer, os.Stderr, bridgeCauseGrace)
+}
+
+var (
+	// bridgeCauseGrace bounds how long the teardown waits for a self-exited TUI's bridge to
+	// name a cause (the same app-server reset can down both, bridge a beat behind). It only
+	// bounds the WAIT, never suppresses a cause. serverReapWait bounds the SIGTERM reap before
+	// escalating to SIGKILL. Vars, not consts, so tests shrink them.
+	bridgeCauseGrace = 2 * time.Second
+	serverReapWait   = 2 * time.Second
+)
+
+// reapWithin waits for reaped to close, up to d, returning whether the reap completed. On
+// expiry it returns false rather than blocking, so a wedged (D-state) app-server that will not
+// reap even on SIGKILL can never suppress the teardown cause forever — printing outranks
+// reaping.
+func reapWithin(reaped <-chan struct{}, d time.Duration) bool {
 	select {
-	case berr := <-bridgeExit:
-		if berr != nil {
-			fmt.Fprintf(os.Stderr, "cbus: codex-bridge failed, TUI torn down: %v\n", berr)
-			return fmt.Errorf("codex-bridge failed: %w", berr)
-		}
-		fmt.Fprintln(os.Stderr, "cbus: codex-bridge exited (listener dormant), TUI torn down")
-		return fmt.Errorf("codex-bridge exited before the TUI")
-	default:
-		return werr // normal TUI exit (the human quit)
+	case <-reaped:
+		return true
+	case <-time.After(d):
+		return false
 	}
+}
+
+// teardownOutcome decides the wrapper's exit and prints the cause LAST — after killServer has
+// killed+reaped the app-server, so the app-server's dying "WebSocket protocol error" stderr
+// has flushed and the bridge cause is the final line the operator sees. killServer and out are
+// seams: production passes the real closure and os.Stderr, a test passes stubs to pin ordering.
+//
+//   - bridge-driven teardown: the goroutine queues berr before it kills the TUI, so berr is
+//     ready the instant tui.Wait returns. A non-blocking read catches it; flush, then cause.
+//   - clean self-exit (werr == nil): the human quit, the bridge stays healthy and silent;
+//     nothing to surface, just flush and return.
+//   - abnormal self-exit (werr != nil): the reset that killed the TUI will down the bridge a
+//     beat later — wait the bounded grace for its cause; on expiry, still flush and surface
+//     what is known (the TUI's own error), last.
+//
+// A berr read AFTER killServer would be a WE-killed-it artifact, not the incident, so only a
+// berr observed BEFORE killServer is ever treated as the cause.
+func teardownOutcome(werr error, bridgeExit <-chan error, killServer func(), out io.Writer, grace time.Duration) error {
+	var berr error
+	got := false
+	select {
+	case berr = <-bridgeExit:
+		got = true
+	default:
+		if werr != nil {
+			select {
+			case berr = <-bridgeExit:
+				got = true
+			case <-time.After(grace):
+			}
+		}
+	}
+	killServer() // flush the app-server death-noise BEFORE the cause line
+	if !got {
+		return werr // clean quit, or an abnormal TUI exit with no bridge cause
+	}
+	if berr != nil {
+		fmt.Fprintf(out, "cbus: codex-bridge failed, TUI torn down: %v\n", berr)
+		return fmt.Errorf("codex-bridge failed: %w", berr)
+	}
+	fmt.Fprintln(out, "cbus: codex-bridge exited (listener dormant), TUI torn down")
+	return fmt.Errorf("codex-bridge exited before the TUI")
 }
