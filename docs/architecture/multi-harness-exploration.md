@@ -169,6 +169,9 @@ exists; `codex fork` exists, so branch may map (*unverified* semantics).
 that an idle interactive Codex session cannot be woken.** Revisit the app-server
 bridge only if that limitation bites.
 
+> Built and landed (cbus-6ij.4): `cbus codex` / `codex-bridge` / `hook-join` /
+> `codex-stop-hook` — see the Codex integration entry in [command-reference.md](command-reference.md).
+
 ## 5. Comparison
 
 | | Grok Build | OpenCode | Codex CLI |

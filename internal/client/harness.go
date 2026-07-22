@@ -123,7 +123,8 @@ func compactText(phase, trigger string) string {
 type hookInput struct {
 	SessionID      string `json:"session_id"`
 	SessionIDCamel string `json:"sessionId"`
-	Trigger        string `json:"trigger"` // PreCompact/PostCompact: manual|auto
+	Trigger        string `json:"trigger"`          // PreCompact/PostCompact: manual|auto
+	StopHookActive bool   `json:"stop_hook_active"` // Stop: this turn was already continued once
 }
 
 // sid returns the hook's session id, snake_case winning over camelCase when a payload
