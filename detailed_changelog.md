@@ -1,5 +1,76 @@
 # Changelog (detailed)
 
+## [2026-07-22 00:16:55 UTC] [Client/Multi-harness] cbus-6ij.4 tranche B — Stop-hook fallback for exec workers (final tranche, increment 4 build complete)
+
+[Attempt #1]
+
+Coder-executed, reviewer-gated, the third and final tranche of the codex
+integration build. Where tranche A's app-server bridge covers a
+`codex --remote`-launched peer, this tranche covers the other reachable
+shape from the epic's Phase-0 spike: a plain `codex exec` worker, which
+has no app-server socket to bridge into but does run Stop hooks. This is
+the parked Stop-hook mechanism from the Phase-0 spike, finally built now
+that it has a defined role (exec-worker fallback) rather than being the
+primary delivery path the early spike considered.
+
+[Files Changed]
+- `internal/client/codexstophook.go`, `internal/client/codexstophook_test.go`
+  (27bb2d9) — `cbus codex-stop-hook [--wait D]`. On a codex Stop event,
+  long-polls this session's inbox(es) within the codex hook timeout; on new
+  chat traffic, emits `{"decision":"block","reason":<framed>}`, which codex
+  injects as a continuation turn. No traffic before `D` (default 550s,
+  inside codex's 600s default timeout) or a `stop_hook_active` re-entry
+  with nothing new allows the stop — hitting the timeout is always a
+  failure path, per the tranche-A doctrine (cbus-6ij.4 notes,
+  docs-verification addendum) that a Stop-hook must return before Codex's
+  own limit and never rely on timeout-as-signal. Polls every registration
+  a worker holds (a worker hears each channel it joined), orders new
+  frames across inboxes by timestamp, batches them into one reason per
+  fire with each message's frame kept intact for provenance, and skips
+  presence/status traffic — a continuation turn per join/leave would burn
+  a model turn on ceremony, mirroring the bridge's own presence-skip
+  design (8da523c). A dedicated dot-prefixed `.stop-cursor` sidecar tracks
+  delivered position per peer directory, deliberately never shared with
+  the follower's `.cursor` — sharing it would give the hook and a live
+  `Monitor`/tail on the same peer inconsistent re-arm semantics. Best-
+  effort throughout: exit 0 always.
+- `internal/client/harness.go` (27bb2d9) — minor touch-up alongside the
+  new verb.
+- `cmd/cbus/main.go`, `cmd/cbus/usage.go` (27bb2d9) — `codex-stop-hook`
+  dispatch and usage line.
+- `docs/architecture/command-reference.md`,
+  `docs/architecture/multi-harness-exploration.md` (27bb2d9) — a Codex
+  integration entry with the `~/.codex/hooks.json` snippet wiring
+  `SessionStart` to `hook-join`, `Stop` to `codex-stop-hook`, `SessionEnd`
+  to `hook-exit` (the last of the three docs-only, `hook-exit` already
+  lenient-decodes), plus a one-line pointer from
+  multi-harness-exploration.md section 4.
+
+[Possible Ripple Effects]
+- This closes the cbus-6ij.4 build entirely. Both delivery paths from the
+  epic's design are now shipped: the app-server bridge for `--remote`
+  peers, this Stop-hook fallback for `exec` workers. Only cbus-6ij.5
+  (spawn/formation integration for codex peers) remains open in the
+  multi-harness epic.
+- The `SessionEnd`-to-`hook-exit` wiring is documentation only in this
+  commit — no code changes, since `hook-exit` already accepts the lenient
+  stdin shape. A wrapper-launched peer (tranche A/B's `cbus codex`) still
+  has no `SessionEnd` wiring of its own; that gap was recorded as a
+  tranche-B rider note on cbus-6ij.4 and stays open, not fixed here.
+
+[Testing Notes]
+- Reviewer PASS on record: field loop independently reproduced,
+  `STOPHOOKOK` delivered verbatim, bounded exit confirmed (no hang past
+  the wait window).
+- Full `go test ./...` green, `-race` clean, `GOOS=linux` amd64 and arm64
+  built, working tree byte-identical to HEAD after verify, no session
+  trailer, conventional commit format.
+- Not pushed. Full commit roster for cbus-6ij.4 now on main: `8da523c`
+  (A2 bridge), `9ae66d6` (F1 zero-turn-adopt race fix), `d8ef18a` (A3
+  wrapper + hook-join), `5ad7ff2` + `c0d5b70` (identity-scrub fix,
+  falsified then re-fixed), `27bb2d9` (this tranche), plus five documenter
+  changelog commits (`b97b94a`, `af43635`, `7d2292e`, `c7d7faf`, this one).
+
 ## [2026-07-21 23:56:19 UTC] [Fix] codex identity leak closed at the execution locus — app-server env scrub
 
 [Attempt #1]
