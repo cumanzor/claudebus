@@ -64,11 +64,35 @@ func armLocalTailTo(target string, steal bool, sink frameSink) error {
 		return fmt.Errorf("no such peer %q — join first", ch+"/"+al)
 	}
 	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json")
+	// P4: establish the witness BEFORE anything else. The witness is now the ONLY thing
+	// that can prove which listener this is, so arming without one would produce a tail
+	// that is instantly and invisibly not the listener — armed, streaming, and read dead
+	// by every peer. Refuse loudly instead of arming into that trap. It is established
+	// here, ahead of the gate, so the gate can recognise a re-arm by THIS SAME process.
+	start, err := procStartTime(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("cannot establish listener identity: %v — refusing to arm", err)
+	}
 	// THE DISPLACEMENT GATE (D5). A second local listener on an already-armed alias is
 	// refused by default, relay-style. The rule is uniform on purpose: it does not
 	// exempt the same session, because a session arming over its own live tail is the
 	// double-listener bug rather than a convenience — every message would be delivered
 	// twice and meta would pin to the newest pid only.
+	//
+	// The ONE exemption is exact-process self: a recorded listener whose pid AND start
+	// token are this very process is not a SECOND listener, it is this process re-arming
+	// its own earlier claim (the codex wrapper claims listenership at join, before the
+	// bridge arms in the same process). A pid+start match is definitionally this one
+	// running process — strictly narrower than the same-session case above.
+	//
+	// CONTRACT: one-arm-per-process is CALLER-OWED, with NO runtime enforcement. ArmLocalTail
+	// must be entered at most once per process; both current callers honor it (the CLI `cbus
+	// tail`, and the wrapper's single bridge goroutine). Recognising self by identity cannot
+	// mask a genuine second CONCURRENT loop in the same process: two such loops would share
+	// this exact pid+start+meta identity, so nothing downstream tells them apart. The
+	// pre-exemption gate WAS that enforcement — it refused a same-process second arm as a live
+	// listener — and this exemption removes it, so the invariant now rests entirely on the
+	// caller.
 	//
 	// The gate is NOT atomic and deliberately takes no lock (R-B): two arms can both
 	// pass it before either writes meta. That race self-corrects, because the loser's
@@ -76,18 +100,11 @@ func armLocalTailTo(target string, steal bool, sink frameSink) error {
 	// one interval. A lock would buy atomicity at the price of a wedged-alias recovery
 	// path, which is the worse failure.
 	if !steal {
-		if m, ok := ReadPeerMeta(metaPath); ok && MetaListenerAlive(metaPath) {
+		if m, ok := ReadPeerMeta(metaPath); ok && MetaListenerAlive(metaPath) &&
+			!(m.ListenerPid == os.Getpid() && m.ListenerStart == start) {
 			return fmt.Errorf("%s is already being tailed (listener pid %d) — use --steal to take over",
 				ch+"/"+al, m.ListenerPid)
 		}
-	}
-	// P4: establish the witness BEFORE anything else. The witness is now the ONLY thing
-	// that can prove which listener this is, so arming without one would produce a tail
-	// that is instantly and invisibly not the listener — armed, streaming, and read dead
-	// by every peer. Refuse loudly instead of arming into that trap.
-	start, err := procStartTime(os.Getpid())
-	if err != nil {
-		return fmt.Errorf("cannot establish listener identity: %v — refusing to arm", err)
 	}
 	// the replay decision, resolved BEFORE armMeta overwrites listenerPid — the
 	// migration rule reads the PREVIOUS value to tell an upgraded peer from a fresh one.

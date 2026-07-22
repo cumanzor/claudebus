@@ -337,9 +337,10 @@ func TestArmRefusesWithoutAWitness(t *testing.T) {
 	}
 }
 
-// TestDisplacementGateRefusesASecondArm is the D5 gate. The rule is uniform: a live
-// listener means refuse, with no exemption for the same session, because arming over
-// your own live tail is the double-listener bug and not a convenience.
+// TestDisplacementGateRefusesASecondArm is the D5 gate. The rule is uniform for a live
+// FOREIGN listener: refuse, no exemption for the same session, because arming over another
+// process's live tail is the double-listener bug and not a convenience. The one carve-out is
+// exact-process self (pid+start), pinned separately by TestDisplacementGateExemptsExactSelf.
 func TestDisplacementGateRefusesASecondArm(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
@@ -348,11 +349,9 @@ func TestDisplacementGateRefusesASecondArm(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := filepath.Join(root, "ch", "al", "meta.json")
-	// a LIVE listener: this process, with its real witness
-	armMeta(meta, selfStart(t))
-	if !MetaListenerAlive(meta) {
-		t.Fatal("precondition: the peer must read as live-listening")
-	}
+	// a LIVE listener that is NOT this process (a self pid+start is exempt as the same
+	// process; the gate still refuses a second arm over someone ELSE's live tail).
+	foreignLiveListener(t, meta)
 
 	// BOUNDED, and this is not defensive padding. On regression ArmLocalTail does not
 	// return an error — it arms and blocks in the follower loop forever, in THIS
@@ -438,7 +437,7 @@ func TestMarkerRemedyMatchesBehavior(t *testing.T) {
 		if _, _, err := Join("ch", "al"); err != nil {
 			t.Fatal(err)
 		}
-		armMeta(filepath.Join(root, "ch", "al", "meta.json"), selfStart(t))
+		foreignLiveListener(t, filepath.Join(root, "ch", "al", "meta.json"))
 		armed := make(chan error, 1)
 		go func() { armed <- ArmLocalTail("ch/al", false) }()
 		select {
