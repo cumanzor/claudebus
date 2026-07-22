@@ -86,6 +86,8 @@ func run(args []string) int {
 		return runHookCompact(args[1:])
 	case "hook-join": // cbus-6ij.4: SessionStart hook — harness-neutral auto-join (never fails the session)
 		return runHookJoin()
+	case "codex-stop-hook": // cbus-6ij.4: Stop hook — fallback delivery for a codex exec worker
+		return runCodexStopHook(args[1:])
 	case "bootstrap":
 		return runBootstrap(args[1:])
 	case "branch":
@@ -292,6 +294,25 @@ func runHookCompact(args []string) int {
 // its stdout is parsed as hook directives.
 func runHookJoin() int {
 	client.HookJoin(os.Stdin, os.Getenv("CBUS_CHANNEL"), os.Getenv("CBUS_ALIAS"), os.Getenv("CBUS_CODEX_RENDEZVOUS"))
+	return 0
+}
+
+// runCodexStopHook runs the codex Stop hook: long-poll this session's inbox and, on new
+// traffic, print {"decision":"block","reason":<framed>} for codex to inject as a continuation
+// turn; otherwise print NOTHING (allow the stop). ALWAYS exits 0 — a Stop hook must never fail
+// the session, and a bad --wait falls back to the default rather than erroring.
+func runCodexStopHook(args []string) int {
+	wait := client.StopHookDefaultWait
+	if w, _, err := extractFlag(args, "--wait"); err == nil && w != "" {
+		if d, perr := time.ParseDuration(w); perr == nil {
+			wait = d
+		} else {
+			fmt.Fprintf(os.Stderr, "cbus: codex-stop-hook: bad --wait %q, using %s\n", w, wait)
+		}
+	}
+	if block := client.StopHook(os.Stdin, wait); block != "" {
+		fmt.Println(block)
+	}
 	return 0
 }
 

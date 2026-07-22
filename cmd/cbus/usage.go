@@ -114,6 +114,12 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
   cbus hook-join                   SessionStart hook: auto-join $CBUS_CHANNEL
                                    (alias $CBUS_ALIAS or auto) under the stdin
                                    session id; harness-neutral, silent, exit 0
+  cbus codex-stop-hook [--wait D]  codex Stop hook (exec-worker fallback):
+                                   long-poll this session's inbox, and on new
+                                   traffic emit a block decision that codex
+                                   injects as a continuation turn; no traffic
+                                   before D (default 550s, under the codex
+                                   timeout) allows the stop. never fails
   cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]
                                    bridge a codex app-server thread to this
                                    alias's inbox: each bus message becomes a

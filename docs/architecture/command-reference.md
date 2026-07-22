@@ -1150,6 +1150,56 @@ profile. Applied by hand, Carlos-gated; no installer or `cbus` verb does this.)
 **Quirk:** args are dropped past `phase` — same family as `hook-exit`'s
 dropped args, different reason underneath (point 1 above).
 
+### Codex integration — `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`
+
+Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex mode:
+
+- **`cbus codex [--channel CH] [--alias AL] [codex args...]`** — the interactive
+  path. Stands up a per-peer `codex app-server` on a short unix socket
+  (`$CBUS_DIR/.sock/<n>.sock`, TempDir fallback), launches `codex --remote` against
+  it, learns the TUI's thread id from a passive server connection (its
+  `thread/started`), joins the bus as that thread (via the `--session-id` identity
+  mechanism), and runs `codex-bridge` to inject each bus message as a turn. Both
+  child processes get the launcher session-ids scrubbed and `CBUS_ALIAS`/
+  `CBUS_CHANNEL` set, so codex's own `cbus` commands self-identify as the peer, not
+  the launcher. A bridge that dies kills the TUI (fail-whole-unit).
+- **`cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]`** — the bridge alone,
+  for a thread you already have. Attaches with `thread/resume` (opening a zero-turn
+  thread and riding out the async rollout flush first), then delivers each framed
+  inbox message: steer an in-flight turn if one is active, else a new turn.
+- **`cbus hook-join`** — a harness-neutral **SessionStart** hook: auto-join
+  `$CBUS_CHANNEL` (alias `$CBUS_ALIAS` or auto) under the stdin session id, silent,
+  exit 0. Serves any harness that fires a SessionStart-shaped hook.
+- **`cbus codex-stop-hook [--wait D]`** — the **exec-worker fallback** delivery, for
+  a plain `codex exec` worker where the app-server bridge is not in play but hooks
+  fire. On a **Stop** event it long-polls this session's inbox(es) up to `D`
+  (default 550s, under the codex 600s Stop timeout); on new chat traffic it prints
+  `{"decision":"block","reason":<framed messages>}`, which codex injects as a
+  continuation turn (each message keeps its own frame; presence/status skipped). No
+  traffic before `D`, or a `stop_hook_active` re-entry with nothing new, prints
+  nothing and allows the stop — **the timeout is a failure, never a signal**. A
+  dot-prefixed `.stop-cursor` sidecar (distinct from the follower `.cursor`) tracks
+  delivered position. Never fails the session.
+
+Codex hooks provision entirely on argv (`-c` + `--dangerously-bypass-hook-trust`)
+for a spawned worker, or via `~/.codex/hooks.json` for a human's exec sessions.
+Wire the auto-join, the Stop delivery, and departure (`hook-exit`, which already
+decodes codex's snake/camel stdin) together:
+
+```json
+{"hooks": {
+  "SessionStart": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-join"}]}],
+  "Stop": [{"hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus codex-stop-hook", "timeout": 600}]}],
+  "SessionEnd": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-exit"}]}]
+}}
+```
+
+Set `CBUS_CHANNEL` (and optionally `CBUS_ALIAS`) in the codex process env so the
+SessionStart join has a channel. The `Stop` timeout must exceed `--wait`.
+
 ---
 
 ## 8. Commands: auth
