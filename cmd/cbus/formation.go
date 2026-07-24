@@ -92,6 +92,15 @@ func runFormationSave(args []string) int {
 	for _, s := range rep.SkippedBirth {
 		fmt.Printf("  skipped a corrupted birth-record — %s\n", s)
 	}
+	// A split run is recorded, never refused: save exists precisely for a pausing or
+	// dying formation, and refusing to save a split would destroy the evidence of it.
+	// But it cannot be silent either — a report field no user-facing path reads
+	// reports to nobody. Blank envelope plus a named warning at the terminal.
+	if len(rep.RunConflict) > 0 {
+		fmt.Printf("  WARNING: peers claim %d different formation runs (%s)\n",
+			len(rep.RunConflict), strings.Join(rep.RunConflict, ", "))
+		fmt.Println("  the envelope's formationRunId was left blank rather than pick one; this channel's run is split")
+	}
 	fmt.Printf("  check it: cbus formation show %s\n", name)
 	return 0
 }

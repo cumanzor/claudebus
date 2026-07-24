@@ -209,3 +209,19 @@ func metaSessionID(path string) string {
 	}
 	return m.SessionID
 }
+
+// metaOrigin reads the birth-record origin out of a meta.json, "" when unreadable —
+// a known subject fact that terminal and rename events would otherwise drop.
+func metaOrigin(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var m struct {
+		Origin string `json:"origin"`
+	}
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	return m.Origin
+}

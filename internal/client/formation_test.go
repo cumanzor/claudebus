@@ -246,7 +246,7 @@ func TestFormationEmissionOrder(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	want := []string{"schema", "name", "channel", "host", "anchorAlias", "savedAt",
-		"savedBy", "drift_anchors", "payload", "peers", "alpha", "zeta"}
+		"savedBy", "drift_anchors", "payload", "formationRunId", "peers", "alpha", "zeta"}
 	var got []string
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	tok, _ := dec.Token() // '{'
