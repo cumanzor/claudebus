@@ -1,5 +1,81 @@
 # Changelog (detailed)
 
+## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id (bdx-mec.2)
+
+[Attempt #1] `0d41228`
+
+Motivating failure: the api36 formation's alias-to-session map exists nowhere
+after the fact. meta.json is the only place alias, channel and sessionId bind
+together, and PruneChannel destroys it with the peer dir. The ledger records
+that binding append-only so a run stays reconstructible after every peer is gone.
+
+[Files Changed]
+- `internal/client/ledger.go` (new) — the ledger: event schema + closed-vocabulary
+  AppendLedger, per-peer run-claim identity (writeClaim/readClaim/currentRun/
+  liveRuns), flock(2) mint lock (acquireMintLock), run resolution (ResolveRunForJoin/
+  RunBoundary/commitOrBlank), terminal-event subject capture (readSubject/
+  RecordEventForSubject), launcher-authored run sourcing (LauncherRun/SelfAliasIn),
+  harness detection (HarnessName).
+- `internal/client/store.go` — wired join/resume, self-leave, rename, spawn
+  (ReserveAlias), and the reaper-emitted leave in PruneChannel; forced-leave in
+  Unregister; run boundary captured before mutation.
+- `internal/client/follow.go` — rebind event on arm (armMeta), the only event that
+  records which process holds the tail.
+- `internal/client/formation_apply.go` — restore event per launched peer, run sourced
+  from the applier's own claim.
+- `internal/client/formation.go` / `formation_save.go` — formationRunId at envelope
+  and per-peer level; ChannelRoster reads each peer's claim; envelope run derived from
+  the unique roster claims (dead peers included) with a RunConflict report field.
+- `internal/client/identity.go` — metaOrigin helper alongside metaSessionID.
+- `cmd/cbus/formation.go` — RunConflict rendered at the save call site (named ids,
+  blank envelope), not just stored in a report struct.
+- test files: `ledger_test.go` (new), `formation_runconflict_test.go` (new),
+  `formation_test.go` (emission-order guard updated for the new key).
+
+[Design — settled over 6 review rounds]
+- Placement: `CBUSDir()/.ledger`, outside every peer dir so the reap can't reach it,
+  dot-hidden so the current channel walkers skip it — an older binary ignores the
+  ledger by construction, not by luck.
+- Seven closed event kinds. Unknown kinds and events missing channel/alias ERROR
+  rather than drop silently (a dropped durability record reads as "never happened").
+  Base fields serialize even when empty (known-absent vs missing). Emitter
+  (self/reaper/forced) carries authorship without widening origin's validated enum.
+- Run identity is a per-peer CLAIM file. A run exists only while a live peer claims
+  it, which removes the stale-run-file class at the root rather than guarding it. A
+  historical (alias,sid) binding cannot prove current membership because session ids
+  survive resume; inheritance is driven only by live claims. The claim is the
+  AUTHORITY, not evidence: a failed write yields a blank run (never a fake nonempty
+  id that the next sibling would split against), and a claimless peer's later events
+  stay blank rather than infer a sibling's run — the authority principle is per-event.
+  A split roster (distinct live claims) is unknowable and handled identically across
+  join, save, and events: blank + a named warning, never first-claim-wins.
+- Launcher-authored events (spawn, restore) carry the launcher's OWN run explicitly,
+  since the launcher is the authority for the child slot it creates.
+- Mint lock: flock(2) on an open fd, taken after three rounds of hand-rolled
+  file-dance semantics each leaked a new TOCTOU. Kernel crash-release + true
+  ownership deletes the whole apparatus (O_EXCL dance, pid+start-token, break/steal).
+- formation_run_id is additive under the unchanged cbus-formation/v1 schema: an old
+  binary carries the new key through its Extra map (verified against a frozen legacy
+  envelope AND peer codec, not raw bytes).
+
+[Possible Ripple Effects]
+- Every join/leave/rename/arm/reserve/unregister/apply now also writes a ledger event
+  and (for members) a `.run` claim file under the peer dir. Best-effort for the
+  ledger line; the claim write is authoritative and its failure degrades to a blank
+  run with a loud stderr.
+- meta.json is unchanged (the claim is a separate sidecar), so no peerMeta rewriter
+  hazard and no byte-compat concern.
+- A v0.8.1 binary sharing the bus is safe: additive + append-only + dot-hidden means
+  it never reads or is confused by the ledger.
+
+[Testing Notes]
+Full suite 7/7 packages, -race clean, git diff --check clean, cross-compiled for all
+three shipped unix targets (darwin/arm64, linux amd64/arm64). Revert-audit applied to
+every added test (revert the exact production line, confirm the covering test fails);
+it caught six false-positive tests across the tranche, all strengthened. Both reviewers
+signed off: reviewer1 design conformance, reviewer2 correctness. NOT installed — the
+running binary stays cbus-go v0.8.1 pending an explicit operator swap. Not pushed.
+
 ## [2026-07-22 05:49:29 UTC] [Fix] codex wrapper — claim listenership at join, print teardown cause last
 
 [Attempt #1]
