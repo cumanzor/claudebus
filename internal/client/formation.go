@@ -63,7 +63,14 @@ type Formation struct {
 	SavedBy      string                     `json:"savedBy"`
 	DriftAnchors map[string]json.RawMessage `json:"drift_anchors"`
 	Payload      json.RawMessage            `json:"payload"`
-	Peers        []FormationPeer            `json:"peers"`
+	// FormationRunID identifies the RUN this snapshot was taken from (bdx-mec.2).
+	// Channel names are reused, so a name is not run identity. Additive under the
+	// UNCHANGED cbus-formation/v1 schema: Validate matches the schema string exactly,
+	// so bumping it would make older binaries reject new snapshots — the opposite of
+	// backward compatible. Older binaries instead carry this key through their Extra
+	// map untouched, verified by TestOldBinaryPreservesFormationRunID.
+	FormationRunID string          `json:"formationRunId"`
+	Peers          []FormationPeer `json:"peers"`
 
 	// Extra holds top-level keys this version does not know, so a hand-edit
 	// survives save/load. Never emitted through the typed fields.
@@ -88,6 +95,9 @@ type FormationPeer struct {
 	Split     string   `json:"split"` // pane layout: ""/auto (largest-area chain) | right | down; hand-maintained, save never records it
 	Machine   string   `json:"machine"`
 	Addresses []string `json:"addresses"` // reserved: v1 apply prints these as manual joins
+	// the run this peer's sessionId belongs to; blank when the snapshot predates the
+	// ledger or the run is genuinely unknown, never inferred
+	FormationRunID string `json:"formationRunId"`
 
 	Extra map[string]json.RawMessage `json:"-"`
 }
@@ -110,6 +120,7 @@ func (f *Formation) fields() []jsonField {
 		{"savedBy", f.SavedBy},
 		{"drift_anchors", f.DriftAnchors},
 		{"payload", f.Payload},
+		{"formationRunId", f.FormationRunID},
 		{"peers", peers},
 	}
 }
@@ -134,6 +145,7 @@ func (p *FormationPeer) fields() []jsonField {
 		{"split", p.Split},
 		{"machine", p.Machine},
 		{"addresses", addrs},
+		{"formationRunId", p.FormationRunID},
 	}
 }
 

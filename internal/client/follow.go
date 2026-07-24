@@ -170,7 +170,17 @@ func armMeta(metaPath, start string) {
 		m.OwnerPid = jsonNull
 	}
 	m.LastActivity = Now()
-	_ = writeMeta(filepath.Dir(metaPath), m)
+	if writeMeta(filepath.Dir(metaPath), m) != nil {
+		return
+	}
+	// A rebind is the only event that records WHICH PROCESS held the tail. Join writes
+	// null pids because a joined peer has not armed yet, and a re-arm after a restart
+	// binds the same alias to a new pid; without this the ledger can say a peer existed
+	// but not who was actually listening at any moment.
+	RecordEvent(LedgerRebind, m.Channel, m.Alias, m.SessionID, func(ev *LedgerEvent) {
+		ev.Pid = os.Getpid()
+		ev.Origin = m.Origin
+	})
 }
 
 // follow is the follower loop. It is the counterpart of the embedded python follower

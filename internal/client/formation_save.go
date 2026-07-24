@@ -37,6 +37,8 @@ type RosterPeer struct {
 	Origin    string
 	Model     string
 	Listening bool
+	RunID     string // the peer's run claim, read from its dir (blank when unclaimed)
+	HasClaim  bool   // whether a claim file was present at all, distinct from RunID==""
 }
 
 // ChannelRoster reads a channel's peers straight from the store. It deliberately
@@ -74,6 +76,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 		if alias == "" {
 			alias = e.Name() // meta is authoritative, the dir name is the fallback
 		}
+		runID := readClaim(filepath.Join(chDir, e.Name()))
 		out = append(out, RosterPeer{
 			Alias:     alias,
 			SessionID: m.SessionID,
@@ -82,6 +85,8 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Origin:    m.Origin,
 			Model:     m.Model,
 			Listening: MetaListenerAlive(metaPath),
+			RunID:     runID,
+			HasClaim:  runID != "",
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Alias < out[j].Alias })
@@ -102,6 +107,10 @@ type SaveReport struct {
 	// BasedOn is set when the refresh base came from a committed template rather than
 	// a prior runtime save, so the CLI can say the starter was inherited.
 	BasedOn string
+	// RunConflict holds the distinct run ids found across the roster when there was
+	// more than one — a split or corruption. The envelope run is left blank and the
+	// CLI surfaces this rather than silently picking a run.
+	RunConflict []string
 }
 
 // loadRepoTemplate reads a committed template as a save refresh base. It reads the
@@ -209,6 +218,46 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 
 	f.SavedAt = Now()
 	f.SavedBy = savedBy(ch)
+	// Envelope run identity is derived from the UNIQUE claims of the ROSTER being
+	// saved, dead peers included. Save exists precisely for a pausing effort whose
+	// peers are dying, so reading only live claims (currentRun) would blank the run
+	// of a channel whose dead dirs still hold a valid claim. First-claim-wins is also
+	// wrong: if two distinct claims are present the run is ambiguous (a split or
+	// corruption), and a save must surface that rather than pick one.
+	rosterRun := map[string]string{}
+	distinct := map[string]bool{}
+	for _, r := range roster {
+		rosterRun[r.Alias] = r.RunID
+		if r.RunID != "" {
+			distinct[r.RunID] = true
+		}
+	}
+	switch len(distinct) {
+	case 0:
+		f.FormationRunID = "" // no claim anywhere: unknown, never inferred
+	case 1:
+		for id := range distinct {
+			f.FormationRunID = id
+		}
+	default:
+		ids := make([]string, 0, len(distinct))
+		for id := range distinct {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		rep.RunConflict = ids // surfaced to the caller; the envelope run stays blank
+		f.FormationRunID = ""
+	}
+	// Per ON-CHANNEL peer, assign its own claim UNCONDITIONALLY, including clearing a
+	// stale FormationRunID to blank when the peer holds no claim (old binary, failed
+	// claim, or pre-ledger). Retaining a prior id on a reused alias would silently
+	// carry the OLD run forward, which violates blank-when-unknown. A kept OFF-channel
+	// peer is deliberately untouched: this run is not its run.
+	for i := range f.Peers {
+		if onChannel[f.Peers[i].Alias] {
+			f.Peers[i].FormationRunID = rosterRun[f.Peers[i].Alias]
+		}
+	}
 	if f.AnchorAlias == "" {
 		f.AnchorAlias = anchorDefault(ch, f.Peers)
 	}

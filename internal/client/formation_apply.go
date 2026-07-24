@@ -139,6 +139,9 @@ func applyWorld(f *Formation, opts ApplyOptions, forker TerminalForker, world *P
 	// pane fork anchors on the largest-area pane among the applier's own surface
 	// and the panes created so far (ties newest-first, so the applier stays big).
 	declared := fileDeclaresSplit(f)
+	// the applier's own run, resolved once: `self` is its ch/alias address
+	_, applierAlias, _ := strings.Cut(self, "/")
+	applierRun := LauncherRun(f.Channel, applierAlias)
 	var created []string
 	for _, pp := range order(plan, f.AnchorAlias) {
 		switch pp.Action {
@@ -161,6 +164,22 @@ func applyWorld(f *Formation, opts ApplyOptions, forker TerminalForker, world *P
 			res.Outcome, res.Detail = OutcomeFailed, "launch failed: "+err.Error()
 		} else if cid != "" {
 			created = append(created, cid)
+		}
+		if err == nil {
+			// A restore is the one event whose facts exist ONLY here: which saved
+			// formation a peer came back from, and which session it was relaunched
+			// against. The child has not booted, so its own join cannot know it was
+			// restored rather than started fresh.
+			// launcher-authored: the APPLIER's own run, read from its own claim.
+			// Not any live claim on the channel — those agree in a converged run and
+			// diverge during a split, where the wrong one would attribute the restored
+			// child to a run the applier is not in.
+			RecordEventInRun(LedgerRestore, f.Channel, pp.Peer.Alias, pp.Peer.SessionID, applierRun, func(ev *LedgerEvent) {
+				ev.Origin = pp.Peer.Origin
+				ev.PrevSessionID = pp.Peer.SessionID
+				// the applier launched the child; its pid/harness are not the child's
+				ev.Cwd, ev.Harness, ev.Pid = pp.Peer.Cwd, "", 0
+			})
 		}
 		rep.Results = append(rep.Results, res)
 	}

@@ -146,9 +146,25 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	// any session that had armed. Reading up front preserves it through the reap. An
 	// auto-pick join has no prior meta and stays origin=joined, model unknown.
 	origin, model := OriginJoined, ""
+	resuming := false
 	if alias != "" && core.ValidName(alias) {
-		origin, model = birthForJoin(filepath.Join(CBUSDir(), ch, alias, "meta.json"), SessionID())
+		metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
+		origin, model = birthForJoin(metaPath, SessionID())
+		// a session coming back to its own meta is a RESUME, not a new arrival: the
+		// process ended, the registration survived, the same session is returning.
+		// Recorded as its own kind so continuity is a fact rather than something a
+		// consumer infers from two events sharing a session id.
+		if sid := SessionID(); sid != "" && metaSessionID(metaPath) == sid {
+			resuming = true
+		}
 	}
+	// Run boundary, captured BEFORE this join mutates the channel. Afterwards our own
+	// meta makes the channel look populated, so a first join into a dead channel would
+	// be indistinguishable from one landing in a live run — and would silently inherit
+	// the dead formation's run id. Read before PruneChannel too: prune reaps the dead
+	// peers, and an empty-vs-populated answer taken after the reap says nothing about
+	// what was there when we arrived.
+	wasPopulated := RunBoundary(ch)
 	PruneChannel(ch)
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch {
@@ -196,6 +212,21 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
 	}
+	// ledger AFTER the mutation (see RecordEvent): a join recorded before writeMeta
+	// would survive a failed join as evidence of one that never happened
+	kind := LedgerJoin
+	if resuming {
+		kind = LedgerResume
+	}
+	RecordEventInRun(kind, ch, alias, m.SessionID,
+		ResolveRunForJoin(ch, alias, wasPopulated), func(ev *LedgerEvent) {
+			ev.Origin = origin
+			if resuming {
+				// same session id on both sides: that identity IS the continuity, and
+				// stating it explicitly beats making a reader match two events by hand
+				ev.PrevSessionID = m.SessionID
+			}
+		})
 	BroadcastPresence(ch, alias, "join", "joined "+ch+" as "+alias, alias)
 	return alias, false, nil
 }
@@ -287,6 +318,19 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 	if err := writeMeta(dir, m); err != nil {
 		return "", err
 	}
+	// The child's session id does not exist yet, so it is recorded EMPTY rather than
+	// as the placeholder string: "reserved" is a store-level sentinel, and writing it
+	// into a sessionId field would hand consumers a fake id that joins against nothing.
+	// The child's own join event supplies the real one under the same run and alias.
+	// launcher-authored: the reserving parent asserts the child joins the PARENT'S
+	// run, read from the parent's own claim. Not any live claim on the channel: those
+	// agree in a converged run and diverge exactly during a split, where the wrong one
+	// would attribute the child to a run its parent is not in.
+	RecordEventInRun(LedgerSpawn, ch, alias, "", LauncherRun(ch, SelfAliasIn(ch)), func(ev *LedgerEvent) {
+		ev.Origin = origin
+		// none of the reserving PARENT's process facts are the not-yet-booted child's
+		ev.Cwd, ev.Harness, ev.Pid = "", "", 0
+	})
 	return alias, nil
 }
 
@@ -305,8 +349,15 @@ func Leave(ch string) (left []string, err error) {
 			continue
 		}
 		BroadcastPresence(reg.Channel, reg.Alias, "leave", "left "+reg.Channel, reg.Alias)
-		_ = os.RemoveAll(filepath.Join(root, reg.Channel, reg.Alias))
+		// capture every subject fact BEFORE the dir goes: after RemoveAll the
+		// alias-to-session binding and the run claim exist nowhere, which is precisely
+		// the api36 loss this ledger exists to prevent
+		peerDir := filepath.Join(root, reg.Channel, reg.Alias)
+		subj := readSubject(peerDir)
+		subj.self = true // this session is leaving itself
+		_ = os.RemoveAll(peerDir)
 		_ = os.Remove(filepath.Join(root, reg.Channel)) // rmdir if empty
+		RecordEventForSubject(LedgerLeave, reg.Channel, reg.Alias, subj)
 		left = append(left, reg.Channel+"/"+reg.Alias)
 	}
 	if len(left) == 0 {
@@ -322,7 +373,15 @@ func Unregister(ch, al string) error {
 	if !dirExists(dir) {
 		return fmt.Errorf("no such peer %q", ch+"/"+al)
 	}
+	// a forced removal ends a peer's run membership just like a reap does, so it must
+	// leave a terminal event or the durable run has a member that never departed.
+	// Capture the subject before RemoveAll (afterwards the binding is gone) and mark
+	// the emitter forced, so a consumer can tell an operator kill from a self-leave or
+	// a crash-reap without widening the seven event kinds.
+	subj := readSubject(dir)
+	subj.emitter = EmitterForced
 	_ = os.RemoveAll(dir)
+	RecordEventForSubject(LedgerLeave, ch, al, subj)
 	BroadcastPresence(ch, al, "departed", "unregistered", al)
 	_ = os.Remove(filepath.Join(root, ch))
 	return nil
@@ -374,6 +433,12 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 		return "", "", false, fmt.Errorf("rename failed")
 	}
 	_ = renameMeta(newDir, newAlias) // best-effort, like bash `|| true`
+	// prevAlias is the whole point: without it a consumer sees one session vanish and
+	// an unrelated one appear, and alias+time-window correlation guesses the link
+	RecordEvent(LedgerRename, ch, newAlias, metaSessionID(filepath.Join(newDir, "meta.json")), func(ev *LedgerEvent) {
+		ev.PrevAlias = old
+		ev.Origin = metaOrigin(filepath.Join(newDir, "meta.json")) // known fact, was dropped
+	})
 	BroadcastPresence(ch, newAlias, "rename", "renamed "+old+" -> "+newAlias, newAlias)
 	return ch, old, false, nil
 }
@@ -450,8 +515,17 @@ func PruneChannel(ch string) []string {
 		}
 		switch {
 		case PeerDead(filepath.Join(tmp, "meta.json")):
+			// A crashed peer never emits its own leave, so its departure would exist
+			// only as a presence line in inboxes that join truncates — the run would
+			// have no terminal event and its end would be invisible to the ledger.
+			// Every subject fact (sid, run claim, host, cwd, origin, ownerPid) must be
+			// read HERE from the DEAD peer's own dir: one line later RemoveAll destroys
+			// the last place any of it exists. subj.self stays false, so the reaper's
+			// own harness is not misattributed to the departed peer.
+			subj := readSubject(tmp)
 			_ = os.RemoveAll(tmp)
 			msgs = append(msgs, "pruned "+ch+"/"+peer)
+			RecordEventForSubject(LedgerLeave, ch, peer, subj)
 			BroadcastPresence(ch, peer, "departed", "departed (listener gone)", peer)
 		case dirExists(peerDir):
 			_ = os.RemoveAll(tmp) // a fresh join reclaimed the slot — drop our copy
