@@ -1,5 +1,107 @@
 # Changelog (detailed)
 
+## [2026-07-24 22:49:51 UTC] [Roles/Profiles] model-generation split: mandate in roles, tuning in profiles
+
+[Attempt #1] `122ea66` — no Go changes, prompts and docs only.
+
+Sources: the Opus 5 prompting guide
+(platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5),
+the Claude-5 context-engineering rules
+(claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models),
+and the Fable 5 field guide
+(claude.com/blog/a-field-guide-to-claude-fable-finding-your-unknowns).
+
+[Motivating problem]
+The role files mixed two kinds of guidance. The seat mandate (what a coder gates,
+how a verdict is shaped, what the documenter owns) was earned from live failures
+here and holds for whoever runs the seat. Model tuning is the opposite: "you
+already verify your own work, do not add a pass" is right for one model and
+harmful for another. With orchestrator and coder on Opus 5, reviewer on Fable 5,
+documenter on Sonnet 5, and codex peers on another provider, any tuning written
+into the shared doctrine block is wrong for most seats by construction.
+
+[Files Changed]
+- `roles/orchestrator.md` — `MODEL: fable` -> `MODEL: opus`; doctrine 2 re-synced
+  (the pruned/re-JOIN sentence it was missing); new doctrine 12 (subagents); new
+  process rules 14 (complete milestone at kickoff, then let the peer work) and 15
+  (name each peer's model, send its profile, and the note that arming doctrines
+  are Claude-harness facts rather than universal ones).
+- `roles/coder.md` — new doctrine 16 (subagents); process rule 10 extended to bind
+  in both directions, so under-delivery is as much a violation as scope creep.
+- `roles/reviewer.md` — new doctrine 18 (subagents); new process rule 11, report
+  every finding classified, so the size ceiling splits a verdict instead of
+  trimming the small findings out of it.
+- `roles/documenter.md` — doctrine 2 re-synced; new doctrine 13 (subagents); new
+  process rule 10, match an entry's length to its substance.
+- `profiles/README.md` (new) — the split, why it is separate from roles, the
+  intended resolution path, handoff semantics, and why absence is safe.
+- `profiles/opus5.md` (new), `profiles/fable5.md` (new), `profiles/codex.md` (new).
+
+[Design]
+- Mandate stays in `roles/`, tuning moves to `profiles/`, appended after the role
+  body at launch. A handoff carries the SUCCESSOR's profile resolved from the
+  successor's model, never a copy of the predecessor's, so the mandate survives a
+  handoff unchanged while the tuning is re-resolved for whoever picks it up.
+- The subagent doctrine is an attribution rule, not a prohibition. The first draft
+  banned subagents outright and was wrong: research into an axiom no seat covered
+  is legitimate. What binds is that the output is a hypothesis the seat owns and
+  verifies, that it never writes to the shared tree or sends on the bus, and that
+  it never substitutes for a peer's gate.
+- New doctrines APPEND rather than insert. `cmd/cbus/list_golden_test.go:58` and
+  `internal/client/formation_kickoff_test.go:80` cite doctrine numbers per-file,
+  so renumbering would silently invalidate those citations.
+- Only `orchestrator.md`'s MODEL: line moved. Coder stays opus, reviewer stays
+  fable, documenter stays sonnet, so the next formation changes exactly one
+  variable and the comparison is readable.
+- Profiles are written only where a source can be cited. There is deliberately no
+  `sonnet5.md`; a seat with no matching profile runs on its role file alone, which
+  is what every seat did before this directory existed.
+
+[Drift found and fixed]
+The doctrine canary was printing 4 unique hashes instead of 1. Items 1-10 had
+split two ways: `coder` and `reviewer` carried the "no such peer means pruned,
+re-JOIN before re-arm" sentence in doctrine 2, `orchestrator` and `documenter`
+did not. This is the exact failure mode the duplication ruling exists to prevent
+and it was live. Shared core is back to one hash across all four; the two shared
+tail doctrines (quoting, subagents) are byte-identical modulo their item number.
+
+[Cross-provider defect this surfaces]
+Role doctrines 1 and 2 state the listener rules as universal. They are not.
+`internal/client/codexbridge.go` arms as the alias's local listener and tails the
+inbox itself, turning each frame into one injection. A codex peer therefore has
+no Monitor tool and must not run `cbus tail`. Handing a codex peer a role file
+alone instructs it to do something it cannot do, in the first two doctrines it
+reads. `profiles/codex.md` corrects this, along with one-frame-is-one-turn cost
+and the fact that repo policy a Claude peer picks up automatically does not reach
+a codex peer at all.
+
+[Possible Ripple Effects]
+- Delivery is a hand step (orchestrator rule 15) until `cbus-7l8` wires
+  resolution into the launch path. A hand step will be skipped, so the current
+  state is better than before but not yet load-bearing.
+- `profiles/` is NOT in the `go:embed` set in `assets.go`. `install-assets` will
+  not ship profiles to a machine that lacks the repo. Adding it means updating
+  `assets_test.go`, which asserts the embedded set exactly. Deferred to cbus-7l8.
+- An Opus 5 orchestrator that satisfies a routing need with a Task subagent
+  instead of a bus peer would bypass the channel ledger, the formation_run_id
+  claim, and every review gate. That is the reason the subagent doctrine landed
+  in the same pass as the orchestrator model flip rather than after it.
+- The context-engineering guide argues against the shape of these files as a
+  whole (roughly 10KB each, hard rules, worked examples, one block repeated four
+  times). Not acted on. The doctrines are environment gotchas, which that guide
+  says to keep; the process rules are where real over-constraint lives. An
+  unhobbling pass is its own effort and would have made this one unreadable.
+
+[Testing Notes]
+- `go test ./...` green across all packages (claudebus, cmd/cbus, internal/client,
+  internal/core, relay/*).
+- Doctrine parity verified three ways: shared core items 1-10 hash identical
+  across all four files; the subagent doctrine text hashes identical with the item
+  number stripped; the quoting doctrine likewise.
+- `assets_test.go`'s runtime-FS canary (embedded bytes equal repo source) passes,
+  confirming the embed snapshot picked up the edited role files.
+- No behavior change to verify at runtime: no Go source was touched.
+
 ## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id (bdx-mec.2)
 
 [Attempt #1] `0d41228`
