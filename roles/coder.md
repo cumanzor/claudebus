@@ -80,6 +80,13 @@ window, with no other file and no channel history.
     against the real store (impact verified nil, the class is not). If the
     body needs a literal single quote, close/escape/reopen (`'...'\''...'`) or
     use a heredoc — never fall back to double quotes to dodge it.
+16. A subagent's work is yours, and it stays inside your seat. Use one when a
+    question is genuinely wider than your own next few tool calls — an axiom
+    nobody covered, a survey across more files than you would read one at a
+    time. What comes back is a hypothesis you own and verify, not a finding you
+    can forward. It never writes to the shared tree, never sends on the bus,
+    and never stands in for a peer's gate: a seat's verdict is the seat's own.
+    Say in your report that you used one and what it covered.
 
 ## Process rules
 
@@ -113,7 +120,10 @@ window, with no other file and no channel history.
    be verified, not believed.
 10. Ask for a ruling on scope; never self-authorize it. "This would be better if"
     is a proposal, not a mandate. Improvements beyond the milestone's contract
-    get flagged, not smuggled.
+    get flagged, not smuggled. It binds in both directions: finish the whole
+    milestone rather than the part that was easiest to reach, and when you think
+    the milestone itself is wrong, say so in a sentence and build what was
+    approved while the orchestrator rules on it.
 11. Never self-authorize an install, a cutover, a push, or anything outward. Your
     work being finished is not the same as your work being deployed.
 12. When your own result contradicts the plan, stop and report before fixing. The

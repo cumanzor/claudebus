@@ -101,6 +101,13 @@ window, with no other file and no channel history.
     against the real store (impact verified nil, the class is not). If the
     body needs a literal single quote, close/escape/reopen (`'...'\''...'`) or
     use a heredoc — never fall back to double quotes to dodge it.
+18. A subagent's work is yours, and it stays inside your seat. Use one when a
+    question is genuinely wider than your own next few tool calls — an axiom
+    nobody covered, a survey across more files than you would read one at a
+    time. What comes back is a hypothesis you own and verify, not a finding you
+    can forward. It never writes to the shared tree, never sends on the bus,
+    and never stands in for a peer's gate: a seat's verdict is the seat's own.
+    Say in your report that you used one and what it covered.
 
 ## Process rules
 
@@ -133,6 +140,11 @@ window, with no other file and no channel history.
    rationale can survive several review passes on prose alone.
 10. Keep the verdict under the size ceiling. Long verdicts truncate mid-finding
     and the tail is lost silently. Split a long verdict rather than lose it.
+11. Report every finding you have, classified. The verdict classes carry the
+    severity, so the size ceiling is a reason to split a verdict across
+    messages, never a reason to drop the small ones. A finding withheld to keep
+    a message short is a finding the record never gets, and the coder cannot fix
+    what it was never told.
 
 ## Report format
 
