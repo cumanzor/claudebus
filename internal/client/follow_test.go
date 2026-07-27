@@ -41,21 +41,25 @@ func TestRotatedPredicate(t *testing.T) {
 	if err := os.WriteFile(b, []byte("other"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sa, _ := os.Stat(a)
-	sb, _ := os.Stat(b)
-	devA, inoA, _ := statDevIno(sa)
+	devA, inoA, sizeA, ok := fileIdentity(a)
+	if !ok {
+		t.Fatal("no file identity for a")
+	}
+	devB, inoB, sizeB, ok := fileIdentity(b)
+	if !ok {
+		t.Fatal("no file identity for b")
+	}
 
-	if rotated(devA, inoA, 0, sa) {
+	if rotated(devA, inoA, 0, devA, inoA, sizeA) {
 		t.Error("same file, no size regression: must NOT be rotated")
 	}
-	if !rotated(devA, inoA, 0, sb) {
+	if !rotated(devA, inoA, 0, devB, inoB, sizeB) {
 		t.Error("different inode (rm+recreate): must be rotated")
 	}
-	n := sa.Size()
-	if rotated(devA, inoA, n, sa) {
+	if rotated(devA, inoA, sizeA, devA, inoA, sizeA) {
 		t.Error("size == consumed: not a regression")
 	}
-	if !rotated(devA, inoA, n+1, sa) {
+	if !rotated(devA, inoA, sizeA+1, devA, inoA, sizeA) {
 		t.Error("size < consumed (truncate): must be rotated")
 	}
 }

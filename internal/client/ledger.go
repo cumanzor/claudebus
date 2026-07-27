@@ -463,28 +463,7 @@ func channelPopulatedExcept(ch, skip string) bool {
 // opencode), reusing the same ancestor walk and argv[0] identity that OwnerPID uses.
 // Empty when no harness ancestor is found — never guessed.
 func HarnessName() string {
-	p := os.Getppid()
-	for depth := 0; p > 1 && depth < 16; depth++ {
-		comm, ppid, err := procParent(p)
-		if err != nil {
-			return ""
-		}
-		if base := commBase(comm); isHarnessComm(base) {
-			return normalizeHarness(base)
-		}
-		if argv, aerr := procArgs(p); aerr == nil {
-			if f := strings.Fields(argv); len(f) > 0 {
-				if base := commBase(f[0]); isHarnessComm(base) {
-					return normalizeHarness(base)
-				}
-			}
-		}
-		if ppid <= 1 {
-			break
-		}
-		p = ppid
-	}
-	return ""
+	return harnessWalk(os.Getppid(), procWalkRoot, procLookup())
 }
 
 // normalizeHarness collapses the claude-* variants onto one name so a ledger

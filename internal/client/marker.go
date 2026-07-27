@@ -105,6 +105,13 @@ func commBase(name string) string {
 // child under a node shim, and the ancestor walk hits codex before node, so an exact
 // entry suffices (node and grokd stay false: the walk stops at the real session, and a
 // suffix like grokd is not the harness).
+//
+// On windows two different binaries share the basename claude.exe: the CLI at
+// .local\bin and the desktop Electron app at AppData\Local\AnthropicClaude. A basename
+// cannot separate them, and this deliberately does not try — both normalize to claude,
+// so the answer is the same either way. The case where the ambiguity could have bitten
+// is a walk that had already crossed into an unrelated process tree, and
+// ancestryPlausible stops that before identity is ever consulted.
 func isHarnessComm(base string) bool {
 	switch base {
 	case "claude", "grok", "xai-grok-pager", "opencode", "codex":

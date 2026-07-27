@@ -138,3 +138,42 @@ func TestLinuxStartTokenMalformed(t *testing.T) {
 		})
 	}
 }
+
+// TestWindowsStartTokenComposition pins the 64-bit composition of a process creation
+// FILETIME. Nothing else can: the stability check against a live process on windows is
+// blind to the mutation this composer is most likely to suffer, because a
+// swapped-halves composer is perfectly STABLE across two reads and so reads green while
+// producing the wrong token. Only injected halves separate them.
+func TestWindowsStartTokenComposition(t *testing.T) {
+	cases := []struct {
+		name      string
+		high, low uint32
+		want      string
+		wantErr   bool
+	}{
+		{name: "low half alone", low: 5, want: "5"},
+		{name: "high half alone lands at 2^32", high: 1, want: "4294967296"},
+		{name: "both halves", high: 1, low: 5, want: "4294967301"},
+		{name: "a zero creation time is rejected, never composed", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := windowsStartToken(c.high, c.low)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("windowsStartToken(%d,%d) = %q, want an error", c.high, c.low, got)
+				}
+				if got != "" {
+					t.Errorf("windowsStartToken(%d,%d) returned %q alongside its error", c.high, c.low, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("windowsStartToken(%d,%d): %v", c.high, c.low, err)
+			}
+			if got != c.want {
+				t.Errorf("windowsStartToken(%d,%d) = %q, want %q", c.high, c.low, got, c.want)
+			}
+		})
+	}
+}

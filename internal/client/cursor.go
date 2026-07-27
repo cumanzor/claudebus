@@ -125,9 +125,8 @@ func resolveResume(inbox, metaPath string) resumePoint {
 	peerDir := filepath.Dir(inbox)
 	switch dev, ino, off, state := readCursor(peerDir); state {
 	case cursorValid:
-		if st, err := os.Stat(inbox); err == nil {
-			curDev, curIno, iok := statDevIno(st)
-			if iok && curDev == dev && curIno == ino && off <= st.Size() {
+		if curDev, curIno, size, ok := fileIdentity(inbox); ok {
+			if curDev == dev && curIno == ino && off <= size {
 				return resumePoint{offset: off}
 			}
 		}

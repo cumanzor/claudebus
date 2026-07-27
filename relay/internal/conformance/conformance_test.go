@@ -28,6 +28,11 @@ func TestWireConformance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds+runs the relay binary; skipped in -short")
 	}
+	// this guard must stay ABOVE trackSources: the ordering is load-bearing, not
+	// stylistic. trackSources walks ..\..\.. from the package dir, and a `go test -c`
+	// binary shipped to a machine with no source tree resolves that walk from wherever
+	// cwd happens to be. Reversed, a clean skip becomes a filesystem walk on a stranger's
+	// disk.
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")
 	}
