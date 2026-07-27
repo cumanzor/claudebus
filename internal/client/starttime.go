@@ -20,8 +20,9 @@ import (
 // (R2). Nothing here does date math, and nothing here reads a file.
 
 var (
-	errShortProcInfo = errors.New("short proc_bsdinfo buffer")
-	errNoStartField  = errors.New("no starttime field in /proc stat")
+	errShortProcInfo  = errors.New("short proc_bsdinfo buffer")
+	errNoStartField   = errors.New("no starttime field in /proc stat")
+	errNoCreationTime = errors.New("zero process creation time")
 )
 
 // darwin proc_bsdinfo start-time offsets, verified against `ps -o lstart` on live
@@ -75,4 +76,20 @@ func linuxStartToken(stat []byte, bootID string) (string, error) {
 		return id + ":" + jiffies, nil
 	}
 	return jiffies, nil
+}
+
+// windowsStartToken composes the two halves of a process creation FILETIME into one
+// decimal. It needs no boot id, unlike the linux token: a FILETIME counts 100ns ticks
+// from 1601 UTC and is absolute, so it stays comparable across the reboot that makes
+// jiffies meaningless.
+//
+// A zero creation time is rejected rather than composed. Zero is what a failed or
+// partial read leaves behind, and two such reads would byte-match each other — the
+// one way an opaque token can answer "same process" about processes it never saw.
+func windowsStartToken(creationHigh, creationLow uint32) (string, error) {
+	ticks := uint64(creationHigh)<<32 | uint64(creationLow)
+	if ticks == 0 {
+		return "", errNoCreationTime
+	}
+	return strconv.FormatUint(ticks, 10), nil
 }

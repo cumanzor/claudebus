@@ -89,13 +89,12 @@ func collectNewFrames(regs []LocalReg) []timedFrame {
 // advances the cursor over everything it consumed (presence included, so it is not re-read).
 // The cursor advances only when something was consumed, so an empty poll leaves it untouched.
 func readNewInboxFrames(inbox, peerDir string) []timedFrame {
-	st, err := os.Stat(inbox)
-	if err != nil {
+	curDev, curIno, curSize, iok := fileIdentity(inbox)
+	if !iok {
 		return nil
 	}
-	curDev, curIno, iok := statDevIno(st)
 	start := int64(0)
-	if dev, ino, off, ok := readStopCursor(peerDir); ok && iok && dev == curDev && ino == curIno && off <= st.Size() {
+	if dev, ino, off, ok := readStopCursor(peerDir); ok && dev == curDev && ino == curIno && off <= curSize {
 		start = off // resume; a dev/ino mismatch or past-EOF offset means a rejoin truncated the
 		// inbox, so byte 0 replays since join and loses nothing (join truncates).
 	}

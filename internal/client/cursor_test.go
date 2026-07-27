@@ -26,13 +26,9 @@ func seedInbox(t *testing.T, lines ...string) (peerDir, inbox string) {
 
 func devInoOfPath(t *testing.T, path string) (uint64, uint64) {
 	t.Helper()
-	st, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dev, ino, ok := statDevIno(st)
+	dev, ino, _, ok := fileIdentity(path)
 	if !ok {
-		t.Fatal("no dev/ino")
+		t.Fatal("no file identity for " + path)
 	}
 	return dev, ino
 }
