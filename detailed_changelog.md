@@ -1,5 +1,152 @@
 # Changelog (detailed)
 
+## [2026-07-27 03:18:12 UTC] [Client/Windows] cbus-que M1+M2: internal/client cross-compiles for windows
+
+[Attempt #1] `23ddb92` (M1, cbus-que.1) and `5d73db4` (M2, cbus-que.2).
+
+Built by the `winport` formation on channel `winport`: orchestrator (Opus 5), coder
+(Opus 5), reviewer (Fable 5), tester (Opus 5, an orchestrator-authored seat at
+`~/.claude-bus/roles/tester.md` since there is no committed tester role by ruling).
+43 labeled rulings, D1-D43. The full record is on `cbus-que`.
+
+[Motivating problem]
+logos runs Windows-native Claude Code and has no WSL distribution, and WSL was
+ruled out on 2026-07-19, so a native port is the only route to fleet membership.
+`internal/core` and `relay/...` already built clean for windows; `internal/client`
+did not, and plain `go build` understated the surface because it stops at 10
+errors. `-gcflags=-e` emitted 27.
+
+[Files Changed]
+- `internal/client/procinfo_windows.go` (new, 219 lines) — the four platform
+  functions plus `pidAlive`. GetProcessTimes for the (pid,starttime) witness,
+  Toolhelp for parent and image name, `procZombie` false with a comment saying
+  the state IS handled, upstream at `pidAlive`, rather than absent; `procArgs` an
+  explicit refusal because Toolhelp `szExeFile` is the on-disk image name and
+  cannot be renamed the way darwin `ucomm` can, so argv stops being load-bearing.
+- `internal/client/{procinfo,procctl,fileid,close,codexwrap}_{unix,windows}.go`
+  (new) — five seam pairs. `procctl` exists because `pane.go:159` also calls
+  `boundedCmd`; extracting its two platform lines leaves both call sites untouched.
+- `internal/client/procwalk.go` (new, 80 lines) — the harness ancestor walk, pure
+  over injected `procRecord`s.
+- `internal/client/filelock_{unix,windows}.go` + `filelock_test.go` (new) — the
+  mint-lock seam and its laptop-half tests.
+- `internal/client/{close,codexwrap,cursor,follow,ledger,liveness,marker,starttime,
+  codexstophook}.go` — modified; `close.go` reduced to `CloseReport` plus
+  `boundedCmd`, `liveness.go` loses `pidAlive`, `follow.go` loses `statDevIno` and
+  `rotated` goes pure.
+- `close_test.go` -> `close_unix_test.go`, `procinfo_test.go` ->
+  `procinfo_unix_test.go` (renamed with tags; both assert unix-only behavior).
+- `relay/internal/conformance/conformance_test.go` — one comment: the
+  `exec.LookPath("go")` guard must stay ABOVE `trackSources`, because that is a
+  `..\..\..` walk and reversing them turns a skip into a filesystem walk from
+  wherever cwd happens to be.
+
+[Design]
+- `pidAlive` uses `WaitForSingleObject(h, 0)`, NOT `GetExitCodeProcess` with a
+  STILL_ACTIVE test. STILL_ACTIVE is 259, drawn from the same value space as a
+  real exit code, so a process legitimately exiting with 259 reads alive forever.
+  The sentinel collides with the space it is drawn from, so the bug is not rare in
+  practice, it is unfixable in that primitive. Access-denied means the process
+  exists, which is the EPERM twin.
+- `fileIdentity` replaces `statDevIno` and returns identity AND size. All three
+  live call sites need both, GetFileInformationByHandle returns the size fields in
+  the same call, and folding them deletes a second stat and the window where the
+  two reads could disagree. Windows identity is `dwVolumeSerialNumber` plus the
+  composed 64-bit file index, which fits the two uint64 fields the cursor already
+  persists, so the on-disk format does not change.
+- Windows `fileIdentity` opens with a hand-rolled `CreateFile` carrying
+  FILE_SHARE_DELETE. Go's `os.Open` passes only READ|WRITE
+  (`syscall_windows.go:395`), so a handle it returns BLOCKS DELETION and turns an
+  identity probe into a lock against a rejoin's rm+recreate. An earlier version of
+  that comment asserted the opposite; the correction history is kept in the code
+  deliberately, because a corrected mechanism whose history is erased invites the
+  same wrong assumption again.
+- The ancestor walk is pure over injected records so the stop conditions are table
+  tests on any host, and it gains a parent-age check. Windows does not clear
+  ParentProcessId when a parent exits and it reuses pids, so a walk can climb into
+  an unrelated live process. Measured on the target machine rather than assumed:
+  15 live processes there carried a parent id naming a pid that no longer existed,
+  and 2 claimed a parent born AFTER the child. The terminator was also a unix-ism
+  (`p > 1`, `ppid <= 1`); there is no pid 1 on windows, so the intended stop
+  condition never fired and a depth backstop was silently doing the mechanism's job.
+- The mint lock's contention signal is the load-bearing part. flock reports
+  contention as EWOULDBLOCK and LockFileEx as ERROR_LOCK_VIOLATION, so a loop
+  comparing either constant directly compiles on both platforms, locks correctly on
+  both, and on the OTHER one falls through to the unexpected-error branch and gives
+  up on the first contended try. It would look correct and abandon the retry under
+  exactly the concurrency it exists for. Each platform maps its own errno onto one
+  `errLockContended` sentinel; the loop asks `errors.Is` and is platform-blind.
+- LockFileEx/UnlockFileEx and AdjustTokenPrivileges are absent from package
+  `syscall`, so they are reached through `syscall.NewLazyDLL` rather than by adding
+  `golang.org/x/sys`. The question arose at two independent sites in one session,
+  so it was ruled as policy rather than per-site: the module stays dependency-free.
+  go.mod declares zero dependencies and there is no go.sum.
+- The windows lock takes the MAXIMUM byte range, not one byte, because windows
+  locks a REGION and exclusion holds only between callers naming the same one.
+  `LazyProc.Call` always returns a non-nil error carrying GetLastError (Errno(0) on
+  success), so r1 is checked first; that trap is commented at the call.
+
+[Possible Ripple Effects]
+- Five `_unix` files now carry explicit `//go:build darwin || linux`. Any new
+  unix-only file must too: the `_unix` filename suffix is COSMETIC, because `unix`
+  is not a GOOS, so the name asserts a guarantee the build system never enforces.
+  `cmd/cbus/detach_unix.go` is the one file in the tree that relied on it and is
+  the sole remaining tree-wide windows diagnostic, filed to `cbus-que.3`.
+- `fileIdentity` on windows cannot open a DIRECTORY, because CreateFile without
+  FILE_FLAG_BACKUP_SEMANTICS refuses one, where unix `os.Stat` succeeds. No live
+  caller probes a directory today. `cbus-que.8` will move more opens onto this seam
+  and the first one that touches a directory inherits a silent false.
+- `cbus-que.8`, filed not fixed: `follow.go:321` opens the inbox with `os.Open` and
+  the follow loop holds that handle for the ENTIRE LIFE OF AN ARM, so a windows peer
+  continuously blocks deletion of its own inbox; and `store.go` discards the error at
+  TWELVE `RemoveAll` sites, two of them the join-reclaim path. On windows a failed
+  reclaim is therefore silent and the joiner proceeds as though it succeeded. Both
+  predate this epic. Reachable rather than theoretical: reclaim fires against a peer
+  that READS dead, and a live peer whose `procStartTime` is denied reads dead at
+  `liveness.go:128` while its process and its follower handle are both alive.
+- The epic design field listed the in-process follower under "Already portable, no
+  work". Framing, rotation and replay carry; the handle-holding does not. Premise
+  falsified and recorded.
+- `cbus-que.7`, filed not fixed: 20+ tests build live and dead processes by spawning
+  unix binaries (sleep, true, tail, /bin/sh, perl). None is on PATH on logos, so
+  `internal/client` compiles for windows without being able to RUN there.
+
+[Testing Notes]
+- Gates on both commits: darwin build and full suite green; linux/amd64 and
+  linux/arm64 build; gofmt clean; go.mod diff empty, no go.sum. After M1 the windows
+  residual was exactly five diagnostics on two source lines (`ledger.go:418,421`),
+  enumerated rather than summarized; after M2, `internal/...` is ZERO and the windows
+  test binary links UNSTUBBED for the first time in this epic.
+- The acceptance harness runs cross-compiled `go test -c` PE32+ binaries shipped to
+  logos, which has no Go toolchain and where no install was authorized. 487ms round
+  trip, 8s for the whole repo. Constraints learned by hitting them: a `go test -c`
+  binary does not inherit the package dir as cwd, PowerShell mangles unquoted dotted
+  flags (`-test.v` arrives as `-test`), and PowerShell returns CRLF so a parsed value
+  compared against a literal needs an explicit `\r` strip.
+- Every mutation audit proved the mutant ON DISK before reading any result and
+  confirmed the baseline restored after. Two audits initially reported no failure
+  because the mutation was never applied; a mutation run that was never mutated is
+  the most convincing wrong answer available.
+- Repository-subject tests (gofmt, the embed canary, selfupdate's `../../` reads) are
+  permanently OUT of the logos matrix, recorded not-attempted and never passed. Under
+  a mirrored layout their upward walks find an almost-empty tree and would report
+  green having inspected nothing. One of them walked the entire C: drive for 35s
+  before this was ruled.
+- GAPS CARRIED, stated rather than papered over. Gate 4 is OPEN: the two-process
+  lock exclusion and release-on-death cases were never run, because `cmd/cbus` does
+  not yet cross-compile and `acquireMintLock` is unexported, so there is no entry
+  point across a process boundary. `TestCloseWithoutUnlockReleases` is named a PROXY
+  in its own comment because it proves close-drops-lock, not release-on-process-death.
+  The `fileIdentity` share-flag fix is VERIFIED BY CONSTRUCTION ONLY with no logos
+  evidence: the test that would gate it constructs its own `os.Open` handle and
+  therefore never reaches the changed path. The `pidAlive` access-denied branch has
+  its premise OBSERVED on logos (csrss returns ERROR_ACCESS_DENIED at the production
+  mask once SeDebugPrivilege is dropped) and the BRANCH itself unexercised.
+- The `unlockFile` call inside `release()` is unobservable by construction: `f.Close()`
+  follows it and drops the lock either way, so a mutant deleting the call stays GREEN.
+  It is kept, because deleting it would make correctness depend entirely on an implicit
+  kernel behavior, and a one-line comment saying it cannot be covered is queued.
+
 ## [2026-07-24 22:49:51 UTC] [Roles/Profiles] model-generation split: mandate in roles, tuning in profiles
 
 [Attempt #1] `122ea66` — no Go changes, prompts and docs only.
