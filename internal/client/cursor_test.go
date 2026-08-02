@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -229,6 +230,16 @@ func TestCursorNeverPointsMidFrame(t *testing.T) {
 // position is unknown. Collapsing them makes an EACCES silently skip everything queued
 // while the peer was away, which is the exact polarity the design forbids.
 func TestUnreadableCursorIsNotAbsent(t *testing.T) {
+	// this needs a file the process genuinely cannot read, and two platforms cannot
+	// produce one. Root reads everything; windows os.Chmod maps only onto
+	// FILE_ATTRIBUTE_READONLY, the WRITE bit, so 0o000 leaves the file fully readable and
+	// readCursor returns cursorValid rather than exercising the branch at all. The
+	// production rule (any read error that is not IsNotExist reads corrupt) is unchanged
+	// and correct on both; only this fixture is unix-only. Constructing it on windows
+	// needs an ACL denial or a sharing violation, which is its own bead.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows chmod cannot clear the read bit (it maps to FILE_ATTRIBUTE_READONLY), so an unreadable cursor is not constructible here")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: an unreadable file is still readable")
 	}

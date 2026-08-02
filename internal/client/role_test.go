@@ -71,7 +71,9 @@ func TestLoadRoleRepoToplevel(t *testing.T) {
 func TestLoadRoleNotFoundAndBadName(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Chdir(t.TempDir())
-	if _, _, err := LoadRole("ghost"); err == nil || !strings.Contains(err.Error(), `role "ghost" not found`) || !strings.Contains(err.Error(), "roles/ghost.md") {
+	// the tried-path fragment is filepath.Join-built in LoadRole, so the expectation is too
+	wantPath := filepath.Join("roles", "ghost.md")
+	if _, _, err := LoadRole("ghost"); err == nil || !strings.Contains(err.Error(), `role "ghost" not found`) || !strings.Contains(err.Error(), wantPath) {
 		t.Fatalf("not-found err = %v", err)
 	}
 	for _, bad := range []string{"-x", "a b", ""} {

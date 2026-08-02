@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,29 +33,16 @@ func TestMetaListenerAlive(t *testing.T) {
 	writeMeta := func(body string) { _ = os.WriteFile(mp, []byte(body), 0o644) }
 
 	// a live process standing in for the follower
-	live := exec.Command("tail", "-f", inbox)
-	if err := live.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = live.Process.Kill() }()
-	liveStart := startTokenOf(t, live.Process.Pid)
+	livePid := liveProc(t)
+	liveStart := startTokenOf(t, livePid)
 
-	// a SECOND live process, spawned after a deliberate gap: linux starttime counts
-	// 10ms ticks, so two children started back to back can share a token and the
-	// mismatch case below would silently stop being a mismatch (the F2 trap).
-	time.Sleep(50 * time.Millisecond)
-	other := exec.Command("sleep", "30")
-	if err := other.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = other.Process.Kill() }()
+	// a SECOND live process: liveProc separates consecutive spawns so the two cannot
+	// share a start token, which is what keeps the mismatch case below a mismatch (F2).
+	otherPid := liveProc(t)
 
-	// a reaped (dead) pid
-	dead := exec.Command("/bin/sh", "-c", "true")
-	_ = dead.Run()
-	deadPid := dead.Process.Pid
+	deadPid := deadProc(t)
 
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, live.Process.Pid, liveStart))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, livePid, liveStart))
 	if !MetaListenerAlive(mp) {
 		t.Error("a live listener whose recorded witness is its own should be listening")
 	}
@@ -64,7 +50,7 @@ func TestMetaListenerAlive(t *testing.T) {
 	if MetaListenerAlive(mp) {
 		t.Error("null listenerPid must be off")
 	}
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, other.Process.Pid, liveStart))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, otherPid, liveStart))
 	if MetaListenerAlive(mp) {
 		t.Error("a live pid wearing another process's witness must be off (recycling guard)")
 	}
@@ -72,7 +58,7 @@ func TestMetaListenerAlive(t *testing.T) {
 	if MetaListenerAlive(mp) {
 		t.Error("a dead pid must be off")
 	}
-	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q,"ownerPid":%d}`, live.Process.Pid, liveStart, deadPid))
+	writeMeta(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q,"ownerPid":%d}`, livePid, liveStart, deadPid))
 	if MetaListenerAlive(mp) {
 		t.Error("a dead owner must make it off (crash-orphan guard)")
 	}
@@ -90,19 +76,14 @@ func TestPeerDead(t *testing.T) {
 	}
 	utc := func(ago time.Duration) string { return time.Now().Add(-ago).UTC().Format("2006-01-02T15:04:05Z") }
 
-	live := exec.Command("tail", "-f", inbox)
-	if err := live.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = live.Process.Kill() }()
-	dead := exec.Command("true")
-	_ = dead.Run()
+	livePid := liveProc(t)
+	deadPid := deadProc(t)
 
-	write(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, live.Process.Pid, startTokenOf(t, live.Process.Pid)))
+	write(fmt.Sprintf(`{"listenerPid":%d,"listenerStart":%q}`, livePid, startTokenOf(t, livePid)))
 	if PeerDead(mp) {
 		t.Error("armed + live listener must NOT be dead")
 	}
-	write(fmt.Sprintf(`{"listenerPid":%d}`, dead.Process.Pid))
+	write(fmt.Sprintf(`{"listenerPid":%d}`, deadPid))
 	if !PeerDead(mp) {
 		t.Error("armed + dead listener must be dead")
 	}

@@ -3,23 +3,11 @@ package client
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
-
-// deadPid returns a pid that is guaranteed not alive (a child run to completion), so
-// a planted meta reads as an armed-but-dead listener and PruneChannel will reap it.
-func deadPid(t *testing.T) int {
-	t.Helper()
-	c := exec.Command("/bin/sh", "-c", "true")
-	if err := c.Run(); err != nil {
-		t.Fatal(err)
-	}
-	return c.Process.Pid
-}
 
 // writeRawMeta plants an arbitrary meta.json for a peer (birth-record fields included).
 func writeRawMeta(t *testing.T, ch, alias, body string) {
@@ -100,7 +88,7 @@ func TestJoinBirthThreeWay(t *testing.T) {
 			name:    "resume-rejoin (own sid, armed-dead) -> preserve",
 			selfSid: "sid-mine",
 			plant: func(t *testing.T) {
-				dp := deadPid(t)
+				dp := deadProc(t)
 				writeRawMeta(t, "ch", "kid", `{"alias":"kid","channel":"ch","sessionId":"sid-mine","origin":"fresh","model":"sonnet","listenerPid":`+strconv.Itoa(dp)+`}`)
 			},
 			alias: "kid", wantOrigin: "fresh", wantModel: "sonnet",
@@ -109,7 +97,7 @@ func TestJoinBirthThreeWay(t *testing.T) {
 			name:    "takeover (different sid) -> joined, NOT the stranger's fork",
 			selfSid: "sid-mine",
 			plant: func(t *testing.T) {
-				dp := deadPid(t)
+				dp := deadProc(t)
 				writeRawMeta(t, "ch", "kid", `{"alias":"kid","channel":"ch","sessionId":"sid-other","origin":"fork","model":"opus","listenerPid":`+strconv.Itoa(dp)+`}`)
 			},
 			alias: "kid", wantOrigin: OriginJoined, wantModel: "",

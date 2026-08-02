@@ -3,10 +3,23 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 // writeTranscript plants a transcript at <cfg>/projects/<project>/<sid>.jsonl.
+// setHome points os.UserHomeDir at dir. The variable it reads is platform-specific —
+// USERPROFILE on windows, HOME elsewhere — so setting only HOME leaves the resolver
+// pointed at the real profile and every lookup misses the fixture entirely.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+		return
+	}
+	t.Setenv("HOME", dir)
+}
+
 func writeTranscript(t *testing.T, cfg, project, sid string) string {
 	t.Helper()
 	dir := filepath.Join(cfg, "projects", project)
@@ -24,7 +37,7 @@ func TestTranscriptPathFindsSidAcrossProjects(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".ccs", "instances", "personal")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	sid := "a26d120e-4d73-4d91-8550-498ab65a5107"
 	want := writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", sid)
 
@@ -52,7 +65,7 @@ func TestTranscriptPathProfileSibling(t *testing.T) {
 	personal := filepath.Join(home, ".ccs", "instances", "personal")
 	work := filepath.Join(home, ".ccs", "instances", "work")
 	t.Setenv("CLAUDE_CONFIG_DIR", personal)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	want := writeTranscript(t, work, "-Users-dev-work-repo", sid)
 
@@ -68,7 +81,7 @@ func TestTranscriptPathProfileSibling(t *testing.T) {
 func TestTranscriptPathBareClaudeHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	sid := "0f0f0f0f-1111-2222-3333-444444444444"
 	want := writeTranscript(t, filepath.Join(home, ".claude"), "-Users-dev-proj", sid)
 	got, ok := TranscriptPath("", sid)
@@ -84,7 +97,7 @@ func TestTranscriptPathRejectsInjection(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".ccs", "instances", "personal")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	writeTranscript(t, cfg, "-proj", "real-sid-here")
 	outside := filepath.Join(home, "secret.jsonl")
 	if err := os.WriteFile(outside, []byte("{}\n"), 0o600); err != nil {
@@ -114,7 +127,7 @@ func TestTranscriptRootsRejectsBadProfile(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".ccs", "instances", "personal")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	roots := transcriptRoots("../../../etc")
 	for _, r := range roots {
 		if filepath.Clean(r) != r || !filepath.IsAbs(r) {

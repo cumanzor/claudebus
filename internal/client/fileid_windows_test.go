@@ -87,35 +87,70 @@ func TestFileIdentitySurvivesReopenAndAppend(t *testing.T) {
 	}
 }
 
-// TestFileIdentityProbeDoesNotLockOutWriters guards the trap the os.Open choice exists
-// for: a CreateFile without the full share set would make this probe a sharing
-// violation for any peer appending to the same inbox. The probe would work and the bus
-// would break, so the probe must hold the file open WHILE a writer appends.
+// TestFileIdentityProbeDoesNotLockOutWriters is the D38 case, driven through the real
+// door. fileIdentity opens with a hand-rolled CreateFile naming all three share flags,
+// so a peer appending to the inbox and a rejoin removing it both keep working while the
+// probe runs. Go's os.Open names only FILE_SHARE_READ|FILE_SHARE_WRITE, so a probe built
+// on it would block deletion and turn an identity read into a lock.
+//
+// The previous version of this test opened its own probe with os.Open and then asserted
+// the delete. That measured the STDLIB's share mode, not ours: it could not pass however
+// fileIdentity was written, and it could not fail if fileIdentity were wrong. The subject
+// has to be the production open.
+//
+// Two halves with different strengths, stated rather than blurred:
+//   - the no-leak half is deterministic. fileIdentity closes its handle before returning,
+//     so a sequential remove afterwards must always succeed.
+//   - the share-flag half is a RACE WINDOW. The handle only exists inside the call, so
+//     the probe has to be running concurrently for a missing flag to bite. It is caught
+//     with high probability across the loop below, not with certainty on any one pass.
+//     A deterministic version needs fileIdentity to hand back its open handle, which is a
+//     production change and not this batch's to make.
 func TestFileIdentityProbeDoesNotLockOutWriters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inbox.jsonl")
 	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	probe, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer probe.Close()
-	if _, _, _, ok := fileIdentityOf(probe); !ok {
-		t.Fatal("no identity from the probe handle")
+	if _, _, _, ok := fileIdentity(path); !ok {
+		t.Fatal("no identity from the production probe")
 	}
 
 	w, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		t.Fatalf("a sender could not open the inbox while an identity probe held it: %v", err)
+		t.Fatalf("a sender could not open the inbox after an identity probe: %v", err)
 	}
 	if _, err := w.WriteString("two\n"); err != nil {
-		t.Errorf("a sender could not append while an identity probe held the file: %v", err)
+		t.Errorf("a sender could not append after an identity probe: %v", err)
 	}
 	w.Close()
 
 	if err := os.Remove(path); err != nil {
-		t.Errorf("a rejoin could not remove the inbox while an identity probe held it: %v", err)
+		t.Fatalf("the probe left a handle behind — a rejoin could not remove the inbox: %v", err)
+	}
+
+	// the share-flag half: probe continuously while a rejoin rm+recreates underneath.
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				fileIdentity(path) // return ignored: a vanished file is expected mid-loop
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	for i := 0; i < 50; i++ {
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatalf("recreate %d: %v", i, err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("rejoin %d could not remove the inbox while the identity probe ran: %v", i, err)
+		}
 	}
 }
 
