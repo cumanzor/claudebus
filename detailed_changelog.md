@@ -1,5 +1,240 @@
 # Changelog (detailed)
 
+## [2026-08-02 22:16:37 UTC] [Client/Windows] cbus-que M4: platform test fixtures so internal/client RUNS on windows
+
+[Attempt #1] `4a9ac3b` (full `4a9ac3b0ff3899b12739f0f871494b7356ebd41d`, M4, cbus-que.7).
+22 files, 688 insertions, 379 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Rulings D51-D61 plus F1; D9, D21, D28 carried in and D38 finally
+closed. Full record on `cbus-que.7`; findings beyond this bead's own scope filed
+to `cbus-que.8` and `cbus-que.9`.
+
+[Motivating problem]
+Found 2026-07-26 by the tester seat by RUNNING the suite on logos, not reading it --
+invisible to every gate M1-M3 define, since `internal/client` was already clean to
+COMPILE for windows/amd64 and this defect is orthogonal to compilation. 20+ call
+sites across liveness, procinfo, send, formation_plan, birth, close and harness
+tests spawn unix binaries (`tail -f`, `sleep 30`, `/bin/sh -c true`, `true`,
+`/bin/sh`, `/bin/bash`, `perl`) to build live and dead test processes; all are
+absent from logos PATH, verified rather than assumed. The structural liveness
+matrix cbus-que.6 names has literally no processes to build against until this is
+fixed.
+
+[Files Changed] (22 paths, final manifest efccf9e0278755fd)
+- `procfixture_test.go`, `procfixture_unix_test.go`, `procfixture_windows_test.go`
+  (new) -- the `liveProc(t)`/`deadProc(t)` seam trio. Windows: `waitfor.exe
+  <per-call-unique-signal> /t 30` for live, `cmd /c exit 0` / `cmd /c exit 259` for
+  dead with a chosen code. Unix: the prior sleep/true, unchanged in spirit.
+- `pidalive_windows_test.go` (new) -- four cases: exit-259 held-handle (the D9
+  discriminator), exit-0 control, a genuinely live process (coder-added fourth
+  case, kills an always-false stub the two false-asserting cases alone cannot), and
+  the D28 access-denied-reads-alive case (skips naming elevation).
+- `harness_launcher_unix_test.go`, `liveness_zombie_unix_test.go` (new,
+  `darwin || linux`) -- `TestLauncherScriptExecutes` (D51: porting it would invent
+  a windows launcher for a verb M3 already refuses) and
+  `TestPredicateStructuralZombieReadsDead` (D55: windows' analogue is the 259
+  retained-object case) extracted per-test into tagged files, never whole files.
+- `formation_apply_tmux_unix_test.go` (new, `darwin || linux`) -- the three
+  tmux pane-anchor tests plus their `fakeTmux` fixture, extracted whole (D56/D57
+  item 4): the fixture can only describe a unix machine (shebang file,
+  colon-separated PATH), so there is no windows shape to port. One extraction
+  target (`TestApplyDryRunNeedsNoJoinNorChannel`) was moved BACK untagged after
+  the fix batch (F1, see Design) once verified it never calls `fakeTmux`.
+- `fileid_windows_test.go` -- `TestFileIdentityProbeDoesNotLockOutWriters` rewritten
+  through the real `fileIdentity(path)` door (the D38 hand-rolled `CreateFile`
+  seam) instead of testing the property through a raw `os.Open`, plus the fix for
+  its now-corrected-backwards doc comment. This is the test cbus-que.8 recorded as
+  not existing; it exists now and D38 is logos-verified.
+- `formation_test.go`, `role_test.go` -- hardcoded forward-slash path expectations
+  replaced with `filepath.Join`-built ones (D57 items 2 and G).
+- `transcript_test.go` -- sets the platform-appropriate home env for its test
+  (`os.UserHomeDir` reads `USERPROFILE` on windows, ignores `HOME`) rather than
+  asserting a unix-shaped path (D57 item 3).
+- `cred_test.go` -- gains a windows-only runtime skip naming cbus-que.4 on the
+  mode-bit assertions specifically (D61), NOT a whole-test skip: Go cannot
+  partially skip a test function, so the portable-round-trip assertions were
+  extracted into their own new `TestFileBackendPermissions`, which is what carries
+  the skip. `TestFileBackend` itself keeps running on windows.
+- `cursor_test.go` -- gains a windows-only runtime skip on the unreadable-cursor
+  case, naming the measured mechanism: `os.Chmod` on windows maps only to
+  `FILE_ATTRIBUTE_READONLY`, so the euid-guarded unreadable state this test wants
+  cannot be constructed via chmod there; production `readCursor` itself verified
+  correct, the coverage gap (an ACL-denial or sharing-violation route) filed to
+  cbus-que.9 rather than faked here.
+- `storename_test.go`, `formation_apply_test.go` -- fixture entries for the Win32
+  trailing-dot case made platform-conditional (D58): the `"...."` subtest skips on
+  windows naming the aliasing mechanism (below), the rest of the matrix unaffected.
+  `formation_apply_test.go` also drops ~160 lines net as part of the tmux-fixture
+  extraction.
+- `birth_test.go`, `cursor_regression_test.go`, `formation_plan_test.go`,
+  `harness_test.go`, `liveness_structural_test.go`, `liveness_test.go`,
+  `send_test.go` -- the 12+1 original fixture-seam conversions (cursor_regression's
+  local helper explains the one unlisted 13th site the reviewer flagged and
+  resolved as accounted-for), two duplicate dead-pid helpers collapsed onto
+  `deadProc`. `formation_plan_test.go` also drops a stale comment describing a
+  deleted pre-P3 mechanism (argv-grep, a tail-f-holds-the-inbox fixture) that would
+  have pointed a future reader at building exactly the delete-blocking fixture
+  cbus-que.8 exists to warn against.
+
+[Design]
+- `waitfor.exe` needed a per-call UNIQUE signal name: the binary exits when ANY
+  sender raises the named signal, so two tests sharing a name could have one test's
+  cleanup kill another's still-running fixture. Fenced inside `liveProc` (which
+  generates its own name), not left as a call-site obligation -- the same shape as
+  the F2 tick-collision trap this milestone's plan cites as a precedent to avoid.
+- Git for Windows ships sleep/true/sh/perl/tail at a fixed absolute path and was
+  rejected as the fixture substrate on purpose: depending on it makes the suite
+  silently require an unrelated install on every future windows machine, the
+  undeclared-dependency class this epic has spent effort closing elsewhere (the
+  codex socket, the flock primitive).
+- Never resolve a shell by bare name on windows: bare `bash` resolves to the WSL
+  launcher stub (WSL rejected for this epic 2026-07-19). Re-probed 2026-08-02 and
+  sharpened: bare `bash` actually resolves to TWO sources (the system32 stub and a
+  WindowsApps alias), so which one fires is not even pinned across machines -- a
+  fixture hitting this would fail differently machine to machine.
+- The exit-259 fixture is D9's missing evidence. Until a test could make
+  `WaitForSingleObject` and `GetExitCodeProcess` actually DISAGREE, D9's choice
+  between them was justified by argument (259 collides with a real exit code), not
+  measurement. Trap: reaping the child and dropping every handle before asserting
+  makes `OpenProcess` fail and BOTH implementations correctly report dead -- a
+  vacuous pass, the same shape as the coder's own earlier F4 finding (a case
+  passing with or without a guard because `0 <= 0` holds either way). The fixture
+  instead opens and HOLDS the handle from before the exit, reproducing the real
+  Windows retained-object state (what D9 says stands in for a zombie there) rather
+  than staging an artificial disagreement. Result: `m4mut1` (the
+  GetExitCodeProcess/STILL_ACTIVE swap) killed EXACTLY `TestPidAliveExitCode259` on
+  its own assertion, nothing stray -- the strongest evidence D9 has had. The paired
+  early-reap mutant (`m4mut2`) killed 8/8 at suite level but NON-DETERMINISTICALLY
+  per test (259 case red 8/8, the held-handle-exit-zero case red only 6/8):
+  reap-then-open races kernel object teardown, and when the object lingers the open
+  succeeds and the assert passes for the wrong reason. LOAD-BEARING: the two-test
+  redundancy on this fixture is not decorative -- the 259 case is the reliable
+  mutant guard, and the 8/8-vs-6/8 asymmetry plus scope caveat is recorded directly
+  on the `TestPidAliveHeldHandleExitZero` doc block so a future reader trimming
+  "redundant" tests sees the rates before doing it.
+- The A-ii rewrite (`TestFileIdentityProbeDoesNotLockOutWriters`) is D38's own
+  missing evidence, same shape as D9's: `fileIdentity` was fixed at M1 to hand-roll
+  `CreateFile` with all three share flags, but the test verifying that property had
+  been opening ITS OWN probe with a raw `os.Open` and testing the claim through the
+  wrong door -- its own doc comment, "guards the trap the os.Open choice exists
+  for," was backwards under the corrected premise (`os.Open` IS the trap; D11's
+  stated reason, that Go opens with all three share flags, was measured false
+  during the M4 first-execution run, though the API choice `CreateFile` remained
+  right). The rewrite calls `fileIdentity(path)` directly and asserts `os.Remove`
+  succeeds while the probe is in flight. Two-half design (D59): a deterministic
+  no-leak half plus a race-window share-flag half, each half's strength stated in
+  its own comment; the deterministic version (production handle exposed for
+  testing) files to cbus-que.8 alongside the handle-exposing change it needs.
+  `fixmutA` (share mask degraded to the `os.Open` set) killed 8/8, every kill at
+  the aimed loop-half assertion (`fileid_windows_test.go:152`) alone, sequential
+  half green throughout -- D38 CONVERTS TO MEASURED-VERIFIED, the oldest carried
+  gap on the epic (held since M1 as construction-only) closes. The catching
+  iteration varied 0/1/2/4/4/6/14 across runs, so the 50-iteration loop is
+  LOAD-BEARING: a single-shot probe would miss most runs. `fixmutB` (the
+  `CloseHandle` call deleted) SURVIVED 8/8 exactly as registered, a predicted
+  survivor rather than a miss: it confirms the passing test pins share-flags-at-
+  remove-time, not leak absence (reviewer micro-note n1).
+- Measured in passing, feeding cbus-que.8's fix design directly: from the fixmutB
+  predicted-survivor run, a LEAKED handle carrying all three share flags blocked
+  NEITHER a sequential remove NOR a 50-iteration rm+recreate loop on logos NTFS,
+  8/8 runs. The target volume exhibits POSIX-delete semantics -- a measured
+  property of that volume, not a general Windows claim -- which validates in
+  advance the fix shape que.8 records (route the follower's inbox open through a
+  hand-rolled `CreateFile` carrying `FILE_SHARE_DELETE`).
+- D58, the Win32 trailing-dot case: the `"...."` fixture subtest doesn't fail
+  because MkdirAll dies -- it fails because Win32 SILENTLY STRIPS trailing dots and
+  the create ALIASES ONTO THE PARENT directory while still reporting success
+  (verified two ways: a PowerShell `New-Item` probe returned created-ok with
+  `FullName` equal to the base path and no child directory; the Go-side test itself
+  read back "001," the `t.TempDir` counter belonging to the parent). The code under
+  test behaved correctly given the directory it was actually handed -- the defect
+  is Win32's, not this repo's, so the fix is a platform-conditional skip, worded to
+  say the failure mode is a SUCCESS pointing at the wrong directory, not an error,
+  since that distinction is the whole point of recording it. The class generalized
+  beyond this fixture: cbus-que.9 separately found trailing-dot STORE names pass
+  both of internal/core's name validators today and would alias onto the parent
+  store directory in production, filed there as validator hardening, not fixed in
+  this test-only batch.
+- F1 correction: an earlier extraction had flagged
+  `TestApplyDryRunNeedsNoJoinNorChannel` as touching the `fakeTmux` fixture via a
+  mentions-based scan, but the coder verified it never actually CALLS `fakeTmux`
+  (unreachable transitively) -- the extraction itself was a real windows-coverage
+  regression, moved back untagged with the header claim trimmed to match.
+- D61: Go cannot partially skip a test function, so "skip only the mode-bit
+  assertions in `TestFileBackend`" isn't expressible as a `t.Skip()` inside that
+  function without also skipping its portable round-trip coverage. The mode-bit
+  assertions were extracted into their own `TestFileBackendPermissions`, which
+  carries the windows skip naming cbus-que.4; `TestFileBackend` keeps exercising
+  the portable path on windows.
+- D60, the close-condition shape: the fix batch closed everything inside this
+  bead's scope, but one residual cluster (three follower/cursor timeouts) proved
+  genuinely nondeterministic under an 8-run scoped tally (one deterministic 8/8
+  fail, two at 6/8), not settled one way or the other by the batch and not
+  necessarily downstream of the sharing-violation cluster it's provisionally
+  grouped with. Rather than chase an exact pass count that a flaky cluster makes
+  meaningless, the close condition became an ATTRIBUTED SET: every non-pass on the
+  gate run must be either a declared skip or a member of the named, filed set
+  (que.8's four sharing-violation cases plus up to three flaky timeouts, que.9's
+  two path-resolution cases), with nothing outside that set in either direction.
+
+[Possible Ripple Effects]
+- `cbus-que.8` (os.Open blocking deletion) gains: the sharing-violation mechanism
+  now measured at a second locus (5 more failures, not just the original follower
+  handle), D11's stated reason falsified by measurement though its conclusion
+  stands, the deterministic half of the A-ii test as a production-change companion,
+  and the NTFS POSIX-delete datum validating its fix shape in advance.
+- `cbus-que.9` (new bead, filed from this milestone's first-execution results):
+  the confirmed production defect at `transcript.go:52` (hardcoded forward-slash
+  `/.ccs/instances/` fragment, silent-no-op class, reachable in production), the
+  trailing-dot store-name aliasing hazard found adjacent to the D58 fixture defect
+  (passes both `internal/core` name validators today), and a worse adjacent class
+  found during the same probe: `NUL`/`nul` as a store-path component silently
+  discards written content with every syscall reporting success (an instrument
+  correction is recorded alongside it: a PowerShell probe of reserved device names
+  read as reassuring because .NET path validation is a layer cbus never executes;
+  the Go-layer probe that actually matters found the opposite).
+- `cbus-que.4` (relay credential store) gains a binding windows skip target
+  (`TestFileBackendPermissions`) and confirmation that no test in the suite
+  exercises windows credential behavior beyond the portable round trip.
+- No behavior-spec impact: test-only diff, no dispatch or printed-string changes.
+
+[Testing Notes]
+- Reviewer: APPROVED across two rounds (initial CONDITIONAL APPROVE on the fixture
+  seam, then CONDITIONAL APPROVE on the fix batch with F1 and D61 as binding
+  conditions, both discharged). All GA-GG gates closed; three independent windows
+  test-binary rebuilds hashed byte-identical across the milestone (coder, tester,
+  reviewer), a fourth and fifth after the fix batch and the closing run.
+- Laptop: darwin suite green throughout (537 RUN / 396 PASS / 0 FAIL / 1 SKIP on
+  the final run, the one skip being `TestKeychainIntegration` on its
+  `CBUS_KEYCHAIN_IT` opt-in guard, unchanged all milestone), windows and linux vet
+  clean, gofmt clean.
+- Logos, final closing run per D60 on the final artifact (manifest
+  efccf9e0278755fd, artifact `2b3cb2decd3cce19`, run record pins the executed
+  binary sha, stderr captured and empty): 529 RUN / 373 PASS / 8 FAIL / 9 skip
+  events (8 top-level + 1 subtest). All 8 fails inside the registered attributed
+  set: 4 que.8 sharing-violation cases, 2 of 3 que.8 flaky follower-timeout cases
+  (the third, `TestDisplacedFollowerStopsMovingTheCursor`, passed this run at
+  0.37s vs a prior 2.05s timeout fail -- inside its own measured flake band, not a
+  fix), 2 que.9 path-resolution cases (fail differently from each other: one
+  resolves to nothing, the other to a backslashed volume-less string). Nothing
+  outside the attributed set in either direction.
+- Mutation coverage this milestone, two separate pairs: `m4mut1`/`m4mut2` (against
+  the original fixture seam, converting D9 to measured evidence) and
+  `fixmutA`/`fixmutB` (against the A-ii rewrite in the fix batch, converting D38 to
+  measured evidence) -- both pairs' full results are in [Design] above rather than
+  repeated here.
+- Instrument-error thread this milestone (naming the class consistently, per
+  standing practice): a CRLF-in-output bug produced a garbage first name-set diff,
+  caught because it contradicted independently-held counts; a PowerShell
+  case-insensitive-variable collision (`$n`/`$N`) plus discarded stderr would have
+  reported a mutation surviving when it was actually the harness never running,
+  caught by un-discarding stderr; the reserved-device-name PowerShell-vs-Go-layer
+  divergence above; and F1's mentions-vs-calls extraction error. None changed a
+  shipped result, all are recorded because the pattern recurring is worth more than
+  any single instance.
+- Footprint delta zero after one `rm`. Not pushed.
+
 ## [2026-08-02 20:17:19 UTC] [Client/Windows] cbus-que M3: honest refusals for every windows-excluded verb
 
 [Attempt #1] `f81c8f2` (full `f81c8f20656158195ec11ae2eb5efcb30bf8fd13`, M3, cbus-que.3).
