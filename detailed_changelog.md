@@ -1,5 +1,175 @@
 # Changelog (detailed)
 
+## [2026-08-02 20:17:19 UTC] [Client/Windows] cbus-que M3: honest refusals for every windows-excluded verb
+
+[Attempt #1] `f81c8f2` (full `f81c8f20656158195ec11ae2eb5efcb30bf8fd13`, M3, cbus-que.3).
+12 files, 246 insertions, 7 deletions.
+
+Built by the `winport` formation, relaunched 2026-08-02 for M3 with five seats
+(orchestrator, coder, reviewer, tester, documenter -- documenter added mid-run).
+Rulings D44-D50, plus the D25 and n4 carry-ins from the M1 review. Full record on
+`cbus-que` / `cbus-que.3`.
+
+[Motivating problem]
+que.3 excludes three out-of-scope subsystems from the windows build: the codex bridge
+(unix-socket rendezvous + process-group teardown), terminal forking (`branch`/`spawn`/
+`formation apply` -- Windows Terminal targeting is phase 2), and `cbus close` (its
+owner walk is the hardest part of the port and is deferred). The requirement was not
+just "don't build it" -- every excluded verb must refuse with a message naming the
+platform and the phase and a non-zero exit, because a silent no-op or a generic
+unknown-command answer both read as "you mistyped it," the class the cbus-vjo
+phantom-channel finding and the codex silent-bridge-death gap were shaped like.
+
+[Files Changed]
+- `cmd/cbus/unsupported_windows.go` (new) -- `phase1Refusal(verb) string`, one switch
+  over the seven excluded verbs. `branch`/`spawn`/`formation apply` share a
+  `forkPhase` fragment carrying "(terminal forking lands in phase 2)"; `close`,
+  `codex`, `codex-bridge`, `codex-stop-hook` don't, since none names a phase-2
+  destination. Returns "" for every verb phase 1 doesn't touch.
+- `cmd/cbus/unsupported_unix.go` (new, `//go:build darwin || linux`) -- same
+  signature, always "": every excluded verb runs natively off this platform.
+- `cmd/cbus/unsupported_windows_test.go` (new, windows-only by filename suffix, no
+  explicit build tag) -- three tests: refusal-message-and-rc for all seven verbs bare
+  AND argument-satisfied; live-verb non-refusal for the formation/bootstrap
+  survivors; template-covers-every-verb (plus a `send` negative control).
+- `cmd/cbus/main.go` -- `phase1Refusal` guard added at the top of `runCodexStopHook`,
+  `runCodexWrap`, `runCodexBridge`, `runBranch`, `runSpawn`, `runClose`, each ahead of
+  its own arg parsing.
+- `cmd/cbus/formation.go` -- same guard at the top of `runFormationApply`, ahead of
+  its usage line.
+- `internal/client/close_windows.go`, `codexwrap_windows.go` -- refusal strings gain
+  "in phase 1" (M1 review forward-pointer n4); both now say explicitly these are the
+  LIBRARY answer, superseded at the CLI door by the dispatch-level guard above.
+- `cmd/cbus/detach_unix.go` -- gains `//go:build darwin || linux` (D25); comment
+  updated to say the tag is what enforces unix-only now, not the filename.
+- `cmd/cbus/detach_windows.go` (new) -- no-op `detachProcess`; a windows child
+  already outlives its parent so there's no session to leave.
+- `internal/client/ledger.go` -- one comment on the mint-lock release closure noting
+  `unlockFile` is unobservable by construction (`Close` alone drops the lock on both
+  platforms; a mutant deleting the call stays green).
+- `docs/architecture/behavior-spec.md` -- new `### 9.2 Windows phase 1 exclusions`,
+  the seven-verb refusal table verbatim from the diff plus the refusal-beats-
+  arg-validation closing rule; citation corrected post-review from a surviving bash
+  `bin/cbus:913` reference to the actual Go site, `main.go:113`.
+- `docs/architecture/command-reference.md` -- Codex integration section: qualified
+  "Never fails the session" to darwin/linux (D49 breaks it unqualified on windows),
+  added a measurable-only windows paragraph for `codex-stop-hook` after the
+  `~/.codex/hooks.json` snippet.
+
+[Design]
+- The refusal check sits at the very top of each excluded handler, before argument
+  parsing, target resolution or any store write (D48, generalizing D46). A bad flag
+  or a missing peer answering FIRST would walk a windows user through fixing
+  something that was never going to work -- measured live: `codex-bridge` with no
+  args answers "--sock PATH is required," a dead-end walkthrough. `close` is the
+  concrete case D46 names: `closeOne` resolves its target before `ClosePeer` would
+  ever refuse, so an early dispatch guard is the only way a fresh box with no
+  matching peer reports "not supported" instead of "no such peer."
+- Exclusion is decided by mechanism reachability, not the design doc's verb list read
+  literally (D44). `applyForker` (`client.OSAForker`) is reached only from
+  `formation.go:111`, the apply path; `formation bootstrap` and top-level `bootstrap`
+  are print-only (`BootstrapPeer`/`BootstrapPrompt`), touching no forker, so they
+  stay live along with `formation save/list/show/rm`. `formation apply --dry-run`
+  refuses too even though the dry-run path itself reaches no forker (D45): its
+  output is a launch plan, and a plan reported as executable on a host that can
+  execute none of it is the same silent-lie class que.3 exists to forbid.
+- The codex subsystem refuses as a whole -- wrapper, bridge, AND stop-hook -- against
+  a coder recommendation to leave the lower-traffic bridge/hook verbs unrefused as
+  practically unreachable (D47). que.3's scope line excludes the subsystem, and the
+  unreachable-in-practice argument is the same shape the coder itself had already
+  rejected elsewhere in the same review round. `codex-stop-hook` additionally keeps
+  exit 1 with its refusal rather than adopting the Stop-hook convention of never
+  failing the session (D49): the registered instrument for this milestone asserts
+  rc != 0 on all seven excluded verbs, uniformly, and a hand-wired codex hook on a
+  platform where codex refuses is a misconfiguration that deserves a visible non-zero.
+- Excluded verbs stay REGISTERED in dispatch rather than vanishing under a build tag.
+  The unknown-command fallback (`main.go:113`) also exits 1, so a check reading only
+  rc cannot distinguish "excluded on this platform" from "you mistyped it" -- the
+  gate instrument therefore matches on the PRINTED string (verb, "windows", "phase 1"
+  all present; "usage:" and "unknown command" both absent), with rc recorded but not
+  decisive. Same reasoning killed a source-grep shortcut: the phase token existed in
+  a doc comment at `codexwrap_windows.go` before this milestone, which a grep would
+  have credited and no user would ever have read.
+- D25 folded in rather than deferred: `detach_unix.go` was the only one of eight
+  `*_unix*.go` files with no `//go:build` line, so its filename suffix was asserting
+  a guarantee the build system never enforced. `detach_windows.go` is a documented
+  no-op, not a port: a windows child already outlives its parent. One residual delta,
+  accepted not fixed: the update poll stays attached to the launching console on
+  windows, so a later Ctrl+C there reaches a process the unix side would have
+  already detached away from.
+- A class-C fold landed mid-milestone: `main.go`'s stop-hook header comment claimed
+  "always exits 0," false on windows since D49. The originally proposed proof of
+  harmlessness (rebuild plus byte-compare against the frozen exe) was ITSELF
+  falsified before use (D50): Go embeds a build id hashed over source content, so any
+  comment edit moves it, and a line-count change additionally moves the DWARF and
+  pcln tables (~1.48 MB of a 10.5 MB exe measured). The comment-shaping option that
+  would have deleted a documented fact to fit the (wrong) measuring device was
+  rejected; the adopted proof is a reviewer-read diff enumerating only comment/doc
+  lines, plus one full rule-8 re-run, which is the numbers reported below.
+
+[Possible Ripple Effects]
+- `unsupported_windows_test.go` is windows-only by the implicit `_windows_test.go`
+  filename suffix (no explicit `//go:build windows` needed) -- consistent with how
+  `unsupported_unix.go` carries an explicit tag (unix isn't a GOOS) while its windows
+  counterpart needs none.
+- The refusal template lives in exactly one place (`phase1Refusal`); the CLI dispatch
+  guards and the `internal/client` library answers (`ClosePeer`, `RunCodexWrap`) now
+  intentionally diverge in wording -- library strings are documented as unreachable
+  from the CLI door. A future direct caller of either library function outside
+  `cmd/cbus` inherits the library wording, not the dispatch wording.
+- `formation apply --dry-run` refusing wholly (D45) means there is currently no way
+  to preview a formation launch plan on windows even read-only. Loosening that later
+  needs a new ruling, not a quiet reversal.
+- colima cross-platform container-runtime gate WAIVED for M3 by the orchestrator: no
+  process-state code changed this milestone (dispatch, refusal strings, one build
+  tag), which is the class that gate exists to catch. Recorded not-run-not-claimed.
+- Doc-embed scope correction found during the class-C rebuild-confirm: doc edits
+  under `docs/` do not reach the binary, but the nine embedded `.md` files under
+  `commands/` and `roles/` ARE compile inputs (`assets.go:12,19`) and an edit there
+  moves both build shas and trips `assets_test`. An earlier roles-only embed claim
+  was wrong and is corrected here.
+
+[Testing Notes]
+- Reviewer: APPROVED. G1-G6 all met and reproduced first-hand; G2 sweep found no
+  eighth verb reaching osascript, tmux, the codex UDS dial or an unguarded kill;
+  library unreachability verified by caller enumeration (`ClosePeer` sole caller
+  `main.go:930`, `RunCodexWrap` sole caller `main.go:347`, both behind guards); G6
+  every hunk maps to a ruling, no smuggle. One retracted instrument on the record:
+  the byte-compare harmlessness proof for the class-C fold (see Design) was false --
+  it fires on every comment edit, so a delta proves nothing either way.
+- Tester, laptop half: tree-wide windows build zero diagnostics (against the tester's
+  own 1-diagnostic morning baseline); artifacts rebuilt from scratch (old ones
+  deleted first) so a silent build failure couldn't ship stale binaries; fresh pair
+  byte-identical to the coder's post-fold pair, independently reproduced twice this
+  milestone.
+- Tester, logos half, run twice (pre-fold and a full rule-8 re-run post-fold), GREEN
+  both times: section E 25/25 (refuse 15/15 -- all seven verbs bare AND
+  argument-satisfied, plus `apply --dry-run`; live 7/7 zero over-refusal; controls
+  3/3), windows test binary 3 RUN / 3 PASS, harness header pins the executed binary
+  sha into the run record. Post-fold run additionally verified BYTE FOR BYTE
+  identical case-line output against the pre-fold run, so the comment fold changed
+  the binary's build id and line tables (as predicted) and exactly zero bytes of
+  user-visible behavior -- measured, not argued. Final artifact pair: `87aa5e94` /
+  `42f4d033`. Footprint delta zero after one `rm`.
+- G5 mutation pass on logos: 4 unique binary hashes (control + 3 reviewer-authored
+  mutants, each proven on-disk and baseline-restore-verified before reading its
+  result), every aimed red landed on the intended assertion. One deviation
+  adjudicated, not a mechanism miss: bare `close` under two of the mutants fired
+  three assertions instead of the predicted usage-only, because a usage line names
+  neither "windows" nor "phase 1" -- an enumeration-granularity gap in the reviewer's
+  own pre-registration, not a discriminator failure. One unpredicted positive: under
+  one mutant the library `CloseReport` text surfaced on raw stdout outside the
+  capture, live proof the dispatch guard and the M1 library seam are two separable
+  output paths.
+- NOT covered by this green, stated rather than papered over: no release ldflags
+  (the gate exe is not a release artifact); nothing privilege-sensitive ran, so no
+  claim about the unelevated production path; amd64, one machine, one profile; the
+  M1/M2 carried gaps (D38 fileIdentity fix construction-only, Gate 4 two-process lock
+  cases never run, pidAlive access-denied branch unexercised) are untouched by this
+  milestone.
+- Final freeze manifest `8aa2ad1dcd199766` (12 paths, reproduced independently by
+  coder, orchestrator and reviewer). Not pushed.
+
 ## [2026-07-27 03:18:12 UTC] [Client/Windows] cbus-que M1+M2: internal/client cross-compiles for windows
 
 [Attempt #1] `23ddb92` (M1, cbus-que.1) and `5d73db4` (M2, cbus-que.2).
