@@ -316,9 +316,13 @@ func openFollow(inbox string, resume resumePoint, poll time.Duration, stop <-cha
 // killing the follower). Retrying keeps the follower alive across a rejoin's
 // rm+recreate; a permanently-gone inbox simply polls forever (never self-exit). The
 // stop seam lets a test bound the retry.
+//
+// openSharedRead, not os.Open: this handle is held for the LIFE OF THE ARM, and a
+// stdlib handle blocks deletion on windows, so the rm half of the rm+recreate this
+// retry exists to survive could not happen at all while a peer was armed.
 func reopenUntilSuccess(path string, poll time.Duration, stop <-chan struct{}) (*os.File, bool) {
 	for {
-		if f, err := os.Open(path); err == nil {
+		if f, err := openSharedRead(path); err == nil {
 			return f, true
 		}
 		if stopped(stop) {

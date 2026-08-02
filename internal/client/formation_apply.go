@@ -437,7 +437,10 @@ const pollInterval = time.Second
 // readInbox reads every line's text field, tolerating a torn last line (the writer
 // appends, so a partial line is normal and transient).
 func readInbox(path string) []string {
-	f, err := os.Open(path)
+	// openSharedRead, not os.Open: this runs once per pollInterval for the life of a
+	// wait, so on windows a stdlib handle would block removal of that inbox roughly a
+	// second in every second.
+	f, err := openSharedRead(path)
 	if err != nil {
 		return nil
 	}

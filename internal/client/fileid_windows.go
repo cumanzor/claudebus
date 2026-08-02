@@ -13,35 +13,17 @@ import (
 
 // fileIdentity is the identity of the file at path.
 //
-// It opens with a hand-rolled CreateFile rather than os.Open, and the share mode is the
-// whole reason. Go's os.Open passes FILE_SHARE_READ|FILE_SHARE_WRITE and NOTHING ELSE
-// (syscall_windows.go, `sharemode := uint32(FILE_SHARE_READ | FILE_SHARE_WRITE)`), so a
-// handle it returns BLOCKS DELETION of the file for as long as it is held. That turns an
-// identity PROBE into a lock: a rejoin's rm+recreate of the inbox fails with "being used
-// by another process" while any probe handle is open. Windows needs FILE_SHARE_DELETE
-// named explicitly, and no stdlib open helper names it, so the call has to be made here.
-//
-// Verified rather than assumed, because the previous version of this comment asserted
-// that os.Open passed all three flags, and it does not.
+// It goes through openSharedRead rather than os.Open, and the share mode is the whole
+// reason: a stdlib handle blocks deletion of its file while held, which turns an
+// identity PROBE into a lock. The mask and the argument for it live in
+// openshared_windows.go, so the follower's open and this one cannot drift apart (D65).
 func fileIdentity(path string) (dev, ino uint64, size int64, ok bool) {
-	p, err := syscall.UTF16PtrFromString(path)
+	f, err := openSharedRead(path)
 	if err != nil {
 		return 0, 0, 0, false
 	}
-	h, err := syscall.CreateFile(
-		p,
-		syscall.GENERIC_READ,
-		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE,
-		nil,
-		syscall.OPEN_EXISTING,
-		syscall.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	defer syscall.CloseHandle(h)
-	return handleIdentity(h)
+	defer f.Close()
+	return fileIdentityOf(f)
 }
 
 // fileIdentityOf is the identity of an already-open file. The share mode here belongs to

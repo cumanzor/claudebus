@@ -794,11 +794,14 @@ func runLeave(args []string) int {
 		ch = args[0]
 	}
 	left, err := client.Leave(ch)
-	if err != nil {
-		return die("%v", err)
-	}
+	// a partial leave returns BOTH: the channels that went and the failure that stopped
+	// the rest. Dying on the error alone would hide work that actually happened, so the
+	// successes print first and the failure still sets the exit code.
 	for _, l := range left {
 		fmt.Printf("left %s\n", l)
+	}
+	if err != nil {
+		return die("%v", err)
 	}
 	return 0
 }
