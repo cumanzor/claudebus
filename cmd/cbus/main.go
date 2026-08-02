@@ -299,9 +299,16 @@ func runHookJoin() int {
 
 // runCodexStopHook runs the codex Stop hook: long-poll this session's inbox and, on new
 // traffic, print {"decision":"block","reason":<framed>} for codex to inject as a continuation
-// turn; otherwise print NOTHING (allow the stop). ALWAYS exits 0 — a Stop hook must never fail
-// the session, and a bad --wait falls back to the default rather than erroring.
+// turn; otherwise print NOTHING (allow the stop). Exits 0 wherever the verb exists — a Stop
+// hook must never fail the session, and a bad --wait falls back to the default rather than
+// erroring. Windows is the one exception, where the verb IS a refusal and exits non-zero.
 func runCodexStopHook(args []string) int {
+	// the only hook target in this binary that can fail its caller. It refuses ahead of
+	// the StopHook read, which would otherwise block on a stdin that carries no codex
+	// turn to wait for.
+	if m := phase1Refusal("codex-stop-hook"); m != "" {
+		return die("%s", m)
+	}
 	wait := client.StopHookDefaultWait
 	if w, _, err := extractFlag(args, "--wait"); err == nil && w != "" {
 		if d, perr := time.ParseDuration(w); perr == nil {
@@ -321,6 +328,11 @@ func runCodexStopHook(args []string) int {
 // repo name; --alias defaults to "codex" (the wrapper must know the alias to bridge it).
 // Remaining args pass through to codex.
 func runCodexWrap(args []string) int {
+	// client.RunCodexWrap refuses too, and stays the library answer; this guard is what
+	// the CLI user actually reaches, since a bad --channel dies on the flag first.
+	if m := phase1Refusal("codex"); m != "" {
+		return die("%s", m)
+	}
 	const use = "usage: cbus codex [--channel CH] [--alias AL] [codex args...]"
 	channel, args, err := extractFlag(args, "--channel")
 	if err != nil {
@@ -343,6 +355,9 @@ func runCodexWrap(args []string) int {
 // must already be joined (the bridge arms as its listener); --thread adopts an existing
 // codex thread, and its absence makes the bridge create one. Blocks in the follower loop.
 func runCodexBridge(args []string) int {
+	if m := phase1Refusal("codex-bridge"); m != "" {
+		return die("%s", m)
+	}
 	const use = "usage: cbus codex-bridge <channel>/<alias> --sock PATH [--thread ID]"
 	sock, args, err := extractFlag(args, "--sock")
 	if err != nil {
@@ -448,6 +463,13 @@ func applySessionIDFlag(args []string) (rest []string, restore func(), err error
 }
 
 func runBranch(args []string) int {
+	// the platform check precedes argument parsing on purpose: on an excluded platform
+	// a flag typo must not answer before the refusal does, and Branch joins the channel
+	// and reserves the child's alias before it ever reaches the forker, so a refusal
+	// raised any later would already have written to the store.
+	if m := phase1Refusal("branch"); m != "" {
+		return die("%s", m)
+	}
 	const use = "usage: cbus branch [window|tab|tmux|pane] [channel] [--model m] [--name n]"
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
@@ -479,6 +501,9 @@ func runBranch(args []string) int {
 }
 
 func runSpawn(args []string) int {
+	if m := phase1Refusal("spawn"); m != "" { // see runBranch: before parsing, before ReserveAlias
+		return die("%s", m)
+	}
 	const use = "usage: cbus spawn [window|tab|tmux|pane] [channel|<ch>@<host>] [--model m] [--name n] [--role r]"
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
@@ -844,6 +869,12 @@ const closeUsage = "usage: cbus close <channel>/<alias> [...] [--force]"
 // local (channel, alias) and cannot express a host, so an @host accepted this far
 // would silently tear down a same-named LOCAL peer instead.
 func runClose(args []string) int {
+	// ahead of target resolution (D46): closeOne resolves the peer FIRST, so on a host
+	// with no live peer the platform refusal in ClosePeer is never reached and the user
+	// is told the peer does not exist instead of that the verb does not run here.
+	if m := phase1Refusal("close"); m != "" {
+		return die("%s", m)
+	}
 	// close parses its own argv instead of splitVerbArgs: that scanner stops at the
 	// first positional (flags.go:60), which works for verbs taking a fixed leading
 	// target but would swallow a trailing --force as a TARGET here, where targets are

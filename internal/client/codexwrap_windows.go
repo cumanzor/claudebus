@@ -10,7 +10,12 @@ import "errors"
 // program wearing the same verb.
 //
 // Phase 1 carries no codex peers on this platform, so the refusal costs nothing that
-// is currently reachable.
+// is currently reachable. The phase belongs in the returned string and not only in
+// this comment: the user reads what gets printed, and "not available on windows" alone
+// says never where the truth is not yet.
+//
+// The CLI refuses at runCodexWrap ahead of this, so what a `cbus codex` user reads is
+// that guard's string; this is the library answer.
 func RunCodexWrap(channel, alias string, passthrough []string) error {
-	return errors.New("cbus codex is not available on windows: the wrapper rendezvouses with the codex app-server over a unix domain socket and tears it down by process group")
+	return errors.New("cbus codex is not available on windows in phase 1: the wrapper rendezvouses with the codex app-server over a unix domain socket and tears it down by process group")
 }
