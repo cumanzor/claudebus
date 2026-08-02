@@ -1179,7 +1179,8 @@ Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex
   traffic before `D`, or a `stop_hook_active` re-entry with nothing new, prints
   nothing and allows the stop — **the timeout is a failure, never a signal**. A
   dot-prefixed `.stop-cursor` sidecar (distinct from the follower `.cursor`) tracks
-  delivered position. Never fails the session.
+  delivered position. Never fails the session on darwin/linux — excluded from
+  windows builds in phase 1 instead (below).
 
 Codex hooks provision entirely on argv (`-c` + `--dangerously-bypass-hook-trust`)
 for a spawned worker, or via `~/.codex/hooks.json` for a human's exec sessions.
@@ -1199,6 +1200,12 @@ decodes codex's snake/camel stdin) together:
 
 Set `CBUS_CHANNEL` (and optionally `CBUS_ALIAS`) in the codex process env so the
 SessionStart join has a channel. The `Stop` timeout must exceed `--wait`.
+
+On windows (phase 1), `codex-stop-hook` is one of the excluded verbs (cbus-que.3,
+[behavior spec §9.2](behavior-spec.md)): it exits 1 and prints `cbus: codex-stop-hook
+is not available on windows in phase 1: ...` instead of running the poll above. An
+operator wiring the `~/.codex/hooks.json` Stop hook on a windows host per the snippet
+above will see that exit code and refusal text in their hook's output.
 
 ---
 

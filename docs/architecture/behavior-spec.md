@@ -461,6 +461,42 @@ staged by hand — and a marker with no local registration still counts as
 `joined`, pinned as its own case since the flag and the exit code must agree in
 every combination, not just the common one.
 
+### 9.2 Windows phase 1 exclusions (`cmd/cbus/unsupported_{unix,windows}.go`, cbus-que.3)
+
+`phase1Refusal(verb) string` — checked at the top of each excluded verb's handler,
+before arg parsing, target resolution, or any store write. Always `""` on
+darwin/linux (`unsupported_unix.go`, `//go:build darwin || linux`). Excluded verbs
+stay **registered** in dispatch rather than falling through to the unknown-command
+path (main.go:113, exit 1, no platform/phase wording — its own comment cites the
+bash predecessor's `bin/cbus:913`, not this line) — rc alone can't distinguish
+"excluded here" from "mistyped."
+
+Refused (exit ≠0). Printed contract splits in two: the three verbs that reach the
+terminal forker carry a `(terminal forking lands in phase 2)` parenthetical the other
+four do not —
+`cbus: <verb> is not available on windows in phase 1 (terminal forking lands in
+phase 2): <mechanism>` for `branch`/`spawn`/`formation apply`, versus
+`cbus: <verb> is not available on windows in phase 1: <mechanism>` for the rest:
+
+| Verb | Mechanism (verbatim) | Notes |
+|---|---|---|
+| `branch` | "it places the forked child in an iTerm2 window or a tmux pane, and neither backend exists here" | carries the phase-2 parenthetical; before `extractForkFlags` |
+| `spawn` | "it launches the fresh session into an iTerm2 window or a tmux pane, and neither backend exists here" | carries the phase-2 parenthetical; before `extractForkFlags`/`ReserveAlias` |
+| `formation apply` (incl. `--dry-run`) | "it launches every peer through that same forker. --dry-run is refused with it, because a launch plan for a host that can start no peer is a promise rather than a preview. formation save, list, show, rm and bootstrap do work here" | carries the phase-2 parenthetical; dry-run itself reaches no forker but refuses anyway — a plan reported executable on a host that can run none of it is the same silent-lie class this milestone forbids |
+| `close` | "it locates the peer's terminal surface by controlling tty, and there is none to read" | refuses at dispatch entry, **before** `closeOne` resolves the target — else a host with no matching peer reports "no such peer" instead of "not supported" |
+| `codex` | "the wrapper rendezvouses with the codex app-server over a unix domain socket and tears it down by process group" | CLI-door wording; `client.RunCodexWrap` carries the same claim as the library answer |
+| `codex-bridge` | "it follows the codex app-server over the same unix domain socket the wrapper dials" | |
+| `codex-stop-hook` | "it is the delivery fallback for a codex exec worker, and the whole codex subsystem is excluded from this build" | exits 1 with the refusal — breaks the verb's usual never-fails-the-session shape; see the Codex integration section in command-reference.md for the operator-facing note |
+
+Stays live (touches neither the terminal forker nor the codex app-server):
+`formation save`, `formation list`, `formation show`, `formation rm`,
+`formation bootstrap`, top-level `bootstrap`. `formation bootstrap`/`bootstrap` are
+print-only (`BootstrapPeer`/`BootstrapPrompt`) — no forker in their path.
+
+The refusal always precedes argument validation: a bad flag or missing target on an
+excluded verb answers with the platform refusal, never a usage line — an excluded
+mechanism doesn't get a walkthrough toward it.
+
 ## 10. Relay spec
 
 ### Startup (main.go:391-420)

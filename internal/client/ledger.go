@@ -430,6 +430,8 @@ func acquireMintLock(ch string) (release func(), ok bool) {
 		err := tryLockExclusive(f)
 		if err == nil {
 			return func() {
+				// unobservable by construction: Close alone drops the lock on both platforms, so a
+				// mutant deleting this call stays green. It is here to state the intent, not to be tested.
 				_ = unlockFile(f)
 				_ = f.Close()
 			}, true
