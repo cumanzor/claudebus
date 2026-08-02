@@ -98,7 +98,7 @@ func readNewInboxFrames(inbox, peerDir string) []timedFrame {
 		start = off // resume; a dev/ino mismatch or past-EOF offset means a rejoin truncated the
 		// inbox, so byte 0 replays since join and loses nothing (join truncates).
 	}
-	f, err := os.Open(inbox)
+	f, err := openSharedRead(inbox) // never os.Open: a held stdlib handle blocks the inbox from being removed on windows
 	if err != nil {
 		return nil
 	}
