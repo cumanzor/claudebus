@@ -1,5 +1,263 @@
 # Changelog (detailed)
 
+## [2026-08-02 23:35:50 UTC] [Client/Windows] cbus-que M5: silent windows reclaim failures now surface, first production fix of the epic
+
+[Attempt #1] `72c2779` (full `72c2779cf0e67806866a5bb696e50d2cf6cc9520`, M5, cbus-que.8).
+11 files, 342 insertions, 43 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Rulings D62-D68, plus D11/D38 (carried since M1, closed here) and
+D59 (carried since M4). Full record on `cbus-que.8`; successor beads `cbus-que.10`
+(follower/cursor timeout cluster, independent of this fix), `cbus-que.11` (cmd/cbus
+windows accounting, first execution), `cbus-que.12` (transient-read handles).
+
+[Motivating problem]
+The epic's own design field listed the in-process follower under "Already
+portable, no work." False: framing, rotation and replay carry, but the follower's
+HANDLE-HOLDING does not, because it interacts with windows deletion semantics
+nobody costed. Verified at the syscall source, not assumed:
+`GOROOT/src/syscall/syscall_windows.go:395` passes
+`FILE_SHARE_READ|FILE_SHARE_WRITE` and nothing else to every `os.Open`/`os.OpenFile`
+call, unconditionally. `follow.go`'s `reopenUntilSuccess` opens the inbox with
+`os.Open` and the follow loop holds that handle for the ENTIRE LIFE OF THE ARM, so
+an armed windows peer continuously blocks deletion of its own inbox -- a permanent
+condition, not a narrow race. `store.go` calls `os.RemoveAll` and discards the
+error at every site, so a reclaim, prune, leave or rename against a peer whose
+inbox is still held FAILS and reports success anyway: the old directory survives
+underneath a caller that believes it cleaned up. Reachable rather than
+theoretical: the reclaim path fires against a peer that READS dead
+(`listenerIdentityHolds` returns false on ANY liveness-probe error, by design),
+and join-reclaim is not an edge case -- it is the path every seat in this
+formation used to start.
+
+[Files Changed] (11 paths, final manifest 3beda9bbc0b5b829)
+- `openshared_unix.go` (new, `darwin || linux`) -- `openSharedRead` is a bare
+  `os.Open`; unix already permits unlinking a held-open file, so there is nothing
+  to add on this side.
+- `openshared_windows.go` (new) -- `openSharedRead` via hand-rolled `CreateFile`
+  requesting `FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE`. Read-only and
+  FILE-ONLY by ruling (D64): no `FILE_FLAG_BACKUP_SEMANTICS`, so a directory
+  target fails loudly rather than silently. Carries two corrections landed
+  in-tree as comment clauses: the "restores unix behaviour" claim is qualified as
+  measured on the TARGET VOLUME specifically (logos NTFS: a held handle blocked
+  neither a remove nor a 50-iteration rm+recreate loop, 8/8; a filesystem with
+  delete-pending semantics instead would let the remove succeed but could delay a
+  same-path recreate, and the follower survives either way since it polls and
+  reopens); and the READ-ONLY boundary names its reason explicitly -- the three
+  O_APPEND writers (`presence.go`, `ledger.go`'s append, `ledger.go`'s mint lock)
+  stay unrouted because hand-rolling create-plus-append-plus-permissions risks
+  getting `FILE_APPEND_DATA` wrong and CORRUPTING A LEDGER, strictly worse than
+  the blocked-delete this milestone fixes, and the mint lock's correctness
+  separately rests on close-drops-the-lock; converting a writer is its own
+  ruling, not assumed here.
+- `openshared_test.go` (new, portable) -- `TestOpenSharedReadSurvivesRemoval`:
+  opens a file through the seam, removes it while the handle is still open, and
+  asserts both that the remove succeeds AND the holder keeps reading the original
+  bytes after the unlink. Deterministic because the TEST owns the handle's
+  lifetime. This is the D38-shape verifying test the epic has recorded as missing
+  since M1.
+- `openshared_windows_test.go` (new) -- `TestOpenSharedReadRefusesADirectory`,
+  with a same-path file-open control inside so the directory case is proven to
+  discriminate something.
+- `fileid_windows.go` -- `fileIdentity` folds onto `openSharedRead` (D65): deletes
+  its own hand-rolled `CreateFile` block (20 lines), since the three-flag mask now
+  exists exactly once. Editing this M1-approved file was a named delta in review,
+  isolated by the reviewer's copy instrument.
+- `follow.go` -- `reopenUntilSuccess` (the arm-lifetime handle, the main event of
+  this bead) now opens via `openSharedRead`.
+- `formation_apply.go`, `codexstophook.go` -- their inbox-polling `os.Open` calls
+  route through `openSharedRead` too.
+- `store.go` -- ten `os.RemoveAll` discard sites addressed (the bead's own title
+  said twelve, which measured out to be the TREE-WIDE call count, not the
+  file's discard count). EIGHT surface their error (see Design for the corrected,
+  twice-revised site classification); THREE keep the discard with a stated-why
+  comment (`Unreserve`, and two litter-cleanup branches inside `PruneChannel`).
+- `cmd/cbus/main.go` -- `runLeave` prints successful `left <ch>/<al>` lines before
+  checking the error, instead of dying on the first error and hiding leaves that
+  already succeeded (class-C c2).
+- `prune_windows_test.go` (new, windows-only by filename suffix) --
+  `TestPruneDoesNotSkipADeadPeerInSilence` (renamed from an earlier working title;
+  see Design for the two-round eighth-site story) and
+  `TestUnregisterDoesNotAnnounceAFailedRemoval`, both fixtured with a held
+  `os.Open` handle -- the measured mechanism itself, not a staged condition.
+
+[Design]
+- D62/D63 answered the coder's plan questions: the ten-discard-site set was
+  confirmed (`selfupdate.go:83` and `spool.go:147` reviewed and left unchanged),
+  and the split rule was "false-success sites surface, best-effort cleanup sites
+  keep the discard with a stated-why comment" -- surfacing every discard as a
+  caller-visible error on every platform would ship a behavior change serving no
+  defect anyone has.
+- D66 corrected the coder's first classification, which had inherited an error
+  from the bead's own site-to-function map (it labeled two sites as prune when
+  they were actually `Leave` and `Unregister`, measured from source). Corrected
+  rule: classify by WHAT THE CODE DOES AFTER THE REMOVAL, not by name or
+  proximity. Site 526 (`PruneChannel`'s normal path) is the worst case in the
+  file: at baseline, a failed removal didn't just fail to clean up -- the code had
+  already appended a "pruned" line, written a terminal ledger LEAVE event and
+  BROADCAST departed to every listener by the time the discarded error was
+  reached, while the directory survived renamed under a dot-prefixed `.reap.<pid>`
+  name that the entry loop's own glob skips, an orphan nothing lists again. Fixed
+  by skipping that whole announce trio unless the directory is actually gone.
+  `Rename` follows the same shape for a different reason: its removal precedes a
+  `departed (name reclaimed)` broadcast on the very next line, so a discarded
+  failure there announces a departure the removal never accomplished, even though
+  the following `os.Rename` would separately fail loudly moments later.
+- `Leave` iterates every channel a session is joined to; the fix keeps the loop
+  running past a failed removal on one channel rather than aborting the rest,
+  because those channels' leaves are independent and already broadcast. What must
+  not happen is reporting the FAILED one as left -- so `left` and `err` can both
+  come back non-empty for a partial leave, a shape callers handle rather than a
+  single pass/fail. `cmd/cbus/main.go`'s `runLeave` was updated to match (c2):
+  print the successes first, then die on the error, so a partial leave's real
+  work isn't hidden behind the one channel that failed.
+- THE EIGHTH SITE, told in full because it took two corrections rounds and is a
+  live instance of trusting a measurement at the wrong scope: `PruneChannel`
+  renames a dead peer's directory aside before removing it, and that RENAME
+  itself also discarded its error, one line above site 526. The first pinning
+  test (`TestPruneDoesNotAnnounceADepartureItCouldNotPerform`) was written
+  expecting a two-way outcome (removal blocks, or it doesn't) but the coder
+  corrected that to three ways before it ever ran on logos: removal blocks
+  (526 confirmed), the RENAME blocks first (peer dir found back at its original,
+  un-renamed path -- a second discarded error, not the one the test was aimed
+  at), or neither blocks on this volume (real possibility given the measured
+  POSIX-delete datum, recorded as the pin going UNEXERCISED rather than counted
+  green). MEASURED ANSWER on logos: row two. The rename blocks FIRST -- a held
+  handle inside the peer directory defeats the rename before the removal is ever
+  reached -- so `PruneChannel` was skipping the dead peer SILENTLY, msgs empty,
+  the exact messageless silent-skip class this epic exists to close, one site
+  the original seven-site ruling had not reached. RULED (D67): the rename discard
+  is surfaced as an EIGHTH site, with a could-NOT line naming the peer and the
+  mechanism, same message discipline as the other seven. The pin test was
+  rewritten and renamed (`TestPruneDoesNotSkipADeadPeerInSilence`): its primary
+  assertion is now never-skipped-in-silence, and it REPORTS which half blocked --
+  the rename-claim-failed wording if the ghost dir is still at its original path,
+  or a `t.Log`ged UNEXERCISED-on-this-volume note if the 526 removal branch never
+  got exercised because the rename got there first. The 526 branch itself stays
+  in the code, for volumes where the rename succeeds and the removal is what
+  fails. Two kill mutations, one per branch, are named directly in the test
+  comment. The coder owned its own row-three misreading in the comment too: the
+  POSIX-delete datum this design leans on was measured at a mask that INCLUDED
+  `FILE_SHARE_DELETE`; this fixture's held handle omits it, so something always
+  blocks at THIS mask, and only which half was ever in doubt -- a measurement
+  taken at one mask, misapplied to a different one, the same class of error this
+  epic has caught itself making before (a mask/scope mismatch, not a new kind of
+  mistake).
+- The three kept-discard sites (`Unreserve`, and two `PruneChannel` litter-cleanup
+  branches) are each commented with why: `Unreserve` is best-effort with no caller
+  reporting its success, so a failure just leaves a stale reservation the next
+  join reclaims through the now-surfaced `ReserveAlias` path; the litter sites
+  drop the reaper's OWN temp copy after a race already resolved elsewhere, so a
+  failure there leaves litter, not a lie, and nothing downstream reads either
+  outcome.
+- Two coder mechanism reads, tasked by the reviewer before the corrections could
+  land, both resolved WITHOUT expanding this milestone's scope:
+  1. `TestForeignReopenIsNotStreamed`'s residual (still red at narrow scope after
+     the fix): no code path HOLDS `meta.json` open -- every reader is
+     open-read-close, every writer is write-tmp-rename. The actual blocker is
+     TRANSIENT handles at HIGH FREQUENCY: `os.ReadFile` IS an `os.Open` one call
+     down (`GOROOT src/os/file.go:865`), carrying the same no-FILE_SHARE_DELETE
+     mask for its microseconds; the armed follower re-reads `meta.json` roughly
+     once a second for the life of an arm (`identityEvery`, 5 ticks), and 23
+     separate `os.ReadFile` sites exist in `internal/client` -- dense enough
+     scheduling that a remove-vs-read overlap is near-certain. The original bead
+     enumeration missed this entirely because it grepped for `os.Open` and
+     `os.OpenFile` textually, and `os.ReadFile` matches NEITHER string while
+     BEING one a call down -- the same mentions-vs-calls instrument gap M4's F1
+     hit one layer up, an instrument that can't see through its own indirection.
+     Filed to new bead `cbus-que.12`, correctly out of this milestone's scope
+     (which covered only the long-held reads).
+  2. `TestDisplacedFollowerStopsMovingTheCursor`'s flip (1/8 pre-fix to 8/8
+     post-fix at narrow scope) is NOT a regression. A discriminating probe (8
+     solo runs each, pre-fix and post-fix artifacts) settled it: pre-fix 7/8
+     FAIL, post-fix 8/8 FAIL -- the test was failing near-constantly before M5
+     ever existed, and the original 7-test-scope 1/8 pre-fix reading was itself
+     the outlier, most likely because the four A-i neighbor tests died fast
+     (0.01-0.06s) pre-fix and ran slow (0.35-0.67s) post-fix, changing the
+     parallel scheduling profile enough to stop suppressing an already
+     near-constant failure (a hypothesis, not asserted as proven). Filed with two
+     siblings (`TestQuietFollowerWritesNothing`, `TestCursorNeverPointsMidFrame`)
+     to new bead `cbus-que.10`. The tester's own initial "possible regression"
+     caution is recorded as the right call to raise, with a now-measured negative
+     answer.
+- D68: `cmd/cbus`'s windows suite had NEVER executed on logos before this round
+  (M3 scoped its own logos run to just the three-verb refusal trio). Rather than
+  block this milestone on a first-ever full run of an unrelated surface, the gate
+  was scoped by ruling to exactly what this milestone touches: every
+  `Leave`-matching test, plus the M3 refusal trio as a regression check,
+  declared in advance via `-test.list` so the boundary is verifiable, not
+  post-hoc. Two first-execution discoveries outside that scope (a
+  `TestUsageAdvertisesClose` hang, and seven `TestClose` windows failures) are
+  filed to new bead `cbus-que.11` rather than gating this milestone, since they
+  are discoveries on a surface that has simply never run before, not regressions
+  this bead introduced.
+
+[Possible Ripple Effects]
+- Five verbs change CLI-visible failure behavior on windows: `join`, `leave`,
+  `unregister`, `rename`, `prune`. A behavior-spec proposal (new subsection,
+  verbatim strings) was prepared and held pending review; `ReserveAlias`'s
+  identical reclaim string is real but not currently windows-reachable, since all
+  three of its callers sit behind verbs M3 already refuses wholly (verified by
+  grep).
+- `fileid_windows.go`'s `fileIdentity` losing its own hand-rolled `CreateFile` in
+  favor of the shared seam means a future divergence between the two open paths
+  is now structurally impossible rather than merely undesired.
+- `cbus-que.12` (new): the transient-`os.ReadFile` class is broader than what
+  this milestone fixed (six originally-enumerated long-held opens) -- 23 call
+  sites carry the same mask, and a blanket conversion would inherit D64's
+  silent-false-on-directory behavior on any path that can name a directory,
+  meaning it needs per-site treatment or a read helper preserving `os.ReadFile`
+  semantics while swapping only the open, not a mechanical find-and-replace.
+- `cbus-que.10` (new): three follower/cursor tests, independent of the sharing-
+  violation cluster this milestone fixed, still unowned.
+- `cbus-que.11` (new): `cmd/cbus`'s windows suite has two first-execution
+  failures of its own, entirely orthogonal to this milestone's changes, now
+  tracked rather than left as an unscoped gate risk for whichever milestone
+  touches that code next.
+
+[Testing Notes]
+- Reviewer: UNCONDITIONAL final sign-off. Every registered condition closed
+  across two review rounds; the milestone record it closes: eight surfaced sites
+  each with commit-last ordering verified, three kept discards with their why at
+  the site, the `openSharedRead` seam with its mask in exactly one file, D38 and
+  the rename-claim defect both measured from both sides (fix-green plus
+  mutant-red), and the operator-facing silent-skip class eliminated at every site
+  that announces. Reviewer's own instrument self-correction on record: a first
+  `m5mut2b` was built from a pre-correction freeze and would have red for
+  unrelated reasons; withdrawn and replaced by `m5mut2b.v2` before being trusted.
+- Closing run (final freeze, manifest `3beda9bbc0b5b829`, artifacts `db32b5f5`,
+  `f9fa6859`, `c7704065`): gate-scope 533 RUN / 380 PASS / 5 FAIL, all five
+  attributed and nothing outside the set (3 `cbus-que.10`, 2 `cbus-que.9`
+  unchanged since M4). Narrow-scope co-instrument, run alongside for the
+  two-scope fact rather than instead of the gate-scope number:
+  `TestQuietFollowerWritesNothing` 8/8, `TestCursorNeverPointsMidFrame` 8/8,
+  `TestDisplacedFollowerStopsMovingTheCursor` 7/8 (all three `cbus-que.10`,
+  independent of this fix per the discriminating probe), `TestForeignReopenIsNotStreamed`
+  8/8 red at narrow scope on the `meta.json` transient class (`cbus-que.12`) while
+  green at gate scope -- both facts true and both preserved in the record, not
+  averaged into one number. `TestOrphanDoesNotMoveTheNewEpochCursor` and both
+  `Follow` tests (`TestFollowRotationRecreate`, `TestFollowDirDeletionNeverExits`)
+  are GENUINELY FIXED at BOTH scopes, 0/8 red at narrow scope where they were
+  previously among the sharing-violation cluster.
+- `cmd/cbus` D68-scoped subset: 6/6 green (every `Leave`-matching test plus the
+  M3 refusal trio), run-count-first so the excluded hang-prone set is outside by
+  declared name, not by accident.
+- Two final mutants, both killed 8/8 on their aimed assertions: `m5mut3` (the
+  rename-discard kill) at the primary silence `t.Fatalf`, with the predicted
+  ABSENCE of a could-NOT line verified at count zero rather than assumed;
+  `m5mut2b.v2` firing both signature halves, including the departed broadcast
+  landing in the observer's inbox -- the user-visible silent-success harm
+  demonstrated directly by restoring it. Sixteen runs total across both mutants,
+  no wedge truncation in any of them.
+- Instrument-error thread this milestone, named consistently per standing
+  practice: the meta.json transient-`ReadFile` mentions-vs-calls gap (same class
+  as M4's F1, one layer deeper); the reviewer's own pre-correction `m5mut2b`
+  built from a stale freeze; and the coder's row-three misreading of the
+  POSIX-delete datum (measured at one share mask, misapplied to a fixture using
+  a different one). None changed a shipped result; all are recorded because the
+  pattern recurring across milestones is worth more than any single instance.
+- Footprint zero. Not pushed.
+
 ## [2026-08-02 22:16:37 UTC] [Client/Windows] cbus-que M4: platform test fixtures so internal/client RUNS on windows
 
 [Attempt #1] `4a9ac3b` (full `4a9ac3b0ff3899b12739f0f871494b7356ebd41d`, M4, cbus-que.7).
