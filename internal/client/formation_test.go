@@ -386,7 +386,9 @@ func TestFormationPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("path: %v", err)
 	}
-	if want := "/tmp/bus/.formations/roles.json"; got != want {
+	// built with filepath.Join, like FormationPath itself: a hardcoded "/" expectation
+	// asserts the separator of the machine that wrote the test, not the contract.
+	if want := filepath.Join("/tmp/bus", ".formations", "roles.json"); got != want {
 		t.Errorf("path: got %q want %q", got, want)
 	}
 	for _, bad := range []string{"", "a/b", "..", ".", "has space", "a\x00b"} {

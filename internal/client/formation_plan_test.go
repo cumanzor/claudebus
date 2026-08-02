@@ -3,7 +3,6 @@ package client
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,9 +10,10 @@ import (
 )
 
 // armPeer makes a planted peer read as LIVE the way the real thing does: a running
-// process whose argv carries the inbox path, which is exactly what the liveness
-// predicate greps for (a bare pid would pass the kill -0 clause and fail the argv
-// one). tail -f blocks and holds the path, standing in for the real follower.
+// process plus the structural witness arming records for it. It used to need a process
+// whose ARGV carried the inbox path, because the predicate grepped for it; that clause
+// is deleted (liveness.go:108), so the stand-in only has to be alive and must NOT hold
+// the inbox — an open handle blocks deletion on windows and would strand the temp dir.
 func armPeer(t *testing.T, ch, alias string) {
 	t.Helper()
 	dir := filepath.Join(CBUSDir(), ch, alias)
@@ -21,11 +21,7 @@ func armPeer(t *testing.T, ch, alias string) {
 	if err := os.WriteFile(inbox, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("tail", "-f", inbox)
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	pid := liveProc(t)
 	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -34,11 +30,11 @@ func armPeer(t *testing.T, ch, alias string) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.ListenerPid = json.RawMessage(strconv.Itoa(cmd.Process.Pid))
+	m.ListenerPid = json.RawMessage(strconv.Itoa(pid))
 	// the structural witness, the way armMeta records it: with the argv branch gone,
 	// a listenerPid alone can never read alive, so a fixture without this is a peer
 	// the predicate is right to call dead.
-	start, serr := procStartTime(cmd.Process.Pid)
+	start, serr := procStartTime(pid)
 	if serr != nil {
 		t.Fatalf("procStartTime on the fake follower: %v", serr)
 	}
