@@ -55,11 +55,24 @@ install:
 # Carlos-gated and sequenced after the quiesce window (cbus-7sg). Requires gh
 # authenticated with write access. A tag with a '-' suffix (v0.2.0-rc1) publishes as
 # a prerelease that selfupdate ignores by construction.
-release: dist
-	@tag=$$(git describe --tags --exact-match 2>/dev/null); \
+#
+# The clean-tree guard is not hygiene. assets.go go:embed snapshots the WORKING TREE,
+# and VERSION carries git describe --dirty, so a dirty release ships uncommitted files
+# under a version string that versionMatchesTag then rejects: verifyDownloaded refuses
+# the asset, and the release fails its own version-gate on every machine and platform.
+# It guards release only — dist and dev builds stay free to run dirty.
+#
+# dist is NOT a prerequisite here: make runs prerequisites before recipes, so a guard
+# written as a recipe line could only refuse AFTER a five-platform build. The checks
+# run first and the build is invoked once they pass.
+release:
+	@dirty=$$(git status --porcelain); \
+	if [ -n "$$dirty" ]; then echo "refusing to release from a dirty tree (go:embed snapshots it, and VERSION would stamp -dirty):" >&2; echo "$$dirty" >&2; exit 1; fi; \
+	tag=$$(git describe --tags --exact-match 2>/dev/null); \
 	if [ -z "$$tag" ]; then echo "no exact tag on HEAD (git tag vX.Y.Z first)" >&2; exit 1; fi; \
 	if [ -z "$(CBUS_REPO)" ]; then echo "set CBUS_REPO=owner/repo (it is baked into the assets and targets the release)" >&2; exit 1; fi; \
 	flags="--generate-notes"; \
 	case "$$tag" in *-*) flags="$$flags --prerelease --latest=false";; esac; \
+	$(MAKE) dist || exit 1; \
 	echo "publishing $$tag to $(CBUS_REPO)..."; \
 	gh release create "$$tag" --repo "$(CBUS_REPO)" $(DIST)/* $$flags
