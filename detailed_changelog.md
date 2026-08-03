@@ -1,5 +1,228 @@
 # Changelog (detailed)
 
+## [2026-08-03 04:19:30 UTC] [Client/Windows] cbus-que M6: transcript/launch profile resolution and trailing-dot store names
+
+[Attempt #1] `972a77c` (full `972a77cd3f774c4640a67ed5b6e4eab161256286`, M6, cbus-que.9).
+8 files, 119 insertions, 19 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Ruling D69 plus the D70 corrections cycle it triggered. Full record
+on `cbus-que.9`.
+
+[Motivating problem]
+Both fixes trace to measurements already made in M4/M5, not fresh windows
+execution this milestone -- coder's own framing, kept because it names a real
+shape difference from M4/M5: neither defect needed windows to be CORRECT, both
+needed windows to be FOUND, and this milestone's logos runs are REGRESSION
+EVIDENCE for an already-designed fix, not first proof of a mechanism.
+`transcript.go:52` hardcoded a forward-slash path fragment a real windows
+`CLAUDE_CONFIG_DIR` never matches, so a peer's profile hint died silently (M4's
+confirmed production defect). `internal/core/name.go`'s store-name validators
+both accept trailing-dot names, which windows silently mishandles (found
+investigating a different M4 fixture failure).
+
+[Files Changed] (8 paths, final manifest 8b0392f9e4fd1d97)
+- `internal/client/transcript.go` -- new `isCCSInstanceDir(cfg)`: structural
+  `filepath.Base`/`filepath.Dir` component comparison replacing the
+  `strings.Contains(cfg, "/.ccs/instances/")` literal. The literal is
+  DELIBERATELY not reproduced in the new comment: the acceptance check for this
+  fix is that the fragment greps to ZERO tree-wide, and quoting it in a comment
+  would defeat that mechanical check for a historical note prose can carry
+  instead.
+- `internal/client/formation_apply.go` -- `peerEnv` (reviewer finding F1,
+  BLOCKING) routed through the same `isCCSInstanceDir`. Its own doc comment
+  promises the SAME derivation `transcriptRoots` uses so a resumed session and
+  a relaunched one can't disagree about the profile; fixing `transcriptRoots`
+  alone would have falsified that documented invariant asymmetrically on
+  windows -- the transcript would resolve, the relaunch profile would not.
+- `internal/client/harness.go` -- `launchPrefix` (reviewer finding F2, a THIRD
+  site of the identical literal) also routed through `isCCSInstanceDir`.
+  Phase-1-unreachable through the CLI today (every verb that calls it already
+  refuses on windows), fixed anyway under the class-not-enumeration principle:
+  a documented landmine surviving because nothing currently trips it is the
+  one wrong option, and the fix cost is identical to the other two sites.
+- `internal/client/formation_apply_test.go` -- `TestApplyPeerProfile` rebuilt
+  off a real `t.TempDir()` root with `filepath.Join`, replacing hardcoded unix
+  literals; independently confirmed as F1's second locus once F1 landed
+  (well-formed path, WRONG profile selected -- a different failure shape than
+  the pre-fix unresolved-path failure, converging with the reviewer's own
+  source-read finding via an independent instrument).
+- `internal/core/name.go` -- `ValidStoreName` gains
+  `!strings.HasSuffix(s, ".")`. New `StoreNameReason(s) string` returns the
+  human-readable why for each rejection class, INTERPOLATING the caller's
+  actual input (`fmt.Sprintf` with `%q` twice: the typed name and its
+  trailing-dot-stripped form) rather than a fixed example -- see Design.
+  `ValidName` (wire authority) untouched, proved byte-identical by extracting
+  the function body from HEAD and diffing it, not just asserted in a comment.
+- `internal/core/name_test.go` -- three trailing-dot cases (`"foo."`,
+  `"foo..."`, `"a.b."`) beside the pre-existing `"a..b"` discriminating
+  neighbor (an interior dot run stays legal, so a reject-any-dot mutant fails
+  there rather than passing by accident on the new block). Two new coherence
+  checks beyond the bool/reason agreement: every trailing-dot reason must name
+  THIS input specifically (not a fixed example), and no reason may ever carry
+  a stem (`"foo"`) the caller didn't type.
+- `internal/client/store.go`, `spawn.go` -- `checkStoreName` and `Spawn`'s name/
+  channel checks switch from a bare `ValidStoreName` bool to `StoreNameReason`,
+  completing the four-door wiring alongside `harness.go`'s `Branch`.
+
+[Design]
+- D69 approved the coder's four-part plan; the reserved-device-name clause was
+  deferred pending the tester's behavioral probe (resolved negatively, see
+  below) rather than pre-ruled, and the darwin-visible blast radius of the
+  trailing-dot tightening was explicitly handed to review rather than argued
+  by the orchestrator.
+- REVIEWER FINDINGS (verdict 1/2): milestone stayed OPEN on two production
+  sites the original plan hadn't reached. F1 (`peerEnv`, BLOCKING): the second
+  attributed red (`TestApplyPeerProfile`) was still failing after the
+  `transcript.go` fix alone, because `peerEnv` carried its own independent
+  copy of the same literal, and its doc comment's promised parity with
+  `transcriptRoots` made fixing one without the other a documented-invariant
+  violation, not just an incomplete fix. F2 (`launchPrefix`, classified but not
+  blocking): a third copy, phase-1-unreachable via the CLI, with its own
+  existing tests passing SPURIOUSLY on windows today because their env
+  fixtures are unix-style literals that `Contains`-match regardless of
+  platform. D70 ruled BOTH fixed together in one corrections cycle
+  (class-not-enumeration, same shape as D66 on M5): the not-one-fix principle
+  proved load-bearing a second time in this epic -- two attributed reds
+  mapped to two DIFFERENT production sites, and the original plan had only
+  reached the first.
+- The D70 acceptance gate is MECHANICAL, not an enumerated site list: the
+  fragment greps to zero tree-wide. This caught the coder's own first attempt
+  at closing it -- a reworded comment that still QUOTED the old literal for
+  illustration, which would have kept the grep non-zero forever and turned the
+  gate into a human judgment call instead of a verifiable one. The final
+  comment at `isCCSInstanceDir` deliberately omits the literal for exactly
+  this reason.
+- Interpolation (the `StoreNameReason` trailing-dot message naming the
+  caller's actual input) came from a TESTER finding, not the original plan: a
+  hardcoded `"foo"`/`"foo..."` illustrative example would tell a user who
+  typed `bar...` that their name becomes `"foo"` -- someone else's name,
+  reading as the tool being confused rather than the name being wrong.
+  Sharper: different names at different call sites is what EXPOSED this in
+  testing at all; the obvious same-name-everywhere test fixture would have
+  read as a clean pass, because a fixed example is invisible to any test that
+  reuses the example as its own input. The landed test pin took three
+  attempts, each defeated by a fact already documented in the same file
+  (not every reason interpolates; the all-dots/leading-dot precedence means
+  shape-keying is wrong), landing as REASON-keyed (if the trailing-dot message
+  text appears, it must name the input) plus a branch-independent pin that NO
+  reason, from any branch, may ever carry a stem the caller never typed.
+- Reviewer ruling on the trailing-dot tightening: FLEET-WIDE, four grounds.
+  Store names are fleet artifacts crossing machines by name through the relay,
+  and the per-platform alternative has the worst failure mode -- no refusal
+  for the darwin user who picked the name, store corruption for the windows
+  peer who didn't. `ValidStoreName` already tightens fleet-wide for the same
+  class of platform-adjacent hazard (leading dot, leading hyphen). FIELD-
+  SMOKED before ruling: a `find` across the real MBP store for both
+  trailing-dot patterns came back empty (the NUC store is unverified and
+  recorded as an explicit residual, not assumed clean). Version-skew is
+  bounded and stated honestly, not claimed as instant fleet-wide enforcement.
+  BINDING CONDITION: the refusal must name the real reason on every platform,
+  applied by the coder as a CLASS (all four doors) rather than the single
+  enumerated site the condition literally named -- a bare "bad name" refusal
+  at branch/spawn would have invited exactly the workaround the condition
+  exists to prevent.
+- TESTER SELF-CORRECTION against its own July wording, kept because it
+  changed what the fix is FOR: the originally-measured harm
+  ("silently aliases onto the parent, reporting success") applied only to an
+  ALL-DOTS name, which the pre-existing leading-dot rule already refuses
+  before it ever reaches the filesystem -- the July probe had measured an
+  unreachable shape. The REACHABLE shape (`foo...`) passes both
+  pre-tightening validators, windows creates a directory named `foo` (dots
+  silently stripped), and the operation then FAILS LOUDLY -- nothing believes
+  it succeeded. True harm: STORE POLLUTION plus NAME-IDENTITY MISMATCH (a
+  failed `join foo...` leaves a bare `foo` directory a later legitimate
+  `join foo` walks into pre-existing), not silent data loss. The tightening
+  stayed justified on the corrected harm; "a fix argued from a harm that does
+  not occur is a fix nobody can later verify."
+- REVIEWER REAFFIRMATION at the corrected severity added a new argument the
+  correction itself surfaced: in an addressing system, NAME-IDENTITY MISMATCH
+  IS the harm class, because the store directory's name IS the channel's
+  identity for list/send-resolution/reclaim -- independent of data loss, a
+  mismatch alone breaks addressing coherence, and the pre-existing-real-`foo`
+  sub-case turns it into cross-channel pollution of an innocent name.
+- Reserved-device-names (`NUL`, `CON`, etc.) CLOSED END TO END WITHOUT A LINE
+  OF CODE: the tester's Go-layer probe (not the earlier PowerShell probe,
+  which measured .NET path validation, a layer cbus never executes, and was
+  confidently reassuring and FALSE) found a store operation on `NUL` fails
+  loudly at first use with a middle-component semantics error -- nothing
+  created, nothing lost. A `NUL`-naming validator clause is recorded as
+  defense-in-depth for later, not a fix for a live hazard.
+
+[Possible Ripple Effects]
+- The refusal message is new user-reachable content at four doors. Behavior-
+  spec proposal (new "Name validation" subsection at the end of section 2,
+  Address Grammar -- the fleet-wide rule doesn't belong under the
+  windows-numbered run, per orchestrator ruling on my placement question --
+  plus a one-line cross-reference as its own `9.4` entry after `9.3`) lands
+  with this docs batch.
+- `internal/core` now has its own build-artifact identity in this epic's gate
+  record, since the validator lives there rather than in `internal/client`.
+- Only three of the four `StoreNameReason` doors are windows-reachable today
+  (`spawn`/`branch` sit behind the D48 platform refusal by design), so their
+  trailing-dot evidence necessarily comes from darwin, not logos -- a
+  logos-only four-door test would be one-third structurally unobservable, not
+  incomplete by oversight.
+- The darwin-visible behavior change (a trailing-dot name that worked before
+  now refuses) is field-smoked safe against the current MBP store; the NUC
+  store's equivalent scan is still an explicit open residual.
+
+[Testing Notes]
+- Reviewer: UNCONDITIONAL final sign-off, after an initial FINDINGS verdict
+  (F1 blocking, F2 classified) resolved by the D70 corrections cycle. Mutant
+  work was a first for the epic: all three original validator mutants were
+  EXECUTED BY THE REVIEWER ITSELF on darwin (`name_test` is platform-neutral,
+  no logos round-trip needed for them) -- `mb` killed on exactly the three
+  trailing-dot rows; `mc` killed by the discriminating neighbor `a..b` AND a
+  second witness (`a.b_c-d`) the plan never claimed; `md` (the silent-refusal
+  mutant) killed by the coherence assertion alone, proving it has teeth of its
+  own independent of the trailing-dot rows. Reviewer's own instrument
+  self-correction on record: its first two `md` forms were COMPILE-DEAD (a
+  stranded import), producing silence its assertion grep read as a pass --
+  caught only by reading the actual output, the same class of error as a
+  no-op mutation reported as a kill, from the opposite direction.
+- D70 corrections triggered a full mutant re-run: the CORE package's build
+  hash moving voided the reviewer's carry-forward condition on `mb`/`mc`/`md`,
+  so all three were rebuilt and re-executed at the corrections freeze
+  alongside two NEW mutants: `me` (the hardcoded example restored, killed by
+  BOTH interpolation pins, with `a.b.` as the discriminating input --
+  adopting the tester's different-names-per-door instrument directly into the
+  mutant design) and the logos pair `m6mutT`/`m6mutP` (the transcript fragment
+  and the peerEnv fragment restored respectively), both predicted single-test
+  reds on logos and GREEN on darwin -- the fragment matches unix-style paths,
+  so only logos measures it, and the asymmetry itself is the proof. All SIX
+  killed on their aimed assertions. A SEVENTH mutant, targeting the
+  phase-1-unreachable `launchPrefix` (F2) site, is recorded STRUCTURALLY
+  UNABLE TO KILL with its reason stated rather than silently omitted or
+  faked: no windows-reachable test path exists to exercise a site every
+  calling verb already refuses.
+- Closing runs: client suite 533 RUN / 382 PASS / 3 FAIL, all three
+  attributed to `cbus-que.10` (the independent flaky follower/cursor cluster
+  filed in M5, not owned by this bead) -- nothing this milestone touches is
+  red. `internal/core` 19/19, with the D7 gofmt-scan exclusion VERIFIED
+  ABSENT from the run (not merely assumed skipped) after a process incident:
+  an orchestrator ping describing the tester's target as "internal/core on
+  logos" omitted the D7 exclusion by name, which read literally would have
+  re-run the unbounded `TestGofmtClean` walk on the live machine -- the exact
+  incident that created D7 in the first place. The tester STOPPED rather than
+  read the omission as an implicit escalation (a message cannot expand what a
+  seat is allowed to do to its target), enumerated a positive
+  nineteen-test `-test.run` alternation excluding the D7 test by name instead
+  of relying on unexpressible negation, and required an explicit reversal
+  before proceeding. None was given; D7 stood.
+- Pollution probe converted to regression evidence: after five refusal
+  attempts against the trailing-dot validator, the store contained only the
+  test's own control entry -- the refusal fires before any creation, so the
+  stray-directory pollution class the validator exists to prevent is
+  confirmed gone, not merely assumed fixed by the validator's presence.
+- Coder process note (mechanism history): "I searched for what was FAILING
+  instead of for what was WRONG" -- kept verbatim in substance because it's
+  the reasoning behind the grep-to-zero acceptance gate being adopted as
+  stronger than an enumerated site list: a list is only as good as the search
+  that produced it, and this milestone's F1/F2 findings are exactly the class
+  a site-enumeration approach would have missed.
+- Footprint zero. Not pushed.
+
 ## [2026-08-02 23:35:50 UTC] [Client/Windows] cbus-que M5: silent windows reclaim failures now surface, first production fix of the epic
 
 [Attempt #1] `72c2779` (full `72c2779cf0e67806866a5bb696e50d2cf6cc9520`, M5, cbus-que.8).
