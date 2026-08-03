@@ -199,7 +199,11 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 	consumed := offsetOf(f)
 	// record the starting position immediately, so a crash before the first message
 	// cannot make the next arm re-apply the migration rule and seek END a second time.
-	writeCursor(peerDir, dev, ino, consumed)
+	// error ignored, unlike the loop write below: this seeds offset 0 and lastSaved is set
+	// to the same 0, so a failure self-corrects — the first real boundary differs from
+	// lastSaved and the loop writes anyway. The asymmetry with the loop write is
+	// deliberate, not an oversight.
+	_ = writeCursor(peerDir, dev, ino, consumed)
 	lastSaved := consumed
 	r := bufio.NewReader(f)
 	pend := ""
@@ -254,9 +258,29 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 				sink.emit(kindDormant, []byte(d.marker()))
 				return // one-way door (R14): dormancy is never re-entered
 			}
+			// lastSaved advances ONLY on success (cbus-que.13). It used to advance
+			// regardless, so one denied rename latched the cursor forever: the guard went
+			// false and no write was ever attempted again for that boundary.
+			//
+			// THE LOOP IS THE RETRY. Nothing is queued and there is no backoff — on
+			// failure the guard simply stays true, so the next tick re-enters this same
+			// block, which means identityCause is re-checked before every attempt. A
+			// displaced follower goes dormant instead of retrying, so a retry cannot
+			// escape the gate; the hazard is unconstructible rather than merely avoided.
+			//
+			// Unbounded on purpose. A cap REINTRODUCES THE LATCH with extra steps: a cap
+			// that gives up is a stale cursor that stopped trying, which is this defect
+			// wearing a policy. At the 200ms production cadence a permanent failure costs
+			// five small-file attempts per second on a peer whose cursor already cannot be
+			// written, and spinning visibly beats latching silently. warnCursorWriteOnce
+			// is what makes such a condition OBSERVED rather than inferred from a process
+			// that seems busy.
 			if boundary != lastSaved {
-				writeCursor(peerDir, dev, ino, boundary)
-				lastSaved = boundary
+				if err := writeCursor(peerDir, dev, ino, boundary); err == nil {
+					lastSaved = boundary
+				} else {
+					warnCursorWriteOnce(peerDir, err)
+				}
 			}
 			idleTicks = 0
 		}
@@ -285,7 +309,10 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 			// the cursor is keyed to the inode, so a rotation must republish it against
 			// the NEW file; leaving the old pair would make the next arm read a stale
 			// inode, fall to byte 0, and replay what we are about to stream anyway.
-			writeCursor(peerDir, dev, ino, consumed)
+			// error ignored for the same reason as the arm-time seed: this republishes
+			// offset 0 against the new inode and lastSaved is set to 0 beside it, so a
+			// failure self-corrects on the next boundary.
+			_ = writeCursor(peerDir, dev, ino, consumed)
 			lastSaved = 0
 			r = bufio.NewReader(f)
 			pend = ""
