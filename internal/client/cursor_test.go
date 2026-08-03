@@ -194,14 +194,11 @@ func TestCursorNeverPointsMidFrame(t *testing.T) {
 	if err := os.WriteFile(inbox, []byte(complete+partial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	buf, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
 	defer stopJoin()
 
 	boundary := int64(len(complete))
-	waitFor(t, func() bool {
-		_, _, off, st := readCursor(peer)
-		return st == cursorValid && off > 0
-	}, "the cursor to land")
+	waitForOwnCursor(t, peer, running, buf.String, "the cursor to land")
 	time.Sleep(200 * time.Millisecond) // let several idle ticks pass
 
 	_, _, off, st := readCursor(peer)
