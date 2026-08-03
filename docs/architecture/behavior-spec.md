@@ -160,6 +160,45 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 - `relay_base` (:148-155): probe `${CBUS_RELAY_LOCAL_URL}/healthz`, `curl -m 0.3`, body exactly `ok` → `local` (loopback, no CF headers); else `public`. Runs on EVERY remote command (≤0.3 s cost off-relay). Identity-blind: anything answering `ok` on loopback:8090 is trusted.
 - `ws_url` (:157-162): `https://`→`wss://`, `http://`→`ws://`, **no default case** — other schemes yield empty string, no error.
 
+### Name validation (`ValidName` / `ValidStoreName`, `internal/core/name.go`, cbus-que.9)
+
+Two validators, layered. `ValidName(s)` is the WIRE authority: `^[A-Za-z0-9._-]+$` and not
+`"."` or `".."` — the relay gates `/send` and `/tail` on it, so it is never tightened
+without a wire-compat reason (a name it rejects can never be addressed at all, even to
+clean it up).
+
+`ValidStoreName(s)` is a STRICT SUBSET of `ValidName`, additive tightening for names the
+store CREATES (`join`, `branch --name`, `spawn --name`, and their channel arguments) —
+never for names already on disk, so `ValidName` alone still governs ADDRESSING an
+existing name (e.g. `cbus unregister <ch>/.foo` remains the cleanup path for a legacy bad
+name that predates a tightening). Three rejection classes, each with its own reason
+string via `StoreNameReason(s) string`, which returns `""` when `s` is accepted and is
+the single wording source at all four creation doors (`join`/`reserve`'s store-name
+check, `branch`'s name and channel, `spawn`'s name and channel):
+
+| Rejected shape | `StoreNameReason` string |
+|---|---|
+| leading `.` | `may not start with '.': a leading dot hides it from list, channels and whoami` |
+| leading `-` | `may not start with '-': flag-shaped, so a CLI filter or a forked child parses it as a flag` |
+| trailing `.` | `may not end with '.': windows strips trailing dots from a path component, so a windows peer would create %q as %q and its identity would not match its own path — refused everywhere, including filesystems like this one that accept it` (both `%q` are the CALLER'S OWN input, interpolated — the typed name and its trailing-dot-stripped form, e.g. `"foo..."` and `"foo"` — never a fixed illustrative example) |
+
+The trailing-dot rule is FLEET-WIDE, not windows-only, even though it exists because of
+windows path semantics: refused on darwin/linux too, because a name meaning two
+different things across machines in one fleet is worse than a name refused in both
+places. An ALL-DOTS name (e.g. `"...."`) never reaches this rule — the leading-dot rule
+refuses it first. Version-skew is bounded, not absolute: a client older than this
+tightening can still mint a trailing-dot name until the whole fleet's floor version
+advances past it.
+
+Message shape at each door (kind + name + the `StoreNameReason` string above):
+`join`/`reserve`: `"<kind> <name> " + why`, e.g. `channel "foo..." may not end with '.':
+windows strips trailing dots from a path component, so a windows peer would create
+"foo..." as "foo" and its identity would not match its own path — refused everywhere,
+including filesystems like this one that accept it`. `branch`/`spawn`: `"bad name %q: %s"`
+/ `"bad channel %q: %s"`, with the same `why` string. Only `join`/`reserve` is
+windows-reachable today: `branch`/`spawn` sit behind the phase-1 platform refusal (§9.2),
+so their trailing-dot evidence necessarily comes from darwin/linux, not windows.
+
 ## 3. On-disk state
 
 ```
@@ -496,6 +535,40 @@ print-only (`BootstrapPeer`/`BootstrapPrompt`) — no forker in their path.
 The refusal always precedes argument validation: a bad flag or missing target on an
 excluded verb answers with the platform refusal, never a usage line — an excluded
 mechanism doesn't get a walkthrough toward it.
+
+### 9.3 Windows deletion semantics (`internal/client/openshared_{unix,windows}.go`, `store.go`, cbus-que.8)
+
+Root cause: on windows, `os.Open`/`os.OpenFile` pass `FILE_SHARE_READ|FILE_SHARE_WRITE`
+only (no `FILE_SHARE_DELETE`), so any stdlib read handle blocks deletion of its file for
+as long as it's held — and the follower holds its inbox handle for the entire life of an
+arm. Before this milestone, `store.go` discarded the `os.RemoveAll` error at every call
+site, so a reclaim/leave/rename/prune against a target whose inbox was still held FAILED
+and reported success anyway, leaving the old directory on disk.
+
+New `openSharedRead(path)` (`openshared_windows.go`) opens with the full share set via a
+hand-rolled `CreateFile`; `follow.go`, `formation_apply.go` and `codexstophook.go`'s inbox
+reads route through it, as does `fileIdentity`. This closes the handle-blocks-delete
+half. The other half: eight `os.RemoveAll`/`os.Rename` sites in `store.go` now surface
+their error instead of discarding it, changing what five verbs print/return on windows
+when a removal or rename fails:
+
+| Verb | New failure shape (verbatim from source) | Notes |
+|---|---|---|
+| `join` (reclaiming a dead peer's name) | `fmt.Errorf("cannot reclaim %q from a dead peer: %w", ch+"/"+alias, err)` | `Join`. The identical message shape also lands inside `ReserveAlias`, but that function's only callers (`branch`, `spawn`, `formation apply`) are ALL windows-refused wholly per M3/D44-D45 — verified by grep, not assumed. Omitted from user-facing framing since a windows user cannot reach it today; the surfacing still ships (defense in depth / darwin-linux correctness) |
+| `leave` | `fmt.Errorf("left %s but could not remove its dir: %w", reg.Channel+"/"+reg.Alias, rerr)` | partial-leave shape: the loop continues past a failed removal on one channel rather than aborting the rest, so `left` (the slice of channels actually left) and `err` can BOTH be non-empty |
+| `unregister` | `fmt.Errorf("cannot unregister %q: %w", ch+"/"+al, err)` | |
+| `rename` | `fmt.Errorf("cannot reclaim %q from a dead peer: %w", ch+"/"+newAlias, err)` | surfaced even though the following `os.Rename` would separately fail loudly moments later, because this removal precedes a `departed (name reclaimed)` presence broadcast that would otherwise announce a departure on a false premise |
+| `prune` (`cbus prune`, `PruneChannel`) | three message strings appended to the returned `[]string`: `"could NOT prune legacy peer " + ch + ": " + err.Error()` (legacy v1 layout); `"could NOT prune " + ch + "/" + peer + ", claim failed: " + err.Error()` (the dead-peer rename-aside fails — on windows this is the FIRST thing a held handle blocks, before the removal below is ever reached, and it also covers the ordinary case of losing the claim to a concurrent reaper); `"could NOT prune " + ch + "/" + peer + ", left at " + tmp + ": " + err.Error()` (the removal itself fails after the rename-aside succeeded) | on any of these three failures the code SKIPS appending `"pruned ..."`, skips the terminal ledger LEAVE event, and skips the departed-presence-broadcast entirely — previously the announce trio fired unconditionally before the (discarded) removal error, so a failed prune announced a departure that hadn't happened while the directory survived under a dot-prefixed name nothing lists again |
+
+Unchanged (discard kept, each with a stated-why code comment, not a bare `_ =`):
+`Unreserve` (best-effort, no caller reports its success) and two litter-cleanup sites
+inside `PruneChannel` (a failure there leaves litter, not a false claim, and nothing
+downstream reads either outcome).
+
+### 9.4 Store name normalization (see §2)
+
+Windows trailing-dot store-name aliasing (cbus-que.9) is refused fleet-wide at creation,
+not just on windows — see the Name validation subsection under Address grammar (§2).
 
 ## 10. Relay spec
 
