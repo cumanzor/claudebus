@@ -1,5 +1,349 @@
 # Changelog (detailed)
 
+## [2026-08-03 15:04:03 UTC] [Client/Windows] cbus-que M7: cluster-B mechanism established -- no fix, an investigation milestone
+
+[Attempt #1] `fa8a353` (full `fa8a3530a6ca1a55bbee38b2e520c2dd23b6b4de`, M7, cbus-que.10).
+4 files, 228 insertions, 20 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). No numbered rulings list here the way prior entries carry one --
+this milestone ran as a long probe sequence (roughly a dozen rounds) rather than
+a plan-then-build cycle, and the mechanism history section below carries the
+shape of that instead. Full record on `cbus-que.10`; disposition on
+`cbus-que.13`; new bead `cbus-que.14`.
+
+[Shape of this entry]
+Unlike every prior milestone in this epic, M7 shipped NO FIX. The single code
+commit is test-only: a diagnostic harness added to the suite, not a defect
+closed. What justifies its own changelog entry is that it converted a
+symptom-only finding (three, later four, tests timing out waiting for a cursor
+write, "mechanism entirely uncharacterised" per the bead's own opening
+description) into a fully source-verified causal chain. The entry below
+documents that chain and the instrument corrections along the way, since both
+are the actual product of the milestone.
+
+[Files Changed] (4 paths)
+- `internal/client/cursorwait_diag_test.go` (new, 220 lines) -- `waitForOwnCursor`,
+  byte-for-byte the old `waitFor`'s loop (same deadline, interval, success
+  condition; it decides NOTHING differently) with a signal capture added AFTER
+  the timeout only. Captures `cursorState` (ABSENT vs CORRUPT vs VALID),
+  whether the follower is still `running`, and whether a `.cursor.tmp.<pid>`
+  survived. A `CURSORWAIT` marker line emits on BOTH outcomes (pass and
+  timeout) so a run can be COUNTED rather than inferred from the absence of
+  failures -- a passing member, a never-executed member, and a wedged binary
+  otherwise all look identical (no failure line).
+- `internal/client/cadence_test.go`, `cursor_test.go`, `dormancy_test.go` --
+  all four que.10 members (`TestQuietFollowerWritesNothing`,
+  `TestCursorNeverPointsMidFrame`, `TestOrphanDoesNotMoveTheNewEpochCursor`,
+  `TestDisplacedFollowerStopsMovingTheCursor`) switched from the bare `waitFor`
+  closure to `waitForOwnCursor`, threading through the follower's `running`
+  check and its output buffer.
+
+[Design -- the mechanism, established via a probe sequence not in this commit]
+- STARTING POINT: cluster B (filed to this bead in M5) was three, later four,
+  windows-only timeouts waiting for a cursor write, independently NOT owned by
+  M5/M8's sharing-violation cluster (a discriminating solo-run probe had shown
+  the decisive member, `TestQuietFollowerWritesNothing`, held 8/8-fail before
+  AND after the M5 fix, at identical scope). No sharing-violation string
+  appeared in any of their output. A source read (coder, M7's actual first
+  step) reframed all three/four as ONE unmet predicate seen from different
+  fixtures: `readCursor` reaching `cursorValid` with `off>0`, satisfied only by
+  the follower loop's conditional write, which itself requires both a
+  frame-boundary advance AND a passing identity check (the latter exits the
+  follower entirely on failure -- two structurally different ways to hang).
+- FOUR INITIAL HYPOTHESES (H1-H4) with discriminating probes were framed and
+  run via an additive-only instrumentation harness (the direct predecessor to
+  what shipped): H1 (the follower exits via its identity gate before ever
+  writing) and H4 (a que.12-shaped transient-read corruption) were both KILLED
+  outright by a unanimous 32-of-32 probe result: cursor state VALID at every
+  observation, offset always 0, follower always `running`. H2 (writeCursor's
+  own silently-discarded write/rename errors) was NOT ruled out by the same
+  round (zero leftover `.cursor.tmp` files, but a failed `os.Rename` cleans up
+  its own tmp file before returning, so tmp-absence cannot distinguish "no
+  failure" from "failure that cleaned up after itself").
+- WRITE-SIDE FOLLOW-UP surfaced three further candidates (H5 spurious file
+  rotation resetting the read cursor, H6 a plain size-tracking regression, H7
+  the reader never receiving bytes at all) alongside H2. A sink-frame-count
+  probe (measuring the CONSEQUENCE of a rotation -- a full re-delivery of
+  everything already sent -- rather than inferring one from its inputs) killed
+  H5, H6 and H7 together: every member showed exactly one message delivered as
+  exactly three framing lines (the counter reports lines, not messages -- see
+  the units-caveat note below), matching what a single successful delivery with
+  no rotation looks like. H2 survived alone, unanimously, across all four
+  members: the read side works, delivery happens once, the follower stays
+  alive, and the cursor write itself is where the failure has to be.
+- H8 (handle contention denying the cursor's rename specifically) was proposed
+  next, tested first with a binary 3ms-vs-200ms poll-width probe, and that
+  design was immediately identified (by the tester, before results) as
+  CONFOUNDED: widening the poll interval changes both how often a handle opens
+  AND how much CPU the polling loop burns, so a landing cursor at 200ms would
+  be equally explained by relieving scheduler contention as by anything about
+  handles. The corrected design (STAT-ONLY at the ORIGINAL 3ms: `os.Stat`
+  never opens a handle on the target at all, so frequency and CPU load stay
+  fixed while only handle-holding varies) is what made a real test possible.
+- FIRST RESULT: stat-only-at-3ms passed all four members 8/8; the read-based
+  control at the same frequency still timed out; a dose ladder (3/25/200ms,
+  read-based) passed cleanly at 25ms and 200ms both. Read as CONFIRMING H8. It
+  was WRONG. The orchestrator, re-reading its own probe's source after the
+  tester published results, found the baseline capture discarded its `os.Stat`
+  error: an absent `.cursor` at capture time left the baseline timestamp at Go's
+  ZERO time, and since the arm-time cursor write happens asynchronously in the
+  follower's own goroutine, the very first successful stat after that race
+  would satisfy "timestamp changed" regardless of what actually changed it.
+  The giveaway in the data itself: every "passing" stat-mode run showed
+  `off=0` -- passing while the value the test cared about had never moved,
+  the symptom wearing a pass. H8 confirmation WITHDRAWN. The reviewer, who had
+  separately verified the underlying `os.Stat` primitive meticulously (tracing
+  it to `GetFileAttributesEx`, confirming no handle opens for a plain file),
+  had checked the RIGHT primitive and the WRONG predicate line one above it --
+  a correctly-executed check and an unsound probe coexisting is the sharpest
+  instrument lesson of the milestone, named explicitly on the record as its
+  own class.
+- The FIXED stat variant (wait for the file to exist first, THEN capture a
+  checked baseline) was built, and immediately exposed the OPPOSITE failure on
+  darwin: a fast filesystem can complete BOTH transitions (absence-to-seed,
+  seed-to-loop-write) inside a single poll interval, so the "fixed" baseline
+  sometimes captures the FINAL state and can never observe a subsequent
+  change -- reported as a timeout on a machine where the mechanism it probes
+  demonstrably isn't present. Ruled STRUCTURALLY BLIND and retired: the design
+  needs the offset to distinguish its two transitions, and reading the offset
+  requires opening the file, which is the one thing a stat-only probe exists
+  not to do. A collapse detector was landed anyway (a stat-mode run that shows
+  no timestamp change but a nonzero offset reports COLLAPSED and skips, rather
+  than reporting a misleading TIMEOUT) as an honesty fix to an instrument
+  already shipped in the tree.
+- THE DIRECT INSTRUMENT: rather than keep proxying, the path forward was
+  reading `writeCursor`'s own two discarded errors directly. Built as an
+  explicitly PROBE-ONLY, NEVER-INTENDED-TO-SHIP edit on a throwaway freeze
+  (reviewer-gated on four conditions: the freeze is pinned and marked
+  non-shippable, the edit is observational only and preserves discard-and-
+  continue semantics exactly, both failure halves are captured with their raw
+  error codes, and the tree is restored and diff-verified after), because
+  making `writeCursor` return an error for real would have PREJUDGED
+  `cbus-que.13`'s own fix design (return-vs-retry, hot-loop risk) rather than
+  just measuring the current behavior. A `t.Logf` call per `writeCursor`
+  invocation moved results from deterministic 8/8-timeout to a MIX of pass and
+  fail -- initially read as merely contaminating the rate (correct), then
+  REFRAMED as itself informative: a purely structural defect (wrong identity
+  comparison, a boundary gate that never opens) would not care whether an
+  instrument logs a line, so timing-sensitivity to logging is positive
+  evidence FOR a contention mechanism and against every structural candidate
+  still standing. It also retroactively explained why an earlier occupancy-
+  arithmetic argument (that a ~0.1% duty cycle couldn't plausibly deny renames
+  at the observed rate) had failed to predict the result: that argument
+  modeled contention against a single write attempt, not against whatever the
+  logging call itself perturbed -- a real calculation aimed at the wrong
+  quantity.
+- RESULT, the full causal chain, from data the direct instrument made
+  possible: the SEED write (offset 0, at arm time) always succeeds. The LOOP
+  write computes the CORRECT nonzero offset and writes it to
+  `.cursor.tmp.<pid>`. Its RENAME onto `.cursor` is DENIED (errno 5). `.cursor`
+  therefore keeps the seed value forever. The reader sees `off=0` and times
+  out. This single sequence accounts for every signal collected all
+  milestone: `frames=3` (delivery happened), `off=0` (the reader sees the
+  stale seed), `tmp=0` (discard-and-continue cleans up its own temp file),
+  `state=VALID` (the seed file itself is intact and readable), `running=YES`
+  (the follower is fine and looping normally). Denial-to-timeout correlation
+  across all 32 member-runs measured in this artifact: 32 agree, 0 disagree.
+  The denial landed on the LOOP write 21 times and the SEED write 0 times out
+  of the same 32 opportunities -- consistent with something starting to poll
+  the file only after arm time, not before.
+- ERRNO CAVEAT, caught before anyone banked the result: errno 5
+  ("Access is denied") is NOT uniquely diagnostic of a held handle on this
+  volume. A controlled four-case probe found a READONLY file with NO handle at
+  all also produces errno 5 -- so 5 fails to REFUTE the handle hypothesis
+  without being able to CONFIRM it alone. What actually points at a handle is
+  the seed/loop asymmetry above (nothing polls before arm time) plus a direct
+  reproduction from primitives: a poller doing the exact 3ms read-based access
+  pattern against 200 renames produced a ~22.5% denial rate, all errno 5,
+  confirming a brief open-read-close window is enough to deny a rename landing
+  inside it, and that the denial is a RACE rather than a persistent lock (which
+  is also why the observed rate was 21-of-32, not 32-of-32).
+- ONE MORE FINDING PRE-EMPTS THE OBVIOUS FIX: the same four-case probe held a
+  handle opened via the M5 `openSharedRead` seam (all three share flags,
+  including `FILE_SHARE_DELETE`) against the rename target, and it STILL
+  denied with errno 5. Confirmed at source by the reviewer: Go's `os.Rename` on
+  windows calls `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` only -- the
+  CLASSIC rename path, which denies when ANY handle is open on the target
+  REGARDLESS of that handle's share mode. Share flags govern open-time
+  compatibility and deletion; the classic rename-replace target check never
+  consults them at all. (The API that WOULD allow replacing an in-use target,
+  `FileRenameInformationEx` with `FILE_RENAME_POSIX_SEMANTICS`, exists on
+  modern NTFS but Go's standard library does not use it -- a known upstream
+  gap.) Consequence: routing the cursor write through `openSharedRead` -- the
+  obvious next move given it fixed an analogous problem in M5 -- WOULD NOT
+  WORK, and would look like it should.
+- THE THREE-CHECKS TRIPLE, worth keeping as a standing reference for this
+  epic: three DIFFERENT windows kernel checks, now each independently
+  measured, that a bare errno blurs together. (1) DELETE of a held file:
+  `FILE_SHARE_DELETE` is honored (M5's `openSharedRead` seam and its pinning
+  test). (2) RENAME-TO-A-FRESH-NAME of a directory with open children inside
+  it: its own rule, denies regardless (the M5 prune-claim defect, D67). (3)
+  RENAME-REPLACE onto an already-existing, held target: SHARE-IMMUNE BY
+  DESIGN, denies no matter what share flags the holder used (M7, this
+  milestone). None of the three contradicts either of the others; they are
+  three separate kernel checks that happen to surface through similar-looking
+  errors.
+- DISPOSITION (recorded as D79 on the tracker): `cbus-que.10` itself is a
+  TEST-side defect. A blind, no-coordination production-code enumeration
+  (grepping every reference to `readCursor`, `cursorPath`, `cursorFile` and the
+  literal `.cursor` across all non-test source, tracing every hit to its
+  caller) found exactly four production sites touching a peer's `.cursor`:
+  three OPENERS, all one-shot, all running once during the arm sequence
+  BEFORE the follower's own write loop starts (so there is no concurrency
+  window against that loop by construction), and one UNLINKER (a plain
+  `os.Remove` at join, a different hazard class, not part of the rename
+  question). There is no production loop, ticker, or retry polling a peer's
+  `.cursor` at any interval, let alone the test's 3ms -- the contention this
+  milestone measured was manufactured entirely by the test's own polling
+  predicate. That licenses calling the OFF=0 SYMPTOM a test artifact. It does
+  NOT clear the underlying rename hazard: any single unlucky production reader
+  can still deny one rename, rarely, and `cbus-que.13`'s own LATCH is what
+  turns that one rare denial PERMANENT for the life of an arm, since nothing
+  retries after it. Rare-and-permanent is worse than frequent-and-
+  self-correcting; the severity lives entirely in the latch, not in the rate.
+  THE PREDICTION, registered on `cbus-que.13` BEFORE any fix existed there so
+  it can falsify the disposition rather than be claimed after the fact: fixing
+  `cbus-que.13` so that a failed write does not advance `lastSaved` is expected
+  to resolve `cbus-que.10`'s test symptom as a side effect, CONDITIONAL on
+  retry attempts being near-independent. Five pre-named shapes distinguish a
+  falsification from a confirmation, each readable off an instrument that
+  already exists rather than argued after the fact: (s1) NON-INDEPENDENT
+  RETRIES -- timer quantization or phase-lock making successive attempts deny
+  serially (signature: many attempts, all denied; the attempt counter reads
+  this), which stays inside `cbus-que.13`'s own design space rather than
+  falsifying the disposition. (s2) RED ON A POST-LANDING ASSERTION -- a
+  member whose cursor now lands but which then fails a LATER assertion for an
+  unrelated windows reason the stall had been masking; read by WHICH assertion
+  failed, and it counts as a NEW finding, not a disposition failure. (s3)
+  RETRY ESCAPING THE IDENTITY GATE -- a queued retry landing after a steal and
+  moving a DISPLACED follower's cursor, which would fail that member
+  LEGITIMATELY; this is why "retries must stay inside the identity gate"
+  became a design constraint on `cbus-que.13` rather than a caveat here.
+  (s4) BACKOFF PAST THE DEADLINE -- a retry policy that stretches past the
+  test's 2-second window, timing out an otherwise-healthy member; read by
+  `waitedms`. (s5), registered later and notable because it INVERTS how a red
+  reads: if the per-attempt denial rate at PRODUCTION's actual polling ratio
+  is near 100%, the retry clause is REGIME-DEPENDENT -- the latch fix is
+  correct and sufficient for production (where nothing polls a `.cursor` at
+  all), and `cbus-que.13`-fixed-plus-`cbus-que.10`-still-red becomes the
+  EXPECTED outcome that CONFIRMS the disposition rather than falsifies it, not
+  a sign the fix failed.
+- The `.stop-cursor` sidecar (a separate cursor file for the codex Stop-hook
+  delivery path, distinct from the follower's `.cursor`) was explicitly named
+  as OUT of this milestone's production-reader enumeration and needing its own
+  pass -- filed as new bead `cbus-que.14` rather than assumed clear by
+  extension.
+
+[Mechanism history / instrument corrections, kept because the class recurs]
+- VACUOUS PASS, H8's first "confirmation": described above under Design; kept
+  here too because it's this milestone's sharpest instance of the
+  "verify-the-instrument" thread this epic's changelogs have named
+  consistently since M4's F1 -- a test can pass for a reason that has nothing
+  to do with what it claims to measure, and the tell was in the data
+  (`off=0` on every "success") rather than in the test's own logic reading
+  clean.
+- STRUCTURALLY BLIND, not just wrong: the fixed stat variant's failure mode
+  (two transitions colliding into one poll interval on a fast filesystem) is
+  definitional to its own design, not a bug fixable within it -- the reason it
+  was retired outright rather than patched again.
+- OBSERVER EFFECT REFRAMED AS EVIDENCE: an instrument's own side effect (a log
+  call moving outcomes) became a positive argument for the mechanism class
+  (timing/contention) over the alternative (a structural defect indifferent to
+  logging) -- turning a normally-unwanted confound into data, once correctly
+  scoped to NOT license a rate comparison against un-instrumented runs.
+- UNITS CAVEAT: a sink-frame counter reporting LINES compared against a field
+  literally named "frames" produced an exact numeric agreement (3-vs-3) that
+  would have read as a 3x EXCESS (reviving a dead rotation-hypothesis family)
+  under the more "obvious" denominator (messages, where one message is three
+  lines). Both the coder and tester independently caught the mismatch before
+  it was used. Standing rule adopted: comparisons stay in whatever unit the
+  counter actually reports, and a denominator arriving in a different unit
+  gets flagged rather than silently divided.
+- TRACKER SIZE CEILING: the tracker's own notes field hit an undocumented
+  64KB limit mid-investigation and further appends failed with a MISLEADING
+  CONNECTION ERROR that briefly read as a network problem rather than a size
+  limit -- a handful of short diagnostic probe entries in the tracker record
+  are the visible residue of chasing that red herring before the real cause
+  was found; later content moved to the design field as a workaround.
+- Every probe artifact in this investigation was explicitly marked
+  NON-SHIPPABLE and tracked separately from the release build-identity chain,
+  with dead (superseded) artifact hashes published alongside their specific
+  reason for being dead -- a practice adopted mid-milestone specifically
+  because this investigation produced enough throwaway builds that silent
+  reuse of a stale one became a real risk.
+
+[Testing Notes]
+- No production code shipped; nothing to gate in the usual sense. The
+  diagnostic harness itself was verified additive-only at decision level
+  against source (the shared wait loop is byte-for-byte the prior `waitFor`;
+  every added line runs only after a timeout has already been reached, with
+  one narrowly-scoped exception -- a pre-existing nil-`running` handling gap
+  in one member, named and fixed as part of landing the harness since the new
+  signal capture needed it measurable there).
+- Every probe round in the investigation itself was run under an explicit
+  emission-count guard (a known expected count checked BEFORE any value from
+  that round is read), adopted after an early near-miss where an empty result
+  file rendered as an all-zero rate table, momentarily reading as "cluster B
+  already fixed by an unrelated milestone" before being caught on the
+  anchor member's implausible zero.
+- The milestone's closing state IS the D79 disposition above: no further
+  fix-verdict applies here, since none was proposed. Follow-up work and its own
+  gates belong to `cbus-que.13`/`cbus-que.14`.
+- Not pushed.
+
+## [2026-08-03 04:48:10 UTC] [Commands] /bus-spawn joins the spawning session too
+
+[Attempt #1] Uncommitted skill-text change, no Go code touched.
+
+[Motivating problem]
+`/bus-spawn` was one-sided: the child joined and armed itself via its launch
+prompt, but the skill explicitly told the parent "there is nothing to arm on
+this side," so the session that spawned a worker had no address on the channel
+and couldn't hear the child at all. Observed live: spawning `main` into a fresh
+`test-channel1` left the parent unjoined. Carlos's ask: the spawning session
+should also connect.
+
+[Files Changed]
+- `commands/bus-spawn.md` -- rewritten from one step to three. Step 1 joins the
+  parent (local: `cbus join <channel>`, idempotent; remote `ch@host`: explicit
+  alias + `cbus tail` for the Monitor ws arm spec, `cbus auth` prerequisite
+  noted), step 2 arms the parent's persistent Monitor (with the never-Bash tail
+  warning and the remote re-arm-on-`[WebSocket closed]` note, both lifted from
+  bus-join), step 3 is the unchanged `cbus spawn`. Steps 1-2 are skipped when a
+  cbus Monitor is already armed for the channel (covers the omitted-channel
+  default, which resolves to the session's own channel). Join is deliberately
+  BEFORE spawn so a fresh local channel gives the parent `main` and the child
+  `fork-N`, matching `cbus branch`'s parent/child layout -- the old flow gave
+  the child `main`; the skill text pins the ordering so a future edit doesn't
+  "fix" it back. Frontmatter: description now says "both sides joined";
+  `allowed-tools` gains Monitor. Final report line now carries both addresses.
+- `docs/architecture/command-reference.md` -- §12 `/bus-spawn` entry rewritten
+  to match (no longer "thin wrapper ... nothing to arm"; documents the
+  parent-join, the skip condition, the main/fork-N layout change, and the
+  Monitor addition to allowed-tools).
+- `~/.claude/commands/bus-spawn.md` (outside the repo) -- hand-synced copy so
+  this machine's sessions pick the fix up now; canonical delivery stays
+  go:embed -> release -> `cbus selfupdate`.
+
+[Possible Ripple Effects]
+- Child alias shifts on fresh channels: formations or habits that assumed a
+  spawned-first child is `main` will now find the PARENT holding `main` and the
+  child at `fork-1` (or its `--name`). `cbus branch` users already live with
+  this layout. `--name` spawns are unaffected.
+- The NUC and any other machine keep the old one-sided behavior until the next
+  release + selfupdate (commands are embedded in the binary).
+- `cbus formation save` from the parent now captures the parent as a channel
+  member, which is what it is.
+
+[Testing Notes]
+- Live-validated the new flow in the session that motivated it: `cbus join
+  test-channel1` (parent took `fork-1` -- child had already claimed `main`
+  under the OLD ordering), Monitor armed on `cbus tail test-channel1/fork-1`,
+  `cbus list test-channel1` shows both peers.
+- Fresh-channel `main`/`fork-N` layout follows from ReserveAlias ordering, same
+  mechanism `cbus branch` uses; not separately re-measured.
+
 ## [2026-08-03 04:19:30 UTC] [Client/Windows] cbus-que M6: transcript/launch profile resolution and trailing-dot store names
 
 [Attempt #1] `972a77c` (full `972a77cd3f774c4640a67ed5b6e4eab161256286`, M6, cbus-que.9).
