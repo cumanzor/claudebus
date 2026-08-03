@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -74,6 +73,13 @@ func runSelfupdate(args []string) int {
 		return die("locate current binary: %v", err)
 	}
 	exePath, _ = filepath.EvalSymlinks(exePath)
+	// an earlier update on windows left its displaced image beside exePath; clear it
+	// here rather than at startup, where every cbus invocation would pay for it. No-op
+	// off windows. Never silent when it cannot finish (D27): a leftover that resists
+	// removal is one another cbus is still running from, and that is actionable.
+	if stuck := cleanDisplaced(exePath); len(stuck) > 0 {
+		fmt.Fprintf(os.Stderr, "cbus: note: could not remove %s left by a previous update — another cbus is probably still running from it; close it and the next update clears it\n", strings.Join(stuck, ", "))
+	}
 
 	asset := assetName()
 	tmpDir, err := os.MkdirTemp("", "cbus-selfupdate-")
@@ -186,26 +192,9 @@ func ghDownloadImpl(slug, tag, asset, out string) error {
 	return cmd.Run()
 }
 
-// swapBinary replaces dst with src on unix, leaving the running binary untouched on
-// any failure (S3). os.Rename works in place while the binary runs (the kernel keeps
-// the open inode alive). A cross-filesystem src (/tmp on tmpfs) is staged into a
-// SIBLING of dst on the same filesystem, then atomically renamed — a direct copy onto
-// dst would O_TRUNC the running binary and trip ETXTBSY.
-func swapBinary(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-	sibling := dst + ".new." + strconv.Itoa(os.Getpid())
-	if err := copyFile(src, sibling); err != nil {
-		_ = os.Remove(sibling)
-		return fmt.Errorf("stage new binary beside %s: %w", dst, err)
-	}
-	if err := os.Rename(sibling, dst); err != nil {
-		_ = os.Remove(sibling)
-		return fmt.Errorf("swap new binary into %s: %w", dst, err)
-	}
-	return nil
-}
+// swapBinary and cleanDisplaced are per-platform: unix replaces a running binary in
+// place, windows cannot and has to vacate the target first (swap_unix.go,
+// swap_windows.go).
 
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
