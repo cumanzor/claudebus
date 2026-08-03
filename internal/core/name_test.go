@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidName(t *testing.T) {
 	cases := []struct {
@@ -68,6 +71,15 @@ func TestValidStoreName(t *testing.T) {
 		{"-a", false},
 		{"--force", false},
 		{"-", false},
+		// trailing dot: windows strips it, so the store creates the dir under a DIFFERENT
+		// name and the peer's identity stops matching its path. Legal on this filesystem,
+		// refused fleet-wide. "a..b" above is the discriminating neighbour — an INTERIOR
+		// dot run stays legal, so a mutant rejecting any dot at all fails there rather
+		// than passing this block. An all-dots name never reaches this rule: the
+		// leading-dot clause takes it first, which is why "..." sits in the block above.
+		{"foo.", false},
+		{"foo...", false},
+		{"a.b.", false},
 		// rejected by ValidName already — the tightening is additive, not a rewrite
 		{"", false},
 		{".", false},
@@ -83,6 +95,26 @@ func TestValidStoreName(t *testing.T) {
 		}
 		if c.want && !ValidName(c.in) {
 			t.Errorf("ValidStoreName(%q) accepts what ValidName rejects — it must be a strict subset", c.in)
+		}
+		// every refusal has to explain itself: an unexplained no on a name the local
+		// filesystem accepts reads as a bug and invites a workaround.
+		why := StoreNameReason(c.in)
+		if (why == "") != c.want {
+			t.Errorf("StoreNameReason(%q) = %q but ValidStoreName = %v — the bool and the reason disagree", c.in, why, c.want)
+		}
+		// a reason that shows an example must show THIS name's, not a hardcoded one: a
+		// user who typed "bar..." being told it becomes "foo" reads as the tool being
+		// confused rather than the name being wrong. Keyed on the REASON GIVEN, not on the
+		// input's shape: "..." ends in a dot but is caught by the leading-dot branch one
+		// clause earlier, so keying on the suffix would demand interpolation from a
+		// message that never claimed to do any...
+		if strings.Contains(why, "may not end with '.'") && !strings.Contains(why, c.in) {
+			t.Errorf("StoreNameReason(%q) does not name the rejected input: %q", c.in, why)
+		}
+		// ...and this catches the regression at every branch, including any added later:
+		// no reason may name a stem the caller never typed.
+		if why != "" && strings.Contains(why, "foo") && !strings.Contains(c.in, "foo") {
+			t.Errorf("StoreNameReason(%q) carries a hardcoded example name: %q", c.in, why)
 		}
 	}
 }

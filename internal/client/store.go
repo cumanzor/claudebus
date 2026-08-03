@@ -127,8 +127,8 @@ func checkStoreName(kind, s string) error {
 	if !core.ValidName(s) {
 		return fmt.Errorf("%s must be [A-Za-z0-9._-]", kind)
 	}
-	if !core.ValidStoreName(s) {
-		return fmt.Errorf("%s %q may not start with '.' or '-': a leading dot hides it from list/channels/whoami, a leading dash is flag-shaped", kind, s)
+	if why := core.StoreNameReason(s); why != "" {
+		return fmt.Errorf("%s %q %s", kind, s, why)
 	}
 	return nil
 }
