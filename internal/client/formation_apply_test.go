@@ -469,7 +469,11 @@ func TestApplyReservesTemplateAlias(t *testing.T) {
 // — the same derivation used to FIND its transcript, so the two cannot disagree.
 func TestApplyPeerProfile(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
-	t.Setenv("CLAUDE_CONFIG_DIR", "/Users/x/.ccs/instances/personal")
+	// built with filepath.Join off a real temp root: the old literals were unix paths,
+	// so on windows the derived sibling came back backslashed and volume-less and the
+	// assertion could not hold whatever the production derivation did.
+	ccs := filepath.Join(t.TempDir(), ".ccs", "instances")
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(ccs, "personal"))
 	applierOn(t, "ch", "applier")
 	f := applyFixture(peer("orchestrator", func(p *FormationPeer) {
 		p.Machine = ShortHostname()
@@ -483,7 +487,7 @@ func TestApplyPeerProfile(t *testing.T) {
 	if s.Argv[0] != "ccs" || s.Argv[1] != "work" {
 		t.Errorf("argv must launch under the peer's profile: %v", s.Argv)
 	}
-	if got := s.Env["CLAUDE_CONFIG_DIR"]; got != "/Users/x/.ccs/instances/work" {
+	if got := s.Env["CLAUDE_CONFIG_DIR"]; got != filepath.Join(ccs, "work") {
 		t.Errorf("CLAUDE_CONFIG_DIR = %q, want the peer's instance dir", got)
 	}
 	// a blank profile keeps the applier's

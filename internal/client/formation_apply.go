@@ -367,7 +367,10 @@ func peerLaunchArgv(pp PeerPlan, prompt, model string) []string {
 func peerEnv(profile string) map[string]string {
 	env := forkReplicatedEnv()
 	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
-	if profile != "" && core.ValidName(profile) && strings.Contains(cfg, "/.ccs/instances/") {
+	// isCCSInstanceDir, not a forward-slash literal: this doc comment promises the SAME
+	// derivation transcriptRoots uses, and a literal that only matches on unix broke that
+	// promise on windows — the transcript was found and the relaunch profile was not.
+	if profile != "" && core.ValidName(profile) && isCCSInstanceDir(cfg) {
 		env["CLAUDE_CONFIG_DIR"] = filepath.Join(filepath.Dir(cfg), profile)
 	}
 	return env
