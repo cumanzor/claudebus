@@ -9,13 +9,14 @@ CBUS_REPO ?=
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.repoSlug=$(CBUS_REPO)
 DIST    := dist
 
-# unix-only: the fleet is a Mac and a Linux box (cbus-7sg D25). bdx stays the
-# reference if a windows target ever materializes.
+# the fleet is a Mac and a Linux box; windows/amd64 lands with the windows port and
+# supersedes the unix-only ruling (cbus-7sg D25, cbus-que.5).
 PLATFORMS := \
 	darwin/amd64 \
 	darwin/arm64 \
 	linux/amd64 \
-	linux/arm64
+	linux/arm64 \
+	windows/amd64
 
 .DEFAULT_GOAL := build
 .PHONY: build test clean dist install release $(PLATFORMS)
@@ -32,13 +33,17 @@ clean:
 dist: clean $(PLATFORMS)
 	@echo "built $$(ls $(DIST) | wc -l | tr -d ' ') binaries in $(DIST)/"
 
-# asset name is cbus-<os>-<arch>, the EXACT string selfupdate passes to
-# `gh release download --pattern` (gh does not platform-match; cbus-7sg fold 3).
+# asset name is cbus-<os>-<arch>, plus .exe on windows: the EXACT string selfupdate
+# passes to `gh release download --pattern` (gh does not platform-match; cbus-7sg
+# fold 3). The windows suffix is load-bearing, not cosmetic: selfupdate execs the
+# download to version-gate it, and go's exec never stats an extensionless path on
+# windows, so an unsuffixed asset is refused as unrunnable there (cbus-que.5).
 $(PLATFORMS):
 	@mkdir -p $(DIST)
 	@os=$$(echo $@ | cut -d/ -f1); \
 	arch=$$(echo $@ | cut -d/ -f2); \
-	out=$(DIST)/$(BINARY)-$$os-$$arch; \
+	case $$os in windows) ext=.exe;; *) ext=;; esac; \
+	out=$(DIST)/$(BINARY)-$$os-$$arch$$ext; \
 	echo "building $$out"; \
 	GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $$out $(PKG)
 
