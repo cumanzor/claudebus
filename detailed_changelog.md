@@ -1,5 +1,174 @@
 # Changelog (detailed)
 
+## [2026-08-03 16:06:52 UTC] [Client] cbus-que M8: cursor write failure no longer latches -- first fleet-wide fix of the epic
+
+[Attempt #1] `5158271` (full `5158271725dec40ec85a13eef9c9b16f08478c20`, M8, cbus-que.13).
+3 files, 113 insertions, 7 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Full record on `cbus-que.13`; resolves `cbus-que.10` as a side
+effect; `cbus-que.14` inherits the fix shape.
+
+[Motivating problem]
+Found by the coder while closing a gap in M7's H8 investigation, and filed as
+its own bead deliberately rather than folded under the windows-scoped
+`cbus-que.10`: this is a PRODUCTION defect on every platform, and burying a
+fleet-wide finding under a windows-numbered bead is exactly the
+next-reader-looks-in-the-wrong-place problem this epic already ruled against
+once for `cbus-que.9`'s case-collision note. `follow.go`'s loop cursor write
+(`if boundary != lastSaved { writeCursor(...); lastSaved = boundary }`)
+advanced `lastSaved` UNCONDITIONALLY, and `writeCursor` (`cursor.go`) discarded
+both of its own failure modes -- a failed `os.WriteFile` returned bare, a
+failed `os.Rename` removed its temp file and returned bare. So a single
+transient write failure latched: the guard went false forever after, no
+further write attempt was ever made for that boundary, and the cursor froze at
+its last good offset while the follower kept streaming past it. The next arm
+resumes from that stale offset and re-delivers everything sent since --
+silent, and it survives the very condition (a single transient failure) that
+caused it. Measured concretely by M7 on windows (all four `cbus-que.10`
+members deterministically stuck, valid cursor, offset zero, while the follower
+looped normally); the same latch is live on darwin/linux and needs only one
+transient `ENOSPC`/`EIO` to trigger.
+
+[Files Changed] (3 paths)
+- `internal/client/cursor.go` -- `writeCursor` changes signature from no return
+  to `error`, naming which half failed (write vs rename) and carrying the
+  underlying errno -- the signature M5 deliberately left alone specifically so
+  it would not prejudge this bead's design. New `warnCursorWriteOnce(peerDir,
+  err)`, backed by a `sync.Map` keyed on peer dir, prints one stderr line on
+  the FIRST failure for a given peer and stays silent after.
+- `internal/client/follow.go` -- the loop write (the only site that can ever
+  carry a nonzero offset for a live follower) now advances `lastSaved` only
+  when `writeCursor` returns nil, and calls `warnCursorWriteOnce` on failure.
+  The two other call sites (arm-time seed, post-rotation reseed) keep ignoring
+  the error (`_ = writeCursor(...)`), each with a new comment stating why:
+  both write offset 0 and set `lastSaved` to that same 0 immediately after, so
+  a failure there is self-correcting the moment a real boundary arrives --
+  guarding them would add branches whose asymmetry with the loop write a
+  future reader would have to re-derive from nothing.
+- `internal/client/latch_test.go` (new, 58 lines) --
+  `TestFailedCursorWriteDoesNotLatch`, portable, runs on every platform. Blocks
+  every write by making the cursor path itself a directory (`os.Rename` onto a
+  directory fails deterministically everywhere, sidestepping the windows-only
+  rename-replace denial `cbus-que.10`/M7 needed to reach the same failure
+  class). Asserts the follower keeps running through several failing ticks,
+  then unblocks and asserts the very next successful tick lands the cursor --
+  proving retry, not merely surviving the failure. Kill mutation named
+  directly in the comment: restore the unconditional `lastSaved = boundary`
+  and the case fails, because the unblocked write below never gets attempted
+  again.
+
+[Design]
+- THE FIX IS A GUARD, NOT A RETRY MECHANISM, by design and worth stating
+  precisely: nothing is queued, there is no backoff, and no new scheduling
+  concept was introduced. `lastSaved` simply stops advancing on failure, which
+  leaves the existing gate (`boundary != lastSaved`) true, so the EXISTING
+  poll loop becomes the retry for free. This is why `identityCause` gets
+  re-checked before every attempt without any new code doing the checking: a
+  retry is just the same gated block running again on the next tick, with
+  every precondition it already had. Consequence argued as decisive rather
+  than incidental: the hazard of a queued retry landing after a steal and
+  moving a DISPLACED follower's cursor becomes UNCONSTRUCTIBLE, not merely
+  avoided by careful sequencing -- a displaced follower takes the dormancy
+  door instead of ever reaching a retry, so there is no retry left to escape
+  anything.
+- UNBOUNDED, RULED AGAINST A CAP: a cap that eventually gives up on a
+  permanently-failing peer IS a stale cursor that stopped trying -- the
+  original defect, wearing a retry-count policy instead of a silent
+  assignment, but landing at exactly the same silent-forever place. Cost of
+  unbounded at the 200ms production cadence: roughly five small-file write
+  attempts per second against a peer whose cursor genuinely cannot be
+  written, accepted because a visibly spinning process beats a silently
+  latched one. `warnCursorWriteOnce` is what converts "permanent condition"
+  from something an operator would have to infer (a process that looks busy
+  for no visible reason) into one observed stderr line, firing exactly once
+  per peer directory rather than once per tick (a per-tick log is what
+  perturbed M7's own probe results into rate-incomparability -- deliberately
+  not repeated here).
+- SIGNATURE CHOICE (R1): `writeCursor` returns `error` rather than a bool.
+  The error's WHICH-half-plus-errno shape is exactly the scaffolding M7 built
+  by hand as a throwaway, non-shippable probe to characterize this exact
+  defect -- landing it for real here means the investigation's own
+  instrumentation becomes the production signature, rather than a separate
+  simplified one being invented after the fact.
+- OTHER CALL SITES (R2): the arm-time seed and post-rotation reseed writes
+  stay unguarded on purpose, each now commented with why, so the asymmetry
+  with the loop write reads as deliberate rather than an oversight a future
+  pass might "fix" into uniformity. Both write offset 0 and immediately set
+  `lastSaved` to that same 0, so any failure there self-corrects the moment a
+  real (nonzero) boundary is next computed by the loop.
+- FIRST LOCALLY-KILLABLE MUTANT for this entire cluster: every prior
+  verification round in `cbus-que.10`/M7 needed the actual windows target
+  machine, because the underlying denial (`MoveFileEx` rename-replace against
+  a held handle) is windows-specific. The reviewer's addition here -- pin the
+  latch itself, not the windows-specific trigger, using a PLATFORM-NEUTRAL
+  failure injection (a directory where the cursor file needs to go, which
+  fails `os.Rename` deterministically everywhere) -- gives this cluster its
+  first mutant killable on darwin, at `latch_test.go:57`.
+- ACCEPTANCE, registered before the run specifically so it could falsify
+  rather than just confirm: `cbus-que.10`'s four members had to run
+  COMPLETELY UNCHANGED against the exact harness M7 committed (`fa8a353`), same
+  scope, same 8 runs, on logos. Editing those tests as part of this fix would
+  have spent the pre-registered D79 prediction -- a green bought by touching
+  the instrument is worth less than a clean red, so the tests were left alone
+  on principle even though this milestone's own author could have "improved"
+  them.
+- DARWIN BLAST RADIUS, stated precisely: only the loop write's behavior
+  changes, and only under failure. A transient `ENOSPC`/`EIO` there now
+  retries on the next tick instead of latching forever -- darwin-visible
+  strictly in exactly the place where, today, unpatched, it silently
+  corrupts. No behavior changes on a successful write anywhere.
+
+[Possible Ripple Effects]
+- `cbus-que.10` resolves as a side effect of this fix and can close, per the
+  D79 falsifiable prediction registered on M7 -- the prediction was CONFIRMED
+  (see Testing Notes), not merely assumed satisfied by shipping a plausible
+  fix.
+- `cbus-que.14` (the `.stop-cursor` sidecar, a separate cursor file for the
+  codex Stop-hook delivery path, explicitly out of M7's production-reader
+  enumeration) inherits this exact fix shape for whenever that bead is
+  worked -- the guard-not-retry-mechanism design and the unbounded-plus-
+  log-once ruling both transfer directly if the sidecar has the same
+  discard-on-failure shape.
+- The new `warnCursorWriteOnce` stderr line is new user-visible output on
+  every platform, gated behind a rare failure condition. RULED not to get a
+  behavior-spec section: the existing 9.x and section-2 surfaces are shaped
+  around VERBS, REFUSALS and VALIDATORS -- things a user invokes or a name
+  they choose -- and this is a DIAGNOSTIC emitted under a failure path nobody
+  triggers deliberately, so filing it beside refusal strings would misfile
+  its class (the same reasoning as the case-collision and section-2
+  placement rulings). Kept here in Ripple Effects instead, with its
+  once-per-peer behavior named, so an operator who sees the line once and
+  never again can find out why. If it ever becomes something users are TOLD
+  to look for, it earns a doc section then.
+
+[Testing Notes]
+- Reviewer: killed the new platform-neutral mutant on darwin at
+  `latch_test.go:57` (restoring the unconditional `lastSaved = boundary`
+  fails the case as predicted).
+- `cbus-que.10` confirmation run (tester, on an UNPERTURBED build -- no
+  per-attempt logging, unlike M7's own direct-instrument artifacts, so this
+  result IS rate-comparable with the pre-fix baseline in a way M7's own probes
+  explicitly were not): all four members 8/8 PASS, tests themselves completely
+  unchanged from the committed `fa8a353` harness. All four D79 pre-named
+  escape shapes (non-independent retries, a red on a later assertion, a retry
+  escaping the identity gate, backoff past the deadline) individually checked
+  and found ABSENT, not merely unobserved.
+- Phase-structure quantification (reported by the orchestrator; not
+  independently re-derived by the documenter from raw data): a random-phase
+  write attempt against the rename window denies at approximately 0.0%, while
+  a real member's FIRST attempt denies at approximately 53% -- the gap between
+  those two numbers is offered as the structural signature explaining why
+  retrying works BY MECHANISM (breaking a phase lock between the poll cadence
+  and whatever holds the handle) rather than by accumulated luck. This also
+  resolves the milestone's standing "anchor mystery":
+  `TestQuietFollowerWritesNothing`, zero of eight first-attempt successes
+  pre-fix and the most deterministically-stuck que.10 member throughout M7,
+  turns out to be the member whose write timing was most reliably mis-phased
+  against the denial window -- an explanation for WHY it was the anchor, not
+  just a confirmation that it was one.
+- Not pushed.
+
 ## [2026-08-03 15:04:03 UTC] [Client/Windows] cbus-que M7: cluster-B mechanism established -- no fix, an investigation milestone
 
 [Attempt #1] `fa8a353` (full `fa8a3530a6ca1a55bbee38b2e520c2dd23b6b4de`, M7, cbus-que.10).
