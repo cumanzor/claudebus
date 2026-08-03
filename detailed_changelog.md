@@ -1,5 +1,163 @@
 # Changelog (detailed)
 
+## [2026-08-03 18:09:01 UTC] [Build/Release/Windows] cbus-que M9: windows build/release wiring, plus a fleet-wide release-safety fix
+
+[Attempt #1] `927ac9c` (full `927ac9c4eaf59fc3cd62418671b8b15a8f5ee4ec`) +
+`9288f6d` (full `9288f6dc0bc99f4d8abbf007d10cdedb79d89059`) +
+`ca71c00` (full `ca71c00871b6e6ad6843606084664f3bb5e53f0d`) (M9, cbus-que.5).
+3 commits, 8 files touched across the batch: Makefile (927ac9c, 9288f6d), cmd/cbus/version.go,
+cmd/cbus/selfupdate_test.go, cmd/cbus/selfupdate.go, cmd/cbus/swap_unix.go (new),
+cmd/cbus/swap_windows.go (new), cmd/cbus/swap_windows_test.go (new).
+47 insertions/20 deletions (927ac9c) + 15/2 (9288f6d) + 381/21 (ca71c00).
+
+Built by the `winship` formation (orchestrator, coder, reviewer, tester, documenter) --
+successor to `winport` (M1-M8), same five-seat shape, standing up on the 2026-08-03
+handover to take cbus-que.5 and cbus-que.6.
+
+[Motivating problem]
+Three separable problems land together because all three sit on the release path que.5
+owns: (1) windows/amd64 was entirely absent from the build matrix; (2) the asset-naming
+question the epic's que.5 handoff flagged as a four-place decision with a fail-silent
+consequence if answered inconsistently; (3) a platform-independent release-safety gap
+found while touching the Makefile for (1)/(2), unrelated to windows but caught in the
+same pass; (4) the selfupdate blocker the prior formation measured at the primitive
+(`os.Rename` denied against a running windows binary) and handed off as a scoped fix.
+
+[Files Changed] (8 paths across 3 commits)
+
+`927ac9c` -- windows/amd64 target + `.exe` asset naming:
+- `Makefile` -- PLATFORMS gains `windows/amd64`; the stale unix-only comment (cbus-7sg
+  D25) is rewritten to say the ruling is superseded rather than left contradicting the
+  list it sits above. The dist rule gains `case $$os in windows) ext=.exe;; *) ext=;;
+  esac` and appends `$$ext` to the output path.
+- `cmd/cbus/version.go` -- `assetNameFor` appends `.exe` when `goos == "windows"`. Doc
+  comment rewritten to state WHY the suffix is required rather than conventional:
+  selfupdate execs the downloaded asset to version-gate it, and windows `os/exec`
+  resolves a path-qualified name through `findExecutable`, which stats only name+ext per
+  PATHEXT entry and never the bare path -- an extensionless windows asset is refused as
+  unrunnable everywhere, so nothing ever installs.
+- `cmd/cbus/selfupdate_test.go` -- `TestAssetNameMatchesMakefile` (S5) restructured from
+  a computed `want` (which would pass under any rule, including a dropped `.exe`) to
+  literal per-platform want strings, `windows/amd64` added to the matrix. Two new
+  substring/regex checks against the Makefile text itself: `$(BINARY)-$$os-$$arch$$ext`
+  (the output-path shape) and `windows) ext=.exe` (the suffix rule), plus a
+  line-anchored regex for the `windows/amd64` PLATFORMS entry so an unanchored match
+  can't be satisfied by the word appearing only in the rewritten comment above the list.
+
+`9288f6d` -- dirty-tree release guard (fleet-wide, not windows-scoped):
+- `Makefile` -- `release` recipe restructured. `git status --porcelain` is checked
+  first; a dirty tree refuses with the offending paths on stderr. `dist` moves from a
+  `.PHONY` prerequisite to an explicit `$(MAKE) dist || exit 1` line inside the recipe
+  body, so a build failure halts before `gh release create` runs rather than falling
+  through to it with whatever partial `dist/` exists.
+
+`ca71c00` -- windows self-replacement:
+- `cmd/cbus/selfupdate.go` -- `swapBinary`'s body (15 lines) removed and replaced with a
+  one-line comment pointing at the two new per-platform files; `copyFile` stays shared.
+  `runSelfupdate` gains a `cleanDisplaced(exePath)` call right after resolving the
+  current binary path, before the download starts; a non-empty stuck-list prints one
+  stderr note naming the leftover(s) rather than failing or staying silent.
+- `cmd/cbus/swap_unix.go` (new, 34 lines, `//go:build darwin || linux`) -- the exact
+  prior `swapBinary` body moved verbatim (rename onto the running binary, cross-fs
+  sibling-stage-then-rename fallback), plus a no-op `cleanDisplaced` with a comment
+  stating why: unix replaces in place, so nothing is ever displaced.
+- `cmd/cbus/swap_windows.go` (new, 78 lines) -- `swapBinary` renames the running image
+  aside to `dst + ".old." + pid` first, then calls `placeBinary` (rename if same volume,
+  copy+remove fallback since `src` sits under `%TEMP%`) to put the new binary at the
+  freed path; on a placement failure it renames the displaced image back and returns the
+  original error plus a note if even the rollback fails. `cleanDisplaced` lists `dir`,
+  matches entries by the PID-qualified prefix (not `filepath.Glob` -- `exePath` is not a
+  pattern and a literal `[` in a real path would make Glob silently match nothing), and
+  returns the names it could not remove.
+- `cmd/cbus/swap_windows_test.go` (new, 259 lines) -- covers `swapBinary` success,
+  placement-failure rollback, `cleanDisplaced` removing a stale displaced image and
+  reporting one it cannot remove, and the D27 contrast kill (below).
+
+[Design]
+
+- THE `.exe` DECISION IS CORRECTNESS, NOT STYLE. The que.5 handoff framed this as a
+  naming choice with two defensible answers; the coder resolved it as a forced move once
+  `findExecutable`'s PATHEXT behavior was checked: an extensionless windows asset is not
+  merely inconsistent, it is UNRUNNABLE, so `verifyDownloaded` (which execs the
+  downloaded binary to confirm it works before swapping it in) fails on every windows
+  install regardless of what the asset actually contains. The handoff's own warning --
+  answer it in one place and the other three silently disagree -- is why S5 was
+  restructured to literal wants rather than trusted to keep tracking a computed one.
+
+- THE DIRTY-RELEASE DEFECT is platform-independent and predates all windows work,
+  found by touching the Makefile for an unrelated reason. `assets.go`'s `go:embed`
+  snapshots the working tree at build time and `VERSION` is `git describe --dirty`; the
+  release target checked only that an exact tag sits on HEAD, not that the tree matches
+  it. A dirty release would stamp a `-dirty` suffix into the published binary's own
+  version string, which `versionMatchesTag` -- run by every peer's selfupdate check --
+  then rejects against the exact tag that was actually published, refusing the update ON
+  EVERY MACHINE AND PLATFORM. This is a defect a user finds after the fact, not one
+  `make release` itself would have caught.
+
+- THE SECOND DEFECT, found restructuring the guard for the first: the recipe was a
+  single semicolon-chained shell command, so a failed `dist` build (a compile error on
+  one of five platforms) fell through to the `gh release create` line anyway, uploading
+  whatever partial `dist/` existed -- potentially publishing a release missing one or
+  more platform binaries with no error surfaced. Verified in both directions with `gh`
+  stubbed: unpatched, a forced `dist` failure still reached the `gh` call; patched, it
+  exits before reaching it.
+
+- WINDOWS SELF-REPLACEMENT MECHANISM. `swapBinary` on unix works because `os.Rename`
+  onto a running binary succeeds -- the kernel keeps the open inode alive independent of
+  the directory entry. Windows' `os.Rename` is `MoveFileEx` with
+  `MOVEFILE_REPLACE_EXISTING`, and that specific clause is denied with
+  ERROR_ACCESS_DENIED whenever ANY handle is open on the target, REGARDLESS OF SHARE
+  MODE -- the loader always holds such a handle on a running image, so no share-flag
+  fix (the seam M5 built for a different problem, delete-blocking) touches this at all.
+  This is the THIRD distinct windows kernel check this epic has now catalogued under one
+  confusing errno: M5 found deleting a held file honors FILE_SHARE_DELETE; M7 found
+  renaming a directory with open children fails regardless of the directory's own share
+  state; this milestone found renaming-and-replacing a file onto a held target is
+  share-immune by design. What windows DOES permit: renaming the running image ASIDE (no
+  replace clause involved), with the process continuing to execute from the moved file.
+  `swapBinary` on windows therefore vacates `dst` first, then places the new binary at
+  the now-empty path -- rename if same volume (the common case once `%TEMP%` and the
+  install dir happen to share one), copy+remove fallback otherwise. A placement failure
+  triggers rollback: the displaced image is renamed back to `dst`, and if THAT also fails
+  the error names both the original failure and the stuck displaced path so nothing is
+  silently lost.
+
+- LEFTOVER CLEANUP TIMING AND MATCHING. A displaced image is left on disk between runs
+  by design, not swept eagerly: cleaning at every `cbus` invocation would cost a
+  directory read for an artifact only `selfupdate` itself ever creates, so cleanup runs
+  once, at the START of the next `selfupdate`, before the new download begins.
+  `cleanDisplaced` matches by a PID-qualified prefix (`filepath.Base(exePath) +
+  ".old." + pid`) rather than `filepath.Glob`, because `exePath` is a real path, not a
+  pattern, and a literal `[` in a user's install path would make `Glob` silently match
+  nothing rather than error -- a false-negative failure mode inappropriate for a cleanup
+  step whose whole job is finding files reliably.
+
+- MECHANISM HISTORY. The blocker was predicted from source and measured at the raw
+  primitive (`os.Rename` behavior against a live loader-held image) by the PRIOR
+  `winport` formation, recorded in the que.5 cold-pickup handoff as a measured blocker
+  with the fix shape already identified (vacate-then-place, no new dependency). This
+  milestone closed it AT THE FUNCTION level -- `swapBinary` itself, not just the
+  primitive underneath it -- with two independent mutants against a real loader-held
+  image, run separately by the coder and the reviewer, both landing on the aimed
+  assertion.
+
+- D27 ENFORCEMENT, FOUND HALF-PINNED. The ruling that a stuck displaced leftover must
+  be reported rather than silently discarded was initially pinned by a test that only
+  checked `cleanDisplaced`'s RETURN VALUE (the stuck-names slice) -- nothing asserted
+  that `runSelfupdate` actually PRINTS the note a user would see. Review caught the gap
+  and closed it with a contrast kill: a mutant that drops the `fmt.Fprintf` call but
+  leaves the return value and control flow untouched now fails the test, where it
+  previously would have passed silently.
+
+[Ripple]
+None filed. This bead's scope (asset naming, release guard, self-replacement) is now
+addressed in full per the que.5 handoff's own gate description; `make dist` producing
+the windows artifact and a selfupdate dry-run resolving the correct asset name remain to
+be confirmed against the actual gate, per the bead's own acceptance criterion, separately
+from this changelog pass.
+
+Not pushed, commit gate open with Carlos.
+
 ## [2026-08-03 16:06:52 UTC] [Client] cbus-que M8: cursor write failure no longer latches -- first fleet-wide fix of the epic
 
 [Attempt #1] `5158271` (full `5158271725dec40ec85a13eef9c9b16f08478c20`, M8, cbus-que.13).
