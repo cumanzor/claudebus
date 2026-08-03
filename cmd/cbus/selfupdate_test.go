@@ -13,18 +13,22 @@ import (
 // changes format, this fails — the names cannot silently diverge into a download that
 // matches nothing.
 func TestAssetNameMatchesMakefile(t *testing.T) {
-	matrix := []struct{ os, arch string }{
-		{"darwin", "amd64"}, {"darwin", "arm64"},
-		{"linux", "amd64"}, {"linux", "arm64"},
+	// wants are literal on purpose: recomputing them the way assetNameFor does would
+	// pass under any rule, including a dropped .exe.
+	matrix := []struct{ os, arch, want string }{
+		{"darwin", "amd64", "cbus-darwin-amd64"},
+		{"darwin", "arm64", "cbus-darwin-arm64"},
+		{"linux", "amd64", "cbus-linux-amd64"},
+		{"linux", "arm64", "cbus-linux-arm64"},
+		{"windows", "amd64", "cbus-windows-amd64.exe"},
 	}
 	for _, m := range matrix {
-		want := "cbus-" + m.os + "-" + m.arch // the exact string the Makefile dist rule writes
-		if got := assetNameFor(m.os, m.arch); got != want {
-			t.Errorf("assetNameFor(%s,%s) = %q, want %q", m.os, m.arch, got, want)
+		if got := assetNameFor(m.os, m.arch); got != m.want {
+			t.Errorf("assetNameFor(%s,%s) = %q, want %q", m.os, m.arch, got, m.want)
 		}
 	}
-	// cross-check the Makefile still builds names as cbus-<os>-<arch> (BINARY=cbus,
-	// out=$(DIST)/$(BINARY)-$$os-$$arch), so this pin tracks the real source.
+	// cross-check the Makefile still builds names as cbus-<os>-<arch><ext> (BINARY=cbus,
+	// out=$(DIST)/$(BINARY)-$$os-$$arch$$ext), so this pin tracks the real source.
 	mk, err := os.ReadFile("../../Makefile")
 	if err != nil {
 		t.Fatalf("read Makefile: %v", err)
@@ -32,8 +36,16 @@ func TestAssetNameMatchesMakefile(t *testing.T) {
 	if !regexp.MustCompile(`BINARY\s*:=\s*cbus\b`).Match(mk) {
 		t.Error("Makefile BINARY is no longer 'cbus' — the asset-name pin is stale")
 	}
-	if !strings.Contains(string(mk), "$(BINARY)-$$os-$$arch") {
-		t.Error("Makefile no longer builds names as $(BINARY)-$os-$arch — pin is stale")
+	if !strings.Contains(string(mk), "$(BINARY)-$$os-$$arch$$ext") {
+		t.Error("Makefile no longer builds names as $(BINARY)-$os-$arch$ext — pin is stale")
+	}
+	if !strings.Contains(string(mk), "windows) ext=.exe") {
+		t.Error("Makefile no longer appends .exe for windows — selfupdate would ask gh for an asset the build never wrote")
+	}
+	// anchored to a list line: an unanchored substring match is also satisfied by the
+	// word appearing in the comment above PLATFORMS.
+	if !regexp.MustCompile(`(?m)^\s+windows/amd64\s*\\?\s*$`).Match(mk) {
+		t.Error("Makefile PLATFORMS no longer builds windows/amd64 — selfupdate on windows would ask gh for an asset no release carries")
 	}
 	// the bootstrap script is the THIRD place the asset name lives (c8); pin it too so
 	// a format change cannot silently break get.sh's download.
