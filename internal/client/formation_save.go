@@ -136,7 +136,13 @@ func loadRepoTemplate(name string) (*Formation, error) {
 //
 // A peer in the file but no longer on the channel is KEPT, not dropped: a paused
 // effort is the main thing a formation exists to hold.
-func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
+//
+// anchors are the caller's --anchor pairs, written into drift_anchors (nil is
+// fine). git_head is refused up front — it is the one machine-owned key.
+func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *SaveReport, error) {
+	if err := checkHandAnchors(anchors); err != nil {
+		return nil, nil, err
+	}
 	path, err := FormationPath(name)
 	if err != nil {
 		return nil, nil, err
@@ -262,10 +268,40 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 		f.AnchorAlias = anchorDefault(ch, f.Peers)
 	}
 	setGitHeadAnchor(f)
+	setHandAnchors(f, anchors)
 	if err := f.Save(); err != nil {
 		return nil, nil, err
 	}
 	return f, rep, nil
+}
+
+// checkHandAnchors refuses the machine-owned key before any store work: git_head
+// is recorded from the repo at save (setGitHeadAnchor), so a hand value would be
+// silently overwritten on the very next save — refusing beats lying.
+func checkHandAnchors(anchors map[string]string) error {
+	if _, ok := anchors["git_head"]; ok {
+		return fmt.Errorf("--anchor git_head is machine-owned (recorded from the repo at save time); pick another key")
+	}
+	return nil
+}
+
+// setHandAnchors writes the caller's anchor pairs. An explicit pair overwrites a
+// same-named key already in the file: the preservation rule protects hand edits
+// from the MACHINE, and a flag is the hand acting.
+func setHandAnchors(f *Formation, anchors map[string]string) {
+	if len(anchors) == 0 {
+		return
+	}
+	if f.DriftAnchors == nil {
+		f.DriftAnchors = map[string]json.RawMessage{}
+	}
+	for k, v := range anchors {
+		b, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		f.DriftAnchors[k] = b
+	}
 }
 
 // capturePeer copies what the store knows onto a peer. The three always-known facts

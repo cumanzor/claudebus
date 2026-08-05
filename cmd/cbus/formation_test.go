@@ -456,3 +456,44 @@ func TestFormationSaveRendersSkippedBirth(t *testing.T) {
 		t.Errorf("the stale 'records nothing else' line must be gone:\n%s", out)
 	}
 }
+
+func TestFormationSaveAnchorFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+
+	// channel positional then repeated flags — the documented order
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "bdx=bdx-7m1", "--anchor", "note=qa"}); rc != 0 {
+		t.Fatalf("save with anchors: rc=%d", rc)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".formations", "far.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"bdx": "bdx-7m1"`, `"note": "qa"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("envelope missing %s:\n%s", want, body)
+		}
+	}
+
+	// channel omitted, flag still parsed (resolves this session's own channel)
+	if rc := runFormation([]string{"save", "near", "--anchor", "bdx=bdx-7m1"}); rc != 0 {
+		t.Fatalf("save with flag and no channel: rc=%d", rc)
+	}
+
+	// the machine-owned key and a pair with no '=' both die
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "git_head=x"}); rc == 0 {
+		t.Error("git_head anchor must be refused")
+	}
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "malformed"}); rc == 0 {
+		t.Error("a valueless anchor must be refused")
+	}
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "=v"}); rc == 0 {
+		t.Error("an empty anchor key must be refused")
+	}
+	// trailing junk after flags is still an error
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "k=v", "extra"}); rc == 0 {
+		t.Error("trailing junk must still die")
+	}
+}

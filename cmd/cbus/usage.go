@@ -67,6 +67,10 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    existing file, preserving hand-edited fields
                                    (origin/model come from the birth-record when
                                    recorded; role/profile stay hand-maintained)
+       --anchor key=value          record a hand anchor in drift_anchors
+                                   (repeatable; a flag overwrites its own key,
+                                   git_head stays machine-owned; convention:
+                                   bdx=<epic-id> links the effort's tracker item)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); join the
                                    channel first — peers are briefed to answer you.

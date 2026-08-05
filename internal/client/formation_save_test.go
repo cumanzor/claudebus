@@ -78,7 +78,7 @@ func TestSaveFormationNew(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, rep, err := SaveFormation("roles", "roles")
+	f, rep, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v1")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
 	plantPeer(t, "roles", "reviewer", "sid-rev")
 
-	f2, rep, err := SaveFormation("roles", "roles")
+	f2, rep, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantPeer(t, "un", "coder", "sid-coder")
 	plantPeer(t, "un", "orchestrator", "sid-orch")
-	if _, _, err := SaveFormation("b31", "un"); err != nil {
+	if _, _, err := SaveFormation("b31", "un", nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// the coder's tab is closed and its registration reaped
@@ -232,7 +232,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, rep, err := SaveFormation("b31", "un")
+	f, rep, err := SaveFormation("b31", "un", nil)
 	if err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestSaveFormationRefusesToClobber(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fdir, "roles.json"), []byte(corrupt), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := SaveFormation("roles", "roles"); err == nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err == nil {
 		t.Fatal("want a refusal, not an overwrite")
 	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Errorf("error should say it refused to overwrite: %v", err)
@@ -286,10 +286,10 @@ func TestSaveFormationRefusesChannelRepoint(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "other", "coder", "sid-other")
-	if _, _, err := SaveFormation("roles", "roles"); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := SaveFormation("roles", "other")
+	_, _, err := SaveFormation("roles", "other", nil)
 	if err == nil || !strings.Contains(err.Error(), "records channel") {
 		t.Errorf("want a channel-repoint refusal, got %v", err)
 	}
@@ -302,7 +302,7 @@ func TestSaveFormationGitHeadAnchor(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	plantPeer(t, "roles", "coder", "sid-coder")
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestSaveFormationSavedByOutsider(t *testing.T) {
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
 	plantPeer(t, "roles", "coder", "sid-coder")
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestSaveEndToEndBirth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the saver captures the channel.
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 
 	// a later save refreshes live facts; the hand-set direction must ride through
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
-	if _, _, err := SaveFormation("roles", "roles"); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 
@@ -501,5 +501,73 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 	// envelope would reject on the next apply is not actually preserved
 	if err := reloaded.Validate(); err != nil {
 		t.Errorf("round-tripped formation no longer validates: %v", err)
+	}
+}
+
+// anchorStr unwraps a drift anchor for asserting; a missing key is "".
+func anchorStr(t *testing.T, f *Formation, key string) string {
+	t.Helper()
+	raw, ok := f.DriftAnchors[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("anchor %q is not a JSON string: %s", key, raw)
+	}
+	return s
+}
+
+func TestSaveFormationHandAnchors(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeer(t, "roles", "coder", "sid-coder")
+
+	f, _, err := SaveFormation("roles", "roles", map[string]string{"bdx": "bdx-7m1", "note": "qa"})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if got := anchorStr(t, f, "bdx"); got != "bdx-7m1" {
+		t.Errorf("bdx anchor = %q", got)
+	}
+	if got := anchorStr(t, f, "note"); got != "qa" {
+		t.Errorf("note anchor = %q", got)
+	}
+
+	// a re-save WITHOUT the flag keeps the hand key — through the real save path,
+	// not just the field-preservation rule in isolation
+	f2, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if got := anchorStr(t, f2, "bdx"); got != "bdx-7m1" {
+		t.Errorf("bdx anchor after flagless re-save = %q (hand keys must survive)", got)
+	}
+
+	// an explicit flag overwrites its own key: the preservation rule protects hand
+	// edits from the machine, and the flag is the hand acting
+	f3, _, err := SaveFormation("roles", "roles", map[string]string{"bdx": "bdx-other"})
+	if err != nil {
+		t.Fatalf("re-save with flag: %v", err)
+	}
+	if got := anchorStr(t, f3, "bdx"); got != "bdx-other" {
+		t.Errorf("bdx anchor after explicit re-save = %q (flag must win)", got)
+	}
+	if got := anchorStr(t, f3, "note"); got != "qa" {
+		t.Errorf("untouched sibling key = %q (must survive)", got)
+	}
+}
+
+func TestSaveFormationRefusesGitHeadAnchor(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeer(t, "roles", "coder", "sid-coder")
+
+	_, _, err := SaveFormation("fresh", "roles", map[string]string{"git_head": "abc"})
+	if err == nil || !strings.Contains(err.Error(), "machine-owned") {
+		t.Fatalf("want the machine-owned refusal, got %v", err)
+	}
+	// refused BEFORE any store work: a fresh name must not leave an envelope behind
+	path, _ := FormationPath("fresh")
+	if fileExists(path) {
+		t.Error("a refused save must not write the envelope")
 	}
 }

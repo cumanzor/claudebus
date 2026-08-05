@@ -41,25 +41,40 @@ func runFormation(args []string) int {
 }
 
 func runFormationSave(args []string) int {
-	const use = "usage: cbus formation save <name> [channel]"
+	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...]"
 	if len(args) == 0 {
 		return die(use)
 	}
-	if err := noExtra(args, 2, use); err != nil {
+	// positionals first, then options (bootstrap's shape) — the optional channel
+	// cannot start with '-', so a dash token ends the positionals.
+	name := args[0]
+	rest := args[1:]
+	ch := ""
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		ch = rest[0]
+		rest = rest[1:]
+	}
+	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true}, nil, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
 		return die("%v", err)
 	}
-	name := args[0]
-	ch := ""
-	if len(args) > 1 {
-		ch = args[1]
+	anchors := map[string]string{}
+	for _, kv := range p.all("--anchor") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return die("--anchor: want key=value, got %q", kv)
+		}
+		anchors[k] = v
 	}
 	if ch == "" {
-		var err error
 		if ch, err = ownChannel(); err != nil {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormation(name, ch)
+	f, rep, err := client.SaveFormation(name, ch, anchors)
 	if err != nil {
 		return die("%v", err)
 	}

@@ -103,3 +103,22 @@ func TestSendDashDashBody(t *testing.T) {
 		t.Errorf("body not delivered: %q", b)
 	}
 }
+
+func TestSplitVerbArgsRepeatedValued(t *testing.T) {
+	valued := map[string]bool{"--anchor": true}
+	p, err := splitVerbArgs([]string{"--anchor", "bdx=a", "--anchor", "note=b"}, valued, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// all() carries every occurrence in order; opts keeps the last, so the
+	// single-value callers' contract is unchanged by the repeat.
+	if strings.Join(p.all("--anchor"), " ") != "bdx=a note=b" {
+		t.Errorf("all(--anchor) = %v", p.all("--anchor"))
+	}
+	if v, _ := p.has("--anchor"); v != "note=b" {
+		t.Errorf("has(--anchor) = %q, want the last occurrence", v)
+	}
+	if got := p.all("--never"); got != nil {
+		t.Errorf("all of an absent flag = %v, want nil", got)
+	}
+}

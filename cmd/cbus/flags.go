@@ -22,6 +22,7 @@ import (
 type parsedArgs struct {
 	opts  map[string]string
 	flags map[string]bool
+	multi map[string][]string
 	pos   []string
 }
 
@@ -32,12 +33,16 @@ func (p parsedArgs) has(name string) (string, bool) {
 	return v, ok
 }
 
+// all returns every occurrence of a valued option, in order — for a repeatable
+// flag. opts keeps the last occurrence, so single-value callers are unchanged.
+func (p parsedArgs) all(name string) []string { return p.multi[name] }
+
 // splitVerbArgs scans leading `--name value` (names in valued) and `--name` (names in
 // bare) options until the first non-option token or a `--` terminator, then treats the
 // rest as positionals. strictUnknown decides what an unrecognized `--flag` means: an
 // error (auth set) or the start of positionals (send, whose message may contain '-').
 func splitVerbArgs(args []string, valued, bare map[string]bool, strictUnknown bool) (parsedArgs, error) {
-	p := parsedArgs{opts: map[string]string{}, flags: map[string]bool{}}
+	p := parsedArgs{opts: map[string]string{}, flags: map[string]bool{}, multi: map[string][]string{}}
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -51,6 +56,7 @@ func splitVerbArgs(args []string, valued, bare map[string]bool, strictUnknown bo
 				return p, fmt.Errorf("missing value for %s", a)
 			}
 			p.opts[a] = args[i+1]
+			p.multi[a] = append(p.multi[a], args[i+1])
 			i += 2
 		case bare[a]:
 			p.flags[a] = true
