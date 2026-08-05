@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-08-05 02:45:05 UTC] [Formation/Save] repeatable --anchor key=value on save
+
+[Attempt #1] `c1ef5fa` — bdx-7m1.6, the one claudebus-side subtask of the
+bd-dashboard formations-page epic.
+
+[Motivating problem]
+The formations page links an envelope to its bdx epic via `drift_anchors.bdx`
+(anchor precedence shipped dashboard-side in bdx-7m1.3). The key already
+survives re-saves — save only owns `git_head`, every other anchor key is the
+human's — but setting it meant opening the envelope in an editor. The flag is
+that hand edit, minus the editor.
+
+[Files Changed]
+- `cmd/cbus/flags.go` — `parsedArgs.multi` collects every occurrence of a valued
+  flag in order; new `all(name)`. `opts` keeps last-wins, so the existing
+  single-value callers (`has`) are behaviorally untouched.
+- `cmd/cbus/formation.go` — save parses positionals-first-then-flags (bootstrap's
+  shape): `save <name> [channel] [--anchor key=value ...]`. Malformed pairs
+  (no `=`, empty key) die on usage. Channel resolution order unchanged.
+- `internal/client/formation_save.go` — `SaveFormation` gains the `anchors`
+  param. `checkHandAnchors` refuses `git_head` BEFORE any store work (a refused
+  fresh save writes nothing); `setHandAnchors` writes pairs after
+  `setGitHeadAnchor`, overwriting same-named keys deliberately.
+- `cmd/cbus/usage.go` — save block documents the flag and the bdx convention.
+- Tests: parser repeat semantics (`flags_test.go`); client-level write /
+  flagless-survival / flag-wins / refusal-writes-nothing
+  (`formation_save_test.go`); CLI-door test incl. channel-then-flags order,
+  git_head refusal, malformed pairs, trailing junk (`cmd/cbus/formation_test.go`).
+  Existing `SaveFormation` call sites gained `, nil` mechanically.
+
+[Possible Ripple Effects]
+- A dash-leading second positional (`save name -x`) previously reached the store
+  as channel `-x` (ValidName permits `-`); it now dies on usage. Ruled a fix.
+- Repeated valued flags on OTHER verbs still last-wins silently, as before; only
+  save reads `all()`.
+- The bd-dashboard sweep reads `drift_anchors.bdx` as the direct epic link with
+  precedence over session-join inference — a wrong hand-set id now has a
+  one-flag path in, same blast radius as the hand edit always had.
+
+[Testing Notes]
+- `go test ./cmd/cbus ./internal/client` green; `go vet` clean.
+- Cross-compile gate: linux amd64 + arm64 PASS. GOOS=windows fails on main
+  pre-existing (`close.go`/`codexwrap.go` syscall use; their windows variants
+  live on the unmerged windows-port branch); this diff touches neither file.
+- Field smoke through the built binary, temp store: save with two anchors,
+  `show` renders them beside the machine `git_head`; flagless re-save keeps
+  both; `--anchor git_head=x` refuses rc=1 with the machine-owned message.
+- Read-only against the real store: 14 envelopes list, `rn-foundry` renders
+  with its existing anchor — old envelopes read fine under the new binary.
+
 ## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id (bdx-mec.2)
 
 [Attempt #1] `0d41228`
