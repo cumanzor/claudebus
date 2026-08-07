@@ -89,6 +89,16 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
        --wait <dur>                how long to wait for each peer to answer its
                                    kickoff (default 90s; 0 = launch and return)
        --brief TEXT                effort brief added to every peer's kickoff
+  cbus formation resume <name>     the first hop after a reboot: relaunch the
+                                   formation's ANCHOR session (right cwd, right
+                                   CCS profile, --resume its own sid) from any
+                                   shell on the recording machine. The anchor is
+                                   briefed to re-join, re-arm, and reconcile the
+                                   rest itself via apply. Refuses loudly instead
+                                   of degrading: gone transcript, fork-born or
+                                   unattributed origin, live-armed sid, wrong
+                                   machine — each names its remedy
+       --brief TEXT                effort brief appended to the anchor's kickoff
   cbus formation bootstrap <name> <alias> [--brief TEXT]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not

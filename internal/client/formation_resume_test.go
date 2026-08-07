@@ -1,0 +1,129 @@
+package client
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+// resumeFixture is a one-anchor formation in the state the verb expects to find
+// after a reboot: sid recorded, fresh-born, transcript present, nobody armed.
+func resumeFixture() *Formation {
+	return &Formation{
+		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{{
+			Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined,
+			Mode: ModeTemplate, Machine: "host-a", Profile: "work",
+			Cwd: "/nonexistent/recorded/cwd",
+		}},
+	}
+}
+
+func resumeWorld() *PlanWorld {
+	return &PlanWorld{
+		Host:          "host-a",
+		LiveSids:      map[string]string{},
+		HasTranscript: func(profile, sid string) bool { return true },
+	}
+}
+
+func TestResumeAnchorLaunchShape(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := resumeFixture()
+	fk := &recForker{ids: []string{"surface-1"}}
+	created, err := resumeAnchorWorld(f, "finish the rollout", fk, resumeWorld())
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if created != "surface-1" || len(fk.specs) != 1 {
+		t.Fatalf("created=%q specs=%d", created, len(fk.specs))
+	}
+	argv := fk.specs[0].Argv
+	// the recorded profile must win even from a bare shell: ccs <profile>, never a
+	// bare claude that would resume against the wrong config dir
+	if len(argv) < 5 || argv[0] != "ccs" || argv[1] != "work" {
+		t.Fatalf("argv prefix = %v, want ccs work", argv[:2])
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{"--resume sid-anchor", "--name orchestrator"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv missing %q: %v", want, argv)
+		}
+	}
+	prompt := argv[len(argv)-1]
+	for _, want := range []string{
+		"SAME session",                    // restored framing, not a fresh brief
+		"cbus formation apply dd",         // the reconcile instruction
+		"finish the rollout",              // the brief rode along
+		"cbus join dd orchestrator",       // re-join instruction with real names
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("kickoff missing %q", want)
+		}
+	}
+	// launcher-authored restore lands in the ledger with a BLANK run — the bare shell
+	// holds no claim and the run must never be inferred
+	b, err := os.ReadFile(ledgerPath("dd"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	line := string(b)
+	if !strings.Contains(line, `"restore"`) || !strings.Contains(line, "sid-anchor") {
+		t.Errorf("ledger missing restore event: %s", line)
+	}
+	if strings.Contains(line, "run_") {
+		t.Errorf("restore must carry a blank run, got: %s", line)
+	}
+}
+
+func TestResumeAnchorBareProfileFallsBack(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // bare shell, no CCS
+	f := resumeFixture()
+	f.Peers[0].Profile = ""
+	fk := &recForker{}
+	if _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if fk.specs[0].Argv[0] != "claude" {
+		t.Errorf("blank profile from a bare shell should launch claude, got %v", fk.specs[0].Argv[:1])
+	}
+}
+
+func TestResumeAnchorRefusals(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	for _, tc := range []struct {
+		name string
+		mut  func(f *Formation, w *PlanWorld)
+		want string
+	}{
+		{"no anchor alias", func(f *Formation, w *PlanWorld) { f.AnchorAlias = "" }, "no anchorAlias"},
+		{"anchor not a peer", func(f *Formation, w *PlanWorld) { f.AnchorAlias = "ghost" }, "names no peer"},
+		{"wrong machine", func(f *Formation, w *PlanWorld) { w.Host = "host-b" }, "run this there"},
+		{"no sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "" }, "no session recorded"},
+		{"reserved sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "reserved" }, "no session recorded"},
+		{"fork-born", func(f *Formation, w *PlanWorld) { f.Peers[0].Origin = OriginFork }, "PARENT's transcript"},
+		{"origin unknown", func(f *Formation, w *PlanWorld) { f.Peers[0].Origin = "" }, "origin recorded"},
+		{"transcript gone", func(f *Formation, w *PlanWorld) {
+			w.HasTranscript = func(string, string) bool { return false }
+		}, "no transcript found"},
+		{"live-armed", func(f *Formation, w *PlanWorld) {
+			w.LiveSids["sid-anchor"] = "dd/orchestrator"
+			// the discriminating input: transcript ALSO unfindable, which is the real
+			// cross-profile shape — live-armed must still win (gate order pinned by the
+			// first real-store smoke, where the wrong refusal fired)
+			w.HasTranscript = func(string, string) bool { return false }
+		}, "live-armed"},
+	} {
+		f, w := resumeFixture(), resumeWorld()
+		tc.mut(f, w)
+		fk := &recForker{}
+		_, err := resumeAnchorWorld(f, "", fk, w)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want containing %q", tc.name, err, tc.want)
+		}
+		if len(fk.specs) != 0 {
+			t.Errorf("%s: a refusal must launch NOTHING, forked %d", tc.name, len(fk.specs))
+		}
+	}
+}

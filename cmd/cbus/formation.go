@@ -14,7 +14,7 @@ import (
 // formationUsage advertises only the verbs that exist. bootstrap lands in a later
 // milestone and is absent on purpose — a help text that promises a verb the binary
 // does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
+const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | resume <name> [--brief TEXT] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -27,6 +27,8 @@ func runFormation(args []string) int {
 		return runFormationSave(args)
 	case "apply":
 		return runFormationApply(args)
+	case "resume":
+		return runFormationResume(args)
 	case "bootstrap":
 		return runFormationBootstrap(args)
 	case "list":
@@ -225,6 +227,41 @@ func renderApplyReport(f *client.Formation, rep *client.ApplyReport, opts client
 	if opts.Wait > 0 && !rep.Converged() {
 		fmt.Println("  NOT converged: a peer never answered. apply reconciles — fix the cause and re-run it.")
 	}
+}
+
+// runFormationResume is the first-hop verb: launch the formation's anchor session
+// back into a terminal from a bare shell, so a reboot recovery never starts with a
+// human copying session ids out of a JSON file. The anchor reconciles the rest.
+func runFormationResume(args []string) int {
+	const use = "usage: cbus formation resume <name> [--brief TEXT]"
+	if len(args) == 0 {
+		return die(use)
+	}
+	name := args[0]
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--brief": true}, nil, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
+		return die("%v", err)
+	}
+	brief, _ := p.has("--brief")
+	f, source, err := client.ResolveFormation(name)
+	if err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("resolved %q from the %s\n", name, source)
+	created, err := client.ResumeAnchor(f, brief, applyForker)
+	if err != nil {
+		return die("%v", err)
+	}
+	anchor := f.AnchorAlias
+	fmt.Printf("anchor %q launched (resuming its own session) — it will re-join %s, re-arm, and reconcile the fleet with 'cbus formation apply %s'\n",
+		anchor, f.Channel, f.Name)
+	if created != "" {
+		fmt.Printf("  surface: %s\n", created)
+	}
+	return 0
 }
 
 // runFormationBootstrap prints one peer's first-turn prompt and nothing else — the
