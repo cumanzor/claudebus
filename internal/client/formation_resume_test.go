@@ -2,6 +2,7 @@ package client
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -61,8 +62,8 @@ func TestResumeAnchorLaunchShape(t *testing.T) {
 			t.Errorf("kickoff missing %q", want)
 		}
 	}
-	// launcher-authored restore lands in the ledger with a BLANK run — the bare shell
-	// holds no claim and the run must never be inferred
+	// launcher-authored restore: with no claim anywhere (this store is empty), the
+	// derived run is blank — never invented
 	b, err := os.ReadFile(ledgerPath("dd"))
 	if err != nil {
 		t.Fatalf("ledger: %v", err)
@@ -72,7 +73,32 @@ func TestResumeAnchorLaunchShape(t *testing.T) {
 		t.Errorf("ledger missing restore event: %s", line)
 	}
 	if strings.Contains(line, "run_") {
-		t.Errorf("restore must carry a blank run, got: %s", line)
+		t.Errorf("restore with no surviving claim must carry a blank run, got: %s", line)
+	}
+}
+
+func TestResumeAnchorRestoreAdoptsOwnSurvivingClaim(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	// the discriminating case for run attribution: the anchor's own claim SURVIVED the
+	// reboot (claims outlive processes by design), so the restore event must carry
+	// that run — the acting alias's own claim, never blank and never a sibling's
+	dir := filepath.Join(CBUSDir(), "dd", "orchestrator")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".run"), []byte("run_20260807T000000Z_aaaaaa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fk := &recForker{}
+	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	b, err := os.ReadFile(ledgerPath("dd"))
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	if !strings.Contains(string(b), "run_20260807T000000Z_aaaaaa") {
+		t.Errorf("restore must adopt the anchor's own surviving claim, got: %s", b)
 	}
 }
 

@@ -25,7 +25,7 @@ anchor — was entirely manual even though everything after the anchor is automa
 - `internal/client/formation_resume.go` (new) — ResumeAnchor + the injected-world
   seam; anchorLaunchPrefix (recorded profile wins even from a bare shell);
   anchorKickoff (restored-session framing + reconcile instruction, no role
-  re-brief); launcher-authored ledger restore with a BLANK run.
+  re-brief); launcher-authored ledger restore whose run attribution follows the mec.2 authority rule: the anchor's own surviving claim when one exists (claims outlive processes), blank when none — pinned both ways.
 - `cmd/cbus/formation.go`, `cmd/cbus/usage.go` — the `resume` verb and help.
 - Tests: join stamping (incl. the structural-vs-substring discriminator),
   save capture/preserve/refresh/garbage, launch shape (ccs prefix, kickoff
