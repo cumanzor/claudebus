@@ -225,3 +225,19 @@ func metaOrigin(path string) string {
 	}
 	return m.Origin
 }
+
+// currentProfile is the CCS instance name this process runs under, derived
+// structurally from CLAUDE_CONFIG_DIR (<root>/.ccs/instances/<profile>); blank when
+// not under CCS. Structural parent checks, not a substring, so it holds on windows
+// separators too.
+func currentProfile() string {
+	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
+	if cfg == "" {
+		return ""
+	}
+	parent := filepath.Dir(cfg)
+	if filepath.Base(parent) != "instances" || filepath.Base(filepath.Dir(parent)) != ".ccs" {
+		return ""
+	}
+	return filepath.Base(cfg)
+}

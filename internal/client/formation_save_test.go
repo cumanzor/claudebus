@@ -571,3 +571,69 @@ func TestSaveFormationRefusesGitHeadAnchor(t *testing.T) {
 		t.Error("a refused save must not write the envelope")
 	}
 }
+
+// plantPeerProfile is plantPeer with a profile stamped, the way a post-yv3 join
+// writes it.
+func plantPeerProfile(t *testing.T, ch, alias, sid, profile string) {
+	t.Helper()
+	dir := filepath.Join(CBUSDir(), ch, alias)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := peerMeta{
+		Alias: alias, Channel: ch, SessionID: sid,
+		Cwd: "/Users/dev/repos/AI/claudebus", ListenerPid: jsonNull, OwnerPid: jsonNull,
+		Host: ShortHostname(), TS: Now(), LastActivity: Now(), Profile: profile,
+	}
+	if err := writeMeta(dir, m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSaveFormationCapturesProfile(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "work")
+
+	f, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if f.Peers[0].Profile != "work" {
+		t.Errorf("captured profile = %q, want work", f.Peers[0].Profile)
+	}
+
+	// a blank meta must NOT clobber a hand-filled (or previously captured) profile
+	plantPeer(t, "roles", "coder", "sid-coder") // rewrites meta with no profile
+	f2, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if f2.Peers[0].Profile != "work" {
+		t.Errorf("profile after blank-meta re-save = %q (blank never clobbers)", f2.Peers[0].Profile)
+	}
+
+	// a non-blank meta refreshes in place, like cwd
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "personal")
+	f3, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("refresh save: %v", err)
+	}
+	if f3.Peers[0].Profile != "personal" {
+		t.Errorf("profile after refresh = %q, want personal", f3.Peers[0].Profile)
+	}
+}
+
+func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "bad profile") // space fails ValidName
+	f, rep, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if f.Peers[0].Profile != "" {
+		t.Errorf("garbage profile must not be captured, got %q", f.Peers[0].Profile)
+	}
+	if len(rep.SkippedBirth) != 1 || !strings.Contains(rep.SkippedBirth[0], "profile") {
+		t.Errorf("skip must be surfaced, got %v", rep.SkippedBirth)
+	}
+}

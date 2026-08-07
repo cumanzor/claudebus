@@ -40,6 +40,11 @@ type peerMeta struct {
 	// field reads as unknown/hand-maintained — never inferred.
 	Origin string `json:"origin,omitempty"`
 	Model  string `json:"model,omitempty"`
+	// Profile is the CCS instance this session runs under, stamped at join from the
+	// session's own CLAUDE_CONFIG_DIR — the session is the only party that knows it,
+	// and formation save captures it so a restore can relaunch the same profile.
+	// omitempty: pre-profile metas rewrite byte-identically, absent reads unknown.
+	Profile string `json:"profile,omitempty"`
 }
 
 var jsonNull = json.RawMessage("null")
@@ -207,7 +212,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: ShortHostname(), TS: now, LastActivity: now,
-		Origin: origin, Model: model,
+		Origin: origin, Model: model, Profile: currentProfile(),
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err

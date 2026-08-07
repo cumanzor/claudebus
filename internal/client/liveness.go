@@ -26,6 +26,7 @@ type PeerMeta struct {
 	SessionID     string
 	Origin        string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
 	Model         string
+	Profile       string // the CCS instance the session stamped at join; "" pre-profile or non-CCS
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -49,6 +50,7 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		SessionID:     rawStr(raw["sessionId"]),
 		Origin:        rawStr(raw["origin"]),
 		Model:         rawStr(raw["model"]),
+		Profile:       rawStr(raw["profile"]),
 	}, true
 }
 
