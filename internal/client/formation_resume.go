@@ -84,9 +84,10 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	if err != nil {
 		return "", err
 	}
-	// Launcher-authored restore record. The launcher is a bare shell with no claim on
-	// any run, so the run is BLANK — blank-when-unknown, never inferred from whatever
-	// claims survive on the channel.
+	// Launcher-authored restore record. The bare-shell launcher holds no claim, so the
+	// empty runID hands attribution to RecordEventInRun's own rule: the ACTING alias's
+	// surviving claim — the run being restored — and blank when none exists. That is
+	// the mec.2 authority rule (own claim, never a sibling's), not blank-always.
 	RecordEventInRun(LedgerRestore, f.Channel, p.Alias, p.SessionID, "", func(ev *LedgerEvent) {
 		ev.Origin = p.Origin
 		ev.PrevSessionID = p.SessionID
