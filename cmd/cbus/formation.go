@@ -101,8 +101,8 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
 	}
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;")
-		fmt.Println("  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates")
+		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;")
+		fmt.Println("  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded")
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the
 	// terminal, not only in the report struct (C4) — a silent skip reads as a clean save.
@@ -412,8 +412,8 @@ func renderFormation(f *client.Formation) {
 			anchor = "  [anchor]"
 		}
 		fmt.Printf("  %s%s\n", p.Alias, anchor)
-		fmt.Printf("    model=%s mode=%s origin=%s target=%s machine=%s\n",
-			orQ(p.Model), orQ(p.Mode), orQ(p.Origin), orQ(p.Target), orQ(p.Machine))
+		fmt.Printf("    model=%s mode=%s origin=%s profile=%s target=%s machine=%s\n",
+			orQ(p.Model), orQ(p.Mode), orQ(p.Origin), orQ(p.Profile), orQ(p.Target), orQ(p.Machine))
 		switch {
 		case p.Rolefile != "":
 			fmt.Printf("    role:     %s\n", p.Rolefile)
