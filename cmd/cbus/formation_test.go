@@ -183,7 +183,7 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"rolefile/role and profile are yours to fill in", "cbus formation show roles"} {
+		"rolefile/role are yours to fill in", "cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
 		}

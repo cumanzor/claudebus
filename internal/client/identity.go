@@ -235,6 +235,9 @@ func currentProfile() string {
 	if cfg == "" {
 		return ""
 	}
+	// Clean first: a trailing separator would make Dir return the path itself and
+	// silently fail the structural check for a perfectly valid instance dir.
+	cfg = filepath.Clean(cfg)
 	parent := filepath.Dir(cfg)
 	if filepath.Base(parent) != "instances" || filepath.Base(filepath.Dir(parent)) != ".ccs" {
 		return ""

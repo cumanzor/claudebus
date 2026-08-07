@@ -279,3 +279,17 @@ func TestJoinProfileBlankOutsideCCS(t *testing.T) {
 		t.Fatalf("profile = %q, want blank outside CCS", m.Profile)
 	}
 }
+
+func TestJoinStampsProfileTrailingSlash(t *testing.T) {
+	setupStore(t)
+	// a trailing separator must not defeat the structural check (review finding:
+	// Dir on an uncleaned path returns the path itself)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), ".ccs", "instances", "work")+string(filepath.Separator))
+	if _, _, err := Join("dev", "slashy"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), "dev", "slashy", "meta.json"))
+	if !ok || m.Profile != "work" {
+		t.Fatalf("profile = %q, want work despite trailing separator", m.Profile)
+	}
+}

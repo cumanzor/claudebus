@@ -130,11 +130,12 @@ func loadRepoTemplate(name string) (*Formation, error) {
 // existing file in place.
 //
 // What it captures is bounded by what the substrate records. meta.json holds a
-// peer's alias, sessionId, cwd and host; there is no model, no role, no origin, no
-// profile anywhere on disk. So save owns exactly four fields per peer and treats
-// everything else as the human's: it fills a blank once, and never overwrites what
-// it finds. That is what makes a re-save at a milestone boundary safe — it refreshes
-// sid checkpoints without eating the prose around them.
+// peer's alias, sessionId, cwd and host, a profile when the session stamped one at
+// join, and origin/model when the launcher recorded them; there is no role and no
+// prose anywhere on disk. Save refreshes the session facts, fills the
+// launcher-recorded ones once, and treats everything else as the human's: it never
+// overwrites a hand edit. That is what makes a re-save at a milestone boundary
+// safe — it refreshes sid checkpoints without eating the prose around them.
 //
 // A peer in the file but no longer on the channel is KEPT, not dropped: a paused
 // effort is the main thing a formation exists to hold.

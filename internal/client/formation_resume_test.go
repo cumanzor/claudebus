@@ -102,6 +102,22 @@ func TestResumeAnchorRestoreAdoptsOwnSurvivingClaim(t *testing.T) {
 	}
 }
 
+func TestResumeAnchorBlankMachineMeansHere(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	// house semantic pinned deliberately (review finding DECLINED): an empty machine
+	// means "here", exactly as apply's decidePeer documents for hand-authored files —
+	// the resume verb must not be stricter than apply about the same field
+	f := resumeFixture()
+	f.Peers[0].Machine = ""
+	fk := &recForker{}
+	if _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
+		t.Fatalf("blank machine must mean here, got refusal: %v", err)
+	}
+	if len(fk.specs) != 1 {
+		t.Fatal("blank-machine anchor was not launched")
+	}
+}
+
 func TestResumeAnchorBareProfileFallsBack(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "") // bare shell, no CCS
@@ -128,6 +144,9 @@ func TestResumeAnchorRefusals(t *testing.T) {
 		{"wrong machine", func(f *Formation, w *PlanWorld) { w.Host = "host-b" }, "run this there"},
 		{"no sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "" }, "no session recorded"},
 		{"reserved sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "reserved" }, "no session recorded"},
+		{"duplicate sid", func(f *Formation, w *PlanWorld) {
+			f.Peers = append(f.Peers, FormationPeer{Alias: "other", SessionID: "sid-anchor", Origin: OriginJoined})
+		}, "more than one alias"},
 		{"fork-born", func(f *Formation, w *PlanWorld) { f.Peers[0].Origin = OriginFork }, "PARENT's transcript"},
 		{"origin unknown", func(f *Formation, w *PlanWorld) { f.Peers[0].Origin = "" }, "origin recorded"},
 		{"transcript gone", func(f *Formation, w *PlanWorld) {
