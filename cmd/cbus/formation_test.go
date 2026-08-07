@@ -497,3 +497,21 @@ func TestFormationSaveAnchorFlag(t *testing.T) {
 		t.Error("trailing junk must still die")
 	}
 }
+
+func TestFormationResumeVerbErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"no name", []string{"resume"}},
+		{"unknown flag", []string{"resume", "x", "--bogus"}},
+		{"missing formation", []string{"resume", "ghost"}},
+		{"trailing junk", []string{"resume", "x", "extra"}},
+	} {
+		if rc := runFormation(tc.args); rc == 0 {
+			t.Errorf("%s: rc=0, want failure", tc.name)
+		}
+	}
+}
