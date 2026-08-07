@@ -1,5 +1,55 @@
 # Changelog (detailed)
 
+## [2026-08-07 21:35:00 UTC] [Formation/Resume] profile capture + the first-hop resume verb
+
+[Attempt #1] `8e30eac` (cbus-yv3) + `409ab7d` (cbus-lsy) — workstream B of the
+northstar reset: after a reboot, nobody should hand-copy a session id, a cwd, or a
+launcher invocation out of a JSON file.
+
+[Motivating problem]
+Field-proven on the dd-rollout reboot: the envelope records everything needed to
+resume EXCEPT the CCS profile (so the correct `ccs work --resume` had to be derived
+by locating the transcript by hand), and the first hop — rebooted machine to running
+anchor — was entirely manual even though everything after the anchor is automated.
+
+[Files Changed]
+- `internal/client/store.go` — peerMeta gains `profile` (omitempty; pre-profile
+  metas rewrite byte-identically); Join stamps `currentProfile()`.
+- `internal/client/identity.go` — `currentProfile()`: structural parent-dir check
+  on CLAUDE_CONFIG_DIR (`.ccs/instances/<profile>`), no substring literal, so it
+  holds on windows separators and stays out of the port's zero-grep gate.
+- `internal/client/liveness.go` — reader-side PeerMeta carries `profile`.
+- `internal/client/formation_save.go` — RosterPeer.Profile; capturePeer refreshes
+  it like cwd, blank meta never clobbers a hand fill, invalid tokens surfaced via
+  the SkippedBirth channel.
+- `internal/client/formation_resume.go` (new) — ResumeAnchor + the injected-world
+  seam; anchorLaunchPrefix (recorded profile wins even from a bare shell);
+  anchorKickoff (restored-session framing + reconcile instruction, no role
+  re-brief); launcher-authored ledger restore with a BLANK run.
+- `cmd/cbus/formation.go`, `cmd/cbus/usage.go` — the `resume` verb and help.
+- Tests: join stamping (incl. the structural-vs-substring discriminator),
+  save capture/preserve/refresh/garbage, launch shape (ccs prefix, kickoff
+  content, blank-run ledger), bare-shell fallback, nine-refusal table with
+  launch-nothing pinned.
+
+[Possible Ripple Effects]
+- Envelopes saved by pre-yv3 binaries have blank profiles; the resume verb then
+  depends on the invoking shell's own profile to find transcripts. dd-rollout was
+  hand-filled to profile=work (legal hand fill, preserved by blank-never-clobbers).
+- The verb reuses apply's identity prohibitions; any future change there should
+  check formation_resume.go for parity (three sites now: decidePeer, BootstrapPeer,
+  resumeAnchorWorld).
+
+[Testing Notes]
+- Full suites green both packages; linux amd64+arm64 cross-compile PASS.
+- Real-store smoke: `resume ghost` errors; `resume dd-rollout` with its anchor
+  LIVE drew the live-armed refusal naming dd-rollout/orchestrator — after the
+  smoke caught the transcript check firing first (wrong refusal when the
+  transcript hides under another profile). Gate reordered, pinned by a test where
+  both gates are true at once.
+- The launch happy path is fixture-proven (recorder forker); the real-terminal
+  acceptance run is the next actual reboot of a saved formation.
+
 ## [2026-08-05 02:45:05 UTC] [Formation/Save] repeatable --anchor key=value on save
 
 [Attempt #1] `c1ef5fa` — bdx-7m1.6, the one claudebus-side subtask of the
