@@ -36,6 +36,7 @@ type RosterPeer struct {
 	Machine   string // meta.host, which is ShortHostname() on the writing machine
 	Origin    string
 	Model     string
+	Profile   string // the CCS instance the session stamped about itself at join
 	Listening bool
 	RunID     string // the peer's run claim, read from its dir (blank when unclaimed)
 	HasClaim  bool   // whether a claim file was present at all, distinct from RunID==""
@@ -84,6 +85,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Machine:   m.Host,
 			Origin:    m.Origin,
 			Model:     m.Model,
+			Profile:   m.Profile,
 			Listening: MetaListenerAlive(metaPath),
 			RunID:     runID,
 			HasClaim:  runID != "",
@@ -317,6 +319,18 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 	p.SessionID = r.SessionID
 	p.Cwd = r.Cwd
 	p.Machine = r.Machine
+
+	// Profile is a session fact the session stamps about itself at join, so it
+	// refreshes like cwd — but a blank meta (pre-profile binary, non-CCS host) never
+	// clobbers a hand-filled envelope, and a token the envelope would reject is
+	// skipped and surfaced like a corrupted birth-record.
+	if r.Profile != "" {
+		if core.ValidName(r.Profile) {
+			p.Profile = r.Profile
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: profile %q (meta not a usable profile token)", r.Alias, r.Profile))
+		}
+	}
 
 	if p.Origin == "" && r.Origin != "" {
 		if validOrigin(r.Origin) {
