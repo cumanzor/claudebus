@@ -617,3 +617,26 @@ Added after the v1 sections above; semantics of the reboot-recovery chain
   like `cwd`. An older binary's meta rewrite drops the unknown key (the
   typed-struct rewriter class), so the field is best-effort until the fleet
   floor includes it; hand fills in envelopes survive regardless.
+
+## 15. Codex integration semantics (multi-harness)
+
+The load-bearing rules, beyond the verb surface (command-reference has that):
+
+- **Discovery is a protocol notification, not a hook.** SessionStart hooks do
+  not fire in the app-server/`--remote` topology (live-probed), so `cbus codex`
+  learns the TUI's thread from a passive initialize-only connection receiving
+  `thread/started` — which also rules out `thread/list` (it returns the user's
+  whole history; "the one live thread" is not knowable from it).
+- **The bridge is the peer's listener.** It arms with its own pid as the
+  liveness signal and tails the inbox with the shared follower loop; a codex
+  peer therefore has real structural liveness like any other, and must never
+  run `cbus tail` itself.
+- **One frame = one injection, and injections are expensive.** Each framed bus
+  message becomes exactly one codex turn — steer when a turn is active, else
+  open one (resuming the thread if the server forgot it). Presence frames are
+  skipped on purpose (a full model turn is too costly for join/leave
+  ceremony) while the cursor still advances over them.
+- **The stop-hook treats timeout as failure, never as signal.** It long-polls
+  under the codex hook limit; traffic returns a block decision codex injects
+  as a continuation turn; no traffic returns nothing and the stop proceeds.
+  The wait must stay under codex's own timeout or the hook dies for nothing.
