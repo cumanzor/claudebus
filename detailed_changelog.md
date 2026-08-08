@@ -1,5 +1,56 @@
 # Changelog (detailed)
 
+## [2026-08-08 20:15:00 UTC] [Formation/AnchorModel] always-anchor + the decision brief
+
+[Attempt #1] `b78f1bc` (cbus-j4i) + `9bfd332` (cbus-zhj) + test riders `2d262c2`
+(c1), `324af80` (c2/c3), `76cc0a2` (example same-host filter). Built by the
+anchormodel formation (coder on opus, reviewer on fable, orchestrator session),
+based on the mode+guard lineage because the brief renders real --mode commands.
+
+[Motivating problem]
+The northstar ruling: a formation envelope always has an anchor, and the restored
+anchor decides -- or is prompted to decide -- how the rest comes back, per peer.
+That makes the dashboard resume button safe by construction (it only ever launches
+the decider), but it needs the invariant enforced at save time and the kickoff
+upgraded from instruction to decision brief.
+
+[Files Changed]
+- `internal/client/formation_save.go` -- mint of a NEW anchorless envelope refuses
+  with both remedies named and nothing written; a refresh of an existing anchorless
+  file saves and sets AnchorMissing. anchorDefault still heals joined re-saves.
+- `internal/client/formation.go` -- Formation.AnchorWarning() (deliberately NOT a
+  Validate error: Save validates every write, and LoadFormation feeds the
+  refuse-to-overwrite gate, so a hard rule would make the heal impossible).
+- `internal/client/formation_resume.go` -- anchorRoster builds rows from the ONE
+  gathered world (same HasTranscript closure the gates consumed); anchorKickoff
+  renders the decision brief: roster, per-peer ruling request, operator
+  confirmation, apply-flag examples, reconvene re-save.
+- `cmd/cbus/formation.go` -- show renders a missing anchor as a named DEFECT row;
+  the save door warns at write time.
+
+[Ruled semantics worth knowing]
+- Refuse-over-autopick on mints; warn-and-save on refreshes; heal on joined
+  re-saves. Three paths, three different answers, each reasoned on the bead.
+- The roster carries STABLE facts only. Liveness is the one volatile fact, and a
+  stored liveness marker lying is the founding lesson of this codebase -- the
+  brief names the dry-run as where present-right-now comes from.
+- Examples are runnable-as-written: present-transcript AND on-this-host (blank
+  machine means here, the exact negation of the apply skip), capped at two,
+  absent when empty. The roster may honestly say a foreign peer's transcript is
+  present while the example declines to name it: the roster states facts, the
+  example promises actions.
+- The anchor renders as the deciding seat, never as a peer awaiting a decision.
+
+[Testing Notes]
+- Whole-repo go test ./... green; GOOS=linux amd64+arm64 builds; gofmt clean.
+- Sixteen pre-registered reviewer gates (A1-A8, B1-B8), all passed, with
+  reviewer-run mutants proven on disk and baseline-restored at every step --
+  including the pick-condition mutants in both directions and a structural proof
+  that a second world gather is impossible.
+- The c2 fixture needed separate stores for its two composes because the
+  launch-intent claim from the first refused the second: the cbus-rze guard
+  working inside a test, recorded so nobody loosens it for fixture convenience.
+
 ## [2026-08-08 07:35:00 UTC] [Formation/ModeGuard] apply --mode + the launch-intent guard
 
 [Attempt #1] `1d4488f` (cbus-osr) + `f4bb204`/`60dc945`/`aa4b70f`/`a780785` (cbus-rze,
