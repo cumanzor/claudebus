@@ -568,3 +568,52 @@ Preserve-or-rethink flags for a port; dispositions in [port-map.md](port-map.md)
 14. The 1006 re-arm is model-memory driven — nothing watches the ws; a forgotten instruction leaves the tail down until noticed (`cbus list @host` shows off/absent).
 15. Frame markers unescaped in-band; body lines starting `◀ cbus ` are spoofable (consistent with trust posture).
 16. Never-Bash warning duplicated across 3 skills + 5 CLI sites; the bootstrap prompt deliberately single-sourced in the binary.
+
+## 14. The anchor model (resume era)
+
+Added after the v1 sections above; semantics of the reboot-recovery chain
+(`formation resume`, `apply --mode`, the launch-intent guard, always-anchor).
+
+- **Always-anchor.** An envelope without an `anchorAlias` is a defect, not a
+  style gap: the anchor is the restore seat. Save refuses to *mint* one
+  (refuse-over-autopick: a wrong auto-anchor becomes the wrong restore seat
+  later), but a *refresh* of a legacy anchorless file saves-and-warns — a hard
+  rule in `Validate` would fail `LoadFormation` at the refresh gate's
+  refuse-to-overwrite load and strand every legacy file the invariant exists
+  to converge. That is why the warning lives in `Formation.AnchorWarning()`,
+  outside `Validate`, permanently.
+- **First hop.** `formation resume` launches only the anchor, from a bare
+  shell, with the recorded profile forcing `ccs <profile>` (a fresh
+  post-reboot shell has no CCS env; a plain `claude --resume` against the
+  wrong config dir comes up blank under the same session id — the failure
+  that motivated profile capture). All identity prohibitions are enforced at
+  a third parity site (`resumeAnchorWorld`, beside `decidePeer` and
+  `BootstrapPeer`); a change to one must visit all three.
+- **The guard has two lifetimes on purpose.** The intent *marker* must
+  SURVIVE its writer (the launcher CLI exits on the success path), so it is a
+  file with a TTL and a same-sid-join clear — launcher liveness plays no role
+  in clearing (a liveness rule would void the guard milliseconds after every
+  write). The *reclaim window* must DIE with its holder, so it is a kernel
+  lock (`flock`, released on death by construction). Same file, two
+  mechanisms, one reason each; the claim itself is a single-syscall
+  first-writer-wins `os.Link` and needs no serialization. Reclaim OVERWRITES
+  the corpse by rename and never unlinks: an absent path is the claim signal,
+  so any reclaim that unlinks first reopens the race it heals.
+- **The decision brief carries stable facts only.** Saved mode, origin,
+  transcript-at-compose-time, machine — all fixed when the brief is composed.
+  Liveness is the one volatile fact, and a stored liveness marker lying in
+  both directions is this tool's founding lesson; the brief names the
+  dry-run as where present-right-now comes from. Examples are **runnable as
+  written**: present-transcript AND on-this-host (blank machine means here,
+  the exact negation of apply's skip), capped, absent when empty. The roster
+  may honestly render a foreign peer's transcript as present while the
+  example declines to name it — the roster states facts, the example
+  promises actions.
+- **`--mode` is a per-run override, never a write.** In-memory peer-mode
+  rewrite on the `--channel` precedent; the planner's gates run byte-unchanged
+  underneath, which is the entire safety argument.
+- **Profile capture is fleet-floor semantics.** Join stamps the session's own
+  CCS instance (structural check on `CLAUDE_CONFIG_DIR`); save refreshes it
+  like `cwd`. An older binary's meta rewrite drops the unknown key (the
+  typed-struct rewriter class), so the field is best-effort until the fleet
+  floor includes it; hand fills in envelopes survive regardless.
