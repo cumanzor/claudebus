@@ -118,6 +118,11 @@ func runFormationSave(args []string) int {
 			len(rep.RunConflict), strings.Join(rep.RunConflict, ", "))
 		fmt.Println("  the envelope's formationRunId was left blank rather than pick one; this channel's run is split")
 	}
+	// A refresh that stays anchorless is written, never silent: minting one refuses,
+	// so this is the only path that can produce a defective envelope on purpose.
+	if rep.AnchorMissing {
+		fmt.Printf("  WARNING: %s\n", f.AnchorWarning())
+	}
 	fmt.Printf("  check it: cbus formation show %s\n", name)
 	return 0
 }
@@ -390,7 +395,9 @@ func renderFormation(f *client.Formation) {
 	fmt.Printf("formation: %s\n", f.Name)
 	fmt.Printf("channel:   %s (%s)\n", f.Channel, host)
 	fmt.Printf("saved:     %s by %s\n", orQ(f.SavedAt), orQ(f.SavedBy))
-	if f.AnchorAlias != "" {
+	if w := f.AnchorWarning(); w != "" {
+		fmt.Printf("anchor:    (none)  DEFECT — %s\n", w)
+	} else {
 		fmt.Printf("anchor:    %s\n", f.AnchorAlias)
 	}
 	if len(f.DriftAnchors) > 0 {
@@ -447,6 +454,9 @@ func renderFormation(f *client.Formation) {
 		}
 	}
 	var warn []string
+	if f.AnchorWarning() != "" {
+		warn = append(warn, "no anchor")
+	}
 	if stale > 0 {
 		warn = append(warn, fmt.Sprintf("%d stale sid(s)", stale))
 	}

@@ -979,6 +979,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		root := setupStore(t)
 		liveUnarmedPeer(t, root, "cc", "a", "SA")
 		liveUnarmedPeer(t, root, "cc", "b", "SB")
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "SA") // the saver is a peer, so the mint resolves an anchor
 		writeClaim("cc", "a", "run_X")
 		writeClaim("cc", "b", "run_Y")
 		f, rep, err := SaveFormation("cc", "cc", nil)
