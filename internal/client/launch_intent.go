@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -111,7 +112,7 @@ func ClaimLaunchIntent(ch, alias, sid string) (in LaunchIntent, age time.Duratio
 		if attempt > 0 {
 			return LaunchIntent{}, 0, false, nil // reclaimed, then lost the free slot to a racer
 		}
-		if reclaimCorpse(dir, path, tmp) {
+		if reclaimCorpse(path, tmp) {
 			return mine, 0, true, nil // we replaced the corpse with our own marker, in one step
 		}
 	}
@@ -130,33 +131,51 @@ func ClaimLaunchIntent(ch, alias, sid string) (in LaunchIntent, age time.Duratio
 // rename-aside version forked 2 of 16.
 //
 // The second rule handles the reclaimers themselves. Overwriting is last-writer-wins,
-// so N reclaimers would all "succeed" — they are serialized by an exclusive link on a
-// reclaim token, and the losers refuse rather than retry. The winner holds that token
-// across three syscalls and releases it by defer.
-func reclaimCorpse(dir, path, tmp string) bool {
-	token := path + ".reclaim"
-	// A token outliving the TTL was leaked by a process killed inside the section
-	// below — it is held for microseconds otherwise. Removing it cannot displace a
-	// live reclaimer: a live one stamped its token NOW, and a stamp cannot read as
-	// three minutes old.
-	if in, ok := readIntent(token); ok && ageOf(in) >= launchIntentTTL {
-		_ = os.Remove(token)
+// so N reclaimers would all "succeed" — they are serialized by flock(2), and a loser
+// refuses rather than retrying.
+func reclaimCorpse(path, tmp string) bool {
+	release, ok := acquireReclaimLock(path)
+	if !ok {
+		return false // another reclaimer holds it; our caller refuses against whatever it leaves
 	}
-	ttmp, _, err := writeIntentTmp(dir, "", "", "") // a token, never read as a claim: only its stamp matters
-	if err != nil {
-		return false
-	}
-	defer os.Remove(ttmp)
-	if os.Link(ttmp, token) != nil {
-		return false // another reclaimer owns the corpse; our caller refuses against whatever it leaves
-	}
-	defer os.Remove(token)
+	defer release()
 	// Sole reclaimer, and every claimer is still blocked by the corpse sitting in the
 	// path, so re-reading here is safe: nothing can have claimed it, only cleared it.
 	if in, ok := readIntent(path); ok && ageOf(in) < launchIntentTTL {
 		return false // it went fresh under us (its child joined, someone claimed): refuse against it
 	}
 	return os.Rename(tmp, path) == nil
+}
+
+// acquireReclaimLock takes the per-marker reclaim lock via flock(2) on an open fd,
+// non-blocking: a loser refuses, it does not queue.
+//
+// The two halves of this file want OPPOSITE properties, which is the whole reason one
+// is a file and the other is a kernel lock. The MARKER must SURVIVE its writer — the
+// launcher exits on the success path, and the guard has to outlive it — so it is a
+// file cleared by TTL or the same-sid join, and a kernel lock would be exactly wrong
+// there. The RECLAIM window is the opposite: transient mutual exclusion that must
+// DIE with its holder, which is what flock gives for free. The kernel drops it when
+// the fd closes, including on process death, so a reclaimer killed mid-section leaks
+// nothing — there is no token to go stale, no pid to be recycled, no heal path to
+// re-race. ledger.go's mint lock took this same route after three rounds of
+// hand-rolled file dances, and this milestone found the same class three times before
+// spending it here.
+//
+// The lock FILE is left on disk; its existence carries no meaning, only the flock does.
+func acquireReclaimLock(path string) (release func(), ok bool) {
+	f, err := os.OpenFile(path+".reclaim", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, false
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return nil, false
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, true
 }
 
 // writeIntentTmp stages the marker's full bytes under a name nothing reads, so the
