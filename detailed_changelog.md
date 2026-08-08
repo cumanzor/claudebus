@@ -1,5 +1,61 @@
 # Changelog (detailed)
 
+## [2026-08-08 07:35:00 UTC] [Formation/ModeGuard] apply --mode + the launch-intent guard
+
+[Attempt #1] `1d4488f` (cbus-osr) + `f4bb204`/`60dc945`/`aa4b70f`/`a780785` (cbus-rze,
+one milestone, two reviewer findings fixed in ruled parts) + `dede3f5` (unrelated
+pre-existing gofmt). Built by the modeflags formation -- coder (opus) and reviewer
+(fable) under an orchestrator session -- using cbus itself for every dispatch,
+verdict, and ruling.
+
+[Motivating problem]
+The dd-rollout reboot proved the resume story end to end but left two gaps: choosing
+resume-vs-fresh per peer required hand-editing the envelope (the literal user
+question "how do I do that?"), and between `formation resume` forking the anchor and
+the child re-joining, liveSids is blind, so a second resume double-launches two
+processes onto one transcript.
+
+[Files Changed]
+- `internal/client/formation_apply.go` -- ApplyOptions.Mode + overrideMode() beside
+  overrideChannel: per-run, in-memory, envelope never written. decidePeer is
+  byte-untouched BY DESIGN; the safety argument is that the gates run unchanged.
+- `internal/client/launch_intent.go` (new) -- the guard. Channel-dir dot-file
+  marker; ClaimLaunchIntent is first-writer-wins via os.Link (EEXIST = claimed);
+  reclaim OVERWRITES the corpse by rename, never unlinks (an absent path is the
+  claim signal, so unlink-first reopens the race); reclaimers and clears serialize
+  on a flock'd side token (LOCK_NB, losers refuse/skip, kernel-released on death).
+- `internal/client/formation_resume.go` -- refuse-then-claim after every gate,
+  before Fork. `internal/client/store.go` -- same-sid Join clears the marker.
+- `cmd/cbus/formation.go`, `cmd/cbus/usage.go` -- the --mode flag and help.
+
+[Expensive lessons, recorded so nobody re-buys them]
+1. Absence is the signal: any reclaim that unlinks before relinking reopens the
+   race it heals. This falsified the reviewer's own fix sketch, measured at 2/16.
+2. The marker and the reclaim window want OPPOSITE lifetimes: the marker must
+   SURVIVE its writer (the launcher exits on success), the reclaim window must DIE
+   with its holder. File+TTL for one, flock for the other. Same file, two
+   mechanisms, one reason each.
+3. The peer dir cannot hold the marker: Join's reclaim RemoveAll would let whoever
+   takes the alias clear the guard protecting the resumed transcript.
+
+[Possible Ripple Effects]
+- cbus-yca (apply-side resume window) adopts ClaimLaunchIntent; the racy writer
+  was deleted so the unsafe path cannot be adopted by accident.
+- BOTH syscall.Flock sites (ledger.go and launch_intent.go) need _windows splits
+  when the windows-port branch merges -- recorded on cbus-rze.
+- The clear can over-refuse (skip on busy lock, later-launch markers declined);
+  bounded by TTL 180s and moot when a live child is armed (live-sid gate first).
+
+[Testing Notes]
+- Whole-repo go test ./... green (5/5 uncached at the original tip, re-verified on
+  this lineage); -race over client and cmd; linux amd64+arm64 builds + vet.
+- Deterministic 16-racer probes, both entry states, exactly-one-forked; SIGKILL
+  release test whose discriminating mutant (flock swapped back to the deleted
+  O_EXCL token design) reds on "the lock survived its holder's death".
+- Reviewer independently reproduced every claim: own mutants proven on disk and
+  restored, door probes with the built binary, branch walks of the fixed protocol
+  after each change (re-walked, not diffed, at the coder's own request).
+
 ## [2026-08-07 21:35:00 UTC] [Formation/Resume] profile capture + the first-hop resume verb
 
 [Attempt #1] `8e30eac` (cbus-yv3) + `409ab7d` (cbus-lsy) — workstream B of the
