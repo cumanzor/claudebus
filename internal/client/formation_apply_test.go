@@ -189,6 +189,9 @@ func applyWith(t *testing.T, f *Formation, opts ApplyOptions, forker TerminalFor
 	if err := overrideChannel(f, opts); err != nil {
 		return nil, err
 	}
+	if err := overrideMode(f, opts); err != nil {
+		return nil, err
+	}
 	self, err := applierAddress(f.Channel)
 	if err != nil {
 		return nil, err

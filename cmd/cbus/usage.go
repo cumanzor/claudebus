@@ -84,6 +84,16 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    the whole run, so the file's layout stands
        --channel ch                target ch for this run (a template serves any
                                    effort; the envelope file is not changed)
+       --mode resume|fork|template
+                                   what the peers apply LAUNCHES come back as, this
+                                   run only (the file's per-peer mode is save-side
+                                   policy; the choice is late-bound). Peers already
+                                   live are untouched, and each launch still goes
+                                   through the identity gates, so a blanket resume
+                                   degrades or refuses per peer rather than forcing.
+                                   steer one peer by composing with --only:
+                                   --mode resume --only documenter, then a plain
+                                   apply brings the rest back as the file says
        --dry-run                   print the plan, launch nothing
        --only a,b                  only these peers
        --wait <dur>                how long to wait for each peer to answer its
