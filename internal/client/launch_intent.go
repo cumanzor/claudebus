@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -55,43 +58,133 @@ func launchIntentPath(ch, alias string) string {
 	return filepath.Join(CBUSDir(), ch, ".launch-intent-"+alias+".json")
 }
 
-// WriteLaunchIntent records that this process is about to launch sid as ch/alias.
+// ClaimLaunchIntent atomically claims the launch of sid as ch/alias. claimed=true
+// means this process is the one launch permitted right now and may fork.
+//
 // The channel dir is created if absent: resuming into a channel that no longer exists
 // is legal (a reboot takes the whole store's live state with it), and an empty channel
-// dir is a harmless artifact.
+// dir is a harmless artifact. Callers are channel/alias-general on purpose — the same
+// window exists for any launcher that forks a session and waits for it to join
+// (cbus-yca), and adopting this should be a call, not surgery.
 //
-// Callers are channel/alias-general on purpose — the same window exists for any
-// launcher that forks a session and waits for it to join (cbus-yca), and adopting
-// this should be a call, not surgery.
-func WriteLaunchIntent(ch, alias, sid string) error {
+// The claim IS the write, and the write is os.Link, which fails with EEXIST when the
+// path is taken. That is the whole correctness argument: a read-then-write guard is
+// check-then-act, and temp+rename is LAST-writer-wins, so N racers all read absent,
+// all rename, and all fork — measured, 2-4 of 16 forking per run. Link is
+// FIRST-writer-wins and the syscall itself reports which one you were, so no racer
+// ever has to infer its own outcome from a later read.
+//
+// claimed=false with err==nil is a refusal: `in`/`age` describe the claim in the way,
+// or `in` is zero when the loss was to a racer whose claim is no longer readable.
+func ClaimLaunchIntent(ch, alias, sid string) (in LaunchIntent, age time.Duration, claimed bool, err error) {
 	if err := checkStoreName("channel", ch); err != nil {
-		return err
+		return LaunchIntent{}, 0, false, err
 	}
 	if err := checkStoreName("alias", alias); err != nil {
-		return err
+		return LaunchIntent{}, 0, false, err
 	}
 	dir := filepath.Join(CBUSDir(), ch)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return LaunchIntent{}, 0, false, err
 	}
+	tmp, mine, err := writeIntentTmp(dir, ch, alias, sid)
+	if err != nil {
+		return LaunchIntent{}, 0, false, err
+	}
+	defer os.Remove(tmp)
+	path := launchIntentPath(ch, alias)
+
+	// Two passes at most: the claim, and one reclaim of an expired corpse. A loser of
+	// the reclaim refuses rather than spinning — a retry loop here would be a lock
+	// with extra steps, and the caller's remedy (wait, or come back after the TTL) is
+	// the same either way.
+	for attempt := 0; attempt < 2; attempt++ {
+		switch err := os.Link(tmp, path); {
+		case err == nil:
+			return mine, 0, true, nil
+		case !errors.Is(err, fs.ErrExist):
+			return LaunchIntent{}, 0, false, err
+		}
+		if held, heldAge, ok := FreshLaunchIntent(ch, alias); ok {
+			return held, heldAge, false, nil // someone live holds it: refuse against THEIR facts
+		}
+		if attempt > 0 {
+			return LaunchIntent{}, 0, false, nil // reclaimed, then lost the free slot to a racer
+		}
+		if reclaimCorpse(dir, path, tmp) {
+			return mine, 0, true, nil // we replaced the corpse with our own marker, in one step
+		}
+	}
+	return LaunchIntent{}, 0, false, nil
+}
+
+// reclaimCorpse replaces an EXPIRED or unreadable marker with the caller's own, and
+// reports whether the caller thereby owns the claim. It is the only path that ever
+// displaces another process's marker.
+//
+// Two rules make it safe, and the first one is the one that took a bounced milestone
+// to learn: the corpse is never REMOVED, it is overwritten by a single atomic rename.
+// Any reclaim that unlinks first — rename-aside, remove-then-link — makes the path
+// momentarily absent, and absence is exactly the signal every other racer is waiting
+// for, so a racer links into the hole and forks alongside the reclaimer. Measured: the
+// rename-aside version forked 2 of 16.
+//
+// The second rule handles the reclaimers themselves. Overwriting is last-writer-wins,
+// so N reclaimers would all "succeed" — they are serialized by an exclusive link on a
+// reclaim token, and the losers refuse rather than retry. The winner holds that token
+// across three syscalls and releases it by defer.
+func reclaimCorpse(dir, path, tmp string) bool {
+	token := path + ".reclaim"
+	// A token outliving the TTL was leaked by a process killed inside the section
+	// below — it is held for microseconds otherwise. Removing it cannot displace a
+	// live reclaimer: a live one stamped its token NOW, and a stamp cannot read as
+	// three minutes old.
+	if in, ok := readIntent(token); ok && ageOf(in) >= launchIntentTTL {
+		_ = os.Remove(token)
+	}
+	ttmp, _, err := writeIntentTmp(dir, "", "", "") // a token, never read as a claim: only its stamp matters
+	if err != nil {
+		return false
+	}
+	defer os.Remove(ttmp)
+	if os.Link(ttmp, token) != nil {
+		return false // another reclaimer owns the corpse; our caller refuses against whatever it leaves
+	}
+	defer os.Remove(token)
+	// Sole reclaimer, and every claimer is still blocked by the corpse sitting in the
+	// path, so re-reading here is safe: nothing can have claimed it, only cleared it.
+	if in, ok := readIntent(path); ok && ageOf(in) < launchIntentTTL {
+		return false // it went fresh under us (its child joined, someone claimed): refuse against it
+	}
+	return os.Rename(tmp, path) == nil
+}
+
+// writeIntentTmp stages the marker's full bytes under a name nothing reads, so the
+// linked-into-place file is complete the instant it becomes visible.
+func writeIntentTmp(dir, ch, alias, sid string) (string, LaunchIntent, error) {
 	pid := os.Getpid()
 	start, _ := procStartTime(pid) // provenance only: a probe that cannot answer must not stop the guard
-	b, err := json.MarshalIndent(LaunchIntent{
-		Channel: ch, Alias: alias, SessionID: sid,
-		Pid: pid, ProcStart: start, TS: Now(),
-	}, "", "  ")
+	in := LaunchIntent{Channel: ch, Alias: alias, SessionID: sid, Pid: pid, ProcStart: start, TS: Now()}
+	b, err := json.MarshalIndent(in, "", "  ")
 	if err != nil {
-		return err
+		return "", LaunchIntent{}, err
 	}
-	// same-dir dot-prefixed temp then rename, the way writeMeta does it: a reader must
-	// never see a half-written intent, and a torn one is not a state this writer can
-	// produce.
-	tmp := filepath.Join(dir, ".launch-intent.tmp."+strconv.Itoa(pid))
+	tmp := filepath.Join(dir, ".launch-intent.tmp."+intentSuffix())
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+		return "", LaunchIntent{}, err
 	}
-	return os.Rename(tmp, launchIntentPath(ch, alias))
+	return tmp, in, nil
 }
+
+// intentSuffix names a scratch file no concurrent claim can collide with. The pid
+// alone is not enough: two claims can race inside ONE process (the barrier probe does
+// exactly that), and a shared temp name would have them overwriting each other's
+// bytes before either linked.
+func intentSuffix() string {
+	return strconv.Itoa(os.Getpid()) + "." + strconv.FormatUint(atomic.AddUint64(&intentSeq, 1), 36)
+}
+
+var intentSeq uint64
 
 // FreshLaunchIntent reports an UNEXPIRED intent for ch/alias and how long ago it was
 // written, so a refusal can name its own age instead of saying "try again later".
@@ -101,31 +194,52 @@ func WriteLaunchIntent(ch, alias, sid string) error {
 // refuses forever on bytes it cannot understand is a wedge with no way out. The
 // atomic rename above is what makes that case not arise from this writer.
 func FreshLaunchIntent(ch, alias string) (LaunchIntent, time.Duration, bool) {
-	var in LaunchIntent
 	// screened on the read side too: the path is built from these, and an unscreened
 	// alias is a traversal wearing a filename
 	if checkStoreName("channel", ch) != nil || checkStoreName("alias", alias) != nil {
-		return in, 0, false
-	}
-	b, err := os.ReadFile(launchIntentPath(ch, alias))
-	if err != nil {
-		return in, 0, false
-	}
-	if json.Unmarshal(b, &in) != nil {
 		return LaunchIntent{}, 0, false
 	}
+	in, ok := readIntent(launchIntentPath(ch, alias))
+	if !ok {
+		return LaunchIntent{}, 0, false
+	}
+	age := ageOf(in)
+	if age >= launchIntentTTL {
+		return LaunchIntent{}, 0, false
+	}
+	return in, age, true
+}
+
+// readIntent parses a marker at an exact path. Unreadable and unparseable are the
+// same answer — no intent — and the reclaim path treats both alike.
+func readIntent(path string) (LaunchIntent, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return LaunchIntent{}, false
+	}
+	var in LaunchIntent
+	if json.Unmarshal(b, &in) != nil {
+		return LaunchIntent{}, false
+	}
+	if _, err := time.Parse(time.RFC3339, in.TS); err != nil {
+		return LaunchIntent{}, false // no usable age is the same as no intent
+	}
+	return in, true
+}
+
+// ageOf is how long ago a marker was written. A marker readIntent accepted always has
+// a parseable stamp, so the error branch here is unreachable and answers EXPIRED,
+// which is the direction that cannot wedge a channel.
+func ageOf(in LaunchIntent) time.Duration {
 	ts, err := time.Parse(time.RFC3339, in.TS)
 	if err != nil {
-		return LaunchIntent{}, 0, false
+		return launchIntentTTL
 	}
 	age := time.Since(ts)
 	if age < 0 {
 		age = 0 // a clock that stepped backwards is not evidence the launch is older
 	}
-	if age >= launchIntentTTL {
-		return LaunchIntent{}, 0, false
-	}
-	return in, age, true
+	return age
 }
 
 // ClearLaunchIntentFor drops ch/alias's intent when sid is the session it was written
