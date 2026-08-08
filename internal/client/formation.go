@@ -549,6 +549,18 @@ func (f *Formation) Validate() error {
 	return nil
 }
 
+// AnchorWarning names the anchorless defect on an envelope that already exists, or
+// "" when there is an anchor. It is deliberately NOT a Validate rule: Save validates
+// every write, so a hard rule there would block the very refresh that heals a legacy
+// file, and a warning cannot travel in an error return at all. show renders this at
+// the anchor row; save reports it at the moment one is written.
+func (f *Formation) AnchorWarning() string {
+	if f.AnchorAlias != "" {
+		return ""
+	}
+	return "no anchorAlias — resume refuses this envelope; re-save it from a session joined to the channel, or set anchorAlias by hand"
+}
+
 func (p *FormationPeer) validate() error {
 	if !core.ValidName(p.Alias) {
 		return fmt.Errorf("alias must be [A-Za-z0-9._-], got %q", p.Alias)

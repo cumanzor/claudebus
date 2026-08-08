@@ -123,6 +123,35 @@ func TestFormationShowVerb(t *testing.T) {
 	}
 }
 
+// TestFormationShowAnchorlessDefect: show renders a missing anchor as a named defect
+// row rather than omitting the line — an absent row reads as "nothing to see", which
+// is how an unrestorable envelope stayed invisible until resume refused it.
+func TestFormationShowAnchorlessDefect(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
+	t.Setenv("HOME", t.TempDir())
+	saveFixture(t, dir, "roles", strings.Replace(fixtureRoles(),
+		`"anchorAlias": "orchestrator"`, `"anchorAlias": ""`, 1))
+
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"show", "roles"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	for _, want := range []string{"anchor:    (none)", "DEFECT", "resume refuses this envelope"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("anchorless show missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "warnings: no anchor, 1 stale sid(s), 1 role TODO(s)") {
+		t.Errorf("the anchor defect is not counted in the summary:\n%s", out)
+	}
+	if strings.Contains(out, "[anchor]") {
+		t.Errorf("a peer was marked anchor on an anchorless envelope:\n%s", out)
+	}
+}
+
 // TestFormationShowUncheckedNotStale: a peer recorded on another machine must not
 // be called stale by a host that cannot see its transcripts.
 func TestFormationShowUncheckedNotStale(t *testing.T) {
@@ -426,7 +455,7 @@ func TestFormationApplyBriefThroughCLI(t *testing.T) {
 func TestFormationSaveRendersSkippedBirth(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	// a peer whose meta carries a garbage origin (hand-corrupted meta)
 	pdir := filepath.Join(dir, "roles", "coder")
 	if err := os.MkdirAll(pdir, 0o755); err != nil {

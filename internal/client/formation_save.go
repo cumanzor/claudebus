@@ -113,6 +113,10 @@ type SaveReport struct {
 	// more than one — a split or corruption. The envelope run is left blank and the
 	// CLI surfaces this rather than silently picking a run.
 	RunConflict []string
+	// AnchorMissing is set when a REFRESH still comes out anchorless (a legacy file
+	// re-saved from outside the channel). Minting one refuses instead; this is the
+	// path that has to save and say so.
+	AnchorMissing bool
 }
 
 // loadRepoTemplate reads a committed template as a save refresh base. It reads the
@@ -269,6 +273,20 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 	}
 	if f.AnchorAlias == "" {
 		f.AnchorAlias = anchorDefault(ch, f.Peers)
+	}
+	// The anchor is load-bearing for restore, so an envelope without one is a defect.
+	// A NEW envelope refuses rather than auto-picking a peer: a wrong anchor becomes
+	// the wrong restore seat every time the formation is resumed, which outlasts a
+	// failed save. A REFRESH still saves — refusing would strand legacy files saved
+	// from outside the channel — and a re-save from a joined session heals it through
+	// anchorDefault above, so the fleet converges without a migration.
+	if f.AnchorAlias == "" {
+		if rep.New {
+			return nil, nil, fmt.Errorf("refusing to save %q with no anchor: this session is not a peer on %q, "+
+				"so there is no alias to anchor to — join %s and save again (the saving session becomes the anchor), "+
+				"or write anchorAlias by hand into %s", name, ch, ch, path)
+		}
+		rep.AnchorMissing = true
 	}
 	setGitHeadAnchor(f)
 	setHandAnchors(f, anchors)
