@@ -321,6 +321,116 @@ func TestReclaimLockDiesWithItsHolder(t *testing.T) {
 	release()
 }
 
+// TestClearSkipsWhileAReclaimerHoldsTheWindow is F2's first half, and it is
+// deterministic: flock conflicts between open file descriptions, so the test can hold
+// the reclaim window itself and there is no interleaving to hope for.
+//
+// The clear used to be a lockless read-check-remove. Removing the corpse under a
+// lock-holding reclaimer opens the hole a claimer links into, and the reclaimer's
+// rename then lands on top of that valid claim: two launches, marker naming the wrong
+// one. Skipping is the safe direction — the marker then dies by TTL instead.
+func TestClearSkipsWhileAReclaimerHoldsTheWindow(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantIntent(t, "dd", "orchestrator", "sid-anchor", time.Second)
+	path := launchIntentPath("dd", "orchestrator")
+
+	release, ok := acquireReclaimLock(path)
+	if !ok {
+		t.Fatal("could not take a free reclaim lock")
+	}
+	ClearLaunchIntentFor("dd", "orchestrator", "sid-anchor")
+	if !intentExists("dd", "orchestrator") {
+		t.Error("the clear removed the marker while a reclaimer held the window — " +
+			"that is the hole a claimer links into and the reclaim then overwrites")
+	}
+	release()
+
+	// and it is a SKIP, not a refusal to ever clear: with the window free, the same
+	// call must land, or the guard would outlive every child that answered it
+	ClearLaunchIntentFor("dd", "orchestrator", "sid-anchor")
+	if intentExists("dd", "orchestrator") {
+		t.Error("the same-sid clear did not land once the window was free")
+	}
+}
+
+// TestReclaimNeverRenamesIntoAnAbsentPath is F2's second half: a branch walk over
+// reclaimCorpse, deterministic because each entry state is constructed directly
+// rather than raced into. The absent row is the finding — the reclaim lock excludes
+// reclaimers from each other and does nothing to a claimer, so an absent path is a
+// hole somebody else may already have won, never an invitation to rename.
+func TestReclaimNeverRenamesIntoAnAbsentPath(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		plant      func(t *testing.T, path string)
+		wantClaim  bool
+		wantMarker string // sessionId expected at the path afterwards; "" = no file
+	}{
+		{"absent path falls back to the link claim", func(t *testing.T, path string) {}, false, ""},
+		{"expired corpse is overwritten", func(t *testing.T, path string) {
+			plantIntent(t, "dd", "orchestrator", "sid-dead", ttlOutside)
+		}, true, "sid-mine"},
+		{"fresh claim is left alone", func(t *testing.T, path string) {
+			plantIntent(t, "dd", "orchestrator", "sid-live", time.Second)
+		}, false, "sid-live"},
+		{"unparseable corpse is overwritten", func(t *testing.T, path string) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, true, "sid-mine"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CBUS_DIR", t.TempDir())
+			dir := filepath.Join(CBUSDir(), "dd")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := launchIntentPath("dd", "orchestrator")
+			tc.plant(t, path)
+
+			tmp, _, err := writeIntentTmp(dir, "dd", "orchestrator", "sid-mine")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmp)
+
+			if got := reclaimCorpse(path, tmp); got != tc.wantClaim {
+				t.Fatalf("reclaimCorpse = %v, want %v", got, tc.wantClaim)
+			}
+			in, present, _ := peekIntent(path)
+			if tc.wantMarker == "" {
+				if present {
+					t.Errorf("reclaim wrote into an absent path: %+v — a claimer may already own that hole", in)
+				}
+				return
+			}
+			if !present || in.SessionID != tc.wantMarker {
+				t.Errorf("marker holds %q (present=%v), want %q", in.SessionID, present, tc.wantMarker)
+			}
+		})
+	}
+}
+
+// TestClaimAfterACorpseVanishes walks the fallback the absent row hands back to: the
+// caller's second pass is a plain link, which is first-writer-wins and cannot land on
+// anyone.
+func TestClaimAfterACorpseVanishes(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantIntent(t, "dd", "orchestrator", "sid-dead", ttlOutside)
+	if err := os.Remove(launchIntentPath("dd", "orchestrator")); err != nil {
+		t.Fatal(err)
+	}
+	in, _, claimed, err := ClaimLaunchIntent("dd", "orchestrator", "sid-anchor")
+	if err != nil || !claimed {
+		t.Fatalf("claim over a vanished corpse: claimed=%v err=%v", claimed, err)
+	}
+	if in.SessionID != "sid-anchor" {
+		t.Errorf("claim returned %q", in.SessionID)
+	}
+}
+
 func TestResumeRefusesAFreshIntent(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	plantIntent(t, "dd", "orchestrator", "sid-anchor", 12*time.Second)
