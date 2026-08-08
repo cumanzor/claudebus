@@ -172,3 +172,156 @@ func TestResumeAnchorRefusals(t *testing.T) {
 		}
 	}
 }
+
+// fleetFixture is the decision brief's subject: an anchor plus one peer in each state
+// a roster row can report — warm, gone, recorded elsewhere, never recorded.
+func fleetFixture() *Formation {
+	return &Formation{
+		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{
+			{Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined,
+				Mode: ModeTemplate, Machine: "host-a", Profile: "work", Cwd: "/nonexistent/recorded/cwd"},
+			{Alias: "documenter", SessionID: "sid-warm", Origin: OriginFresh,
+				Mode: ModeResume, Machine: "host-a", Profile: "work"},
+			{Alias: "reviewer", SessionID: "sid-gone", Origin: OriginFresh,
+				Mode: ModeResume, Machine: "host-a", Profile: "work"},
+			{Alias: "tester", SessionID: "sid-remote", Origin: OriginFresh,
+				Mode: ModeResume, Machine: "host-b", Profile: "work"},
+			{Alias: "planner", Origin: OriginFresh, Mode: ModeTemplate, Machine: "host-a"},
+		},
+	}
+}
+
+func fleetWorld() *PlanWorld {
+	warm := map[string]bool{"sid-anchor": true, "sid-warm": true}
+	return &PlanWorld{
+		Host:          "host-a",
+		LiveSids:      map[string]string{},
+		HasTranscript: func(_, sid string) bool { return warm[sid] },
+	}
+}
+
+func rosterLine(t *testing.T, prompt, alias string) string {
+	t.Helper()
+	for _, ln := range strings.Split(prompt, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), alias+" ") {
+			return ln
+		}
+	}
+	t.Fatalf("no roster row for %q in:\n%s", alias, prompt)
+	return ""
+}
+
+func anchorPrompt(t *testing.T, f *Formation, w *PlanWorld) string {
+	t.Helper()
+	fk := &recForker{}
+	if _, err := resumeAnchorWorld(f, "", fk, w); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if len(fk.specs) != 1 {
+		t.Fatalf("forked %d times", len(fk.specs))
+	}
+	argv := fk.specs[0].Argv
+	return argv[len(argv)-1]
+}
+
+// TestAnchorKickoffRosterRendersEveryState: the brief is only a decision brief if the
+// rows say different things about different peers. The warm-and-gone pair is the
+// discriminating input — a mutant that prints one verdict for the whole fleet passes
+// any single-peer fixture and dies here.
+func TestAnchorKickoffRosterRendersEveryState(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
+
+	warm := rosterLine(t, prompt, "documenter")
+	for _, want := range []string{"mode=resume", "origin=fresh", "transcript=present", "machine=host-a"} {
+		if !strings.Contains(warm, want) {
+			t.Errorf("warm peer row missing %q: %s", want, warm)
+		}
+	}
+	if gone := rosterLine(t, prompt, "reviewer"); !strings.Contains(gone, "transcript=GONE") {
+		t.Errorf("a peer whose transcript is missing must render GONE: %s", gone)
+	}
+	// recorded on another machine: this host cannot see its transcripts, so the brief
+	// must not claim they are gone
+	remote := rosterLine(t, prompt, "tester")
+	if !strings.Contains(remote, "unchecked (recorded on host-b)") || strings.Contains(remote, "GONE") {
+		t.Errorf("cross-machine peer must render unchecked, not GONE: %s", remote)
+	}
+	if none := rosterLine(t, prompt, "planner"); !strings.Contains(none, "transcript=none recorded") {
+		t.Errorf("a peer with no sid must say so: %s", none)
+	}
+}
+
+// TestAnchorKickoffAnchorIsTheDecidingSeat is B8: the anchor appears in its own
+// roster as the seat making the call, never as a peer awaiting one. Its transcript was
+// proved by the gates before this prompt existed, so re-asking would be a decision the
+// anchor cannot make about itself.
+func TestAnchorKickoffAnchorIsTheDecidingSeat(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
+
+	row := rosterLine(t, prompt, "orchestrator")
+	if !strings.Contains(row, "this session, restored") {
+		t.Errorf("the anchor row must name itself as the restored session: %s", row)
+	}
+	for _, forbidden := range []string{"transcript=", "mode=", "origin="} {
+		if strings.Contains(row, forbidden) {
+			t.Errorf("the anchor row must not render %q as if it were awaiting a decision: %s", forbidden, row)
+		}
+	}
+}
+
+// TestAnchorKickoffSpeaksInFlagsAndReconvenes: the decision has to be expressible.
+// The examples name the formation's OWN aliases (a placeholder is one more thing to
+// translate before acting), the liveness handoff points at the dry-run rather than at
+// this snapshot, and the checkpoint gets refreshed once the fleet answers.
+func TestAnchorKickoffSpeaksInFlagsAndReconvenes(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
+
+	for _, want := range []string{
+		"cbus formation apply dd --mode resume --only documenter", // a REAL alias, and a resumable one
+		"cbus formation apply dd --wait 90s",
+		"--dry-run",
+		"RIGHT NOW", // liveness comes from the dry-run, not from this composed-once snapshot
+		"cbus formation save dd dd",
+		"recreate it fresh",
+		"skip it",
+		"confirm the plan with the operator",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("decision brief missing %q:\n%s", want, prompt)
+		}
+	}
+	// the --only example must not offer a peer that cannot be resumed
+	for _, ln := range strings.Split(prompt, "\n") {
+		if strings.Contains(ln, "--only") && strings.Contains(ln, "reviewer") {
+			t.Errorf("the resume example names a peer whose transcript is gone: %s", ln)
+		}
+	}
+}
+
+// TestResumeAnchorArgvShapeUnchanged pins M2's diff surface: the brief changed the
+// PROMPT and nothing about how the anchor is launched. A gate, flag or ordering move
+// reds here instead of asking a reader to trust the diff.
+func TestResumeAnchorArgvShapeUnchanged(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	fk := &recForker{}
+	if _, err := resumeAnchorWorld(fleetFixture(), "", fk, fleetWorld()); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	argv := fk.specs[0].Argv
+	want := []string{"ccs", "work", "--resume", "sid-anchor", "--name", "orchestrator"}
+	if len(argv) != len(want)+1 {
+		t.Fatalf("argv = %v, want the recorded prefix plus exactly one prompt", argv)
+	}
+	for i, w := range want {
+		if argv[i] != w {
+			t.Errorf("argv[%d] = %q want %q", i, argv[i], w)
+		}
+	}
+	if !strings.Contains(argv[len(argv)-1], "you are the anchor") {
+		t.Errorf("the prompt must be the last argument: %v", argv)
+	}
+}
