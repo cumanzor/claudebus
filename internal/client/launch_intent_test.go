@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -261,6 +262,63 @@ func TestResumeClaimIsExactlyOnceUnderRace(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReclaimLockHelper is the subprocess half of TestReclaimLockDiesWithItsHolder.
+// It takes the reclaim lock, announces that it holds it, and waits to be killed.
+func TestReclaimLockHelper(t *testing.T) {
+	lock := os.Getenv("CBUS_TEST_RECLAIM_LOCK")
+	if lock == "" {
+		t.Skip("subprocess half; driven by TestReclaimLockDiesWithItsHolder")
+	}
+	if _, ok := acquireReclaimLock(lock); !ok {
+		t.Fatal("helper could not take a free lock")
+	}
+	// deliberately NOT released: the point is what the kernel does when we are killed
+	// still holding it
+	if err := os.WriteFile(lock+".held", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Second) // the parent kills us long before this
+}
+
+// TestReclaimLockDiesWithItsHolder is why the ruling spent flock here. A hand-rolled
+// token needs a heal path for a holder that died mid-section, and every heal path is
+// another remove-then-link — the same race one level down, which is the class this
+// milestone hit three times. The kernel drops a flock when the holder's fd closes,
+// process death included, so there is nothing left to heal.
+//
+// The kill is scoped to the child this test started, never a pattern.
+func TestReclaimLockDiesWithItsHolder(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, ".launch-intent-orchestrator.json")
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestReclaimLockHelper", "-test.timeout=90s")
+	cmd.Env = append(os.Environ(), "CBUS_TEST_RECLAIM_LOCK="+lock)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill() }() // harness-tracked pid only
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !fileExists(lock + ".held") {
+		if time.Now().After(deadline) {
+			t.Fatal("helper never reported holding the lock")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, ok := acquireReclaimLock(lock); ok {
+		t.Fatal("the lock was available while another process held it — it excludes nothing")
+	}
+	if err := cmd.Process.Kill(); err != nil { // SIGKILL: no defers, no cleanup, no chance to release
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	release, ok := acquireReclaimLock(lock)
+	if !ok {
+		t.Fatal("the lock survived its holder's death — that is the leak flock was chosen to delete")
+	}
+	release()
 }
 
 func TestResumeRefusesAFreshIntent(t *testing.T) {
