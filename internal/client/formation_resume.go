@@ -141,6 +141,7 @@ type anchorRow struct {
 	Machine    string
 	Transcript string // present | GONE | unchecked (recorded on X) | none recorded
 	IsAnchor   bool
+	Here       bool // recorded on this host, blank machine included (apply's house semantic)
 }
 
 // anchorRoster resolves the envelope's peers against the ALREADY-GATHERED world.
@@ -156,6 +157,7 @@ func anchorRoster(f *Formation, anchorAlias string, world *PlanWorld) []anchorRo
 		row := anchorRow{
 			Alias: p.Alias, Mode: p.Mode, Origin: p.Origin,
 			Machine: p.Machine, IsAnchor: p.Alias == anchorAlias,
+			Here: p.Machine == "" || p.Machine == world.Host,
 		}
 		switch {
 		case p.SessionID == "" || p.SessionID == "reserved":
@@ -238,11 +240,15 @@ func anchorKickoff(f *Formation, p *FormationPeer, brief string, rows []anchorRo
 
 // applyExamples spells the flags with the formation's OWN aliases. A placeholder
 // example is a second thing to translate before acting; a real alias is a command
-// the anchor can run as written.
+// the anchor can run as written — which is a promise about what the command DOES,
+// not merely that it exits zero. So the pick is present-transcript AND on this host:
+// a peer apply's machine gate will skip is a command that runs and under-delivers
+// exactly where the brief said it would act. The roster row still reports that peer's
+// transcript honestly; the two claims are different claims.
 func applyExamples(name string, rows []anchorRow) string {
 	var pick []string
 	for _, r := range rows {
-		if !r.IsAnchor && r.Transcript == "present" {
+		if !r.IsAnchor && r.Transcript == "present" && r.Here {
 			pick = append(pick, r.Alias)
 		}
 	}

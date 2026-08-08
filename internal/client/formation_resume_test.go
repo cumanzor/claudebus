@@ -349,7 +349,9 @@ func TestAnchorKickoffExampleContract(t *testing.T) {
 		Peers: []FormationPeer{
 			{Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined,
 				Mode: ModeTemplate, Machine: "host-a", Profile: "work", Cwd: "/nonexistent/recorded/cwd"},
-			{Alias: "documenter", SessionID: "sid-w1", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
+			// blank machine means HERE, the same house semantic the resume gate uses:
+			// documenter must survive the same-host filter on that clause alone
+			{Alias: "documenter", SessionID: "sid-w1", Origin: OriginFresh, Mode: ModeResume, Machine: "", Profile: "work"},
 			{Alias: "reviewer", SessionID: "sid-w2", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
 			{Alias: "tester", SessionID: "sid-w3", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
 		},
@@ -397,12 +399,15 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 	t.Setenv("HOME", home)
 	visible := "aaaaaaaa-1111-2222-3333-444444444444"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", visible)
+	anchorSid := "bbbbbbbb-1111-2222-3333-444444444444"
+	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", anchorSid)
 
 	elsewhere := ShortHostname() + "-elsewhere"
 	f := &Formation{
 		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
 		Peers: []FormationPeer{
-			{Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined, Mode: ModeTemplate, Machine: ShortHostname()},
+			{Alias: "orchestrator", SessionID: anchorSid, Origin: OriginJoined, Mode: ModeTemplate,
+				Machine: ShortHostname(), Cwd: "/nonexistent/recorded/cwd"},
 			{Alias: "seen", SessionID: visible, Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
 			{Alias: "unseen", SessionID: "ffffffff-0000-0000-0000-000000000000", Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
 		},
@@ -437,5 +442,18 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 			t.Errorf("%s: the brief says %q where show reads as %q — the two surfaces disagree about one peer",
 				tc.alias, rows[tc.alias], tc.wantRow)
 		}
+	}
+
+	// The same peer, two different claims, both true: the ROSTER reports its transcript
+	// honestly (present, it really is readable here), and the EXAMPLE leaves it out,
+	// because apply's machine gate would skip it and a named alias promises apply will
+	// act on it. This fixture is the only one where the two can disagree.
+	t.Setenv("CBUS_DIR", t.TempDir())
+	prompt := anchorPrompt(t, f, world)
+	if !strings.Contains(rosterLine(t, prompt, "seen"), "transcript=present") {
+		t.Errorf("the roster stopped reporting a readable transcript as present:\n%s", prompt)
+	}
+	if ln := onlyLine(prompt); ln != "" {
+		t.Errorf("the resume example names a peer recorded on another machine, which apply would skip: %s", ln)
 	}
 }
