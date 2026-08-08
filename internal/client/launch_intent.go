@@ -139,11 +139,21 @@ func reclaimCorpse(path, tmp string) bool {
 		return false // another reclaimer holds it; our caller refuses against whatever it leaves
 	}
 	defer release()
-	// Sole reclaimer, and every claimer is still blocked by the corpse sitting in the
-	// path, so re-reading here is safe: nothing can have claimed it, only cleared it.
-	if in, ok := readIntent(path); ok && ageOf(in) < launchIntentTTL {
-		return false // it went fresh under us (its child joined, someone claimed): refuse against it
+	in, present, parsed := peekIntent(path)
+	if !present {
+		// The corpse is GONE — its child finally joined and cleared it, or a racer
+		// already replaced it. This lock excludes RECLAIMERS from each other; it does
+		// not stop a claimer, and a claimer needs only an absent path to link into.
+		// Renaming here would land on top of whatever legitimately won that hole, so
+		// both would fork and the marker would name the wrong one. Falling back to the
+		// caller's plain link claim is first-writer-wins and cannot overwrite anybody.
+		return false
 	}
+	if parsed && ageOf(in) < launchIntentTTL {
+		return false // it went fresh under us: refuse against it
+	}
+	// A corpse is still sitting in the path, so this rename replaces it and nothing
+	// else — the path is occupied at every instant, which is the invariant from F1.
 	return os.Rename(tmp, path) == nil
 }
 
@@ -229,21 +239,32 @@ func FreshLaunchIntent(ch, alias string) (LaunchIntent, time.Duration, bool) {
 	return in, age, true
 }
 
-// readIntent parses a marker at an exact path. Unreadable and unparseable are the
-// same answer — no intent — and the reclaim path treats both alike.
-func readIntent(path string) (LaunchIntent, bool) {
+// peekIntent tells apart the three states the reclaim path has to distinguish: no
+// file at all, a file that will not parse, and a readable intent.
+//
+// readIntent collapses the first two into "no intent", which is the right answer to a
+// freshness question and the WRONG one for a reclaim. Absent means the path is a hole
+// a claimer can link into; present-but-garbage means a corpse is still sitting there
+// to be overwritten. Treating them alike is how a reclaim lands on a valid claim.
+func peekIntent(path string) (in LaunchIntent, present, parsed bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return LaunchIntent{}, false
+		return LaunchIntent{}, false, false
 	}
-	var in LaunchIntent
 	if json.Unmarshal(b, &in) != nil {
-		return LaunchIntent{}, false
+		return LaunchIntent{}, true, false
 	}
 	if _, err := time.Parse(time.RFC3339, in.TS); err != nil {
-		return LaunchIntent{}, false // no usable age is the same as no intent
+		return LaunchIntent{}, true, false // no usable age is no usable intent
 	}
-	return in, true
+	return in, true, true
+}
+
+// readIntent parses a marker at an exact path. Unreadable and unparseable are the
+// same answer — no intent — which is what every freshness question wants.
+func readIntent(path string) (LaunchIntent, bool) {
+	in, _, parsed := peekIntent(path)
+	return in, parsed
 }
 
 // ageOf is how long ago a marker was written. A marker readIntent accepted always has
@@ -272,15 +293,32 @@ func ClearLaunchIntentFor(ch, alias, sid string) {
 	if checkStoreName("channel", ch) != nil || checkStoreName("alias", alias) != nil {
 		return
 	}
-	b, err := os.ReadFile(launchIntentPath(ch, alias))
-	if err != nil {
+	path := launchIntentPath(ch, alias)
+	// Nothing to clear, and no lock file created for the overwhelming majority of joins
+	// that never had a marker. A marker appearing after this check belongs to a LATER
+	// launch than the one this join answers, so declining to clear it is also correct.
+	if !fileExists(path) {
 		return
 	}
-	var in LaunchIntent
-	if json.Unmarshal(b, &in) != nil || in.SessionID != sid {
+	// The removal takes the reclaim lock, because removing is a mutation of the same
+	// path a reclaimer is mid-way through replacing. Without it: a clear pulls the
+	// corpse out from under a lock-holding reclaimer, a claimer links into the hole,
+	// and the reclaimer's rename lands on top of that valid claim — two launches, and
+	// a marker naming the wrong one.
+	//
+	// SKIP, never wait: a clear that loses the lock leaves the marker to the TTL, which
+	// costs at most an over-refusal. It cannot cost a missed launch, because by the time
+	// this session is joining, the live-armed gate refuses a second resume before the
+	// marker is ever consulted.
+	release, ok := acquireReclaimLock(path)
+	if !ok {
 		return
 	}
-	_ = os.Remove(launchIntentPath(ch, alias))
+	defer release()
+	if in, ok := readIntent(path); !ok || in.SessionID != sid {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // LaunchIntentExpiry is how long a fresh intent has left, for a message that has to
