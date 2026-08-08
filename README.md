@@ -1,20 +1,21 @@
 # claudebus
 
 A tiny **file-based message bus that lets two (or more) live Claude Code sessions
-talk to each other** — for example a parent session and a `/bus-branch` fork in
-another window, so the fork can report results back live instead of writing a
-handoff doc you carry over by hand.
+talk to each other** — an orchestrator and the worker sessions it spawned, two
+windows working the same repo, or a session on your laptop and one on a home
+server — so results flow between them live instead of through handoff files you
+carry over by hand.
 
 > In a hurry? See **[CHEATSHEET.md](CHEATSHEET.md)**.
 
 It's built entirely from **supported primitives** — the `Monitor` tool plus plain
 files — so it doesn't depend on any undocumented internals and works across
 terminal windows, tabs, tmux, and CCS profiles. The client is a single Go binary
-(`cmd/cbus`); the retired bash implementation is kept in `bin/` as the rollback
-artifact until P3.
+(`cmd/cbus`); the original bash implementation it replaced lives only in git
+history now.
 
-Peers are organized into **named channels**. A parent/fork pair working on a repo
-gets its own channel (named after the repo by default), so aliases stay short and
+Peers are organized into **named channels**. Sessions working the same effort
+get their own channel (named after the repo by default), so aliases stay short and
 unrelated work doesn't share an address space. The channel name `global` is
 reserved by convention as the machine-wide bus — join it when you want a master
 orchestrator that anything can reach.
@@ -136,10 +137,10 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 
 > **Legacy installers — retired.** `install.sh` (bash-client restore) and
 > `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
-> releases and `cbus selfupdate` shipped; recover them from git history if ever needed.
-> The retired bash client itself stays at `bin/cbus` until P3 homogenization deletes it
-> (see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)); rolling back
-> to it is now a manual copy over `~/.local/bin/cbus`.
+> releases and `cbus selfupdate` shipped, and the bash client itself was deleted at
+> P3 homogenization (see [compat-deletion-plan](docs/architecture/compat-deletion-plan.md)).
+> All of it is recoverable from git history if ever needed; the supported path is
+> releases plus `cbus selfupdate`.
 
 > **Forking:** `cbus branch` forks natively (iTerm2 window/tab via osascript, tmux
 > new-window, or — for `pane` — a split of the caller's own surface: `tmux

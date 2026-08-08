@@ -99,7 +99,7 @@ cbus leave dev@server                 # drop THIS session's identity marker
 One-time prereqs: relay running on the server (`sudo systemctl status cbus-relay`);
 on the **Mac**, `cbus auth set server` seeded (creds from a password manager → Keychain); on the
 **Server**, `cbus` installed + loopback bearer seeded
-(`cat /home/relay/cbus-relay/token | cbus auth set server --token -`).
+(`cat <relay-dest>/token | cbus auth set <host> --token -`).
 
 Pick a channel + two explicit aliases (e.g. `bridge`, `laptop`, `server`):
 
