@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"claudebus/internal/core"
 )
@@ -68,6 +69,23 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	}
 	if !world.HasTranscript(p.Profile, p.SessionID) {
 		return "", fmt.Errorf("no transcript found for the anchor's session %s — it has aged out or lives under another profile; start a fresh session, join %s, and run apply from it", p.SessionID, f.Channel)
+	}
+	// The last gate, and the one the live-armed check above cannot cover: between the
+	// fork below and the child's re-join the anchor holds no meta and arms no
+	// listener, so liveSids reads its transcript as free. A second resume in that gap
+	// double-launches one conversation. Written after every other refusal on purpose —
+	// a fork-born anchor must hear about origin=fork, not about an intent — and before
+	// the fork, so the window it guards is never open.
+	if in, age, ok := FreshLaunchIntent(f.Channel, p.Alias); ok {
+		return "", fmt.Errorf("a resume of %q was launched %s ago (pid %d) and has not joined yet — "+
+			"it is most likely still booting: find its window and use it. If it never came up, "+
+			"this refusal expires in %s", p.Alias, age.Round(time.Second), in.Pid,
+			LaunchIntentExpiry(age).Round(time.Second))
+	}
+	if err := WriteLaunchIntent(f.Channel, p.Alias, p.SessionID); err != nil {
+		// fail closed: without the marker the next resume cannot see this one, and a
+		// launch nobody can see is the whole failure this verb is being guarded against
+		return "", fmt.Errorf("cannot record the launch intent for %q: %w", p.Alias, err)
 	}
 
 	prompt := anchorKickoff(f, p, brief)
