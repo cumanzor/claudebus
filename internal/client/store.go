@@ -217,6 +217,11 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
 	}
+	// A launch intent for this name is answered the moment the SAME session arrives:
+	// the child is here, the window it guarded is shut, and the launcher's own opinion
+	// never enters into it. A different session joining this name leaves the marker
+	// alone — it is not the launch that was promised.
+	ClearLaunchIntentFor(ch, alias, m.SessionID)
 	// ledger AFTER the mutation (see RecordEvent): a join recorded before writeMeta
 	// would survive a failed join as evidence of one that never happened
 	kind := LedgerJoin
