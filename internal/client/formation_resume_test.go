@@ -325,3 +325,117 @@ func TestResumeAnchorArgvShapeUnchanged(t *testing.T) {
 		t.Errorf("the prompt must be the last argument: %v", argv)
 	}
 }
+
+func onlyLine(prompt string) string {
+	for _, ln := range strings.Split(prompt, "\n") {
+		if strings.Contains(ln, "--only") {
+			return ln
+		}
+	}
+	return ""
+}
+
+// TestAnchorKickoffExampleContract covers both clauses of the example rule: it caps
+// at two aliases (a fleet dump stops being a command), and it disappears entirely
+// when nothing is resumable — an example that fails when pasted is a false fact in
+// imperative form. Neither clause is visible in a fixture with exactly one resumable
+// peer, which is why both fixtures here are built to have three and none.
+func TestAnchorKickoffExampleContract(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+
+	// three resumable peers, all on this host, so the cap is the only variable
+	three := &Formation{
+		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{
+			{Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined,
+				Mode: ModeTemplate, Machine: "host-a", Profile: "work", Cwd: "/nonexistent/recorded/cwd"},
+			{Alias: "documenter", SessionID: "sid-w1", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
+			{Alias: "reviewer", SessionID: "sid-w2", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
+			{Alias: "tester", SessionID: "sid-w3", Origin: OriginFresh, Mode: ModeResume, Machine: "host-a", Profile: "work"},
+		},
+	}
+	allWarm := &PlanWorld{Host: "host-a", LiveSids: map[string]string{},
+		HasTranscript: func(string, string) bool { return true }}
+
+	only := onlyLine(anchorPrompt(t, three, allWarm))
+	if only == "" {
+		t.Fatal("three resumable peers and no resume example")
+	}
+	if !strings.Contains(only, "--only documenter,reviewer") {
+		t.Errorf("the example must name the first two resumable aliases: %s", only)
+	}
+	if strings.Contains(only, "tester") {
+		t.Errorf("the example is uncapped, it lists the whole fleet: %s", only)
+	}
+
+	// a fresh store: the launch-intent claim from the compose above would refuse the
+	// second resume of the same alias, which is the guard working, not a fixture
+	t.Setenv("CBUS_DIR", t.TempDir())
+	// nothing resumable but the anchor itself, which the gates already proved
+	nothing := fleetFixture()
+	anchorOnly := &PlanWorld{Host: "host-a", LiveSids: map[string]string{},
+		HasTranscript: func(_, sid string) bool { return sid == "sid-anchor" }}
+	prompt := anchorPrompt(t, nothing, anchorOnly)
+	if ln := onlyLine(prompt); ln != "" {
+		t.Errorf("no peer can be resumed, yet the brief offers a resume command: %s", ln)
+	}
+	if !strings.Contains(prompt, "cbus formation apply dd --wait 90s") {
+		t.Errorf("the plain apply example must survive an unresumable fleet:\n%s", prompt)
+	}
+}
+
+// TestAnchorRosterMirrorsSidState pins the mirror that is otherwise only prose: the
+// brief and show must not disagree about one peer. The discriminating input is a peer
+// recorded on ANOTHER machine whose transcript is visible HERE — transcript-first
+// says present, machine-first says unchecked, and the two surfaces cannot both be
+// right. The world uses the REAL closure GatherPlanWorld builds; a stub here would
+// compare the stub to SidState rather than the two surfaces to each other.
+func TestAnchorRosterMirrorsSidState(t *testing.T) {
+	home := t.TempDir()
+	cfg := filepath.Join(home, ".ccs", "instances", "personal")
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("HOME", home)
+	visible := "aaaaaaaa-1111-2222-3333-444444444444"
+	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", visible)
+
+	elsewhere := ShortHostname() + "-elsewhere"
+	f := &Formation{
+		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
+		Peers: []FormationPeer{
+			{Alias: "orchestrator", SessionID: "sid-anchor", Origin: OriginJoined, Mode: ModeTemplate, Machine: ShortHostname()},
+			{Alias: "seen", SessionID: visible, Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
+			{Alias: "unseen", SessionID: "ffffffff-0000-0000-0000-000000000000", Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
+		},
+	}
+	world := &PlanWorld{
+		Host: ShortHostname(), LiveSids: map[string]string{},
+		HasTranscript: func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
+	}
+	rows := map[string]string{}
+	for _, r := range anchorRoster(f, "orchestrator", world) {
+		rows[r.Alias] = r.Transcript
+	}
+	for _, tc := range []struct {
+		alias     string
+		wantState SidState
+		wantRow   string
+	}{
+		{"seen", SidPresent, "present"},
+		{"unseen", SidUnchecked, "unchecked (recorded on " + elsewhere + ")"},
+	} {
+		var p *FormationPeer
+		for i := range f.Peers {
+			if f.Peers[i].Alias == tc.alias {
+				p = &f.Peers[i]
+			}
+		}
+		state, detail := p.SidState()
+		if state != tc.wantState {
+			t.Errorf("%s: show reads %v (%s), the mirror assumes %v", tc.alias, state, detail, tc.wantState)
+		}
+		if rows[tc.alias] != tc.wantRow {
+			t.Errorf("%s: the brief says %q where show reads as %q — the two surfaces disagree about one peer",
+				tc.alias, rows[tc.alias], tc.wantRow)
+		}
+	}
+}
