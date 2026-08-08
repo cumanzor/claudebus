@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -24,7 +25,7 @@ func plantIntent(t *testing.T, ch, alias, sid string, age time.Duration) string 
 		t.Fatal(err)
 	}
 	b, err := json.MarshalIndent(LaunchIntent{
-		Channel: ch, Alias: alias, SessionID: sid, Pid: 4711, ProcStart: "planted",
+		Channel: ch, Alias: alias, SessionID: sid, Pid: impossiblePid, ProcStart: "planted",
 		TS: time.Now().UTC().Add(-age).Format("2006-01-02T15:04:05Z"),
 	}, "", "  ")
 	if err != nil {
@@ -36,6 +37,17 @@ func plantIntent(t *testing.T, ch, alias, sid string, age time.Duration) string 
 	return path
 }
 
+// The fixture constants are LITERALS, not arithmetic on launchIntentTTL. An age
+// written as launchIntentTTL+1s moves with the constant it is supposed to be
+// guarding, so a TTL that drifted to an hour would pass every one of these tests.
+// These two pin the ruled 2-3 minute window from the outside: 170s must still
+// refuse, 190s must not.
+const (
+	ttlInside     = 170 * time.Second
+	ttlOutside    = 190 * time.Second
+	impossiblePid = 2147483647 // above every platform's pid_max, so no host can host it
+)
+
 func intentExists(ch, alias string) bool {
 	_, err := os.Stat(launchIntentPath(ch, alias))
 	return err == nil
@@ -43,8 +55,8 @@ func intentExists(ch, alias string) bool {
 
 func TestLaunchIntentRoundTrip(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
-	if err := WriteLaunchIntent("dd", "orchestrator", "sid-anchor"); err != nil {
-		t.Fatalf("write: %v", err)
+	if _, _, claimed, err := ClaimLaunchIntent("dd", "orchestrator", "sid-anchor"); err != nil || !claimed {
+		t.Fatalf("claim: claimed=%v err=%v", claimed, err)
 	}
 	in, age, ok := FreshLaunchIntent("dd", "orchestrator")
 	if !ok {
@@ -71,11 +83,11 @@ func TestLaunchIntentRoundTrip(t *testing.T) {
 
 func TestLaunchIntentExpires(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
-	plantIntent(t, "dd", "orchestrator", "sid-anchor", launchIntentTTL-10*time.Second)
+	plantIntent(t, "dd", "orchestrator", "sid-anchor", ttlInside)
 	if _, age, ok := FreshLaunchIntent("dd", "orchestrator"); !ok {
-		t.Fatalf("an intent inside the TTL must still refuse (age %s, ttl %s)", age, launchIntentTTL)
+		t.Fatalf("a %s-old intent must still refuse (age %s, ttl %s)", ttlInside, age, launchIntentTTL)
 	}
-	plantIntent(t, "dd", "orchestrator", "sid-anchor", launchIntentTTL+time.Second)
+	plantIntent(t, "dd", "orchestrator", "sid-anchor", ttlOutside)
 	if in, _, ok := FreshLaunchIntent("dd", "orchestrator"); ok {
 		t.Errorf("an expired intent must not refuse: %+v", in)
 	}
@@ -116,8 +128,8 @@ func TestLaunchIntentIsInvisibleToTheChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteLaunchIntent("dd", "coder", "sid-coder"); err != nil {
-		t.Fatal(err)
+	if _, _, claimed, err := ClaimLaunchIntent("dd", "coder", "sid-coder"); err != nil || !claimed {
+		t.Fatalf("claim: claimed=%v err=%v", claimed, err)
 	}
 	after, err := ChannelRoster("dd")
 	if err != nil {
@@ -176,6 +188,81 @@ func TestResumeWritesIntentBeforeForking(t *testing.T) {
 	}
 }
 
+// lockedForker counts forks from many goroutines at once. recForker appends to a
+// slice unguarded, so the race probe needs its own sink or -race trips on the
+// instrument instead of the subject.
+type lockedForker struct {
+	mu    sync.Mutex
+	forks int
+}
+
+func (f *lockedForker) Fork(ForkSpec) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forks++
+	return "", nil
+}
+
+// TestResumeClaimIsExactlyOnceUnderRace is F1's regression, and it is DETERMINISTIC:
+// with a first-writer-wins link claim the assertion is exactly-one-forked, not a
+// probability. The check-then-write version it replaced (read absent, temp+rename,
+// fork) failed this by forking 2-4 of 16, because rename is last-writer-wins and
+// every racer's write "succeeded".
+//
+// Both entry states are run. The empty one is the plain race. The expired one is the
+// reclaim path, where racers must additionally agree on who gets to clear the corpse —
+// a reclaim that removed the path outright would let the second remover erase the
+// first's winning claim and both would fork.
+func TestResumeClaimIsExactlyOnceUnderRace(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T)
+	}{
+		{"no marker", func(t *testing.T) {}},
+		{"expired marker to reclaim", func(t *testing.T) {
+			plantIntent(t, "dd", "orchestrator", "sid-anchor", ttlOutside)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CBUS_DIR", t.TempDir())
+			tc.setup(t)
+
+			const racers = 16
+			fk := &lockedForker{}
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			errs := make([]error, racers)
+			for i := 0; i < racers; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					<-start // release them together, so the claims genuinely overlap
+					_, errs[i] = resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld())
+				}(i)
+			}
+			close(start)
+			wg.Wait()
+
+			won := 0
+			for _, err := range errs {
+				if err == nil {
+					won++
+				}
+			}
+			if won != 1 || fk.forks != 1 {
+				t.Fatalf("%d resumes claimed and %d forked, want exactly 1 of each — "+
+					"more than one process on one transcript is the failure this guard exists for",
+					won, fk.forks)
+			}
+			// and the survivor is a real claim the next resume will refuse against
+			in, _, ok := FreshLaunchIntent("dd", "orchestrator")
+			if !ok || in.SessionID != "sid-anchor" {
+				t.Errorf("the winner left no usable marker: %+v ok=%v", in, ok)
+			}
+		})
+	}
+}
+
 func TestResumeRefusesAFreshIntent(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	plantIntent(t, "dd", "orchestrator", "sid-anchor", 12*time.Second)
@@ -184,7 +271,7 @@ func TestResumeRefusesAFreshIntent(t *testing.T) {
 	if err == nil {
 		t.Fatal("a second resume inside the launch window must refuse")
 	}
-	for _, want := range []string{"orchestrator", "4711", "expires in"} {
+	for _, want := range []string{"orchestrator", strconv.Itoa(impossiblePid), "expires in"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal must name %q so the operator can act on it: %v", want, err)
 		}
@@ -211,7 +298,7 @@ func TestResumeRefusesAFreshIntent(t *testing.T) {
 
 func TestResumeProceedsPastAnExpiredIntent(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
-	plantIntent(t, "dd", "orchestrator", "sid-anchor", launchIntentTTL+time.Minute)
+	plantIntent(t, "dd", "orchestrator", "sid-anchor", ttlOutside)
 	fk := &recForker{}
 	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
 		t.Fatalf("an expired intent must not block a legitimate resume: %v", err)

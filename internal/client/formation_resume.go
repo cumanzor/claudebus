@@ -76,16 +76,21 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	// double-launches one conversation. Written after every other refusal on purpose —
 	// a fork-born anchor must hear about origin=fork, not about an intent — and before
 	// the fork, so the window it guards is never open.
-	if in, age, ok := FreshLaunchIntent(f.Channel, p.Alias); ok {
+	in, age, claimed, err := ClaimLaunchIntent(f.Channel, p.Alias, p.SessionID)
+	if err != nil {
+		// fail closed: without the marker the next resume cannot see this one, and a
+		// launch nobody can see is the whole failure this verb is being guarded against
+		return "", fmt.Errorf("cannot record the launch intent for %q: %w", p.Alias, err)
+	}
+	if !claimed {
+		if in.TS == "" {
+			return "", fmt.Errorf("another resume of %q claimed the launch a moment ago — "+
+				"only one may run at a time; find its window, or re-run once it settles", p.Alias)
+		}
 		return "", fmt.Errorf("a resume of %q was launched %s ago (pid %d) and has not joined yet — "+
 			"it is most likely still booting: find its window and use it. If it never came up, "+
 			"this refusal expires in %s", p.Alias, age.Round(time.Second), in.Pid,
 			LaunchIntentExpiry(age).Round(time.Second))
-	}
-	if err := WriteLaunchIntent(f.Channel, p.Alias, p.SessionID); err != nil {
-		// fail closed: without the marker the next resume cannot see this one, and a
-		// launch nobody can see is the whole failure this verb is being guarded against
-		return "", fmt.Errorf("cannot record the launch intent for %q: %w", p.Alias, err)
 	}
 
 	prompt := anchorKickoff(f, p, brief)
