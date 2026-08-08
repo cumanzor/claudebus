@@ -544,3 +544,32 @@ func TestFormationResumeVerbErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestFormationSaveWarnsOnAnchorlessRefresh: the same shape as the RunConflict
+// warning — a SaveReport field no user-facing path renders reports to nobody. The
+// refresh must still succeed (refusing would strand legacy envelopes), so the print
+// is the only thing standing between a defective envelope and a clean-looking save.
+func TestFormationSaveWarnsOnAnchorlessRefresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody") // not a peer: nothing to anchor to
+	plantMeta(t, dir, "roles", "coder", "sid-coder")
+	// what an older binary left behind: loadable, anchorless
+	saveFixture(t, dir, "roles", `{"schema":"cbus-formation/v1","name":"roles","channel":"roles","anchorAlias":"","peers":[]}`)
+
+	var rc int
+	out := captureStdout(t, func() { rc = runFormation([]string{"save", "roles", "roles"}) })
+	if rc != 0 {
+		t.Fatalf("an anchorless refresh must still save, rc=%d:\n%s", rc, out)
+	}
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, "no anchorAlias") {
+		t.Errorf("the anchorless refresh saved without warning at the terminal:\n%s", out)
+	}
+	// and the same door refuses the MINT, so the warning is not standing in for a gate
+	dir2 := t.TempDir()
+	t.Setenv("CBUS_DIR", dir2)
+	plantMeta(t, dir2, "roles", "coder", "sid-coder")
+	if rc := runFormation([]string{"save", "roles", "roles"}); rc == 0 {
+		t.Error("the save door minted an anchorless envelope")
+	}
+}
