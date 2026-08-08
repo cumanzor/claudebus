@@ -99,7 +99,7 @@ cbus leave dev@nuc                 # drop THIS session's identity marker
 One-time prereqs: relay running on the NUC (`sudo systemctl status cbus-relay`);
 on the **Mac**, `cbus auth set nuc` seeded (creds from 1Password → Keychain); on the
 **NUC**, `cbus` installed + loopback bearer seeded
-(`cat /home/relay/cbus-relay/token | cbus auth set nuc --token -`).
+(`cat <relay-dest>/token | cbus auth set <host> --token -`).
 
 Pick a channel + two explicit aliases (e.g. `bridge`, `mbp`, `nuc`):
 
