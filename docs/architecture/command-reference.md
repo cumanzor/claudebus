@@ -1472,7 +1472,10 @@ pinned at a commit, e.g. `roles/coder.md@b3a806e`), `role` (freeform fallback),
 `sessionId`, `onStale` (`template`/`skip`/`fail`), `profile`, `cwd`, `target`,
 `split` (pane layout: `""`/`auto`/`right`/`down`, hand-maintained like
 `rolefile`/`role`/`profile` — chain-split anchoring below, under `apply`),
-`machine`, `addresses`. Unknown keys round-trip verbatim (`Extra`).
+`machine`, `addresses`, `formationRunId` (per peer: the run claim captured at
+save; top-level `formationRunId`: the roster's **unique** claim, blank when
+none or when peers claim different runs — a split is surfaced with a WARNING,
+never silently resolved). Unknown keys round-trip verbatim (`Extra`).
 
 ### `cbus formation save <name> [channel]`
 
@@ -1480,12 +1483,32 @@ Snapshots the channel's current peers into the runtime store. Channel defaults t
 this session's own registration (`not joined to a channel in this session — pass
 one` if none; `joined to <N> channels (<list>) — pass one` if several).
 
-- **The store records exactly four facts per peer**: `sessionId`, `cwd`,
-  `machine`, and the birth-record `origin`/`model` **when the launcher recorded
-  them** (§9 / protocol.md birth records). It fills a blank origin/model **once**
-  and never overwrites a hand-edited field; `rolefile`/`role`, `profile`, and
-  `split` are yours to fill in — `save` never writes `split` at all, even on a
-  blank one. A corrupted birth-record is skipped with a note, not fatal.
+- **The store records the session facts per peer**: `sessionId`, `cwd`,
+  `machine`, the `profile` the session stamped about itself at join (refreshes
+  like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
+  skipped with a note), and the birth-record `origin`/`model` **when the
+  launcher recorded them** (§9 / protocol.md birth records). It fills a blank
+  origin/model **once** and never overwrites a hand-edited field;
+  `rolefile`/`role` and `split` are yours to fill in — `save` never writes
+  `split` at all, even on a blank one. A corrupted birth-record is skipped with
+  a note, not fatal. (Fleet caveat until every binary carries the profile
+  field: an older binary's meta rewrite drops the stamp — hand fills in the
+  envelope survive regardless.)
+- **`--anchor key=value`** (repeatable) records a hand anchor in
+  `drift_anchors`. An explicit flag overwrites its own key (the preservation
+  rule protects hand edits from the *machine*; a flag is the hand acting);
+  `git_head` is machine-owned and refused up front (`--anchor git_head is
+  machine-owned (recorded from the repo at save time); pick another key`) so a
+  refused save writes nothing. Any external system may adopt a key and read
+  envelopes; the author links his tracker with `--anchor bdx=<id>`.
+- **Always-anchor invariant.** Minting a **new** envelope with no resolvable
+  anchor **refuses**, naming both remedies (join and re-save, or set
+  `anchorAlias` by hand) with nothing written — a wrong auto-picked anchor
+  would become the wrong restore seat later. A **refresh** of a legacy
+  anchorless file still saves and **warns** (`WARNING` at the save door;
+  refusing would strand the files the invariant exists to converge), and any
+  joined re-save heals via the anchor default. `show` renders the absence as a
+  named `DEFECT` row.
 - New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
   `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
   this with the peer's brief`).
@@ -1500,8 +1523,8 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 ```
 saved formation "myeffort" (<path>, new)
   channel "myeffort": +3 new (orchestrator, coder, reviewer)
-  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;
-  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates
+  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;
+  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded
   check it: cbus formation show myeffort
 ```
 
@@ -1528,6 +1551,15 @@ briefs peers to answer *it*, so it must be a peer first: `this session is not on
 - `--wait <dur>` sets the per-peer answer wait (default `90s`; `0` = launch and
   return; `--wait: want a duration like 90s or 2m (0 = do not wait), got "<x>"`).
 - `--brief TEXT` adds an effort brief to every kickoff.
+- `--mode resume|fork|template` overrides the **planned** mode of every peer
+  apply would launch, for this run only, in memory — the envelope is never
+  written, and the same `this run only; the file is untouched` note prints.
+  Present peers are untouched **by ordering** (the planner returns
+  present/skip before it ever reads mode), and every identity gate still fires
+  under the override, so a blanket `--mode resume` degrades or refuses per
+  peer. Composes with `--only` for per-peer steering: `--mode resume --only
+  documenter`, then a plain `apply`, is the two-step late-bound flow.
+  Validation names all three values.
 
 **`pane`-target peers chain-split rather than always splitting the applier.**
 `TerminalForker.Fork` returns the created surface's id (iTerm2 session UUID
@@ -1577,6 +1609,45 @@ surfaced as the per-peer detail — the load-bearing ones:
 convergence. Drift findings print `DRIFT <anchor>: saved <a>, now <b> — ... not
 blocking`.
 
+### `cbus formation resume <name> [--brief TEXT]`
+
+The **first hop after a reboot**: relaunches the formation's **anchor** session
+from a bare shell — right cwd, right CCS profile (`ccs <profile>` even when the
+invoking shell has no CCS env), `--resume` its own sid — so recovery never
+starts with a human copying session ids out of a JSON file. It launches exactly
+one session; the restored anchor reconciles the rest itself.
+
+**Refuses loudly instead of degrading** — the anchor is the seat the human is
+about to sit next to, and a silent blank replacement is the failure this verb
+exists to prevent. Gates, each naming its remedy: no `anchorAlias`; anchor not
+a peer; recorded on another machine (`run this there`); no/`reserved` sid;
+duplicate sid; `origin=fork` (the parent's transcript); empty origin; the
+anchor **live-armed right now** (`it does not need resuming; run apply from
+it` — checked *before* the transcript gate, because both can be true and
+already-running is decisive); transcript gone.
+
+**The launch-intent guard** closes the fork-to-rejoin window in which a second
+resume would double-launch one transcript: a channel-dir marker claimed
+first-writer-wins (`os.Link`), reclaimed by overwrite (never unlink — an
+absent path is the claim signal), reclaimers and clears serialized on a
+kernel-released lock. A concurrent resume refuses with the marker's age,
+forensic pid, and TTL expiry (`a resume of "<alias>" was launched <n>s ago
+(pid <p>) and has not joined yet ... this refusal expires in <t>`); the marker
+clears on the same-sid join or a 180s TTL, and a failed-looking fork
+deliberately leaves it (the window may have opened anyway).
+
+**The restored anchor's first turn is a decision brief**, not an instruction:
+the roster rendered per peer (alias, saved mode, origin, transcript
+`present`/`GONE`/`unchecked (recorded on <machine>)`/`none recorded`, machine;
+the anchor itself marked as the deciding seat), a per-peer
+resume/recreate/skip ruling requested, operator confirmation required, and the
+ruling expressed as `apply --mode`/`--only` examples that are **runnable as
+written** — only present-transcript, on-this-host peers are named (blank
+machine means here, mirroring apply's gate exactly), capped at two, the line
+absent when nobody is resumable. The roster carries **stable facts only**:
+liveness is volatile, so the brief hands it to the dry-run by name. It closes
+with the reconvene re-save instruction.
+
 ### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
 
 Prints **one** peer's first-turn prompt to stdout for you to paste by hand — the
@@ -1596,9 +1667,10 @@ skipped.
 ### `cbus formation show <name>`
 
 Inspects one formation without launching anything. Prints the resolved `source:`,
-the channel/host, `saved ... by ...`, any anchor, the `drift_anchors` (recorded
+the channel/host, `saved ... by ...`, the anchor (a **missing** anchor renders
+as a named `DEFECT` row — the always-anchor invariant, above), the `drift_anchors` (recorded
 at save; apply is what diffs them), the opaque `payload`, and each peer's
-`model`/`mode`/`origin`/`target`/`machine`, its role line (`rolefile`, a freeform
+`model`/`mode`/`origin`/`profile`/`target`/`machine`, its role line (`rolefile`, a freeform
 byte count, or a `TODO` when neither is usable), and its `sid` state — **`STALE`**
 when the recorded transcript is gone (`resume/fork cannot run, onStale=<x>
 applies`), `unchecked` when recorded on another machine, or `none recorded`. A

@@ -133,6 +133,9 @@ cbus formation apply myeffort --dry-run             # preview the relaunch plan
 cbus formation apply myeffort --only coder,reviewer # narrow it
 cbus formation apply dev-trio --channel myeffort    # committed 4-role starter, any channel
 cbus formation bootstrap myeffort coder             # one peer's first-turn prompt, paste by hand
+cbus formation save myeffort --anchor bdx=item-42    # record a hand anchor (any key; git_head is machine-owned)
+cbus formation resume myeffort                       # after a reboot: relaunch the ANCHOR, it reconciles the rest
+cbus formation apply myeffort --mode resume --only coder  # late-bound per-peer resume (this run only)
 cbus formation list                                 # every saved formation (yours + starters)
 cbus formation rm myeffort                          # delete (starters: use git rm instead)
 ```

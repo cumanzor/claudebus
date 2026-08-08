@@ -324,6 +324,34 @@ always does.
 myeffort --dry-run`, and so on — for driving formations from inside a Claude
 Code session rather than shelling out directly.
 
+### Coming back after a reboot
+
+`cbus formation resume <name>` is the whole recovery story: run it from any
+fresh shell on the machine that saved the formation. It relaunches just the
+anchor session (right directory, right profile, resuming its own transcript),
+and the restored anchor wakes to a decision brief: the saved roster, which
+peers are still resumable, and the `apply` commands to bring them back as
+themselves or fresh — its call, confirmed with you. A guard refuses
+double-resumes while the anchor is booting, and a formation that is already
+running refuses with directions to the live seat.
+
+### Anchors and integrations
+
+Envelopes carry a free-form `drift_anchors` map. cbus itself owns exactly one
+key (`git_head`, recorded at save and diffed at apply); every other key is
+yours, written by hand or with `formation save --anchor key=value`, and
+survives re-saves untouched. That makes anchors the integration seam: any
+external system can adopt a key and consume envelopes read-only. As the worked
+example, the author links each formation to his private issue tracker with
+`--anchor bdx=<id>`, and a personal dashboard renders formations by reading
+envelopes and relay spool metadata without ever writing them — which is why
+the on-disk formats are treated as compatibility surfaces.
+
+On that note: commit messages, changelogs, and the architecture docs reference
+that same private tracker by opaque ids (`cbus-xxx`, `bdx-xxx`). They are
+provenance markers, not links — there is nothing to resolve them against, and
+the history reads fine without them.
+
 ## Networked relay (NUC)
 
 `relay/` holds `cbus-relay`, a std-lib-only Go daemon that extends the bus across
