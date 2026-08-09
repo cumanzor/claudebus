@@ -153,8 +153,43 @@ func TestTranscriptRootsBareShellFindsProfiled(t *testing.T) {
 		t.Fatalf("bare-shell profiled lookup = %q,%v want %q", got, ok, want)
 	}
 	// the inverse stays true and documented: blank profile + bare shell cannot
-	// see instance roots (the pre-profile-envelope caveat, unchanged)
+	// see instance roots THROUGH THIS LOOKUP — the recovery for pre-profile
+	// envelopes is InstanceProfiles, a deliberate named sweep, never an implicit
+	// widening of every caller's search (cbus-kl4)
 	if _, ok := TranscriptPath("", sid); ok {
 		t.Fatal("blank profile from a bare shell must not find instance transcripts")
+	}
+}
+
+// TestInstanceProfilesSweep: the recovery input for envelopes that record no
+// profile — the transcript's own location names the profile. HOME-derived like
+// transcriptRoots, so a bare shell (no CLAUDE_CONFIG_DIR) can still sweep.
+func TestInstanceProfilesSweep(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	work := filepath.Join(home, ".ccs", "instances", "work")
+	personal := filepath.Join(home, ".ccs", "instances", "personal")
+	sidWork := "aaaaaaaa-1111-2222-3333-444444444444"
+	sidBoth := "bbbbbbbb-1111-2222-3333-444444444444"
+	writeTranscript(t, work, "-Users-dev-work-repo", sidWork)
+	writeTranscript(t, work, "-Users-dev-work-repo", sidBoth)
+	writeTranscript(t, personal, "-Users-dev-play-repo", sidBoth)
+
+	if got := InstanceProfiles(sidWork); len(got) != 1 || got[0] != "work" {
+		t.Errorf("single-owner sweep = %v, want [work]", got)
+	}
+	// ambiguity is reported sorted, never silently resolved by glob order
+	if got := InstanceProfiles(sidBoth); len(got) != 2 || got[0] != "personal" || got[1] != "work" {
+		t.Errorf("two-owner sweep = %v, want [personal work]", got)
+	}
+	if got := InstanceProfiles("ffffffff-0000-0000-0000-000000000000"); len(got) != 0 {
+		t.Errorf("absent sid swept to %v, want none", got)
+	}
+	// same untrusted-text screen as TranscriptPath: globs and traversals die
+	for _, bad := range []string{"*", "../../../etc", "a/b", ""} {
+		if got := InstanceProfiles(bad); len(got) != 0 {
+			t.Errorf("InstanceProfiles(%q) = %v, want refused", bad, got)
+		}
 	}
 }

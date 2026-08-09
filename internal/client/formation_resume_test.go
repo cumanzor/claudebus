@@ -32,7 +32,7 @@ func TestResumeAnchorLaunchShape(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	f := resumeFixture()
 	fk := &recForker{ids: []string{"surface-1"}}
-	created, err := resumeAnchorWorld(f, "finish the rollout", fk, resumeWorld())
+	created, _, err := resumeAnchorWorld(f, "finish the rollout", fk, resumeWorld())
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestResumeAnchorRestoreAdoptsOwnSurvivingClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	b, err := os.ReadFile(ledgerPath("dd"))
@@ -110,7 +110,7 @@ func TestResumeAnchorBlankMachineMeansHere(t *testing.T) {
 	f := resumeFixture()
 	f.Peers[0].Machine = ""
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
 		t.Fatalf("blank machine must mean here, got refusal: %v", err)
 	}
 	if len(fk.specs) != 1 {
@@ -124,7 +124,7 @@ func TestResumeAnchorBareProfileFallsBack(t *testing.T) {
 	f := resumeFixture()
 	f.Peers[0].Profile = ""
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(f, "", fk, resumeWorld()); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if fk.specs[0].Argv[0] != "claude" {
@@ -163,7 +163,7 @@ func TestResumeAnchorRefusals(t *testing.T) {
 		f, w := resumeFixture(), resumeWorld()
 		tc.mut(f, w)
 		fk := &recForker{}
-		_, err := resumeAnchorWorld(f, "", fk, w)
+		_, _, err := resumeAnchorWorld(f, "", fk, w)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want containing %q", tc.name, err, tc.want)
 		}
@@ -215,7 +215,7 @@ func rosterLine(t *testing.T, prompt, alias string) string {
 func anchorPrompt(t *testing.T, f *Formation, w *PlanWorld) string {
 	t.Helper()
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(f, "", fk, w); err != nil {
+	if _, _, err := resumeAnchorWorld(f, "", fk, w); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if len(fk.specs) != 1 {
@@ -308,7 +308,7 @@ func TestAnchorKickoffSpeaksInFlagsAndReconvenes(t *testing.T) {
 func TestResumeAnchorArgvShapeUnchanged(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(fleetFixture(), "", fk, fleetWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(fleetFixture(), "", fk, fleetWorld()); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	argv := fk.specs[0].Argv
@@ -455,5 +455,131 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 	}
 	if ln := onlyLine(prompt); ln != "" {
 		t.Errorf("the resume example names a peer recorded on another machine, which apply would skip: %s", ln)
+	}
+}
+
+// TestResumeAnchorInfersProfileFromSweep is the cbus-kl4 recovery: an envelope
+// from before profile capture records no profile, the default roots miss, and the
+// instance sweep names exactly one owner — the launch must adopt it for the argv
+// prefix AND the child env, report it, and never write it back to the envelope.
+// The shell here is a profiled one that is NOT the owner, so an implementation
+// that leans on the env instead of the sweep fails visibly rather than vacuously.
+func TestResumeAnchorInfersProfileFromSweep(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".ccs", "instances", "personal"))
+	f := resumeFixture()
+	f.Peers[0].Profile = ""
+	w := resumeWorld()
+	w.HasTranscript = func(profile, sid string) bool { return profile == "work" }
+	w.InstanceProfiles = func(sid string) []string {
+		if sid != "sid-anchor" {
+			t.Errorf("swept the wrong sid: %q", sid)
+		}
+		return []string{"work"}
+	}
+	fk := &recForker{ids: []string{"surface-1"}}
+	created, inferred, err := resumeAnchorWorld(f, "", fk, w)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if created != "surface-1" || inferred != "work" {
+		t.Errorf("created=%q inferred=%q, want surface-1 / work", created, inferred)
+	}
+	argv := fk.specs[0].Argv
+	if argv[0] != "ccs" || argv[1] != "work" {
+		t.Errorf("argv prefix = %v, want the inferred profile, not the env's", argv[:2])
+	}
+	if env := fk.specs[0].Env["CLAUDE_CONFIG_DIR"]; !strings.HasSuffix(env, filepath.Join("instances", "work")) {
+		t.Errorf("child CLAUDE_CONFIG_DIR = %q, want the inferred work instance", env)
+	}
+	if f.Peers[0].Profile != "" {
+		t.Error("inference must not mutate the envelope in memory")
+	}
+}
+
+// TestResumeAnchorSweepRefusals: the sweep's two refusal shapes — ambiguity is
+// named and never resolved by picking, and a swept-empty machine says the search
+// was exhaustive. Both must launch nothing.
+func TestResumeAnchorSweepRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		profiles []string
+		want     string
+	}{
+		{"ambiguous", []string{"personal", "work"}, "cannot pick"},
+		{"swept empty", nil, "anywhere on this machine"},
+	} {
+		t.Setenv("CBUS_DIR", t.TempDir())
+		f := resumeFixture()
+		f.Peers[0].Profile = ""
+		w := resumeWorld()
+		w.HasTranscript = func(string, string) bool { return false }
+		w.InstanceProfiles = func(string) []string { return tc.profiles }
+		fk := &recForker{}
+		_, _, err := resumeAnchorWorld(f, "", fk, w)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want containing %q", tc.name, err, tc.want)
+		}
+		if len(fk.specs) != 0 {
+			t.Errorf("%s: a refusal must launch NOTHING, forked %d", tc.name, len(fk.specs))
+		}
+	}
+}
+
+// TestResumeAnchorRecordedProfileNeverSweeps pins the authority rule: a recorded
+// profile whose transcript is missing refuses exactly as before — the sweep is
+// recovery for a BLANK record, not an override of a named one. A mutant that
+// always sweeps would find the transcript under another profile and launch
+// against a store the save never named; it dies here.
+func TestResumeAnchorRecordedProfileNeverSweeps(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := resumeFixture() // Profile "work" is recorded
+	w := resumeWorld()
+	w.HasTranscript = func(string, string) bool { return false }
+	w.InstanceProfiles = func(string) []string {
+		t.Error("the sweep ran for a peer with a recorded profile")
+		return []string{"personal"}
+	}
+	fk := &recForker{}
+	_, _, err := resumeAnchorWorld(f, "", fk, w)
+	if err == nil || !strings.Contains(err.Error(), "lives under another profile") {
+		t.Errorf("err = %v, want the recorded-profile refusal", err)
+	}
+	if len(fk.specs) != 0 {
+		t.Errorf("a refusal must launch NOTHING, forked %d", len(fk.specs))
+	}
+}
+
+// TestResumeAnchorSweepEndToEnd drives the real sweep against a real store: a
+// bare shell, an envelope with no profile, a transcript under an instance — the
+// android-waiver-scan shape that filed cbus-kl4. Real InstanceProfiles plus the
+// real TranscriptPath closure, so the glob, the path parse, and the argv are
+// proved to agree with each other rather than with a stub.
+func TestResumeAnchorSweepEndToEnd(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	sid := "34ecd2f2-0000-1111-2222-333333333333"
+	writeTranscript(t, filepath.Join(home, ".ccs", "instances", "work"), "-Users-dev-work-repo", sid)
+
+	f := resumeFixture()
+	f.Peers[0].Profile = ""
+	f.Peers[0].SessionID = sid
+	w := resumeWorld()
+	w.HasTranscript = func(profile, s string) bool { _, ok := TranscriptPath(profile, s); return ok }
+	w.InstanceProfiles = InstanceProfiles
+	fk := &recForker{ids: []string{"surface-1"}}
+	_, inferred, err := resumeAnchorWorld(f, "", fk, w)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if inferred != "work" {
+		t.Errorf("inferred = %q, want work", inferred)
+	}
+	if argv := fk.specs[0].Argv; argv[0] != "ccs" || argv[1] != "work" {
+		t.Errorf("argv = %v, want a ccs work prefix", argv[:2])
 	}
 }
