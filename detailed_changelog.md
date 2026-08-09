@@ -1,5 +1,37 @@
 # Changelog (detailed)
 
+## [2026-08-09 21:55:00 UTC] [Transcript/Fix] bare-shell resume of profiled formations
+
+[Attempt #1] `fb948f8`, ships as v0.9.1. Found by the ccresume:// handler work
+(cbus-phh): the full-launch field test refused a warm formation through the real
+LaunchServices door, and the coder traced it to transcriptRoots rather than the
+handler.
+
+[The defect]
+transcriptRoots derived the CCS profile root from $CLAUDE_CONFIG_DIR. Bare
+post-reboot terminals and GUI-launched shells have no such variable (ccs sets it
+per session), so with cfg unset only ~/.claude/projects was searched and every
+profiled formation's resume refused with no-transcript-found — the northstar
+scenario itself, broken on CCS machines, masked in every prior field test
+because those ran from this session's env-carrying shell. Scope precisely: only
+PROFILED formations; blank-profile envelopes store under ~/.claude and were
+always fine (attribution per the coder's evidence-strength correction: the path
+facts are theirs, the masking claim verified by the orchestrator against its
+own shell env).
+
+[The fix]
+The profile root resolves from HOME + the recorded profile
+(~/.ccs/instances/<profile>/projects), structurally — the envelope is the
+authority, the env is a hint. Same trust move anchorLaunchPrefix made for the
+launch prefix; the gate now matches the launcher. cfg-derived roots are kept
+for non-standard layouts, deduped as before.
+
+[Testing Notes]
+Regression test pins the bare-shell profiled lookup (HOME override, env
+explicitly empty) and the blank-profile inverse (bare shells still cannot see
+instance roots for pre-profile envelopes — the documented caveat, unchanged).
+Full suite 7/7; linux amd64+arm64 builds.
+
 ## [2026-08-08 20:15:00 UTC] [Formation/AnchorModel] always-anchor + the decision brief
 
 [Attempt #1] `b78f1bc` (cbus-j4i) + `9bfd332` (cbus-zhj) + test riders `2d262c2`
