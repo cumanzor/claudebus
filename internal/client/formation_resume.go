@@ -19,19 +19,22 @@ import (
 // the human is about to sit next to; silently handing them a blank one is the
 // fresh-under-same-sid failure this verb was built to prevent. Every gate refuses
 // loudly with the remedy named.
-func ResumeAnchor(f *Formation, brief string, forker TerminalForker) (string, error) {
+func ResumeAnchor(f *Formation, brief string, forker TerminalForker) (created, inferredProfile string, err error) {
 	world, err := GatherPlanWorld(f.Channel)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	return resumeAnchorWorld(f, brief, forker, world)
 }
 
 // resumeAnchorWorld is ResumeAnchor once the live state is in hand — the seam the
-// tests inject a world through, same split as apply's.
-func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world *PlanWorld) (string, error) {
+// tests inject a world through, same split as apply's. inferredProfile is non-empty
+// only when the envelope recorded no profile and the transcript sweep named one —
+// the caller surfaces it, because the operator is about to watch a launch under a
+// profile no file mentions.
+func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world *PlanWorld) (created, inferredProfile string, err error) {
 	if f.AnchorAlias == "" {
-		return "", fmt.Errorf("formation %q records no anchorAlias — set it, or resume the session by hand", f.Name)
+		return "", "", fmt.Errorf("formation %q records no anchorAlias — set it, or resume the session by hand", f.Name)
 	}
 	var p *FormationPeer
 	for i := range f.Peers {
@@ -41,34 +44,52 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 		}
 	}
 	if p == nil {
-		return "", fmt.Errorf("anchorAlias %q names no peer in %q (it has: %s)", f.AnchorAlias, f.Name, strings.Join(peerAliases(f), ", "))
+		return "", "", fmt.Errorf("anchorAlias %q names no peer in %q (it has: %s)", f.AnchorAlias, f.Name, strings.Join(peerAliases(f), ", "))
 	}
 	if p.Machine != "" && p.Machine != world.Host {
-		return "", fmt.Errorf("anchor %q was recorded on %q, this host is %q — run this there", p.Alias, p.Machine, world.Host)
+		return "", "", fmt.Errorf("anchor %q was recorded on %q, this host is %q — run this there", p.Alias, p.Machine, world.Host)
 	}
 	if p.SessionID == "" || p.SessionID == "reserved" {
-		return "", fmt.Errorf("anchor %q has no session recorded — nothing to resume; start a fresh session, join %s, and run apply from it", p.Alias, f.Channel)
+		return "", "", fmt.Errorf("anchor %q has no session recorded — nothing to resume; start a fresh session, join %s, and run apply from it", p.Alias, f.Channel)
 	}
 	if duplicateSids(f)[p.SessionID] {
-		return "", fmt.Errorf("session %s is recorded under more than one alias in this formation — one of them is wrong; fix the file", p.SessionID)
+		return "", "", fmt.Errorf("session %s is recorded under more than one alias in this formation — one of them is wrong; fix the file", p.SessionID)
 	}
 	// The same identity prohibitions apply and bootstrap enforce, because resuming the
 	// wrong transcript from a NEW verb is still the ghost-orchestrator failure.
 	if p.Origin == OriginFork {
-		return "", fmt.Errorf("origin=fork means session %s is the PARENT's transcript, not the anchor's — resuming it re-runs the parent's intent; start fresh and apply instead", p.SessionID)
+		return "", "", fmt.Errorf("origin=fork means session %s is the PARENT's transcript, not the anchor's — resuming it re-runs the parent's intent; start fresh and apply instead", p.SessionID)
 	}
 	if p.Origin == "" {
-		return "", fmt.Errorf("the anchor needs origin recorded (fresh|fork|joined) — the tool cannot know how %q was born, and a fork-born session must never be resumed", p.Alias)
+		return "", "", fmt.Errorf("the anchor needs origin recorded (fresh|fork|joined) — the tool cannot know how %q was born, and a fork-born session must never be resumed", p.Alias)
 	}
 	// Live-armed BEFORE the transcript check: both can be true at once (a live anchor
 	// whose transcript sits under a profile this shell cannot see), and "it is already
 	// running, go use it" is the decisive answer. Caught by the first real-store smoke:
 	// the transcript refusal fired for a session that was alive on the channel.
 	if at, ok := world.LiveSids[p.SessionID]; ok {
-		return "", fmt.Errorf("the anchor's session %s is live-armed at %s right now — it does not need resuming; run apply from it", p.SessionID, at)
+		return "", "", fmt.Errorf("the anchor's session %s is live-armed at %s right now — it does not need resuming; run apply from it", p.SessionID, at)
 	}
+	// The launch profile can outgrow the recorded one: an envelope from before
+	// profile capture records none, and a blank profile resolves no instance roots,
+	// so a bare shell reads every profiled transcript as gone (the whole back
+	// catalog, censused at cbus-kl4). Before declaring it gone, sweep the CCS
+	// instances and let the transcript's location name the profile. Only for a
+	// BLANK record: a recorded profile is the envelope's authority, and overriding
+	// it on a miss would launch against a store the save never named.
+	launchProfile := p.Profile
 	if !world.HasTranscript(p.Profile, p.SessionID) {
-		return "", fmt.Errorf("no transcript found for the anchor's session %s — it has aged out or lives under another profile; start a fresh session, join %s, and run apply from it", p.SessionID, f.Channel)
+		if p.Profile != "" {
+			return "", "", fmt.Errorf("no transcript found for the anchor's session %s — it has aged out or lives under another profile; start a fresh session, join %s, and run apply from it", p.SessionID, f.Channel)
+		}
+		switch profiles := world.InstanceProfiles(p.SessionID); len(profiles) {
+		case 0:
+			return "", "", fmt.Errorf("no transcript found for the anchor's session %s anywhere on this machine (every CCS instance and the default store searched) — it has aged out or was recorded on another machine; start a fresh session, join %s, and run apply from it", p.SessionID, f.Channel)
+		case 1:
+			launchProfile, inferredProfile = profiles[0], profiles[0]
+		default:
+			return "", "", fmt.Errorf("the anchor's session %s has transcripts under %d CCS profiles (%s) and the envelope records none — the tool cannot pick; re-save this formation from a live seat so the profile is recorded, or resume the session by hand", p.SessionID, len(profiles), strings.Join(profiles, ", "))
+		}
 	}
 	// The last gate, and the one the live-armed check above cannot cover: between the
 	// fork below and the child's re-join the anchor holds no meta and arms no
@@ -80,32 +101,35 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	if err != nil {
 		// fail closed: without the marker the next resume cannot see this one, and a
 		// launch nobody can see is the whole failure this verb is being guarded against
-		return "", fmt.Errorf("cannot record the launch intent for %q: %w", p.Alias, err)
+		return "", "", fmt.Errorf("cannot record the launch intent for %q: %w", p.Alias, err)
 	}
 	if !claimed {
 		if in.TS == "" {
-			return "", fmt.Errorf("another resume of %q claimed the launch a moment ago — "+
+			return "", "", fmt.Errorf("another resume of %q claimed the launch a moment ago — "+
 				"only one may run at a time; find its window, or re-run once it settles", p.Alias)
 		}
-		return "", fmt.Errorf("a resume of %q was launched %s ago (pid %d) and has not joined yet — "+
+		return "", "", fmt.Errorf("a resume of %q was launched %s ago (pid %d) and has not joined yet — "+
 			"it is most likely still booting: find its window and use it. If it never came up, "+
 			"this refusal expires in %s", p.Alias, age.Round(time.Second), in.Pid,
 			LaunchIntentExpiry(age).Round(time.Second))
 	}
 
 	prompt := anchorKickoff(f, p, brief, anchorRoster(f, p.Alias, world))
-	argv := anchorLaunchPrefix(p.Profile)
+	// launchProfile, not p.Profile: the profile that FOUND the transcript is the one
+	// the relaunch runs under — letting the two diverge is how a session comes up
+	// blank against the wrong config dir while its transcript sits intact next door.
+	argv := anchorLaunchPrefix(launchProfile)
 	argv = append(argv, "--resume", p.SessionID, "--name", p.Alias)
 	argv = append(argv, prompt)
 	spec := ForkSpec{
 		Target: launchTarget(p.Target),
 		Argv:   argv,
-		Env:    peerEnv(p.Profile),
+		Env:    peerEnv(launchProfile),
 		Dir:    launchDir(p.Cwd),
 	}
-	created, err := forker.Fork(spec)
+	created, err = forker.Fork(spec)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// Launcher-authored restore record. The bare-shell launcher holds no claim, so the
 	// empty runID hands attribution to RecordEventInRun's own rule: the ACTING alias's
@@ -116,7 +140,7 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 		ev.PrevSessionID = p.SessionID
 		ev.Cwd, ev.Harness, ev.Pid = p.Cwd, "", 0
 	})
-	return created, nil
+	return created, inferredProfile, nil
 }
 
 // anchorLaunchPrefix launches under the peer's RECORDED profile even from a bare

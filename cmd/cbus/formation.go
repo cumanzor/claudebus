@@ -262,13 +262,16 @@ func runFormationResume(args []string) int {
 		return die("%v", err)
 	}
 	fmt.Printf("resolved %q from the %s\n", name, source)
-	created, err := client.ResumeAnchor(f, brief, applyForker)
+	created, inferred, err := client.ResumeAnchor(f, brief, applyForker)
 	if err != nil {
 		return die("%v", err)
 	}
 	anchor := f.AnchorAlias
 	fmt.Printf("anchor %q launched (resuming its own session) — it will re-join %s, re-arm, and reconcile the fleet with 'cbus formation apply %s'\n",
 		anchor, f.Channel, f.Name)
+	if inferred != "" {
+		fmt.Printf("  profile: %s — inferred from the transcript's location, the envelope records none; the anchor's next 'cbus formation save' stamps it\n", inferred)
+	}
 	if created != "" {
 		fmt.Printf("  surface: %s\n", created)
 	}

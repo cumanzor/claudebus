@@ -178,7 +178,7 @@ func (f *intentSpyForker) Fork(s ForkSpec) (string, error) {
 func TestResumeWritesIntentBeforeForking(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	fk := &intentSpyForker{ch: "dd", alias: "orchestrator"}
-	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if !fk.sawAtFork {
@@ -238,7 +238,7 @@ func TestResumeClaimIsExactlyOnceUnderRace(t *testing.T) {
 				go func(i int) {
 					defer wg.Done()
 					<-start // release them together, so the claims genuinely overlap
-					_, errs[i] = resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld())
+					_, _, errs[i] = resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld())
 				}(i)
 			}
 			close(start)
@@ -435,7 +435,7 @@ func TestResumeRefusesAFreshIntent(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	plantIntent(t, "dd", "orchestrator", "sid-anchor", 12*time.Second)
 	fk := &recForker{}
-	_, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld())
+	_, _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld())
 	if err == nil {
 		t.Fatal("a second resume inside the launch window must refuse")
 	}
@@ -468,7 +468,7 @@ func TestResumeProceedsPastAnExpiredIntent(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	plantIntent(t, "dd", "orchestrator", "sid-anchor", ttlOutside)
 	fk := &recForker{}
-	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
+	if _, _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err != nil {
 		t.Fatalf("an expired intent must not block a legitimate resume: %v", err)
 	}
 	if len(fk.specs) != 1 {
@@ -514,7 +514,7 @@ func TestResumeWritesNoIntentWhenItRefuses(t *testing.T) {
 			f := resumeFixture()
 			tc.mut(f)
 			fk := &recForker{}
-			if _, err := resumeAnchorWorld(f, "", fk, tc.world()); err == nil {
+			if _, _, err := resumeAnchorWorld(f, "", fk, tc.world()); err == nil {
 				t.Fatal("want a refusal")
 			}
 			if intentExists("dd", "orchestrator") {
@@ -535,7 +535,7 @@ func TestResumeWritesNoIntentWhenItRefuses(t *testing.T) {
 func TestResumeLeavesTheIntentOnForkError(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	fk := &intentSpyForker{ch: "dd", alias: "orchestrator", failWithErr: os.ErrPermission}
-	if _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err == nil {
+	if _, _, err := resumeAnchorWorld(resumeFixture(), "", fk, resumeWorld()); err == nil {
 		t.Fatal("a failed fork must surface")
 	}
 	if !intentExists("dd", "orchestrator") {
