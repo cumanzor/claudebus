@@ -1,5 +1,72 @@
 # Changelog (detailed)
 
+## [2026-08-09 23:10:00 UTC] [Formation/Resume] blank-profile envelopes: instance sweep
+
+[Attempt #1] `7903eb1`. Found by Carlos's first field test of resume on an older
+formation: `cbus formation resume 'android-waiver-scan'` from a bare shell
+refused with "aged out or lives under another profile" while the transcript sat
+1.6MB under ~/.ccs/instances/work. Filed as cbus-kl4 with a store census: 16 of
+17 envelopes record an empty profile on every peer (only dd-rollout, re-saved
+post-capture, records one) -- including dd-cleanup saved the day before, because
+a save captures what the seat metas hold and pre-capture joins contribute
+nothing. The whole back catalog was button-unresumable.
+
+[The defect]
+transcriptRoots builds the instance root from HOME + the RECORDED profile
+(fb948f8). With a blank profile there is nothing to build from, and a bare
+shell adds no cfg root, so only ~/.claude/projects was searched -- structurally
+empty on a CCS machine. The refusal's second clause was the truth; "aged out"
+was not.
+
+[The fix]
+internal/client/transcript.go: InstanceProfiles(sid) -- a deliberate, named
+sweep of ~/.ccs/instances/*/projects (plus the cfg-sibling base) returning the
+distinct owning profiles, sorted; same sidRe screen as TranscriptPath (the sid
+is untrusted text used as a glob). NOT folded into TranscriptPath: a lookup
+that silently matched other profiles would let a caller find a transcript
+under one profile and launch under another -- the blank-under-same-sid failure.
+internal/client/formation_resume.go: when the anchor's recorded profile is
+blank and HasTranscript misses, the gate consults the sweep. One owner: adopt
+for the gate AND anchorLaunchPrefix AND peerEnv, return it as inferredProfile.
+Several: refuse naming them. None: refuse stating the search was exhaustive.
+A recorded profile never sweeps -- its miss refuses exactly as before.
+cmd/cbus/formation.go prints the inference under the launch line; the anchor's
+next `formation save` stamps the profile and the envelope heals.
+
+[Files Changed]
+- internal/client/transcript.go (+InstanceProfiles, sort import)
+- internal/client/formation_plan.go (PlanWorld.InstanceProfiles seam, wired in
+  GatherPlanWorld beside HasTranscript)
+- internal/client/formation_resume.go (gate + launch plumb; ResumeAnchor and
+  resumeAnchorWorld gain the inferredProfile return)
+- cmd/cbus/formation.go (operator notice)
+- tests: transcript_test.go, formation_resume_test.go, launch_intent_test.go
+  (signature sites)
+
+[Possible Ripple Effects]
+`show`/SidState and apply's decidePeer deliberately do NOT sweep: show still
+reads a blank-profile peer as STALE where resume now launches, and apply run
+from a foreign profile still templates such peers. Both are recorded on
+cbus-kl4 as residual surfaces; the dominant case self-heals because the
+resurrected anchor runs under the inferred profile, so ITS apply sees the
+transcripts through the cfg root. The decision brief's roster may read GONE
+for fleet peers at bare-shell compose time; the brief already hands liveness
+and presence to `apply --dry-run` by name, which re-reads from the anchor's
+healed env.
+
+[Testing Notes]
+go test ./... green (gofmt gate included); GOOS=linux amd64+arm64 compile
+gates pass (windows/amd64 fails on main's pre-existing close.go/codexwrap.go
+syscall use -- the windows-port branch's remit, untouched here). Five new
+tests: the sweep itself (owners sorted, ambiguity reported, injection screened),
+inference adopted for argv AND child env against a WRONG-profile shell (env
+would make it pass vacuously), both refusal shapes launch nothing, recorded
+profile never sweeps (sweep stub t.Errors on call), and an end-to-end run with
+the real sweep + real TranscriptPath closure against a real temp store in the
+android-waiver-scan shape. Two mutants killed on their aimed assertions:
+launch-from-recorded-profile (argv asserts fired) and always-sweep (sentinel +
+refusal + forked-1 all fired).
+
 ## [2026-08-09 21:55:00 UTC] [Transcript/Fix] bare-shell resume of profiled formations
 
 [Attempt #1] `fb948f8`, ships as v0.9.1. Found by the ccresume:// handler work
