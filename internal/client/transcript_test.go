@@ -138,3 +138,23 @@ func TestDedupeStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestTranscriptRootsBareShellFindsProfiled(t *testing.T) {
+	// the ccresume-button finding: a bare or GUI shell has NO CLAUDE_CONFIG_DIR,
+	// and the profile root must resolve from HOME + the recorded profile anyway —
+	// the envelope is the authority, the env is a hint
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	sid := "bare-shell-sid"
+	want := writeTranscript(t, filepath.Join(home, ".ccs", "instances", "work"), "-Users-dev-proj", sid)
+	got, ok := TranscriptPath("work", sid)
+	if !ok || got != want {
+		t.Fatalf("bare-shell profiled lookup = %q,%v want %q", got, ok, want)
+	}
+	// the inverse stays true and documented: blank profile + bare shell cannot
+	// see instance roots (the pre-profile-envelope caveat, unchanged)
+	if _, ok := TranscriptPath("", sid); ok {
+		t.Fatal("blank profile from a bare shell must not find instance transcripts")
+	}
+}
