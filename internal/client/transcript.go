@@ -49,8 +49,20 @@ func transcriptRoots(profile string) []string {
 	var roots []string
 	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
 	// profile is a path segment from a hand-edited file — screen it like any name.
-	if profile != "" && core.ValidName(profile) && strings.Contains(cfg, "/.ccs/instances/") {
-		roots = append(roots, filepath.Join(filepath.Dir(cfg), profile, "projects"))
+	//
+	// The recorded profile resolves from HOME, not from the env: a bare or
+	// GUI-launched shell (the post-reboot terminal, the ccresume:// handler) has
+	// no CLAUDE_CONFIG_DIR at all, and gating the profile root on it made every
+	// bare-shell resume of a profiled formation refuse on a transcript that was
+	// present the whole time. Same trust move anchorLaunchPrefix makes: the
+	// envelope's profile is the authority, the env is just a hint.
+	if profile != "" && core.ValidName(profile) {
+		if home, err := os.UserHomeDir(); err == nil {
+			roots = append(roots, filepath.Join(home, ".ccs", "instances", profile, "projects"))
+		}
+		if strings.Contains(cfg, "/.ccs/instances/") {
+			roots = append(roots, filepath.Join(filepath.Dir(cfg), profile, "projects"))
+		}
 	}
 	if cfg != "" {
 		roots = append(roots, filepath.Join(cfg, "projects"))
