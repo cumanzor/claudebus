@@ -21,7 +21,7 @@ PLATFORMS := \
 .PHONY: build test clean dist install release $(PLATFORMS)
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 test:
 	go test ./...
@@ -40,7 +40,7 @@ $(PLATFORMS):
 	arch=$$(echo $@ | cut -d/ -f2); \
 	out=$(DIST)/$(BINARY)-$$os-$$arch; \
 	echo "building $$out"; \
-	GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $$out $(PKG)
+	GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $$out $(PKG)
 
 install:
 	go install -ldflags "$(LDFLAGS)" $(PKG)
