@@ -1605,7 +1605,8 @@ surfaced as the per-peer detail — the load-bearing ones:
 
 **Output** (per peer): `<alias>  <outcome>[ — <detail>]`, outcomes `present` /
 `resumed` / `forked` / `templated` / `degraded` / `skipped` / `refused` /
-`failed`, plus `<alias>  answered its kickoff (round-trip verified)` on
+`failed`, plus an indented `answered its kickoff (round-trip verified)`
+continuation line under the peer (the alias column is blank there) on
 convergence. Drift findings print `DRIFT <anchor>: saved <a>, now <b> — ... not
 blocking`.
 

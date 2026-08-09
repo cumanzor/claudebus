@@ -29,7 +29,7 @@ rsync -a --delete \
 ssh "$HOST" "rm -rf ${DEST:?}/src/cmd ${DEST:?}/src/cbus-relay.service"
 
 echo "== build on $HOST =="
-ssh "$HOST" "cd $DEST/src && go build -o $DEST/cbus-relay ./relay/cmd/cbus-relay && go build -o $DEST/wstail ./relay/cmd/wstail && $DEST/cbus-relay -h 2>&1 | head -1 || true"
+ssh "$HOST" "cd $DEST/src && go build -o $DEST/cbus-relay ./relay/cmd/cbus-relay && go build -o $DEST/wstail ./relay/cmd/wstail && { $DEST/cbus-relay -h 2>&1 | head -1 || true; }"
 
 echo "== token =="
 ssh "$HOST" "[ -s $DEST/token ] && echo 'token exists' || { umask 077 && openssl rand -hex 32 > $DEST/token && echo 'token created'; }"

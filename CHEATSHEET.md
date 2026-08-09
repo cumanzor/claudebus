@@ -140,7 +140,7 @@ cbus formation apply myeffort --mode resume --only coder  # late-bound per-peer 
 # codex as a peer (harness-neutral bus; codex never runs `cbus tail`)
 cbus codex --channel myrepo                          # codex --remote TUI joined as a bus peer, bridged
 cbus codex-stop-hook                                 # Stop-hook delivery for plain codex exec workers
-cbus formation list                                 # every saved formation (yours + starters)
+cbus formation list                                 # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                          # delete (starters: use git rm instead)
 ```
 
