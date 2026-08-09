@@ -1627,6 +1627,17 @@ anchor **live-armed right now** (`it does not need resuming; run apply from
 it` — checked *before* the transcript gate, because both can be true and
 already-running is decisive); transcript gone.
 
+**Blank-profile recovery (cbus-kl4):** when the envelope records **no** profile
+(saves from before profile capture — the entire back catalog), the transcript
+gate does not give up at the default roots: it sweeps `~/.ccs/instances/*/projects`
+for the sid and lets the transcript's location name the profile. A unique owner
+is adopted for the launch (`ccs <inferred>`) and reported — `profile: <p> —
+inferred from the transcript's location, the envelope records none; the anchor's
+next 'cbus formation save' stamps it`. Transcripts under several profiles refuse
+naming them; a swept-empty machine refuses stating the search was exhaustive
+(`anywhere on this machine`). A **recorded** profile is never overridden — its
+miss refuses exactly as before.
+
 **The launch-intent guard** closes the fork-to-rejoin window in which a second
 resume would double-launch one transcript: a channel-dir marker claimed
 first-writer-wins (`os.Link`), reclaimed by overwrite (never unlink — an

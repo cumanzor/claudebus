@@ -589,6 +589,20 @@ Added after the v1 sections above; semantics of the reboot-recovery chain
   that motivated profile capture). All identity prohibitions are enforced at
   a third parity site (`resumeAnchorWorld`, beside `decidePeer` and
   `BootstrapPeer`); a change to one must visit all three.
+- **Blank profile is recovered by sweep, never by widening.** An envelope from
+  before profile capture records no profile, so a bare shell resolves no
+  instance roots and reads every profiled transcript as gone (cbus-kl4: 16 of
+  17 envelopes in the field store). Before the transcript gate refuses,
+  `InstanceProfiles` sweeps `~/.ccs/instances/*/projects` for the sid and the
+  transcript's location names the profile: a unique owner is adopted for BOTH
+  the gate and the launch prefix (the profile that found the transcript is the
+  one the relaunch runs under — letting them diverge is the blank-under-same-sid
+  failure again), reported to the operator, and stamped by the anchor's next
+  save. Several owners refuse by name; swept-empty refuses stating the search
+  was exhaustive. A *recorded* profile is never overridden — the envelope is
+  the authority — and `TranscriptPath` itself stays narrow: the sweep is a
+  deliberate, named verb-level recovery, not an implicit widening of every
+  caller's lookup.
 - **The guard has two lifetimes on purpose.** The intent *marker* must
   SURVIVE its writer (the launcher CLI exits on the success path), so it is a
   file with a TTL and a same-sid-join clear — launcher liveness plays no role
