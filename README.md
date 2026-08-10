@@ -6,7 +6,7 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
-![two sessions talking over a channel, then the whole fleet saved as a formation](docs/demo.gif)
+![two live Claude Code sessions on one channel: main joins and stands by, fork-1 asks it for a status report over the bus, and the idle session wakes on the Monitor event and answers](docs/demo-live.gif)
 
 Built entirely from **supported primitives** — the `Monitor` tool plus plain
 files — so it depends on no undocumented internals and works across terminal
