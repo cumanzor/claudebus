@@ -10,9 +10,10 @@ Each participating session **joins a channel** and **arms a listener**:
   **auto-prunes dead peers first** so alias numbers get recycled instead of
   growing forever.
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
-  **Monitor** tool (persistent). It re-`exec`s itself as a small follower process so
-  *its own pid* becomes the liveness signal (its argv carries the inbox path via
-  `--inbox`, which the liveness check matches). The follower reframes each stored message into a
+  **Monitor** tool (persistent). It runs the blocking follower in-process, so
+  *its own pid* becomes the liveness signal, recorded together with its process
+  start time (`listenerStart` in `meta.json`) — the identity witness the
+  liveness check matches. The follower reframes each stored message into a
   short `◀ cbus msg from=… to=… ts=…` header + the text soft-wrapped at ~440 bytes
   + a `◀ cbus end` marker. Why: the Monitor truncates any single stdout line at
   **500 chars**, so a raw 1-line JSON event forces the receiver into a second inbox
@@ -36,16 +37,18 @@ Each participating session **joins a channel** and **arms a listener**:
 - **No lost messages during setup.** `join` truncates the inbox and the *first*
   arm replays the whole inbox from the start, so anything sent between *join* and
   *arming the Monitor* is still delivered — `send` accepts a joined-but-not-yet-
-  armed peer for exactly this reason. A *re*-arm follows from the end of the
-  inbox instead, so old messages are never redelivered.
+  armed peer for exactly this reason. A *re*-arm resumes from a durable
+  per-peer cursor at the last delivered message, so nothing is redelivered —
+  and nothing that arrived while unarmed is lost.
 - **Liveness is a real process, not a stale flag.** The tracked `listenerPid` *is*
   the follower process. When a window closes or the Monitor is stopped, the peer flips
   to `off` on its own, and `cbus send` refuses to message a dead window (override
-  with `--force`, which queues the line best-effort — a re-arm follows from the
-  end of the inbox, so it may never be delivered). Two edge cases are hardened:
-  - *pid recycling* — a live pid is only trusted if its process args still
-    reference this peer's inbox, so an unrelated process that inherited the number
-    doesn't read as a false `listen`.
+  with `--force`, which queues the line; the next re-arm resumes from the
+  durable cursor and delivers it). Two edge cases are hardened:
+  - *pid recycling* — a live pid is only trusted if its recorded start-time
+    witness (`listenerStart`) still matches the process now wearing the pid, so
+    an unrelated process that inherited the number doesn't read as a false
+    `listen`.
   - *crash-orphaned listener* — on arm, cbus also records `ownerPid`, the owning
     `claude` process. If the session is hard-killed (crash, `kill -9`), the follower
     can survive as an orphan with a live pid — but its `ownerPid` is gone, so the
