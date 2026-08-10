@@ -36,8 +36,8 @@ preserves or rethinks them deliberately, never silently.
 > 6. **Trailing junk is an error on fixed-arity verbs** (bash silently discarded it, e.g.
 >    `cbus whoami junk`).
 > 7. `--help` no longer lists the obsolete `CC_BRANCH` env line (branch is native). The
->    `CBUS_PYTHON (default python3)` help line is still printed for byte-parity
->    (COMPAT(P3 #4)) but the Go client ignores it.
+>    `CBUS_PYTHON (default python3)` help line was kept for byte-parity
+>    (COMPAT(P3 #4)) but ignored, then dropped from `--help` at P3 homogenization.
 > 8. New verb: `cbus --version` (prints the build stamp; bash had no version verb).
 > 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
@@ -47,7 +47,8 @@ preserves or rethinks them deliberately, never silently.
 > is native in the Go client (TerminalForker, §9), and both legacy installers
 > (`install.sh`, `install-cbus-go.sh`) were removed in `de07cbe` — distribution is
 > now `get.sh` + `cbus selfupdate` + `install-commands`/`install-roles` (§11).
-> Rolling back to the bash client (still at `bin/cbus`) is a manual copy over
+> Rolling back to the bash client now means recovering `bin/cbus` from git
+> history (it was deleted at P3 homogenization) and copying it over
 > `~/.local/bin/cbus`. The Go-native verbs added post-cutover — `spawn` (§9), the
 > `formation` family (§10), and the distribution verbs (§11) — have no bash
 > counterpart and anchor to `cmd/cbus`/`internal/client`.
@@ -87,11 +88,12 @@ dependencies. The retired bash `bin/cbus` it replaced was a single script (914
 lines, `#!/usr/bin/env bash`, `set -euo pipefail`) that delegated all JSON work —
 and the long-lived tail follower itself — to short embedded `python3` programs
 (no `jq`). The rows below citing `bin/cbus:N` describe that bash-era contract,
-preserved here because the script stays in-repo as the rollback artifact.
+preserved here as the record of it — the script itself was deleted from the
+tree at P3 homogenization and is recoverable from git history.
 
 | Fact | Detail |
 |---|---|
-| python3 (bash era only) | The bash `bin/cbus` checked python3 at startup before dispatch (bin/cbus:22) — even `cbus --help` died without it (`cbus: python3 not found (set CBUS_PYTHON)`). The installed **Go client has no python dependency**; `CBUS_PYTHON` survives only as a COMPAT(P3 #4) help-text vestige (env table below), printed for byte-parity and ignored (README:482). |
+| python3 (bash era only) | The bash `bin/cbus` checked python3 at startup before dispatch (bin/cbus:22) — even `cbus --help` died without it (`cbus: python3 not found (set CBUS_PYTHON)`). The installed **Go client has no python dependency**; `CBUS_PYTHON` survived for a while as a COMPAT(P3 #4) help-text vestige, dropped from `--help` at P3 homogenization (env table below). |
 | State root | `$CBUS_DIR`, default `~/.claude-bus` (bin/cbus:16). |
 | Timestamps | UTC ISO-8601 `YYYY-MM-DDTHH:MM:SSZ` via `date -u` (bin/cbus:20). |
 | bash floor (bash era only) | macOS `/bin/bash` 3.2 was a hard compatibility floor for the retired script (a nameref refactor was rejected for breaking it); the Go client has no shell-version floor. |
@@ -129,8 +131,8 @@ all and render bash's stock `parameter null or not set`.
 | Var | Read at | Effect |
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
-| `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — still printed in `--help` for byte-parity as a COMPAT(P3 #4) vestige (README:482) |
-| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)) |
+| `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — the COMPAT(P3 #4) byte-parity help line was dropped from `--help` at P3 homogenization |
+| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain — the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID` (`internal/client/identity.go`) — and "without it" means the whole chain is empty |
 | `CBUS_ALIAS` | :478 | Last-resort `from` on **local** send only. Unvalidated. Documented nowhere else — this is its only doc |
 | `CBUS_SITE_<HOST>_URL` | :134-139 | Per-host relay public URL override/extension (see [§2](#host--endpoint-resolution)) |
 | `CBUS_RELAY_LOCAL_URL` | :149 | Loopback relay probe target (default `http://127.0.0.1:8090`) |
@@ -499,6 +501,11 @@ until someone notices.
 
 Registers this session as a peer in a channel and creates its inbox.
 
+**Flag:** `--session-id <id>` — act AS this session id, overriding the
+`$*_SESSION_ID` env chain (a trailing `--session-id` with no value is an
+error). Accepted by `join`, `leave`, `rename`, and `send` (local and remote);
+for hooks and scripted multi-session drivers.
+
 **Sequence:**
 
 1. Validate channel → `cbus: channel must be [A-Za-z0-9._-]`.
@@ -629,7 +636,9 @@ the printed contract, not the accident. Separately, the OLD follower now
 detects the rename itself (`cbus-0r8`'s displacement mechanism, §8.7) and stops
 rather than continuing to poll a path a stranger may later reoccupy.
 
-**Quirk:** an all-numeric new alias is stored as a JSON int in `meta.json`.
+**Quirk (bash era):** an all-numeric new alias was stored as a JSON int in
+`meta.json`; the Go client always writes the alias as a string (port-map row
+16, see §2).
 
 ---
 
@@ -770,8 +779,9 @@ column):
 listen|off     <ch>/<alias>                 pid=<pid|?>   <host|?>  <cwd|?>
 ```
 
-- `listen` = the three-part liveness check passes (pid alive + argv contains
-  the inbox path + recorded ownerPid alive). `off` = anything else. `list`
+- `listen` = the three-part liveness check passes (pid alive + the recorded
+  `(listenerPid, listenerStart)` identity witness still matching the process
+  wearing the pid + recorded ownerPid alive). `off` = anything else. `list`
   never prunes; dead peers show as `off`.
 - `--active` / `-a` shows only live listeners. Any other arg is the channel
   filter (last non-flag wins).
@@ -801,7 +811,7 @@ of a session.
       "peers": [
         {"alias": "orchestrator", "sessionId": "...", "listening": true,
          "listenerPid": 16510, "host": "carlos-mbp", "cwd": "...",
-         "scope": "local", "origin": "spawn", "model": "sonnet"}
+         "scope": "local", "origin": "fresh", "model": "sonnet"}
       ]
     }
   ]
@@ -850,10 +860,11 @@ listen|off     <ch>@<host>/<al>             queued=<n>   lastSeen=<ts|?>
 - `connected:true` → `listen`. Channel filter (if given before the `@`) is
   applied client-side.
 - Empty: `no remote peers` / `no remote peers in <ch>@<host>`.
-- **Quirk (failure shape):** a transport/auth failure surfaces as curl's
-  stderr **plus a python `JSONDecodeError` traceback**, exit **1** (python's,
-  never curl's code), with no `cbus:` framing — the only remote command not
-  wrapped in `die`.
+- **Quirk (failure shape, bash era):** a transport/auth failure surfaced as
+  curl's stderr **plus a python `JSONDecodeError` traceback**, exit **1**
+  (python's, never curl's code), with no `cbus:` framing — the only remote
+  command not wrapped in `die`. The Go client fails every remote-list path
+  with `cbus:`-framed `die` output.
 - **Quirk:** everything after the remote spec is silently discarded —
   `cbus list dev@nuc --active` ignores the flag and prints the full listing.
 - Presence caveats: `connected:true` can be stale for ~90–120 s after a silent
@@ -979,8 +990,9 @@ roster twice.
 - **Mechanics, per target:** read `OwnerPid` from the peer's `meta.json`
   (falling back to deriving it from the armed listener's ancestry when
   `OwnerPid` is null — pre-fix registrations, see the quirk below — gated on
-  the listener's own inbox path appearing in its argv, so a recycled
-  listener pid belonging to a *different* session can't donate that session
+  the same structural `(listenerPid, listenerStart)` identity witness the
+  liveness predicate uses, so a recycled listener pid belonging to a
+  *different* session can't donate that session
   to the signal); capture the owning process's tty **before** signalling (a
   reaped pid has no tty left to read after); `SIGTERM`; wait up to 5s. On
   timeout, `--force` escalates to `SIGKILL` (2s further wait) — without
@@ -1270,7 +1282,7 @@ own** surface (tmux-first, else iTerm2, else a hard error — mechanics below).
 One-shot parent side of `/bus-branch`: derive channel → join (idempotent) →
 **reserve the child's alias** → fork the parent's transcript into a new terminal
 seeded with the canonical bootstrap prompt. Collapses what used to be three model
-turns into one command. Handler `runBranch` (main.go:304); mechanics
+turns into one command. Handler `runBranch` (main.go:450); mechanics
 `client.Branch` (harness.go:81).
 
 - Target defaults to `window`; anything else →
@@ -1354,7 +1366,7 @@ as plain `tmux` — dispatch differs by surface, not by target. The child inheri
 
 Opens a **fresh, blank-transcript** session — not a fork — that joins and arms
 the channel on its own. Go-native, no bash counterpart. Handler `runSpawn`
-(main.go:335); mechanics `client.Spawn` (spawn.go:60). Same terminal launch as
+(main.go:481); mechanics `client.Spawn` (spawn.go:60). Same terminal launch as
 `branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
 blank transcript.
 
@@ -2015,8 +2027,8 @@ client; they remain for the homogenization/port record.
 
 **Errors & exit codes**
 7. Two error dialects (`cbus:` vs bash `${1:?}` with path+line).
-8. `cbus list @host` failures exit 1 with a python traceback, no `cbus:`
-   framing.
+8. (bash era) `cbus list @host` failures exited 1 with a python traceback, no
+   `cbus:` framing; the Go client fails with `cbus:`-framed `die` output.
 9. Unknown relay host is a non-fatal stderr message (die-in-substitution);
    with stored creds, `tail ch@bogus/al` exits 0 with a broken spec and a
    live marker.
@@ -2048,8 +2060,8 @@ client; they remain for the homogenization/port record.
     having none.
 14. The 10-minute unarmed grace keys off `meta.json` mtime; any rewrite resets
     it.
-15. Liveness is pid + argv-substring + ownerPid forensics; the inbox path must
-    stay in the listener's argv.
+15. Liveness is pid + the structural `(pid, starttime)` identity witness +
+    ownerPid forensics (the argv-substring clause is gone since M6.2).
 16. The framed block is load-bearing wire format (440-byte body wrap,
     ~2800-byte remote warn threshold, `◀` markers); constants encode
     *measured* Monitor caps. Header/end lines are exempt from wrapping;
@@ -2073,7 +2085,8 @@ client; they remain for the homogenization/port record.
     queued relay mail is inherited by the next claimant of the alias.
 23. prune reap messages: stdout from `cbus prune`, stderr from join's
     auto-prune.
-24. All-digit aliases stored as JSON ints; `meta.json` writes are non-atomic.
+24. (bash era) All-digit aliases stored as JSON ints; `meta.json` writes were
+    non-atomic. The Go client writes string aliases and temp+rename-atomic metas.
 25. `cbus inbox` prints paths for nonexistent peers.
 
 **Remote & auth**
@@ -2129,7 +2142,7 @@ client; they remain for the homogenization/port record.
     silently close a same-named local peer) and refuses a pid whose argv no
     longer contains `claude` (probable pid recycle) rather than signalling
     it. Its null-`ownerPid` fallback derives the owner from the armed
-    listener's ancestry only when the listener's own argv still carries this
-    peer's inbox path — without that guard a recycled listener pid under a
+    listener's ancestry only when the structural `(listenerPid,
+    listenerStart)` identity witness still holds — without that guard a recycled listener pid under a
     *different* claude session would donate that session to the SIGTERM
     (§7).
