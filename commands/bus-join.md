@@ -40,8 +40,8 @@ The user passed: "$ARGUMENTS" — optional channel (optionally `channel@host`), 
    `cbus:<channel>/<alias>`.
 
    ⚠️ **Never run `cbus tail` in Bash** (not `Bash(cbus tail …)`, not piped to
-   `head`, not `run_in_background`). `cbus tail` execs a follower that never
-   exits, so a Bash call **blocks forever** and delivers nothing to your
+   `head`, not `run_in_background`). `cbus tail` runs a follower loop that
+   never exits, so a Bash call **blocks forever** and delivers nothing to your
    conversation. It is the Monitor tool's event *source*, not a shell command —
    the ONLY correct way to listen is the Monitor tool.
 

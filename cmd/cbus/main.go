@@ -740,7 +740,7 @@ func runJoin(args []string) int {
 	}
 	fmt.Printf("joined channel \"%s\" as \"%s\" (session %s)\n", ch, chosen, sid)
 	fmt.Printf("address: %s/%s\n", ch, chosen)
-	fmt.Printf("now arm the Monitor tool (NOT Bash — `cbus tail` execs a follower that never exits, so a Bash call blocks forever) on: cbus tail %s/%s\n", ch, chosen)
+	fmt.Printf("now arm the Monitor tool (NOT Bash — `cbus tail` runs a follower loop that never exits, so a Bash call blocks forever) on: cbus tail %s/%s\n", ch, chosen)
 	return 0
 }
 
