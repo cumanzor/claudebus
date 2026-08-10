@@ -21,9 +21,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    target is <channel>/<alias>, or a bare
                                    <alias> within your own channel(s)
        --from <ch/alias>           override sender (default: auto-resolved)
-       --force                     send even if target's listener died — best
-                                   effort: a re-arm follows from the end of the
-                                   inbox, so the line may never be delivered
+       --force                     send even if target's listener died — queues
+                                   the line anyway; the next re-arm resumes from
+                                   the durable cursor and delivers it
                                    (a joined-but-not-yet-armed peer is always
                                    accepted: its first arm replays the inbox)
   cbus list [--active] [channel]   peers with listen/off state, host, cwd
