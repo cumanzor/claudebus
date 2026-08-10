@@ -64,7 +64,8 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
   `cbus spawn --role coder` opens a fresh peer briefed from a committed role
   file — [docs/usage.md](docs/usage.md)
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
-  fresh fleets from starter templates — [docs/formations.md](docs/formations.md)
+  fresh fleets from starter templates; there's a three-peer fleet demo at the
+  top of the doc — [docs/formations.md](docs/formations.md)
 - **Harness-neutral peers** — a Codex CLI session can hold a channel alias
   today; cbus does the listening for it. Grok Build and OpenCode are planned
   next — [docs/codex.md](docs/codex.md)
