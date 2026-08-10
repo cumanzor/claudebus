@@ -21,8 +21,8 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > 6. **Trailing junk is an error on fixed-arity verbs** (bash silently discarded it, e.g.
 >    `cbus whoami junk`).
 > 7. `--help` no longer lists the obsolete `CC_BRANCH` env line (branch is native). The
->    `CBUS_PYTHON (default python3)` help line is still printed for byte-parity
->    (COMPAT(P3 #4)) but the Go client ignores it.
+>    `CBUS_PYTHON (default python3)` help line was kept for byte-parity
+>    (COMPAT(P3 #4)) but ignored, then dropped from `--help` at P3 homogenization.
 > 8. New verb: `cbus --version` (prints the build stamp; bash had no version verb).
 > 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
@@ -101,8 +101,8 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > displacement gate (D5) plus a follower self-identity check; see the closure note
 > appended to §8.7. Local dormancy markers each name the remedy that actually
 > works for their cause, not a uniform "re-arm" that was wrong three times out of
-> four. One new local-only stderr warning (port-map D7) fires once on join/send/
-> tail/rename/leave/whoami when `CLAUDE_CODE_SESSION_ID` is unset, naming what
+> four. One new local-only stderr warning (port-map D7) fires once on join, send
+> (local and remote), and local tail when `CLAUDE_CODE_SESSION_ID` is unset, naming what
 > sessionless mode actually loses. None of this touches the wire, presence, the
 > relay, or remote tail — those replay semantics are unchanged and out of scope.
 

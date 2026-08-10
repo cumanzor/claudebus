@@ -20,7 +20,8 @@
 > durable replay cursor (D4) and the local double-listener displacement gate +
 > `--steal` (D5) landed 2026-07-19 as M4 (`cbus-8k9.4`), closing `cbus-8no` and
 > `cbus-0r8` respectively — see §6 below. Leading-dot/dash name rejection and
-> `list --json` remain open Phase 3 work. Phase 4 is unchanged.
+> `list --json` have since shipped (M5 name tightening,
+> `internal/core.ValidStoreName`; `cmd/cbus/jsonout.go`). Phase 4 is unchanged.
 >
 > Companion documents:
 > - [overview.md](overview.md) — system topology, design pillars, security model
