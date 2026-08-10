@@ -1,5 +1,10 @@
 # cbus release checklist
 
+> **STATUS: executed.** The quiesce window ran and v0.1.0 shipped 2026-07-17;
+> the repo is public and releases exist through v0.9.2. This file is preserved
+> as the pre-release verification ledger — the per-release sequence (tag,
+> `make release`, `cbus selfupdate`) still applies to every new release.
+
 The distribution machinery (cbus-7sg) is built as local commits. Everything that
 talks to a real GitHub release cannot be exercised until a release exists, which is
 gated behind the quiesce window (history scrub, then a private remote). This file is
