@@ -1,8 +1,5 @@
 # How it works
 
-![the same flow at the CLI level: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness](demo.gif)
-
-
 Each participating session **joins a channel** and **arms a listener**:
 
 - **Store** — `~/.claude-bus/<channel>/<alias>/` holds:
