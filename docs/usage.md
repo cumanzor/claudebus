@@ -88,8 +88,9 @@ channel can message every other; aliases are auto-assigned and recycled
 
 `join` / `leave` / `rename` / `departed` events are broadcast automatically to every
 non-dead peer in the channel as `kind=presence` messages (replayed at a
-joined-but-unarmed peer's first arm). Presence is **local-only** — it does not cross
-the relay. A SessionEnd hook (`cbus hook-exit`, wired manually in
+joined-but-unarmed peer's first arm). These client-originated events do not cross
+the relay; a relay channel gets its own connection-lifecycle `join`/`departed`
+presence pushed by the relay itself (see [relay.md](relay.md)). A SessionEnd hook (`cbus hook-exit`, wired manually in
 `~/.claude/settings.json`) announces graceful exits immediately; hard kills fall back
 to the lazy prune's `departed` broadcast. PreCompact/PostCompact hooks
 (`cbus hook-compact pre|post`, same manual wiring) announce compaction the same
