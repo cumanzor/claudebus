@@ -13,6 +13,12 @@ the CLI level:
 
 ![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness](docs/demo.gif)
 
+And a whole fleet driving itself — one prompt in, then the orchestrator spawns
+its coder and reviewer with `cbus spawn pane` and runs a task → review → verdict
+loop entirely over the bus:
+
+![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict](docs/demo-fleet.gif)
+
 Built entirely from **supported primitives** — the `Monitor` tool plus plain
 files — so it depends on no undocumented internals and works across terminal
 windows, tabs, tmux, and CCS profiles. The client is a single static Go binary.
