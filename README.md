@@ -6,7 +6,12 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
-![two live Claude Code sessions on one channel: main joins and stands by, fork-1 asks it for a status report over the bus, and the idle session wakes on the Monitor event and answers](docs/demo-live.gif)
+![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers](docs/demo-live.gif)
+
+Under the hood, this is what the armed Monitor is tailing — the same exchange at
+the CLI level:
+
+![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness](docs/demo.gif)
 
 Built entirely from **supported primitives** — the `Monitor` tool plus plain
 files — so it depends on no undocumented internals and works across terminal
@@ -60,8 +65,9 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
   file — [docs/usage.md](docs/usage.md)
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
   fresh fleets from starter templates — [docs/formations.md](docs/formations.md)
-- **Codex peers** — a Codex CLI session can hold a channel alias; cbus does the
-  listening for it — [docs/codex.md](docs/codex.md)
+- **Harness-neutral peers** — a Codex CLI session can hold a channel alias
+  today; cbus does the listening for it. Grok Build and OpenCode are planned
+  next — [docs/codex.md](docs/codex.md)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
