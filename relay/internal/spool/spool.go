@@ -5,6 +5,10 @@
 // queued (new), or delivered (cur) — never truncated, never half-read.
 // NOT power-loss durable (no fsync): acceptable for a session bus. Ordering
 // is by wall-clock name; a backwards clock step can reorder across the step.
+//
+// External readers exist: bd-dashboard's formations sweep reads {new,cur} dir
+// mtimes (read-only, never content) as a peer-activity signal, so this layout
+// is a compatibility surface — restructuring it blinds those readers.
 package spool
 
 import (
