@@ -1,5 +1,85 @@
 # Changelog (detailed)
 
+## [2026-08-11 21:27:02 UTC] [Commands/Docs] /bus-spawn both-sides flow + spool external-readers note
+
+[Attempt #1] `10a1a8d` (full `10a1a8dea03c152d3c2ea57664bda95c39196536`) +
+`f7f370a` (full `f7f370a5e9341d5b7a506f0b7143911f48f5a724`).
+2 commits, 3 files: commands/bus-spawn.md + docs/architecture/command-reference.md
+(10a1a8d, 50 insertions/17 deletions), relay/internal/spool/spool.go (f7f370a,
+4 insertions, comment-only). Carlos-authored working-tree changes that predate this
+session, reviewed and committed here with one gap closed. Riders on the windows-port
+branch by circumstance only -- neither is port work.
+
+[Motivating problem]
+`/bus-spawn` was a thin one-step wrapper: run `cbus spawn`, report the output. The
+child joins and arms itself, but the SPAWNING side never joined, so the parent could
+not hear the child until someone manually ran /bus-join -- the common case being you
+spawn a worker and immediately want to talk to it.
+
+[Files Changed]
+
+`10a1a8d` -- /bus-spawn wires both sides:
+- `commands/bus-spawn.md` -- description now says "both sides joined"; `Monitor` added
+  to allowed-tools (the skill arms a listener now). The one-step body becomes three
+  steps: (1) join THIS session first -- local: `cbus join <channel>` (idempotent);
+  remote `ch@host`: no join verb, so explicit alias + `cbus tail` to print the ws arm
+  spec (`cbus auth set <host>` if credentials are missing); (2) arm the persistent
+  Monitor (command source locally, ws source remotely; the ⚠ never-run-local-tail-in-
+  Bash warning carried over from bus-join.md); (3) `cbus spawn` as before. Steps 1-2
+  are skipped when a cbus Monitor is already armed for the channel. Join-before-spawn
+  ordering is called out as load-bearing: on a fresh channel the parent takes `main`
+  and the child's reservation takes `fork-1`, matching `cbus branch` layout (verified
+  against `pickAlias`, internal/client/store.go:62). The confirmation line reports
+  both addresses.
+- REVIEW GAP CLOSED IN THE SAME COMMIT: the draft left the no-channel invocation
+  undefined -- the argument-hint marks the channel optional and the old flow delegated
+  derivation to `cbus spawn` itself (`spawnDefaultAddress`: own registration, else
+  git toplevel basename, else `global`), but the new step 1 needs a concrete name and
+  bare `cbus join` refuses with usage (cmd/cbus/main.go:741). The vague "defaults to
+  this session's own channel, else the repo-derived name" sentence became an
+  actionable instruction: derive before step 1, mirroring spawnDefaultAddress --
+  channel half of `cbus whoami`'s first line (exits 1 when not joined), else git
+  toplevel basename, else `global` -- and use that name in every step.
+- `docs/architecture/command-reference.md` -- the §/bus-spawn entry rewritten from
+  "thin wrapper" to the both-sides description, including the derivation rule and the
+  main/fork-N layout claim; allowed-tools line updated to include Monitor.
+
+`f7f370a` -- spool layout is a compatibility surface:
+- `relay/internal/spool/spool.go` -- 4-line comment appended to the package doc:
+  bd-dashboard's formations sweep reads `{new,cur}` dir mtimes (read-only, never
+  content) as a peer-activity signal, so restructuring the Maildir layout blinds
+  those readers. Claim VERIFIED before committing against the NUC's deployed
+  `~/bd-dashboard/cc_sessions/activity.py:107-115`: iterates
+  `spool/<channel>/<peer>/`, appends the `cur` and `new` dir mtimes to its candidate
+  set, newest wins; its own header says "Read-only, mtimes only, never parse". The
+  LOCAL bd-dashboard checkout (April 2026, feature/tracker-binding) predates that
+  code entirely -- the deployed copy is the referent.
+
+[Possible Ripple Effects]
+- /bus-spawn sessions now hold a joined registration + armed Monitor the old flow
+  never created; anything counting channel members after a spawn sees one more peer
+  (the parent) than before. That is the point, but scripts asserting exact rosters
+  would notice.
+- The skill's fresh-channel layout promise (parent=main, child=fork-N) depends on
+  join-before-spawn ordering; reordering the steps silently changes who gets `main`.
+- The spool comment constrains future relay refactors: renaming/merging `{new,cur}`
+  now carries a documented external-reader cost (bd-dashboard degrades to
+  inbox-mtime-only for relay-armed peers, silently).
+- Merge note: main's command-reference.md is heavily restructured (v0.9.x docs era),
+  but its §/bus-spawn body is byte-identical to this branch's pre-edit text, so the
+  reconcile conflict, if any, resolves by taking this side of the section.
+
+[Testing Notes]
+- Doc/comment-only: no binary change intended; `go build ./...` unaffected.
+- Claims audited against source rather than executed: join usage refusal
+  (main.go:741), pickAlias main/fork-N (store.go:62), spawnDefaultAddress fallback
+  chain (spawn.go:139-146 + branchChannelFromGit, harness.go:247), whoami output
+  shape `channel/alias` + exit 1 on empty (main.go:687-707), bd-dashboard reader
+  (NUC activity.py, over ssh).
+- Not exercised: a live /bus-spawn invocation through a real session (the skill text
+  is model-directed prose; its first live run is the real test -- watch the omitted-
+  channel path in particular).
+
 ## [2026-08-03 18:09:01 UTC] [Build/Release/Windows] cbus-que M9: windows build/release wiring, plus a fleet-wide release-safety fix
 
 [Attempt #1] `927ac9c` (full `927ac9c4eaf59fc3cd62418671b8b15a8f5ee4ec`) +
