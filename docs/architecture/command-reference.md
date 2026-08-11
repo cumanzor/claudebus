@@ -1783,13 +1783,21 @@ add steps to try to suppress it."**
 
 ### `/bus-spawn [window|tab|tmux|pane] [channel|ch@host] [--model M] [--name N]`
 
-`allowed-tools: Bash(cbus:*), AskUserQuestion`
+`allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion`
 
-Thin wrapper over `cbus spawn` (§9): opens a **fresh** session (blank transcript,
-not a fork) in a new terminal, joined and armed on its own. The model asks for a
-target via AskUserQuestion only if none was passed, runs `cbus spawn`, and reports
-the result. The skill's argument hint surfaces `--model`/`--name`; `--role` is a
-`cbus spawn` flag used directly (§9).
+Wrapper over `cbus spawn` (§9) that wires BOTH sides. Before spawning, the skill
+joins the spawning session to the channel and arms its persistent Monitor tail —
+both skipped if a cbus Monitor is already armed for that channel. An omitted
+channel is derived up front, mirroring `spawnDefaultAddress`: own registration
+(`cbus whoami`), else git toplevel basename, else `global` — the join verb
+requires a name, so the skill can't leave derivation to spawn. Local: `cbus
+join` (idempotent), so a fresh channel gives the parent `main` and the child
+`fork-N`, the same layout as `cbus branch`. Remote `ch@host`: no join verb —
+explicit alias + the `cbus tail` ws arm-spec flow. Then it opens a **fresh**
+session (blank transcript, not a fork) in a new terminal, joined and armed on
+its own, and reports both addresses. The model asks for a target via
+AskUserQuestion only if none was passed. The skill's argument hint surfaces
+`--model`/`--name`; `--role` is a `cbus spawn` flag used directly (§9).
 
 ### `/bus-formation <verb> ...`
 
