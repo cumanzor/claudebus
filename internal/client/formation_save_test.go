@@ -78,7 +78,7 @@ func TestSaveFormationNew(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, rep, err := SaveFormation("roles", "roles")
+	f, rep, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v1")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
 	plantPeer(t, "roles", "reviewer", "sid-rev")
 
-	f2, rep, err := SaveFormation("roles", "roles")
+	f2, rep, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantPeer(t, "un", "coder", "sid-coder")
 	plantPeer(t, "un", "orchestrator", "sid-orch")
-	if _, _, err := SaveFormation("b31", "un"); err != nil {
+	if _, _, err := SaveFormation("b31", "un", nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// the coder's tab is closed and its registration reaped
@@ -232,7 +232,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, rep, err := SaveFormation("b31", "un")
+	f, rep, err := SaveFormation("b31", "un", nil)
 	if err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestSaveFormationRefusesToClobber(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fdir, "roles.json"), []byte(corrupt), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := SaveFormation("roles", "roles"); err == nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err == nil {
 		t.Fatal("want a refusal, not an overwrite")
 	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Errorf("error should say it refused to overwrite: %v", err)
@@ -283,13 +283,13 @@ func TestSaveFormationRefusesToClobber(t *testing.T) {
 func TestSaveFormationRefusesChannelRepoint(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "other", "coder", "sid-other")
-	if _, _, err := SaveFormation("roles", "roles"); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := SaveFormation("roles", "other")
+	_, _, err := SaveFormation("roles", "other", nil)
 	if err == nil || !strings.Contains(err.Error(), "records channel") {
 		t.Errorf("want a channel-repoint refusal, got %v", err)
 	}
@@ -301,8 +301,9 @@ func TestSaveFormationRefusesChannelRepoint(t *testing.T) {
 func TestSaveFormationGitHeadAnchor(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeer(t, "roles", "coder", "sid-coder")
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,12 +322,18 @@ func TestSaveFormationGitHeadAnchor(t *testing.T) {
 
 // TestSaveFormationSavedByOutsider: a formation can be saved by a session that is
 // not itself on the channel; savedBy must say so rather than invent an address.
+//
+// Re-aimed at a REFRESH: this used to mint, which the always-anchor invariant now
+// refuses (an outsider has no alias to anchor to). The subject was always savedBy,
+// not the mint, so the fixture moved and the refusal is owned by
+// TestSaveFormationRefusesAnchorlessMint.
 func TestSaveFormationSavedByOutsider(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
 	plantPeer(t, "roles", "coder", "sid-coder")
-	f, _, err := SaveFormation("roles", "roles")
+	plantLegacyFormation(t, "roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,6 +342,120 @@ func TestSaveFormationSavedByOutsider(t *testing.T) {
 	}
 	if f.AnchorAlias != "" {
 		t.Errorf("anchorAlias = %q, want empty when the saver is not on the channel", f.AnchorAlias)
+	}
+}
+
+// plantLegacyFormation writes the envelope an older binary left behind: no anchor,
+// no peers yet. Validate has always accepted a blank anchorAlias, which is exactly
+// why the legacy shape exists on disk to be refreshed.
+func plantLegacyFormation(t *testing.T, name, ch string) {
+	t.Helper()
+	f := &Formation{Schema: FormationSchema, Name: name, Channel: ch}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSaveFormationRefusesAnchorlessMint: a NEW envelope with no resolvable anchor
+// refuses, names BOTH remedies, and leaves nothing on disk.
+func TestSaveFormationRefusesAnchorlessMint(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
+	plantPeer(t, "roles", "coder", "sid-coder")
+
+	_, _, err := SaveFormation("roles", "roles", nil)
+	if err == nil {
+		t.Fatal("an anchorless envelope was minted")
+	}
+	for _, remedy := range []string{"join roles and save again", "write anchorAlias by hand into"} {
+		if !strings.Contains(err.Error(), remedy) {
+			t.Errorf("refusal does not name the remedy %q: %v", remedy, err)
+		}
+	}
+	path, perr := FormationPath("roles")
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if _, serr := os.Stat(path); !os.IsNotExist(serr) {
+		t.Errorf("a refused mint wrote %s (stat: %v)", path, serr)
+	}
+}
+
+// TestSaveFormationJoinedMintFillsAnchor: the same mint from a session that IS a peer
+// fills the anchor from anchorDefault and saves — the refusal is about an
+// unresolvable anchor, not about minting.
+func TestSaveFormationJoinedMintFillsAnchor(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantPeer(t, "roles", "coder", "sid-coder")
+	plantPeer(t, "roles", "orchestrator", "sid-orch")
+
+	f, rep, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("a joined mint must save: %v", err)
+	}
+	if !rep.New {
+		t.Error("first save reported as a refresh")
+	}
+	if f.AnchorAlias != "orchestrator" {
+		t.Errorf("anchorAlias = %q, want the saving session's alias", f.AnchorAlias)
+	}
+	if rep.AnchorMissing {
+		t.Error("a filled anchor was reported missing")
+	}
+}
+
+// TestSaveFormationAnchorlessRefreshWarnsThenHeals is the discriminating pair: ONE
+// legacy anchorless envelope, two savers. The outsider still saves and the report
+// says the envelope is defective; the joined session heals it through anchorDefault.
+// A refuse-on-refresh mutation kills the first half, a warn-only (never-fill)
+// mutation kills the second.
+func TestSaveFormationAnchorlessRefreshWarnsThenHeals(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
+	plantPeer(t, "roles", "coder", "sid-coder")
+	plantPeer(t, "roles", "orchestrator", "sid-orch")
+	plantLegacyFormation(t, "roles", "roles")
+
+	f, rep, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("an anchorless refresh must still save: %v", err)
+	}
+	if rep.New {
+		t.Error("a refresh of a planted file reported as new")
+	}
+	if !rep.AnchorMissing {
+		t.Error("an envelope that stayed anchorless saved without reporting it")
+	}
+	if f.AnchorAlias != "" {
+		t.Errorf("anchorAlias = %q, want it left blank when the saver is not on the channel", f.AnchorAlias)
+	}
+	if f.AnchorWarning() == "" {
+		t.Error("an anchorless envelope reports no warning")
+	}
+	// the refresh reached disk: it saved, it did not merely return
+	back, err := LoadFormation("roles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Peers) != 2 || back.AnchorAlias != "" {
+		t.Errorf("on disk after the refresh: peers=%d anchor=%q", len(back.Peers), back.AnchorAlias)
+	}
+
+	// same file, a joined saver: anchorDefault fills it and the defect is gone
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	f2, rep2, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f2.AnchorAlias != "orchestrator" {
+		t.Errorf("a joined re-save did not heal the anchor: %q", f2.AnchorAlias)
+	}
+	if rep2.AnchorMissing || f2.AnchorWarning() != "" {
+		t.Errorf("healed envelope still reports a defect (missing=%v warning=%q)", rep2.AnchorMissing, f2.AnchorWarning())
 	}
 }
 
@@ -411,7 +532,7 @@ func TestSaveEndToEndBirth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the saver captures the channel.
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +576,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles")
+	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -471,7 +592,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 
 	// a later save refreshes live facts; the hand-set direction must ride through
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
-	if _, _, err := SaveFormation("roles", "roles"); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 
@@ -501,5 +622,142 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 	// envelope would reject on the next apply is not actually preserved
 	if err := reloaded.Validate(); err != nil {
 		t.Errorf("round-tripped formation no longer validates: %v", err)
+	}
+}
+
+// anchorStr unwraps a drift anchor for asserting; a missing key is "".
+func anchorStr(t *testing.T, f *Formation, key string) string {
+	t.Helper()
+	raw, ok := f.DriftAnchors[key]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("anchor %q is not a JSON string: %s", key, raw)
+	}
+	return s
+}
+
+func TestSaveFormationHandAnchors(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
+	plantPeer(t, "roles", "coder", "sid-coder")
+
+	f, _, err := SaveFormation("roles", "roles", map[string]string{"bdx": "bdx-7m1", "note": "qa"})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if got := anchorStr(t, f, "bdx"); got != "bdx-7m1" {
+		t.Errorf("bdx anchor = %q", got)
+	}
+	if got := anchorStr(t, f, "note"); got != "qa" {
+		t.Errorf("note anchor = %q", got)
+	}
+
+	// a re-save WITHOUT the flag keeps the hand key — through the real save path,
+	// not just the field-preservation rule in isolation
+	f2, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if got := anchorStr(t, f2, "bdx"); got != "bdx-7m1" {
+		t.Errorf("bdx anchor after flagless re-save = %q (hand keys must survive)", got)
+	}
+
+	// an explicit flag overwrites its own key: the preservation rule protects hand
+	// edits from the machine, and the flag is the hand acting
+	f3, _, err := SaveFormation("roles", "roles", map[string]string{"bdx": "bdx-other"})
+	if err != nil {
+		t.Fatalf("re-save with flag: %v", err)
+	}
+	if got := anchorStr(t, f3, "bdx"); got != "bdx-other" {
+		t.Errorf("bdx anchor after explicit re-save = %q (flag must win)", got)
+	}
+	if got := anchorStr(t, f3, "note"); got != "qa" {
+		t.Errorf("untouched sibling key = %q (must survive)", got)
+	}
+}
+
+func TestSaveFormationRefusesGitHeadAnchor(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeer(t, "roles", "coder", "sid-coder")
+
+	_, _, err := SaveFormation("fresh", "roles", map[string]string{"git_head": "abc"})
+	if err == nil || !strings.Contains(err.Error(), "machine-owned") {
+		t.Fatalf("want the machine-owned refusal, got %v", err)
+	}
+	// refused BEFORE any store work: a fresh name must not leave an envelope behind
+	path, _ := FormationPath("fresh")
+	if fileExists(path) {
+		t.Error("a refused save must not write the envelope")
+	}
+}
+
+// plantPeerProfile is plantPeer with a profile stamped, the way a post-yv3 join
+// writes it.
+func plantPeerProfile(t *testing.T, ch, alias, sid, profile string) {
+	t.Helper()
+	dir := filepath.Join(CBUSDir(), ch, alias)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := peerMeta{
+		Alias: alias, Channel: ch, SessionID: sid,
+		Cwd: "/Users/dev/repos/AI/claudebus", ListenerPid: jsonNull, OwnerPid: jsonNull,
+		Host: ShortHostname(), TS: Now(), LastActivity: Now(), Profile: profile,
+	}
+	if err := writeMeta(dir, m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSaveFormationCapturesProfile(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "work")
+
+	f, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if f.Peers[0].Profile != "work" {
+		t.Errorf("captured profile = %q, want work", f.Peers[0].Profile)
+	}
+
+	// a blank meta must NOT clobber a hand-filled (or previously captured) profile
+	plantPeer(t, "roles", "coder", "sid-coder") // rewrites meta with no profile
+	f2, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	if f2.Peers[0].Profile != "work" {
+		t.Errorf("profile after blank-meta re-save = %q (blank never clobbers)", f2.Peers[0].Profile)
+	}
+
+	// a non-blank meta refreshes in place, like cwd
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "personal")
+	f3, _, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("refresh save: %v", err)
+	}
+	if f3.Peers[0].Profile != "personal" {
+		t.Errorf("profile after refresh = %q, want personal", f3.Peers[0].Profile)
+	}
+}
+
+func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder")                   // the saver is a peer, so the mint resolves an anchor
+	plantPeerProfile(t, "roles", "coder", "sid-coder", "bad profile") // space fails ValidName
+	f, rep, err := SaveFormation("roles", "roles", nil)
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if f.Peers[0].Profile != "" {
+		t.Errorf("garbage profile must not be captured, got %q", f.Peers[0].Profile)
+	}
+	if len(rep.SkippedBirth) != 1 || !strings.Contains(rep.SkippedBirth[0], "profile") {
+		t.Errorf("skip must be surfaced, got %v", rep.SkippedBirth)
 	}
 }

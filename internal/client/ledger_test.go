@@ -758,7 +758,7 @@ func TestSnapshotSaveRecordsTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, _, err := SaveFormation("cc", "cc")
+	f, _, err := SaveFormation("cc", "cc", nil)
 	if err != nil {
 		t.Fatalf("SaveFormation: %v", err)
 	}
@@ -947,7 +947,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		_, _, _ = Join("cc", "coder")
 		want := readClaim(filepath.Join(root, "cc", "coder"))
 		seedDeadMeta(t, filepath.Join(root, "cc", "coder", "meta.json")) // dying peer
-		f, _, err := SaveFormation("cc", "cc")
+		f, _, err := SaveFormation("cc", "cc", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -965,7 +965,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		if err := seed.Save(); err != nil {
 			t.Fatal(err)
 		}
-		f, _, err := SaveFormation("cc", "cc")
+		f, _, err := SaveFormation("cc", "cc", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -979,9 +979,10 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		root := setupStore(t)
 		liveUnarmedPeer(t, root, "cc", "a", "SA")
 		liveUnarmedPeer(t, root, "cc", "b", "SB")
+		t.Setenv("CLAUDE_CODE_SESSION_ID", "SA") // the saver is a peer, so the mint resolves an anchor
 		writeClaim("cc", "a", "run_X")
 		writeClaim("cc", "b", "run_Y")
-		f, rep, err := SaveFormation("cc", "cc")
+		f, rep, err := SaveFormation("cc", "cc", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

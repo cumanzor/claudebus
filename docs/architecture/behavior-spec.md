@@ -21,8 +21,8 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > 6. **Trailing junk is an error on fixed-arity verbs** (bash silently discarded it, e.g.
 >    `cbus whoami junk`).
 > 7. `--help` no longer lists the obsolete `CC_BRANCH` env line (branch is native). The
->    `CBUS_PYTHON (default python3)` help line is still printed for byte-parity
->    (COMPAT(P3 #4)) but the Go client ignores it.
+>    `CBUS_PYTHON (default python3)` help line was kept for byte-parity
+>    (COMPAT(P3 #4)) but ignored, then dropped from `--help` at P3 homogenization.
 > 8. New verb: `cbus --version` (prints the build stamp; bash had no version verb).
 > 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
@@ -101,8 +101,8 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > displacement gate (D5) plus a follower self-identity check; see the closure note
 > appended to §8.7. Local dormancy markers each name the remedy that actually
 > works for their cause, not a uniform "re-arm" that was wrong three times out of
-> four. One new local-only stderr warning (port-map D7) fires once on join/send/
-> tail/rename/leave/whoami when `CLAUDE_CODE_SESSION_ID` is unset, naming what
+> four. One new local-only stderr warning (port-map D7) fires once on join, send
+> (local and remote), and local tail when `CLAUDE_CODE_SESSION_ID` is unset, naming what
 > sessionless mode actually loses. None of this touches the wire, presence, the
 > relay, or remote tail — those replay semantics are unchanged and out of scope.
 
@@ -601,7 +601,7 @@ Maildir per `channel/alias`: write `tmp/<name>` then rename into `new/`; `MarkDe
 Server upgrade requires GET, `Upgrade: websocket`, `Connection: upgrade` token, version 13, 16-byte key; echoes accept + selected subprotocol. Client `Dial` is TCP-only (no TLS) — wstail is loopback-only, NOT a client-side bridge. Opcodes: Text/Close/Ping/Pong only — **no binary, no fragmentation, no extensions/compression** (hard errors). `maxFrame = 1 MiB` enforced **read-side only** — `WriteFrame` has no size check, so a near-cap /send reframes into a frame the contract itself rejects; a compliant reader drops the connection and the message is already in `cur/` → deterministic loss (fill-r1-1 §5). Masking direction enforced both ways; control payloads ≤125 read-side. WriteFrame is mutex-serialized, always FIN=1.
 
 ### Deploy & systemd
-deploy.sh: rsync src → build on NUC (+ smoke-run `-h | head -1 || true` — proves the binary executes on target) → seed token if missing → `sudo cp unit && daemon-reload && enable && restart && is-active` → healthz. Requires **passwordless sudo** (non-interactive ssh); a sudo failure aborts AFTER the new binary is on disk → stale-process state with no flag. Unit: `Restart=on-failure`/5 s, User=relay, WorkingDirectory anchors relative defaults, no hardening directives. Restart drops all tails (client 1006).
+deploy.sh: rsync src → build on the host (a failed build ABORTS the deploy; the `-h` smoke line is shown to the operator and nothing gates on it) → seed token if missing → sed-template the unit (`@USER@`/`@DEST@`) → `sudo cp && daemon-reload && enable && restart && is-active` → healthz. Requires **passwordless sudo** (non-interactive ssh); a sudo failure aborts AFTER the new binary is on disk → stale-process state with no flag. Unit: `Restart=on-failure`/5 s, a dedicated service user, WorkingDirectory anchors relative defaults, no hardening directives. Restart drops all tails (client 1006).
 
 ## 11. Claude Code integration contracts (cc-integration A1-A17)
 
@@ -677,3 +677,89 @@ Preserve-or-rethink flags for a port; dispositions in [port-map.md](port-map.md)
 14. The 1006 re-arm is model-memory driven — nothing watches the ws; a forgotten instruction leaves the tail down until noticed (`cbus list @host` shows off/absent).
 15. Frame markers unescaped in-band; body lines starting `◀ cbus ` are spoofable (consistent with trust posture).
 16. Never-Bash warning duplicated across 3 skills + 5 CLI sites; the bootstrap prompt deliberately single-sourced in the binary.
+
+## 14. The anchor model (resume era)
+
+Added after the v1 sections above; semantics of the reboot-recovery chain
+(`formation resume`, `apply --mode`, the launch-intent guard, always-anchor).
+
+- **Always-anchor.** An envelope without an `anchorAlias` is a defect, not a
+  style gap: the anchor is the restore seat. Save refuses to *mint* one
+  (refuse-over-autopick: a wrong auto-anchor becomes the wrong restore seat
+  later), but a *refresh* of a legacy anchorless file saves-and-warns — a hard
+  rule in `Validate` would fail `LoadFormation` at the refresh gate's
+  refuse-to-overwrite load and strand every legacy file the invariant exists
+  to converge. That is why the warning lives in `Formation.AnchorWarning()`,
+  outside `Validate`, permanently.
+- **First hop.** `formation resume` launches only the anchor, from a bare
+  shell, with the recorded profile forcing `ccs <profile>` (a fresh
+  post-reboot shell has no CCS env; a plain `claude --resume` against the
+  wrong config dir comes up blank under the same session id — the failure
+  that motivated profile capture). All identity prohibitions are enforced at
+  a third parity site (`resumeAnchorWorld`, beside `decidePeer` and
+  `BootstrapPeer`); a change to one must visit all three.
+- **Blank profile is recovered by sweep, never by widening.** An envelope from
+  before profile capture records no profile, so a bare shell resolves no
+  instance roots and reads every profiled transcript as gone (cbus-kl4: 16 of
+  17 envelopes in the field store). Before the transcript gate refuses,
+  `InstanceProfiles` sweeps `~/.ccs/instances/*/projects` for the sid and the
+  transcript's location names the profile: a unique owner is adopted for BOTH
+  the gate and the launch prefix (the profile that found the transcript is the
+  one the relaunch runs under — letting them diverge is the blank-under-same-sid
+  failure again), reported to the operator, and stamped by the anchor's next
+  save. Several owners refuse by name; swept-empty refuses stating the search
+  was exhaustive. A *recorded* profile is never overridden — the envelope is
+  the authority — and `TranscriptPath` itself stays narrow: the sweep is a
+  deliberate, named verb-level recovery, not an implicit widening of every
+  caller's lookup.
+- **The guard has two lifetimes on purpose.** The intent *marker* must
+  SURVIVE its writer (the launcher CLI exits on the success path), so it is a
+  file with a TTL and a same-sid-join clear — launcher liveness plays no role
+  in clearing (a liveness rule would void the guard milliseconds after every
+  write). The *reclaim window* must DIE with its holder, so it is a kernel
+  lock (`flock`, released on death by construction). Same file, two
+  mechanisms, one reason each; the claim itself is a single-syscall
+  first-writer-wins `os.Link` and needs no serialization. Reclaim OVERWRITES
+  the corpse by rename and never unlinks: an absent path is the claim signal,
+  so any reclaim that unlinks first reopens the race it heals.
+- **The decision brief carries stable facts only.** Saved mode, origin,
+  transcript-at-compose-time, machine — all fixed when the brief is composed.
+  Liveness is the one volatile fact, and a stored liveness marker lying in
+  both directions is this tool's founding lesson; the brief names the
+  dry-run as where present-right-now comes from. Examples are **runnable as
+  written**: present-transcript AND on-this-host (blank machine means here,
+  the exact negation of apply's skip), capped, absent when empty. The roster
+  may honestly render a foreign peer's transcript as present while the
+  example declines to name it — the roster states facts, the example
+  promises actions.
+- **`--mode` is a per-run override, never a write.** In-memory peer-mode
+  rewrite on the `--channel` precedent; the planner's gates run byte-unchanged
+  underneath, which is the entire safety argument.
+- **Profile capture is fleet-floor semantics.** Join stamps the session's own
+  CCS instance (structural check on `CLAUDE_CONFIG_DIR`); save refreshes it
+  like `cwd`. An older binary's meta rewrite drops the unknown key (the
+  typed-struct rewriter class), so the field is best-effort until the fleet
+  floor includes it; hand fills in envelopes survive regardless.
+
+## 15. Codex integration semantics (multi-harness)
+
+The load-bearing rules, beyond the verb surface (command-reference has that):
+
+- **Discovery is a protocol notification, not a hook.** SessionStart hooks do
+  not fire in the app-server/`--remote` topology (live-probed), so `cbus codex`
+  learns the TUI's thread from a passive initialize-only connection receiving
+  `thread/started` — which also rules out `thread/list` (it returns the user's
+  whole history; "the one live thread" is not knowable from it).
+- **The bridge is the peer's listener.** It arms with its own pid as the
+  liveness signal and tails the inbox with the shared follower loop; a codex
+  peer therefore has real structural liveness like any other, and must never
+  run `cbus tail` itself.
+- **One frame = one injection, and injections are expensive.** Each framed bus
+  message becomes exactly one codex turn — steer when a turn is active, else
+  open one (resuming the thread if the server forgot it). Presence frames are
+  skipped on purpose (a full model turn is too costly for join/leave
+  ceremony) while the cursor still advances over them.
+- **The stop-hook treats timeout as failure, never as signal.** It long-polls
+  under the codex hook limit; traffic returns a block decision codex injects
+  as a continuation turn; no traffic returns nothing and the stop proceeds.
+  The wait must stay under codex's own timeout or the hook dies for nothing.

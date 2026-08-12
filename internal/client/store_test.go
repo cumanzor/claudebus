@@ -251,3 +251,45 @@ func TestUnregisterAndLeave(t *testing.T) {
 		t.Errorf("peer missing leave presence: %q", p)
 	}
 }
+
+func TestJoinStampsProfile(t *testing.T) {
+	setupStore(t)
+	// structural CCS instance dir: <root>/.ccs/instances/<profile>
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), ".ccs", "instances", "work"))
+	if _, _, err := Join("dev", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), "dev", "worker", "meta.json"))
+	if !ok || m.Profile != "work" {
+		t.Fatalf("profile = %q, want work", m.Profile)
+	}
+}
+
+func TestJoinProfileBlankOutsideCCS(t *testing.T) {
+	setupStore(t)
+	// a config dir that is not a CCS instance must stamp NOTHING — the discriminating
+	// case is a path whose basename could pass a substring check but fails the
+	// structural parent test
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "instances", "work"))
+	if _, _, err := Join("dev", "solo"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), "dev", "solo", "meta.json"))
+	if !ok || m.Profile != "" {
+		t.Fatalf("profile = %q, want blank outside CCS", m.Profile)
+	}
+}
+
+func TestJoinStampsProfileTrailingSlash(t *testing.T) {
+	setupStore(t)
+	// a trailing separator must not defeat the structural check (review finding:
+	// Dir on an uncleaned path returns the path itself)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), ".ccs", "instances", "work")+string(filepath.Separator))
+	if _, _, err := Join("dev", "slashy"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), "dev", "slashy", "meta.json"))
+	if !ok || m.Profile != "work" {
+		t.Fatalf("profile = %q, want work despite trailing separator", m.Profile)
+	}
+}

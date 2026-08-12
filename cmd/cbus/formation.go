@@ -14,7 +14,7 @@ import (
 // formationUsage advertises only the verbs that exist. bootstrap lands in a later
 // milestone and is absent on purpose — a help text that promises a verb the binary
 // does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
+const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | resume <name> [--brief TEXT] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -27,6 +27,8 @@ func runFormation(args []string) int {
 		return runFormationSave(args)
 	case "apply":
 		return runFormationApply(args)
+	case "resume":
+		return runFormationResume(args)
 	case "bootstrap":
 		return runFormationBootstrap(args)
 	case "list":
@@ -41,25 +43,40 @@ func runFormation(args []string) int {
 }
 
 func runFormationSave(args []string) int {
-	const use = "usage: cbus formation save <name> [channel]"
+	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...]"
 	if len(args) == 0 {
 		return die(use)
 	}
-	if err := noExtra(args, 2, use); err != nil {
+	// positionals first, then options (bootstrap's shape) — the optional channel
+	// cannot start with '-', so a dash token ends the positionals.
+	name := args[0]
+	rest := args[1:]
+	ch := ""
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		ch = rest[0]
+		rest = rest[1:]
+	}
+	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true}, nil, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
 		return die("%v", err)
 	}
-	name := args[0]
-	ch := ""
-	if len(args) > 1 {
-		ch = args[1]
+	anchors := map[string]string{}
+	for _, kv := range p.all("--anchor") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return die("--anchor: want key=value, got %q", kv)
+		}
+		anchors[k] = v
 	}
 	if ch == "" {
-		var err error
 		if ch, err = ownChannel(); err != nil {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormation(name, ch)
+	f, rep, err := client.SaveFormation(name, ch, anchors)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -84,8 +101,8 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
 	}
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;")
-		fmt.Println("  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates")
+		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;")
+		fmt.Println("  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded")
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the
 	// terminal, not only in the report struct (C4) — a silent skip reads as a clean save.
@@ -100,6 +117,11 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  WARNING: peers claim %d different formation runs (%s)\n",
 			len(rep.RunConflict), strings.Join(rep.RunConflict, ", "))
 		fmt.Println("  the envelope's formationRunId was left blank rather than pick one; this channel's run is split")
+	}
+	// A refresh that stays anchorless is written, never silent: minting one refuses,
+	// so this is the only path that can produce a defective envelope on purpose.
+	if rep.AnchorMissing {
+		fmt.Printf("  WARNING: %s\n", f.AnchorWarning())
 	}
 	fmt.Printf("  check it: cbus formation show %s\n", name)
 	return 0
@@ -121,14 +143,14 @@ func runFormationApply(args []string) int {
 	if m := phase1Refusal("formation apply"); m != "" {
 		return die("%s", m)
 	}
-	const use = "usage: cbus formation apply <name> [--channel ch] [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]"
+	const use = "usage: cbus formation apply <name> [--channel ch] [--mode resume|fork|template] [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]"
 	if len(args) == 0 {
 		return die(use)
 	}
 	// name first, then flags — the shape `send` uses (splitVerbArgs scans LEADING
 	// options only, so the positional cannot sit behind them).
 	name := args[0]
-	p, err := splitVerbArgs(args[1:], map[string]bool{"--only": true, "--wait": true, "--brief": true, "--channel": true},
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--only": true, "--wait": true, "--brief": true, "--channel": true, "--mode": true},
 		map[string]bool{"--dry-run": true}, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
@@ -142,6 +164,9 @@ func runFormationApply(args []string) int {
 	}
 	if v, ok := p.has("--channel"); ok {
 		opts.Channel = v // per-run override; validated in client.Apply
+	}
+	if v, ok := p.has("--mode"); ok {
+		opts.Mode = v // per-run override; validated in client.Apply
 	}
 	if v, ok := p.has("--only"); ok {
 		for _, a := range strings.Split(v, ",") {
@@ -167,6 +192,9 @@ func runFormationApply(args []string) int {
 	fmt.Printf("resolved %q from the %s\n", name, source)
 	if opts.Channel != "" && opts.Channel != f.Channel {
 		fmt.Printf("channel: %s -> %s (this run only; the %s file is untouched)\n", f.Channel, opts.Channel, name)
+	}
+	if opts.Mode != "" {
+		fmt.Printf("mode: every peer apply would launch -> %s (this run only; the %s file is untouched)\n", opts.Mode, name)
 	}
 	rep, err := client.Apply(f, opts, applyForker)
 	if rep != nil {
@@ -215,6 +243,44 @@ func renderApplyReport(f *client.Formation, rep *client.ApplyReport, opts client
 	if opts.Wait > 0 && !rep.Converged() {
 		fmt.Println("  NOT converged: a peer never answered. apply reconciles — fix the cause and re-run it.")
 	}
+}
+
+// runFormationResume is the first-hop verb: launch the formation's anchor session
+// back into a terminal from a bare shell, so a reboot recovery never starts with a
+// human copying session ids out of a JSON file. The anchor reconciles the rest.
+func runFormationResume(args []string) int {
+	const use = "usage: cbus formation resume <name> [--brief TEXT]"
+	if len(args) == 0 {
+		return die(use)
+	}
+	name := args[0]
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--brief": true}, nil, true)
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
+		return die("%v", err)
+	}
+	brief, _ := p.has("--brief")
+	f, source, err := client.ResolveFormation(name)
+	if err != nil {
+		return die("%v", err)
+	}
+	fmt.Printf("resolved %q from the %s\n", name, source)
+	created, inferred, err := client.ResumeAnchor(f, brief, applyForker)
+	if err != nil {
+		return die("%v", err)
+	}
+	anchor := f.AnchorAlias
+	fmt.Printf("anchor %q launched (resuming its own session) — it will re-join %s, re-arm, and reconcile the fleet with 'cbus formation apply %s'\n",
+		anchor, f.Channel, f.Name)
+	if inferred != "" {
+		fmt.Printf("  profile: %s — inferred from the transcript's location, the envelope records none; the anchor's next 'cbus formation save' stamps it\n", inferred)
+	}
+	if created != "" {
+		fmt.Printf("  surface: %s\n", created)
+	}
+	return 0
 }
 
 // runFormationBootstrap prints one peer's first-turn prompt and nothing else — the
@@ -337,7 +403,9 @@ func renderFormation(f *client.Formation) {
 	fmt.Printf("formation: %s\n", f.Name)
 	fmt.Printf("channel:   %s (%s)\n", f.Channel, host)
 	fmt.Printf("saved:     %s by %s\n", orQ(f.SavedAt), orQ(f.SavedBy))
-	if f.AnchorAlias != "" {
+	if w := f.AnchorWarning(); w != "" {
+		fmt.Printf("anchor:    (none)  DEFECT — %s\n", w)
+	} else {
 		fmt.Printf("anchor:    %s\n", f.AnchorAlias)
 	}
 	if len(f.DriftAnchors) > 0 {
@@ -365,8 +433,8 @@ func renderFormation(f *client.Formation) {
 			anchor = "  [anchor]"
 		}
 		fmt.Printf("  %s%s\n", p.Alias, anchor)
-		fmt.Printf("    model=%s mode=%s origin=%s target=%s machine=%s\n",
-			orQ(p.Model), orQ(p.Mode), orQ(p.Origin), orQ(p.Target), orQ(p.Machine))
+		fmt.Printf("    model=%s mode=%s origin=%s profile=%s target=%s machine=%s\n",
+			orQ(p.Model), orQ(p.Mode), orQ(p.Origin), orQ(p.Profile), orQ(p.Target), orQ(p.Machine))
 		switch {
 		case p.Rolefile != "":
 			fmt.Printf("    role:     %s\n", p.Rolefile)
@@ -394,6 +462,9 @@ func renderFormation(f *client.Formation) {
 		}
 	}
 	var warn []string
+	if f.AnchorWarning() != "" {
+		warn = append(warn, "no anchor")
+	}
 	if stale > 0 {
 		warn = append(warn, fmt.Sprintf("%d stale sid(s)", stale))
 	}

@@ -123,6 +123,35 @@ func TestFormationShowVerb(t *testing.T) {
 	}
 }
 
+// TestFormationShowAnchorlessDefect: show renders a missing anchor as a named defect
+// row rather than omitting the line — an absent row reads as "nothing to see", which
+// is how an unrestorable envelope stayed invisible until resume refused it.
+func TestFormationShowAnchorlessDefect(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
+	t.Setenv("HOME", t.TempDir())
+	saveFixture(t, dir, "roles", strings.Replace(fixtureRoles(),
+		`"anchorAlias": "orchestrator"`, `"anchorAlias": ""`, 1))
+
+	out := captureStdout(t, func() {
+		if rc := runFormation([]string{"show", "roles"}); rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+	})
+	for _, want := range []string{"anchor:    (none)", "DEFECT", "resume refuses this envelope"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("anchorless show missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "warnings: no anchor, 1 stale sid(s), 1 role TODO(s)") {
+		t.Errorf("the anchor defect is not counted in the summary:\n%s", out)
+	}
+	if strings.Contains(out, "[anchor]") {
+		t.Errorf("a peer was marked anchor on an anchorless envelope:\n%s", out)
+	}
+}
+
 // TestFormationShowUncheckedNotStale: a peer recorded on another machine must not
 // be called stale by a host that cannot see its transcripts.
 func TestFormationShowUncheckedNotStale(t *testing.T) {
@@ -183,7 +212,7 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"rolefile/role and profile are yours to fill in", "cbus formation show roles"} {
+		"rolefile/role are yours to fill in", "cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
 		}
@@ -426,7 +455,7 @@ func TestFormationApplyBriefThroughCLI(t *testing.T) {
 func TestFormationSaveRendersSkippedBirth(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	// a peer whose meta carries a garbage origin (hand-corrupted meta)
 	pdir := filepath.Join(dir, "roles", "coder")
 	if err := os.MkdirAll(pdir, 0o755); err != nil {
@@ -454,5 +483,93 @@ func TestFormationSaveRendersSkippedBirth(t *testing.T) {
 	// the guidance line is truthful now (origin/model ARE captured when present)
 	if strings.Contains(out, "the store records nothing else") {
 		t.Errorf("the stale 'records nothing else' line must be gone:\n%s", out)
+	}
+}
+
+func TestFormationSaveAnchorFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+
+	// channel positional then repeated flags — the documented order
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "bdx=bdx-7m1", "--anchor", "note=qa"}); rc != 0 {
+		t.Fatalf("save with anchors: rc=%d", rc)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, ".formations", "far.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"bdx": "bdx-7m1"`, `"note": "qa"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("envelope missing %s:\n%s", want, body)
+		}
+	}
+
+	// channel omitted, flag still parsed (resolves this session's own channel)
+	if rc := runFormation([]string{"save", "near", "--anchor", "bdx=bdx-7m1"}); rc != 0 {
+		t.Fatalf("save with flag and no channel: rc=%d", rc)
+	}
+
+	// the machine-owned key and a pair with no '=' both die
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "git_head=x"}); rc == 0 {
+		t.Error("git_head anchor must be refused")
+	}
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "malformed"}); rc == 0 {
+		t.Error("a valueless anchor must be refused")
+	}
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "=v"}); rc == 0 {
+		t.Error("an empty anchor key must be refused")
+	}
+	// trailing junk after flags is still an error
+	if rc := runFormation([]string{"save", "far", "roles", "--anchor", "k=v", "extra"}); rc == 0 {
+		t.Error("trailing junk must still die")
+	}
+}
+
+func TestFormationResumeVerbErrors(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"no name", []string{"resume"}},
+		{"unknown flag", []string{"resume", "x", "--bogus"}},
+		{"missing formation", []string{"resume", "ghost"}},
+		{"trailing junk", []string{"resume", "x", "extra"}},
+	} {
+		if rc := runFormation(tc.args); rc == 0 {
+			t.Errorf("%s: rc=0, want failure", tc.name)
+		}
+	}
+}
+
+// TestFormationSaveWarnsOnAnchorlessRefresh: the same shape as the RunConflict
+// warning — a SaveReport field no user-facing path renders reports to nobody. The
+// refresh must still succeed (refusing would strand legacy envelopes), so the print
+// is the only thing standing between a defective envelope and a clean-looking save.
+func TestFormationSaveWarnsOnAnchorlessRefresh(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody") // not a peer: nothing to anchor to
+	plantMeta(t, dir, "roles", "coder", "sid-coder")
+	// what an older binary left behind: loadable, anchorless
+	saveFixture(t, dir, "roles", `{"schema":"cbus-formation/v1","name":"roles","channel":"roles","anchorAlias":"","peers":[]}`)
+
+	var rc int
+	out := captureStdout(t, func() { rc = runFormation([]string{"save", "roles", "roles"}) })
+	if rc != 0 {
+		t.Fatalf("an anchorless refresh must still save, rc=%d:\n%s", rc, out)
+	}
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, "no anchorAlias") {
+		t.Errorf("the anchorless refresh saved without warning at the terminal:\n%s", out)
+	}
+	// and the same door refuses the MINT, so the warning is not standing in for a gate
+	dir2 := t.TempDir()
+	t.Setenv("CBUS_DIR", dir2)
+	plantMeta(t, dir2, "roles", "coder", "sid-coder")
+	if rc := runFormation([]string{"save", "roles", "roles"}); rc == 0 {
+		t.Error("the save door minted an anchorless envelope")
 	}
 }

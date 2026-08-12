@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# deploy the relay to the NUC: rsync source, build with the NUC's Go, seed a
+# deploy the relay to its host: rsync source, build with the host's Go, seed a
 # token if missing, install + start the systemd unit. Idempotent.
+# Site-specific values (ssh alias, dest, service user) come from env or an
+# untracked relay/deploy.local beside this script — the tree stays generic.
 set -euo pipefail
 
-HOST="${CBUS_RELAY_HOST:-nuc}"
-DEST="/home/relay/cbus-relay"
+here_early="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$here_early/deploy.local" ] && . "$here_early/deploy.local"
+HOST="${CBUS_RELAY_HOST:-relay}"
+DEST="${CBUS_RELAY_DEST:-/home/relay/cbus-relay}"
+RUSER="${CBUS_RELAY_USER:-relay}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)" # repo root: go.mod (module claudebus) + internal/core live here
 
@@ -24,7 +29,7 @@ rsync -a --delete \
 ssh "$HOST" "rm -rf ${DEST:?}/src/cmd ${DEST:?}/src/cbus-relay.service"
 
 echo "== build on $HOST =="
-ssh "$HOST" "cd $DEST/src && go build -o $DEST/cbus-relay ./relay/cmd/cbus-relay && go build -o $DEST/wstail ./relay/cmd/wstail && $DEST/cbus-relay -h 2>&1 | head -1 || true"
+ssh "$HOST" "cd $DEST/src && go build -o $DEST/cbus-relay ./relay/cmd/cbus-relay && go build -o $DEST/wstail ./relay/cmd/wstail && { $DEST/cbus-relay -h 2>&1 | head -1 || true; }"
 
 echo "== token =="
 ssh "$HOST" "[ -s $DEST/token ] && echo 'token exists' || { umask 077 && openssl rand -hex 32 > $DEST/token && echo 'token created'; }"
@@ -33,7 +38,7 @@ echo "== systemd unit =="
 # enable for boot persistence, then RESTART to load the freshly-built binary.
 # `enable --now` only *starts* a stopped unit — it is a no-op on an already-
 # active one, so it would silently keep serving the old binary after a rebuild.
-ssh "$HOST" "sudo cp $DEST/src/relay/cbus-relay.service /etc/systemd/system/cbus-relay.service && sudo systemctl daemon-reload && sudo systemctl enable cbus-relay && sudo systemctl restart cbus-relay && sleep 1 && sudo systemctl is-active cbus-relay"
+ssh "$HOST" "sed -e 's|@USER@|$RUSER|g' -e 's|@DEST@|$DEST|g' $DEST/src/relay/cbus-relay.service > /tmp/cbus-relay.service && sudo cp /tmp/cbus-relay.service /etc/systemd/system/cbus-relay.service && sudo systemctl daemon-reload && sudo systemctl enable cbus-relay && sudo systemctl restart cbus-relay && sleep 1 && sudo systemctl is-active cbus-relay"
 
 echo "== health =="
 ssh "$HOST" "curl -fsS http://127.0.0.1:8090/healthz"

@@ -80,6 +80,312 @@ spawn a worker and immediately want to talk to it.
   is model-directed prose; its first live run is the real test -- watch the omitted-
   channel path in particular).
 
+## [2026-08-09 23:10:00 UTC] [Formation/Resume] blank-profile envelopes: instance sweep
+
+[Attempt #1] `7903eb1`. Found by Carlos's first field test of resume on an older
+formation: `cbus formation resume 'android-waiver-scan'` from a bare shell
+refused with "aged out or lives under another profile" while the transcript sat
+1.6MB under ~/.ccs/instances/work. Filed as cbus-kl4 with a store census: 16 of
+17 envelopes record an empty profile on every peer (only dd-rollout, re-saved
+post-capture, records one) -- including dd-cleanup saved the day before, because
+a save captures what the seat metas hold and pre-capture joins contribute
+nothing. The whole back catalog was button-unresumable.
+
+[The defect]
+transcriptRoots builds the instance root from HOME + the RECORDED profile
+(fb948f8). With a blank profile there is nothing to build from, and a bare
+shell adds no cfg root, so only ~/.claude/projects was searched -- structurally
+empty on a CCS machine. The refusal's second clause was the truth; "aged out"
+was not.
+
+[The fix]
+internal/client/transcript.go: InstanceProfiles(sid) -- a deliberate, named
+sweep of ~/.ccs/instances/*/projects (plus the cfg-sibling base) returning the
+distinct owning profiles, sorted; same sidRe screen as TranscriptPath (the sid
+is untrusted text used as a glob). NOT folded into TranscriptPath: a lookup
+that silently matched other profiles would let a caller find a transcript
+under one profile and launch under another -- the blank-under-same-sid failure.
+internal/client/formation_resume.go: when the anchor's recorded profile is
+blank and HasTranscript misses, the gate consults the sweep. One owner: adopt
+for the gate AND anchorLaunchPrefix AND peerEnv, return it as inferredProfile.
+Several: refuse naming them. None: refuse stating the search was exhaustive.
+A recorded profile never sweeps -- its miss refuses exactly as before.
+cmd/cbus/formation.go prints the inference under the launch line; the anchor's
+next `formation save` stamps the profile and the envelope heals.
+
+[Files Changed]
+- internal/client/transcript.go (+InstanceProfiles, sort import)
+- internal/client/formation_plan.go (PlanWorld.InstanceProfiles seam, wired in
+  GatherPlanWorld beside HasTranscript)
+- internal/client/formation_resume.go (gate + launch plumb; ResumeAnchor and
+  resumeAnchorWorld gain the inferredProfile return)
+- cmd/cbus/formation.go (operator notice)
+- tests: transcript_test.go, formation_resume_test.go, launch_intent_test.go
+  (signature sites)
+
+[Possible Ripple Effects]
+`show`/SidState and apply's decidePeer deliberately do NOT sweep: show still
+reads a blank-profile peer as STALE where resume now launches, and apply run
+from a foreign profile still templates such peers. Both are recorded on
+cbus-kl4 as residual surfaces; the dominant case self-heals because the
+resurrected anchor runs under the inferred profile, so ITS apply sees the
+transcripts through the cfg root. The decision brief's roster may read GONE
+for fleet peers at bare-shell compose time; the brief already hands liveness
+and presence to `apply --dry-run` by name, which re-reads from the anchor's
+healed env.
+
+[Testing Notes]
+go test ./... green (gofmt gate included); GOOS=linux amd64+arm64 compile
+gates pass (windows/amd64 fails on main's pre-existing close.go/codexwrap.go
+syscall use -- the windows-port branch's remit, untouched here). Five new
+tests: the sweep itself (owners sorted, ambiguity reported, injection screened),
+inference adopted for argv AND child env against a WRONG-profile shell (env
+would make it pass vacuously), both refusal shapes launch nothing, recorded
+profile never sweeps (sweep stub t.Errors on call), and an end-to-end run with
+the real sweep + real TranscriptPath closure against a real temp store in the
+android-waiver-scan shape. Two mutants killed on their aimed assertions:
+launch-from-recorded-profile (argv asserts fired) and always-sweep (sentinel +
+refusal + forked-1 all fired).
+
+## [2026-08-09 21:55:00 UTC] [Transcript/Fix] bare-shell resume of profiled formations
+
+[Attempt #1] `fb948f8`, ships as v0.9.1. Found by the ccresume:// handler work
+(cbus-phh): the full-launch field test refused a warm formation through the real
+LaunchServices door, and the coder traced it to transcriptRoots rather than the
+handler.
+
+[The defect]
+transcriptRoots derived the CCS profile root from $CLAUDE_CONFIG_DIR. Bare
+post-reboot terminals and GUI-launched shells have no such variable (ccs sets it
+per session), so with cfg unset only ~/.claude/projects was searched and every
+profiled formation's resume refused with no-transcript-found — the northstar
+scenario itself, broken on CCS machines, masked in every prior field test
+because those ran from this session's env-carrying shell. Scope precisely: only
+PROFILED formations; blank-profile envelopes store under ~/.claude and were
+always fine (attribution per the coder's evidence-strength correction: the path
+facts are theirs, the masking claim verified by the orchestrator against its
+own shell env).
+
+[The fix]
+The profile root resolves from HOME + the recorded profile
+(~/.ccs/instances/<profile>/projects), structurally — the envelope is the
+authority, the env is a hint. Same trust move anchorLaunchPrefix made for the
+launch prefix; the gate now matches the launcher. cfg-derived roots are kept
+for non-standard layouts, deduped as before.
+
+[Testing Notes]
+Regression test pins the bare-shell profiled lookup (HOME override, env
+explicitly empty) and the blank-profile inverse (bare shells still cannot see
+instance roots for pre-profile envelopes — the documented caveat, unchanged).
+Full suite 7/7; linux amd64+arm64 builds.
+
+## [2026-08-08 20:15:00 UTC] [Formation/AnchorModel] always-anchor + the decision brief
+
+[Attempt #1] `b78f1bc` (cbus-j4i) + `9bfd332` (cbus-zhj) + test riders `2d262c2`
+(c1), `324af80` (c2/c3), `76cc0a2` (example same-host filter). Built by the
+anchormodel formation (coder on opus, reviewer on fable, orchestrator session),
+based on the mode+guard lineage because the brief renders real --mode commands.
+
+[Motivating problem]
+The northstar ruling: a formation envelope always has an anchor, and the restored
+anchor decides -- or is prompted to decide -- how the rest comes back, per peer.
+That makes the dashboard resume button safe by construction (it only ever launches
+the decider), but it needs the invariant enforced at save time and the kickoff
+upgraded from instruction to decision brief.
+
+[Files Changed]
+- `internal/client/formation_save.go` -- mint of a NEW anchorless envelope refuses
+  with both remedies named and nothing written; a refresh of an existing anchorless
+  file saves and sets AnchorMissing. anchorDefault still heals joined re-saves.
+- `internal/client/formation.go` -- Formation.AnchorWarning() (deliberately NOT a
+  Validate error: Save validates every write, and LoadFormation feeds the
+  refuse-to-overwrite gate, so a hard rule would make the heal impossible).
+- `internal/client/formation_resume.go` -- anchorRoster builds rows from the ONE
+  gathered world (same HasTranscript closure the gates consumed); anchorKickoff
+  renders the decision brief: roster, per-peer ruling request, operator
+  confirmation, apply-flag examples, reconvene re-save.
+- `cmd/cbus/formation.go` -- show renders a missing anchor as a named DEFECT row;
+  the save door warns at write time.
+
+[Ruled semantics worth knowing]
+- Refuse-over-autopick on mints; warn-and-save on refreshes; heal on joined
+  re-saves. Three paths, three different answers, each reasoned on the bead.
+- The roster carries STABLE facts only. Liveness is the one volatile fact, and a
+  stored liveness marker lying is the founding lesson of this codebase -- the
+  brief names the dry-run as where present-right-now comes from.
+- Examples are runnable-as-written: present-transcript AND on-this-host (blank
+  machine means here, the exact negation of the apply skip), capped at two,
+  absent when empty. The roster may honestly say a foreign peer's transcript is
+  present while the example declines to name it: the roster states facts, the
+  example promises actions.
+- The anchor renders as the deciding seat, never as a peer awaiting a decision.
+
+[Testing Notes]
+- Whole-repo go test ./... green; GOOS=linux amd64+arm64 builds; gofmt clean.
+- Sixteen pre-registered reviewer gates (A1-A8, B1-B8), all passed, with
+  reviewer-run mutants proven on disk and baseline-restored at every step --
+  including the pick-condition mutants in both directions and a structural proof
+  that a second world gather is impossible.
+- The c2 fixture needed separate stores for its two composes because the
+  launch-intent claim from the first refused the second: the cbus-rze guard
+  working inside a test, recorded so nobody loosens it for fixture convenience.
+
+## [2026-08-08 07:35:00 UTC] [Formation/ModeGuard] apply --mode + the launch-intent guard
+
+[Attempt #1] `1d4488f` (cbus-osr) + `f4bb204`/`60dc945`/`aa4b70f`/`a780785` (cbus-rze,
+one milestone, two reviewer findings fixed in ruled parts) + `dede3f5` (unrelated
+pre-existing gofmt). Built by the modeflags formation -- coder (opus) and reviewer
+(fable) under an orchestrator session -- using cbus itself for every dispatch,
+verdict, and ruling.
+
+[Motivating problem]
+The dd-rollout reboot proved the resume story end to end but left two gaps: choosing
+resume-vs-fresh per peer required hand-editing the envelope (the literal user
+question "how do I do that?"), and between `formation resume` forking the anchor and
+the child re-joining, liveSids is blind, so a second resume double-launches two
+processes onto one transcript.
+
+[Files Changed]
+- `internal/client/formation_apply.go` -- ApplyOptions.Mode + overrideMode() beside
+  overrideChannel: per-run, in-memory, envelope never written. decidePeer is
+  byte-untouched BY DESIGN; the safety argument is that the gates run unchanged.
+- `internal/client/launch_intent.go` (new) -- the guard. Channel-dir dot-file
+  marker; ClaimLaunchIntent is first-writer-wins via os.Link (EEXIST = claimed);
+  reclaim OVERWRITES the corpse by rename, never unlinks (an absent path is the
+  claim signal, so unlink-first reopens the race); reclaimers and clears serialize
+  on a flock'd side token (LOCK_NB, losers refuse/skip, kernel-released on death).
+- `internal/client/formation_resume.go` -- refuse-then-claim after every gate,
+  before Fork. `internal/client/store.go` -- same-sid Join clears the marker.
+- `cmd/cbus/formation.go`, `cmd/cbus/usage.go` -- the --mode flag and help.
+
+[Expensive lessons, recorded so nobody re-buys them]
+1. Absence is the signal: any reclaim that unlinks before relinking reopens the
+   race it heals. This falsified the reviewer's own fix sketch, measured at 2/16.
+2. The marker and the reclaim window want OPPOSITE lifetimes: the marker must
+   SURVIVE its writer (the launcher exits on success), the reclaim window must DIE
+   with its holder. File+TTL for one, flock for the other. Same file, two
+   mechanisms, one reason each.
+3. The peer dir cannot hold the marker: Join's reclaim RemoveAll would let whoever
+   takes the alias clear the guard protecting the resumed transcript.
+
+[Possible Ripple Effects]
+- cbus-yca (apply-side resume window) adopts ClaimLaunchIntent; the racy writer
+  was deleted so the unsafe path cannot be adopted by accident.
+- BOTH syscall.Flock sites (ledger.go and launch_intent.go) need _windows splits
+  when the windows-port branch merges -- recorded on cbus-rze.
+- The clear can over-refuse (skip on busy lock, later-launch markers declined);
+  bounded by TTL 180s and moot when a live child is armed (live-sid gate first).
+
+[Testing Notes]
+- Whole-repo go test ./... green (5/5 uncached at the original tip, re-verified on
+  this lineage); -race over client and cmd; linux amd64+arm64 builds + vet.
+- Deterministic 16-racer probes, both entry states, exactly-one-forked; SIGKILL
+  release test whose discriminating mutant (flock swapped back to the deleted
+  O_EXCL token design) reds on "the lock survived its holder's death".
+- Reviewer independently reproduced every claim: own mutants proven on disk and
+  restored, door probes with the built binary, branch walks of the fixed protocol
+  after each change (re-walked, not diffed, at the coder's own request).
+
+## [2026-08-07 21:35:00 UTC] [Formation/Resume] profile capture + the first-hop resume verb
+
+[Attempt #1] `8e30eac` (cbus-yv3) + `409ab7d` (cbus-lsy) — workstream B of the
+northstar reset: after a reboot, nobody should hand-copy a session id, a cwd, or a
+launcher invocation out of a JSON file.
+
+[Motivating problem]
+Field-proven on the dd-rollout reboot: the envelope records everything needed to
+resume EXCEPT the CCS profile (so the correct `ccs work --resume` had to be derived
+by locating the transcript by hand), and the first hop — rebooted machine to running
+anchor — was entirely manual even though everything after the anchor is automated.
+
+[Files Changed]
+- `internal/client/store.go` — peerMeta gains `profile` (omitempty; pre-profile
+  metas rewrite byte-identically); Join stamps `currentProfile()`.
+- `internal/client/identity.go` — `currentProfile()`: structural parent-dir check
+  on CLAUDE_CONFIG_DIR (`.ccs/instances/<profile>`), no substring literal, so it
+  holds on windows separators and stays out of the port's zero-grep gate.
+- `internal/client/liveness.go` — reader-side PeerMeta carries `profile`.
+- `internal/client/formation_save.go` — RosterPeer.Profile; capturePeer refreshes
+  it like cwd, blank meta never clobbers a hand fill, invalid tokens surfaced via
+  the SkippedBirth channel.
+- `internal/client/formation_resume.go` (new) — ResumeAnchor + the injected-world
+  seam; anchorLaunchPrefix (recorded profile wins even from a bare shell);
+  anchorKickoff (restored-session framing + reconcile instruction, no role
+  re-brief); launcher-authored ledger restore whose run attribution follows the mec.2 authority rule: the anchor's own surviving claim when one exists (claims outlive processes), blank when none — pinned both ways.
+- `cmd/cbus/formation.go`, `cmd/cbus/usage.go` — the `resume` verb and help.
+- Tests: join stamping (incl. the structural-vs-substring discriminator),
+  save capture/preserve/refresh/garbage, launch shape (ccs prefix, kickoff
+  content, blank-run ledger), bare-shell fallback, nine-refusal table with
+  launch-nothing pinned.
+
+[Possible Ripple Effects]
+- Envelopes saved by pre-yv3 binaries have blank profiles; the resume verb then
+  depends on the invoking shell's own profile to find transcripts. dd-rollout was
+  hand-filled to profile=work (legal hand fill, preserved by blank-never-clobbers).
+- The verb reuses apply's identity prohibitions; any future change there should
+  check formation_resume.go for parity (three sites now: decidePeer, BootstrapPeer,
+  resumeAnchorWorld).
+
+[Testing Notes]
+- Full suites green both packages; linux amd64+arm64 cross-compile PASS.
+- Real-store smoke: `resume ghost` errors; `resume dd-rollout` with its anchor
+  LIVE drew the live-armed refusal naming dd-rollout/orchestrator — after the
+  smoke caught the transcript check firing first (wrong refusal when the
+  transcript hides under another profile). Gate reordered, pinned by a test where
+  both gates are true at once.
+- The launch happy path is fixture-proven (recorder forker); the real-terminal
+  acceptance run is the next actual reboot of a saved formation.
+
+## [2026-08-05 02:45:05 UTC] [Formation/Save] repeatable --anchor key=value on save
+
+[Attempt #1] `c1ef5fa` — bdx-7m1.6, the one claudebus-side subtask of the
+bd-dashboard formations-page epic.
+
+[Motivating problem]
+The formations page links an envelope to its bdx epic via `drift_anchors.bdx`
+(anchor precedence shipped dashboard-side in bdx-7m1.3). The key already
+survives re-saves — save only owns `git_head`, every other anchor key is the
+human's — but setting it meant opening the envelope in an editor. The flag is
+that hand edit, minus the editor.
+
+[Files Changed]
+- `cmd/cbus/flags.go` — `parsedArgs.multi` collects every occurrence of a valued
+  flag in order; new `all(name)`. `opts` keeps last-wins, so the existing
+  single-value callers (`has`) are behaviorally untouched.
+- `cmd/cbus/formation.go` — save parses positionals-first-then-flags (bootstrap's
+  shape): `save <name> [channel] [--anchor key=value ...]`. Malformed pairs
+  (no `=`, empty key) die on usage. Channel resolution order unchanged.
+- `internal/client/formation_save.go` — `SaveFormation` gains the `anchors`
+  param. `checkHandAnchors` refuses `git_head` BEFORE any store work (a refused
+  fresh save writes nothing); `setHandAnchors` writes pairs after
+  `setGitHeadAnchor`, overwriting same-named keys deliberately.
+- `cmd/cbus/usage.go` — save block documents the flag and the bdx convention.
+- Tests: parser repeat semantics (`flags_test.go`); client-level write /
+  flagless-survival / flag-wins / refusal-writes-nothing
+  (`formation_save_test.go`); CLI-door test incl. channel-then-flags order,
+  git_head refusal, malformed pairs, trailing junk (`cmd/cbus/formation_test.go`).
+  Existing `SaveFormation` call sites gained `, nil` mechanically.
+
+[Possible Ripple Effects]
+- A dash-leading second positional (`save name -x`) previously reached the store
+  as channel `-x` (ValidName permits `-`); it now dies on usage. Ruled a fix.
+- Repeated valued flags on OTHER verbs still last-wins silently, as before; only
+  save reads `all()`.
+- The bd-dashboard sweep reads `drift_anchors.bdx` as the direct epic link with
+  precedence over session-join inference — a wrong hand-set id now has a
+  one-flag path in, same blast radius as the hand edit always had.
+
+[Testing Notes]
+- `go test ./cmd/cbus ./internal/client` green; `go vet` clean.
+- Cross-compile gate: linux amd64 + arm64 PASS. GOOS=windows fails on main
+  pre-existing (`close.go`/`codexwrap.go` syscall use; their windows variants
+  live on the unmerged windows-port branch); this diff touches neither file.
+- Field smoke through the built binary, temp store: save with two anchors,
+  `show` renders them beside the machine `git_head`; flagless re-save keeps
+  both; `--anchor git_head=x` refuses rc=1 with the machine-owned message.
+- Read-only against the real store: 14 envelopes list, `rn-foundry` renders
+  with its existing anchor — old envelopes read fine under the new binary.
+
 ## [2026-08-03 18:09:01 UTC] [Build/Release/Windows] cbus-que M9: windows build/release wiring, plus a fleet-wide release-safety fix
 
 [Attempt #1] `927ac9c` (full `927ac9c4eaf59fc3cd62418671b8b15a8f5ee4ec`) +

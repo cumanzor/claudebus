@@ -44,7 +44,7 @@ The core loop:
    `~/.claude-bus/<channel>/<alias>/` with a `meta.json` registration and an empty append-only
    `inbox.jsonl`.
 2. It **arms delivery** by running `cbus tail <channel>/<alias>` under Claude Code's **Monitor
-   tool** (never plain Bash — the command execs a follower that never exits, so a Bash call blocks
+   tool** (never plain Bash — the command runs a follower loop that never exits, so a Bash call blocks
    the session forever).
 3. Any peer runs `cbus send <channel>/<alias> "text"`, which appends one JSON line to the target's
    inbox. The follower turns the append into a Monitor notification — a conversation event. An
@@ -325,7 +325,7 @@ from a notification convenience into an autonomous coordination fabric — which
 incoming bus messages are treated as untrusted peer requests. The corollary is documented as a
 caveat, not just a feature: a peer message can trigger action while you're away.
 
-`cbus tail` must **never** run under Bash: it execs a follower that never exits, so a Bash call
+`cbus tail` must **never** run under Bash: it runs a follower loop that never exits, so a Bash call
 blocks the session forever and delivers nothing. This warning is repeated at every surface the
 model reads — join/rename/branch output, the usage text, the bootstrap prompt, and the slash
 commands.
@@ -356,7 +356,7 @@ unroutable `hostname-PID`. A marker is a *from-default*, **not** proof of reacha
 |---|---|---|
 | joined, never armed (`listenerPid` null) | **accepted unconditionally** | the peer's *first* arm replays the whole inbox from line 1, so nothing sent during setup is lost |
 | listener alive | accepted | normal delivery |
-| armed once, listener now dead | **refused** — `use --force to queue anyway`; `--force` queues best-effort | a re-arm follows from the *end* of the inbox, so a forced line may never be delivered |
+| armed once, listener now dead | **refused** — `use --force to queue anyway`; `--force` queues the line | the next re-arm resumes from the durable cursor (M4), so the forced line is delivered |
 
 The first row completes the no-lost-messages invariant: `join` truncates the inbox and the first
 arm replays from the start, so the join→arm window is covered. (The initial release *refused*

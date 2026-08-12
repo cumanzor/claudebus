@@ -21,9 +21,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    target is <channel>/<alias>, or a bare
                                    <alias> within your own channel(s)
        --from <ch/alias>           override sender (default: auto-resolved)
-       --force                     send even if target's listener died — best
-                                   effort: a re-arm follows from the end of the
-                                   inbox, so the line may never be delivered
+       --force                     send even if target's listener died — queues
+                                   the line anyway; the next re-arm resumes from
+                                   the durable cursor and delivers it
                                    (a joined-but-not-yet-armed peer is always
                                    accepted: its first arm replays the inbox)
   cbus list [--active] [channel]   peers with listen/off state, host, cwd
@@ -67,6 +67,10 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    existing file, preserving hand-edited fields
                                    (origin/model come from the birth-record when
                                    recorded; role/profile stay hand-maintained)
+       --anchor key=value          record a hand anchor in drift_anchors
+                                   (repeatable; a flag overwrites its own key,
+                                   git_head stays machine-owned; convention:
+                                   bdx=<epic-id> links the effort's tracker item)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); join the
                                    channel first — peers are briefed to answer you.
@@ -80,11 +84,31 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    the whole run, so the file's layout stands
        --channel ch                target ch for this run (a template serves any
                                    effort; the envelope file is not changed)
+       --mode resume|fork|template
+                                   what the peers apply LAUNCHES come back as, this
+                                   run only (the file's per-peer mode is save-side
+                                   policy; the choice is late-bound). Peers already
+                                   live are untouched, and each launch still goes
+                                   through the identity gates, so a blanket resume
+                                   degrades or refuses per peer rather than forcing.
+                                   steer one peer by composing with --only:
+                                   --mode resume --only documenter, then a plain
+                                   apply brings the rest back as the file says
        --dry-run                   print the plan, launch nothing
        --only a,b                  only these peers
        --wait <dur>                how long to wait for each peer to answer its
                                    kickoff (default 90s; 0 = launch and return)
        --brief TEXT                effort brief added to every peer's kickoff
+  cbus formation resume <name>     the first hop after a reboot: relaunch the
+                                   formation's ANCHOR session (right cwd, right
+                                   CCS profile, --resume its own sid) from any
+                                   shell on the recording machine. The anchor is
+                                   briefed to re-join, re-arm, and reconcile the
+                                   rest itself via apply. Refuses loudly instead
+                                   of degrading: gone transcript, fork-born or
+                                   unattributed origin, live-armed sid, wrong
+                                   machine — each names its remedy
+       --brief TEXT                effort brief appended to the anchor's kickoff
   cbus formation bootstrap <name> <alias> [--brief TEXT]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not

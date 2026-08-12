@@ -4,3 +4,8 @@
 # build artifacts (make build / make dist)
 /cbus
 /dist/
+.DS_Store
+.claude/
+relay/deploy.local
+/cbus-check
+/cbus-next

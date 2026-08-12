@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 
 	"claudebus/internal/core"
 )
@@ -48,8 +49,20 @@ func transcriptRoots(profile string) []string {
 	var roots []string
 	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
 	// profile is a path segment from a hand-edited file — screen it like any name.
-	if profile != "" && core.ValidName(profile) && isCCSInstanceDir(cfg) {
-		roots = append(roots, filepath.Join(filepath.Dir(cfg), profile, "projects"))
+	//
+	// The recorded profile resolves from HOME, not from the env: a bare or
+	// GUI-launched shell (the post-reboot terminal, the ccresume:// handler) has
+	// no CLAUDE_CONFIG_DIR at all, and gating the profile root on it made every
+	// bare-shell resume of a profiled formation refuse on a transcript that was
+	// present the whole time. Same trust move anchorLaunchPrefix makes: the
+	// envelope's profile is the authority, the env is just a hint.
+	if profile != "" && core.ValidName(profile) {
+		if home, err := os.UserHomeDir(); err == nil {
+			roots = append(roots, filepath.Join(home, ".ccs", "instances", profile, "projects"))
+		}
+		if isCCSInstanceDir(cfg) {
+			roots = append(roots, filepath.Join(filepath.Dir(cfg), profile, "projects"))
+		}
 	}
 	if cfg != "" {
 		roots = append(roots, filepath.Join(cfg, "projects"))
@@ -74,6 +87,45 @@ func transcriptRoots(profile string) []string {
 func isCCSInstanceDir(cfg string) bool {
 	parent := filepath.Dir(cfg)
 	return filepath.Base(parent) == "instances" && filepath.Base(filepath.Dir(parent)) == ".ccs"
+}
+
+// InstanceProfiles returns the distinct CCS profiles whose transcript store holds
+// sid, sorted. This is the recovery input for envelopes that record no profile —
+// saves from before profile capture, and seats whose meta never carried one: the
+// transcript's own location names the profile a relaunch needs. It is deliberately
+// a separate, named sweep rather than a widening of TranscriptPath: a lookup that
+// silently matched other profiles would let a caller find a transcript under one
+// profile and launch under another, which is the blank-under-same-sid failure.
+// HOME-derived like transcriptRoots, for the same bare-shell reason.
+func InstanceProfiles(sid string) []string {
+	if !sidRe.MatchString(sid) {
+		return nil
+	}
+	var bases []string
+	if home, err := os.UserHomeDir(); err == nil {
+		bases = append(bases, filepath.Join(home, ".ccs", "instances"))
+	}
+	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); isCCSInstanceDir(cfg) {
+		bases = append(bases, filepath.Dir(cfg))
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, base := range dedupeStrings(bases) {
+		matches, err := filepath.Glob(filepath.Join(base, "*", "projects", "*", sid+".jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			// .../instances/<profile>/projects/<project>/<sid>.jsonl
+			profile := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(m))))
+			if core.ValidName(profile) && !seen[profile] {
+				seen[profile] = true
+				out = append(out, profile)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func dedupeStrings(in []string) []string {

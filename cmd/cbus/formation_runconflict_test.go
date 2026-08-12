@@ -19,7 +19,7 @@ import (
 func TestFormationSaveWarnsOnRunConflict(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "SA") // the saver is peer a, so the mint resolves an anchor
 
 	// two live peers claiming DIFFERENT runs: a split
 	for _, p := range []struct{ alias, sid, run string }{

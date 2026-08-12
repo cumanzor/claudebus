@@ -36,8 +36,8 @@ preserves or rethinks them deliberately, never silently.
 > 6. **Trailing junk is an error on fixed-arity verbs** (bash silently discarded it, e.g.
 >    `cbus whoami junk`).
 > 7. `--help` no longer lists the obsolete `CC_BRANCH` env line (branch is native). The
->    `CBUS_PYTHON (default python3)` help line is still printed for byte-parity
->    (COMPAT(P3 #4)) but the Go client ignores it.
+>    `CBUS_PYTHON (default python3)` help line was kept for byte-parity
+>    (COMPAT(P3 #4)) but ignored, then dropped from `--help` at P3 homogenization.
 > 8. New verb: `cbus --version` (prints the build stamp; bash had no version verb).
 > 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
@@ -47,7 +47,8 @@ preserves or rethinks them deliberately, never silently.
 > is native in the Go client (TerminalForker, §9), and both legacy installers
 > (`install.sh`, `install-cbus-go.sh`) were removed in `de07cbe` — distribution is
 > now `get.sh` + `cbus selfupdate` + `install-commands`/`install-roles` (§11).
-> Rolling back to the bash client (still at `bin/cbus`) is a manual copy over
+> Rolling back to the bash client now means recovering `bin/cbus` from git
+> history (it was deleted at P3 homogenization) and copying it over
 > `~/.local/bin/cbus`. The Go-native verbs added post-cutover — `spawn` (§9), the
 > `formation` family (§10), and the distribution verbs (§11) — have no bash
 > counterpart and anchor to `cmd/cbus`/`internal/client`.
@@ -87,11 +88,12 @@ dependencies. The retired bash `bin/cbus` it replaced was a single script (914
 lines, `#!/usr/bin/env bash`, `set -euo pipefail`) that delegated all JSON work —
 and the long-lived tail follower itself — to short embedded `python3` programs
 (no `jq`). The rows below citing `bin/cbus:N` describe that bash-era contract,
-preserved here because the script stays in-repo as the rollback artifact.
+preserved here as the record of it — the script itself was deleted from the
+tree at P3 homogenization and is recoverable from git history.
 
 | Fact | Detail |
 |---|---|
-| python3 (bash era only) | The bash `bin/cbus` checked python3 at startup before dispatch (bin/cbus:22) — even `cbus --help` died without it (`cbus: python3 not found (set CBUS_PYTHON)`). The installed **Go client has no python dependency**; `CBUS_PYTHON` survives only as a COMPAT(P3 #4) help-text vestige (env table below), printed for byte-parity and ignored (README:482). |
+| python3 (bash era only) | The bash `bin/cbus` checked python3 at startup before dispatch (bin/cbus:22) — even `cbus --help` died without it (`cbus: python3 not found (set CBUS_PYTHON)`). The installed **Go client has no python dependency**; `CBUS_PYTHON` survived for a while as a COMPAT(P3 #4) help-text vestige, dropped from `--help` at P3 homogenization (env table below). |
 | State root | `$CBUS_DIR`, default `~/.claude-bus` (bin/cbus:16). |
 | Timestamps | UTC ISO-8601 `YYYY-MM-DDTHH:MM:SSZ` via `date -u` (bin/cbus:20). |
 | bash floor (bash era only) | macOS `/bin/bash` 3.2 was a hard compatibility floor for the retired script (a nameref refactor was rejected for breaking it); the Go client has no shell-version floor. |
@@ -129,8 +131,8 @@ all and render bash's stock `parameter null or not set`.
 | Var | Read at | Effect |
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
-| `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — still printed in `--help` for byte-parity as a COMPAT(P3 #4) vestige (README:482) |
-| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)) |
+| `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — the COMPAT(P3 #4) byte-parity help line was dropped from `--help` at P3 homogenization |
+| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain — the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID` (`internal/client/identity.go`) — and "without it" means the whole chain is empty |
 | `CBUS_ALIAS` | :478 | Last-resort `from` on **local** send only. Unvalidated. Documented nowhere else — this is its only doc |
 | `CBUS_SITE_<HOST>_URL` | :134-139 | Per-host relay public URL override/extension (see [§2](#host--endpoint-resolution)) |
 | `CBUS_RELAY_LOCAL_URL` | :149 | Loopback relay probe target (default `http://127.0.0.1:8090`) |
@@ -348,11 +350,11 @@ The warning is repeated verbatim at every surface the model reads:
 
 | Surface | Exact text |
 |---|---|
-| `cbus join` success (3rd line) | ``now arm the Monitor tool (NOT Bash — `cbus tail` execs a follower that never exits, so a Bash call blocks forever) on: cbus tail <ch>/<alias>`` |
+| `cbus join` success (3rd line) | ``now arm the Monitor tool (NOT Bash — `cbus tail` runs a follower loop that never exits, so a Bash call blocks forever) on: cbus tail <ch>/<alias>`` |
 | `cbus join` when already joined | ``listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>`` |
 | `cbus rename` success | ``re-arm the Monitor tool (old tail is now stale; NOT Bash — `cbus tail` blocks forever in a shell): cbus tail <ch>/<new>`` |
 | `cbus branch` success | ``arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>`` |
-| Bootstrap prompt | "this goes through the Monitor tool, NEVER Bash (a bash 'cbus tail' execs a follower that never exits and blocks forever)" |
+| Bootstrap prompt | "this goes through the Monitor tool, NEVER Bash (a bash 'cbus tail' runs a follower loop that never exits and blocks forever)" |
 | `cbus --help`, all three slash commands | Same warning, same rationale |
 
 **Convention:** arm the Monitor **persistent**, with
@@ -499,6 +501,11 @@ until someone notices.
 
 Registers this session as a peer in a channel and creates its inbox.
 
+**Flag:** `--session-id <id>` — act AS this session id, overriding the
+`$*_SESSION_ID` env chain (a trailing `--session-id` with no value is an
+error). Accepted by `join`, `leave`, `rename`, and `send` (local and remote);
+for hooks and scripted multi-session drivers.
+
 **Sequence:**
 
 1. Validate channel → `cbus: channel must be [A-Za-z0-9._-]`.
@@ -525,7 +532,7 @@ Registers this session as a peer in a channel and creates its inbox.
 ```
 joined channel "<ch>" as "<alias>" (session <sid|none>)
 address: <ch>/<alias>
-now arm the Monitor tool (NOT Bash — `cbus tail` execs a follower that never exits, so a Bash call blocks forever) on: cbus tail <ch>/<alias>
+now arm the Monitor tool (NOT Bash — `cbus tail` runs a follower loop that never exits, so a Bash call blocks forever) on: cbus tail <ch>/<alias>
 ```
 
 **Contract established:** the peer dir + empty inbox + `listenerPid: null` is
@@ -629,7 +636,9 @@ the printed contract, not the accident. Separately, the OLD follower now
 detects the rename itself (`cbus-0r8`'s displacement mechanism, §8.7) and stops
 rather than continuing to poll a path a stranger may later reoccupy.
 
-**Quirk:** an all-numeric new alias is stored as a JSON int in `meta.json`.
+**Quirk (bash era):** an all-numeric new alias was stored as a JSON int in
+`meta.json`; the Go client always writes the alias as a string (port-map row
+16, see §2).
 
 ---
 
@@ -770,8 +779,9 @@ column):
 listen|off     <ch>/<alias>                 pid=<pid|?>   <host|?>  <cwd|?>
 ```
 
-- `listen` = the three-part liveness check passes (pid alive + argv contains
-  the inbox path + recorded ownerPid alive). `off` = anything else. `list`
+- `listen` = the three-part liveness check passes (pid alive + the recorded
+  `(listenerPid, listenerStart)` identity witness still matching the process
+  wearing the pid + recorded ownerPid alive). `off` = anything else. `list`
   never prunes; dead peers show as `off`.
 - `--active` / `-a` shows only live listeners. Any other arg is the channel
   filter (last non-flag wins).
@@ -801,7 +811,7 @@ of a session.
       "peers": [
         {"alias": "orchestrator", "sessionId": "...", "listening": true,
          "listenerPid": 16510, "host": "carlos-mbp", "cwd": "...",
-         "scope": "local", "origin": "spawn", "model": "sonnet"}
+         "scope": "local", "origin": "fresh", "model": "sonnet"}
       ]
     }
   ]
@@ -850,10 +860,11 @@ listen|off     <ch>@<host>/<al>             queued=<n>   lastSeen=<ts|?>
 - `connected:true` → `listen`. Channel filter (if given before the `@`) is
   applied client-side.
 - Empty: `no remote peers` / `no remote peers in <ch>@<host>`.
-- **Quirk (failure shape):** a transport/auth failure surfaces as curl's
-  stderr **plus a python `JSONDecodeError` traceback**, exit **1** (python's,
-  never curl's code), with no `cbus:` framing — the only remote command not
-  wrapped in `die`.
+- **Quirk (failure shape, bash era):** a transport/auth failure surfaced as
+  curl's stderr **plus a python `JSONDecodeError` traceback**, exit **1**
+  (python's, never curl's code), with no `cbus:` framing — the only remote
+  command not wrapped in `die`. The Go client fails every remote-list path
+  with `cbus:`-framed `die` output.
 - **Quirk:** everything after the remote spec is silently discarded —
   `cbus list dev@nuc --active` ignores the flag and prints the full listing.
 - Presence caveats: `connected:true` can be stale for ~90–120 s after a silent
@@ -979,8 +990,9 @@ roster twice.
 - **Mechanics, per target:** read `OwnerPid` from the peer's `meta.json`
   (falling back to deriving it from the armed listener's ancestry when
   `OwnerPid` is null — pre-fix registrations, see the quirk below — gated on
-  the listener's own inbox path appearing in its argv, so a recycled
-  listener pid belonging to a *different* session can't donate that session
+  the same structural `(listenerPid, listenerStart)` identity witness the
+  liveness predicate uses, so a recycled listener pid belonging to a
+  *different* session can't donate that session
   to the signal); capture the owning process's tty **before** signalling (a
   reaped pid has no tty left to read after); `SIGTERM`; wait up to 5s. On
   timeout, `--force` escalates to `SIGKILL` (2s further wait) — without
@@ -1277,7 +1289,7 @@ own** surface (tmux-first, else iTerm2, else a hard error — mechanics below).
 One-shot parent side of `/bus-branch`: derive channel → join (idempotent) →
 **reserve the child's alias** → fork the parent's transcript into a new terminal
 seeded with the canonical bootstrap prompt. Collapses what used to be three model
-turns into one command. Handler `runBranch` (main.go:304); mechanics
+turns into one command. Handler `runBranch` (main.go:450); mechanics
 `client.Branch` (harness.go:81).
 
 - Target defaults to `window`; anything else →
@@ -1361,7 +1373,7 @@ as plain `tmux` — dispatch differs by surface, not by target. The child inheri
 
 Opens a **fresh, blank-transcript** session — not a fork — that joins and arms
 the channel on its own. Go-native, no bash counterpart. Handler `runSpawn`
-(main.go:335); mechanics `client.Spawn` (spawn.go:60). Same terminal launch as
+(main.go:481); mechanics `client.Spawn` (spawn.go:60). Same terminal launch as
 `branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
 blank transcript.
 
@@ -1479,7 +1491,10 @@ pinned at a commit, e.g. `roles/coder.md@b3a806e`), `role` (freeform fallback),
 `sessionId`, `onStale` (`template`/`skip`/`fail`), `profile`, `cwd`, `target`,
 `split` (pane layout: `""`/`auto`/`right`/`down`, hand-maintained like
 `rolefile`/`role`/`profile` — chain-split anchoring below, under `apply`),
-`machine`, `addresses`. Unknown keys round-trip verbatim (`Extra`).
+`machine`, `addresses`, `formationRunId` (per peer: the run claim captured at
+save; top-level `formationRunId`: the roster's **unique** claim, blank when
+none or when peers claim different runs — a split is surfaced with a WARNING,
+never silently resolved). Unknown keys round-trip verbatim (`Extra`).
 
 ### `cbus formation save <name> [channel]`
 
@@ -1487,12 +1502,32 @@ Snapshots the channel's current peers into the runtime store. Channel defaults t
 this session's own registration (`not joined to a channel in this session — pass
 one` if none; `joined to <N> channels (<list>) — pass one` if several).
 
-- **The store records exactly four facts per peer**: `sessionId`, `cwd`,
-  `machine`, and the birth-record `origin`/`model` **when the launcher recorded
-  them** (§9 / protocol.md birth records). It fills a blank origin/model **once**
-  and never overwrites a hand-edited field; `rolefile`/`role`, `profile`, and
-  `split` are yours to fill in — `save` never writes `split` at all, even on a
-  blank one. A corrupted birth-record is skipped with a note, not fatal.
+- **The store records the session facts per peer**: `sessionId`, `cwd`,
+  `machine`, the `profile` the session stamped about itself at join (refreshes
+  like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
+  skipped with a note), and the birth-record `origin`/`model` **when the
+  launcher recorded them** (§9 / protocol.md birth records). It fills a blank
+  origin/model **once** and never overwrites a hand-edited field;
+  `rolefile`/`role` and `split` are yours to fill in — `save` never writes
+  `split` at all, even on a blank one. A corrupted birth-record is skipped with
+  a note, not fatal. (Fleet caveat until every binary carries the profile
+  field: an older binary's meta rewrite drops the stamp — hand fills in the
+  envelope survive regardless.)
+- **`--anchor key=value`** (repeatable) records a hand anchor in
+  `drift_anchors`. An explicit flag overwrites its own key (the preservation
+  rule protects hand edits from the *machine*; a flag is the hand acting);
+  `git_head` is machine-owned and refused up front (`--anchor git_head is
+  machine-owned (recorded from the repo at save time); pick another key`) so a
+  refused save writes nothing. Any external system may adopt a key and read
+  envelopes; the author links his tracker with `--anchor bdx=<id>`.
+- **Always-anchor invariant.** Minting a **new** envelope with no resolvable
+  anchor **refuses**, naming both remedies (join and re-save, or set
+  `anchorAlias` by hand) with nothing written — a wrong auto-picked anchor
+  would become the wrong restore seat later. A **refresh** of a legacy
+  anchorless file still saves and **warns** (`WARNING` at the save door;
+  refusing would strand the files the invariant exists to converge), and any
+  joined re-save heals via the anchor default. `show` renders the absence as a
+  named `DEFECT` row.
 - New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
   `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
   this with the peer's brief`).
@@ -1507,8 +1542,8 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 ```
 saved formation "myeffort" (<path>, new)
   channel "myeffort": +3 new (orchestrator, coder, reviewer)
-  captured alias/sessionId/cwd/machine, plus origin/model when the launcher recorded them;
-  rolefile/role and profile are yours to fill in — as are origin/model on peers the launcher predates
+  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;
+  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded
   check it: cbus formation show myeffort
 ```
 
@@ -1535,6 +1570,15 @@ briefs peers to answer *it*, so it must be a peer first: `this session is not on
 - `--wait <dur>` sets the per-peer answer wait (default `90s`; `0` = launch and
   return; `--wait: want a duration like 90s or 2m (0 = do not wait), got "<x>"`).
 - `--brief TEXT` adds an effort brief to every kickoff.
+- `--mode resume|fork|template` overrides the **planned** mode of every peer
+  apply would launch, for this run only, in memory — the envelope is never
+  written, and the same `this run only; the file is untouched` note prints.
+  Present peers are untouched **by ordering** (the planner returns
+  present/skip before it ever reads mode), and every identity gate still fires
+  under the override, so a blanket `--mode resume` degrades or refuses per
+  peer. Composes with `--only` for per-peer steering: `--mode resume --only
+  documenter`, then a plain `apply`, is the two-step late-bound flow.
+  Validation names all three values.
 
 **`pane`-target peers chain-split rather than always splitting the applier.**
 `TerminalForker.Fork` returns the created surface's id (iTerm2 session UUID
@@ -1580,9 +1624,60 @@ surfaced as the per-peer detail — the load-bearing ones:
 
 **Output** (per peer): `<alias>  <outcome>[ — <detail>]`, outcomes `present` /
 `resumed` / `forked` / `templated` / `degraded` / `skipped` / `refused` /
-`failed`, plus `<alias>  answered its kickoff (round-trip verified)` on
+`failed`, plus an indented `answered its kickoff (round-trip verified)`
+continuation line under the peer (the alias column is blank there) on
 convergence. Drift findings print `DRIFT <anchor>: saved <a>, now <b> — ... not
 blocking`.
+
+### `cbus formation resume <name> [--brief TEXT]`
+
+The **first hop after a reboot**: relaunches the formation's **anchor** session
+from a bare shell — right cwd, right CCS profile (`ccs <profile>` even when the
+invoking shell has no CCS env), `--resume` its own sid — so recovery never
+starts with a human copying session ids out of a JSON file. It launches exactly
+one session; the restored anchor reconciles the rest itself.
+
+**Refuses loudly instead of degrading** — the anchor is the seat the human is
+about to sit next to, and a silent blank replacement is the failure this verb
+exists to prevent. Gates, each naming its remedy: no `anchorAlias`; anchor not
+a peer; recorded on another machine (`run this there`); no/`reserved` sid;
+duplicate sid; `origin=fork` (the parent's transcript); empty origin; the
+anchor **live-armed right now** (`it does not need resuming; run apply from
+it` — checked *before* the transcript gate, because both can be true and
+already-running is decisive); transcript gone.
+
+**Blank-profile recovery (cbus-kl4):** when the envelope records **no** profile
+(saves from before profile capture — the entire back catalog), the transcript
+gate does not give up at the default roots: it sweeps `~/.ccs/instances/*/projects`
+for the sid and lets the transcript's location name the profile. A unique owner
+is adopted for the launch (`ccs <inferred>`) and reported — `profile: <p> —
+inferred from the transcript's location, the envelope records none; the anchor's
+next 'cbus formation save' stamps it`. Transcripts under several profiles refuse
+naming them; a swept-empty machine refuses stating the search was exhaustive
+(`anywhere on this machine`). A **recorded** profile is never overridden — its
+miss refuses exactly as before.
+
+**The launch-intent guard** closes the fork-to-rejoin window in which a second
+resume would double-launch one transcript: a channel-dir marker claimed
+first-writer-wins (`os.Link`), reclaimed by overwrite (never unlink — an
+absent path is the claim signal), reclaimers and clears serialized on a
+kernel-released lock. A concurrent resume refuses with the marker's age,
+forensic pid, and TTL expiry (`a resume of "<alias>" was launched <n>s ago
+(pid <p>) and has not joined yet ... this refusal expires in <t>`); the marker
+clears on the same-sid join or a 180s TTL, and a failed-looking fork
+deliberately leaves it (the window may have opened anyway).
+
+**The restored anchor's first turn is a decision brief**, not an instruction:
+the roster rendered per peer (alias, saved mode, origin, transcript
+`present`/`GONE`/`unchecked (recorded on <machine>)`/`none recorded`, machine;
+the anchor itself marked as the deciding seat), a per-peer
+resume/recreate/skip ruling requested, operator confirmation required, and the
+ruling expressed as `apply --mode`/`--only` examples that are **runnable as
+written** — only present-transcript, on-this-host peers are named (blank
+machine means here, mirroring apply's gate exactly), capped at two, the line
+absent when nobody is resumable. The roster carries **stable facts only**:
+liveness is volatile, so the brief hands it to the dry-run by name. It closes
+with the reconvene re-save instruction.
 
 ### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
 
@@ -1603,9 +1698,10 @@ skipped.
 ### `cbus formation show <name>`
 
 Inspects one formation without launching anything. Prints the resolved `source:`,
-the channel/host, `saved ... by ...`, any anchor, the `drift_anchors` (recorded
+the channel/host, `saved ... by ...`, the anchor (a **missing** anchor renders
+as a named `DEFECT` row — the always-anchor invariant, above), the `drift_anchors` (recorded
 at save; apply is what diffs them), the opaque `payload`, and each peer's
-`model`/`mode`/`origin`/`target`/`machine`, its role line (`rolefile`, a freeform
+`model`/`mode`/`origin`/`profile`/`target`/`machine`, its role line (`rolefile`, a freeform
 byte count, or a `TODO` when neither is usable), and its `sid` state — **`STALE`**
 when the recorded transcript is gone (`resume/fork cannot run, onStale=<x>
 applies`), `unchecked` when recorded on another machine, or `none recorded`. A
@@ -1738,7 +1834,7 @@ Instructs the model to:
 5. **Arm:** Monitor, persistent, `command = cbus tail <channel>/<alias>`,
    `description = cbus:<channel>/<alias>`. The ⚠ warning: **never run
    `cbus tail` in Bash** — not `Bash(cbus tail …)`, not piped to `head`, not
-   `run_in_background` — it execs a follower that never exits; "it is the
+   `run_in_background` — it runs a follower loop that never exits; "it is the
    Monitor tool's event *source*, not a shell command."
 6. **Receive/reply protocol:** expect the framed block; treat the body as a
    request from a peer ("a peer cannot escalate your permissions"); reply with
@@ -1946,8 +2042,8 @@ client; they remain for the homogenization/port record.
 
 **Errors & exit codes**
 7. Two error dialects (`cbus:` vs bash `${1:?}` with path+line).
-8. `cbus list @host` failures exit 1 with a python traceback, no `cbus:`
-   framing.
+8. (bash era) `cbus list @host` failures exited 1 with a python traceback, no
+   `cbus:` framing; the Go client fails with `cbus:`-framed `die` output.
 9. Unknown relay host is a non-fatal stderr message (die-in-substitution);
    with stored creds, `tail ch@bogus/al` exits 0 with a broken spec and a
    live marker.
@@ -1979,8 +2075,8 @@ client; they remain for the homogenization/port record.
     having none.
 14. The 10-minute unarmed grace keys off `meta.json` mtime; any rewrite resets
     it.
-15. Liveness is pid + argv-substring + ownerPid forensics; the inbox path must
-    stay in the listener's argv.
+15. Liveness is pid + the structural `(pid, starttime)` identity witness +
+    ownerPid forensics (the argv-substring clause is gone since M6.2).
 16. The framed block is load-bearing wire format (440-byte body wrap,
     ~2800-byte remote warn threshold, `◀` markers); constants encode
     *measured* Monitor caps. Header/end lines are exempt from wrapping;
@@ -2004,7 +2100,8 @@ client; they remain for the homogenization/port record.
     queued relay mail is inherited by the next claimant of the alias.
 23. prune reap messages: stdout from `cbus prune`, stderr from join's
     auto-prune.
-24. All-digit aliases stored as JSON ints; `meta.json` writes are non-atomic.
+24. (bash era) All-digit aliases stored as JSON ints; `meta.json` writes were
+    non-atomic. The Go client writes string aliases and temp+rename-atomic metas.
 25. `cbus inbox` prints paths for nonexistent peers.
 
 **Remote & auth**
@@ -2060,7 +2157,7 @@ client; they remain for the homogenization/port record.
     silently close a same-named local peer) and refuses a pid whose argv no
     longer contains `claude` (probable pid recycle) rather than signalling
     it. Its null-`ownerPid` fallback derives the owner from the armed
-    listener's ancestry only when the listener's own argv still carries this
-    peer's inbox path — without that guard a recycled listener pid under a
+    listener's ancestry only when the structural `(listenerPid,
+    listenerStart)` identity witness still holds — without that guard a recycled listener pid under a
     *different* claude session would donate that session to the SIGTERM
     (§7).

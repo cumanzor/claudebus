@@ -16,7 +16,7 @@ role file on purpose: a role prompt must survive being pasted alone into a fresh
 window, with no other file and no channel history.
 
 1. Arm your listener through the Monitor tool, never Bash. A bash `cbus tail`
-   execs a follower that never exits and blocks the session forever. The sole
+   runs a follower loop that never exits and blocks the session forever. The sole
    exception is a bounded capture inside a test harness (a timeout or a read
    deadline), never in a live session, and the harness comment says so.
 2. Re-arm on drop, immediately: if your Monitor dies, or a remote ws closes with

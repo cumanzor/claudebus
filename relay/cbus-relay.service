@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=relay
-WorkingDirectory=/home/relay/cbus-relay
-ExecStart=/home/relay/cbus-relay/cbus-relay -listen 127.0.0.1:8090 -spool /home/relay/cbus-relay/spool -token-file /home/relay/cbus-relay/token
+User=@USER@
+WorkingDirectory=@DEST@
+ExecStart=@DEST@/cbus-relay -listen 127.0.0.1:8090 -spool @DEST@/spool -token-file @DEST@/token
 Restart=on-failure
 RestartSec=5
 
