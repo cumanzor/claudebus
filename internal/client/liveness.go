@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -133,15 +132,6 @@ func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
 		return false // R2: a proc probe that cannot answer reads DEAD
 	}
 	return cur == m.ListenerStart
-}
-
-// pidAlive is `kill -0`: the process exists (EPERM still means it exists).
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }
 
 // PeerDead is the prune / broadcast-recipient / send-gate predicate (bin/cbus:316-323):

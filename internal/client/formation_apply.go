@@ -397,7 +397,10 @@ func peerLaunchArgv(pp PeerPlan, prompt, model string) []string {
 func peerEnv(profile string) map[string]string {
 	env := forkReplicatedEnv()
 	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
-	if profile != "" && core.ValidName(profile) && strings.Contains(cfg, "/.ccs/instances/") {
+	// isCCSInstanceDir, not a forward-slash literal: this doc comment promises the SAME
+	// derivation transcriptRoots uses, and a literal that only matches on unix broke that
+	// promise on windows — the transcript was found and the relaunch profile was not.
+	if profile != "" && core.ValidName(profile) && isCCSInstanceDir(cfg) {
 		env["CLAUDE_CONFIG_DIR"] = filepath.Join(filepath.Dir(cfg), profile)
 	}
 	return env
@@ -467,7 +470,10 @@ const pollInterval = time.Second
 // readInbox reads every line's text field, tolerating a torn last line (the writer
 // appends, so a partial line is normal and transient).
 func readInbox(path string) []string {
-	f, err := os.Open(path)
+	// openSharedRead, not os.Open: this runs once per pollInterval for the life of a
+	// wait, so on windows a stdlib handle would block removal of that inbox roughly a
+	// second in every second.
+	f, err := openSharedRead(path)
 	if err != nil {
 		return nil
 	}

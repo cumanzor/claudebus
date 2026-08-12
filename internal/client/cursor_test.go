@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,13 +27,9 @@ func seedInbox(t *testing.T, lines ...string) (peerDir, inbox string) {
 
 func devInoOfPath(t *testing.T, path string) (uint64, uint64) {
 	t.Helper()
-	st, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dev, ino, ok := statDevIno(st)
+	dev, ino, _, ok := fileIdentity(path)
 	if !ok {
-		t.Fatal("no dev/ino")
+		t.Fatal("no file identity for " + path)
 	}
 	return dev, ino
 }
@@ -197,14 +194,11 @@ func TestCursorNeverPointsMidFrame(t *testing.T) {
 	if err := os.WriteFile(inbox, []byte(complete+partial), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	buf, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
 	defer stopJoin()
 
 	boundary := int64(len(complete))
-	waitFor(t, func() bool {
-		_, _, off, st := readCursor(peer)
-		return st == cursorValid && off > 0
-	}, "the cursor to land")
+	waitForOwnCursor(t, peer, running, buf.String, "the cursor to land")
 	time.Sleep(200 * time.Millisecond) // let several idle ticks pass
 
 	_, _, off, st := readCursor(peer)
@@ -233,6 +227,16 @@ func TestCursorNeverPointsMidFrame(t *testing.T) {
 // position is unknown. Collapsing them makes an EACCES silently skip everything queued
 // while the peer was away, which is the exact polarity the design forbids.
 func TestUnreadableCursorIsNotAbsent(t *testing.T) {
+	// this needs a file the process genuinely cannot read, and two platforms cannot
+	// produce one. Root reads everything; windows os.Chmod maps only onto
+	// FILE_ATTRIBUTE_READONLY, the WRITE bit, so 0o000 leaves the file fully readable and
+	// readCursor returns cursorValid rather than exercising the branch at all. The
+	// production rule (any read error that is not IsNotExist reads corrupt) is unchanged
+	// and correct on both; only this fixture is unix-only. Constructing it on windows
+	// needs an ACL denial or a sharing violation, which is its own bead.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows chmod cannot clear the read bit (it maps to FILE_ATTRIBUTE_READONLY), so an unreadable cursor is not constructible here")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: an unreadable file is still readable")
 	}

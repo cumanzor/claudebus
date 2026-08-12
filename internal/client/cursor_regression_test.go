@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,7 +98,7 @@ func TestForceIntoDeadGapDelivers(t *testing.T) {
 
 	// the listener dies (a reaped pid stands in for the crash) and a --force send lands
 	// in the gap
-	dead := deadPidFor(t)
+	dead := deadProc(t)
 	writeMetaJSON(t, peer, fmt.Sprint(dead))
 	appendLine(t, inbox, "peer", "me", "forced-into-the-gap")
 
@@ -142,14 +141,4 @@ func TestMigrationSelfHeals(t *testing.T) {
 	} else if got.offset != off {
 		t.Errorf("second arm resumes at %d, want the recorded cursor %d", got.offset, off)
 	}
-}
-
-// deadPidFor returns a pid that has certainly exited.
-func deadPidFor(t *testing.T) int {
-	t.Helper()
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	return cmd.Process.Pid
 }

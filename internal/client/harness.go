@@ -201,15 +201,15 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	}
 	// name IS the child's alias now, so it must pass the store rule the reservation
 	// enforces. Checked here too, pre-fork, so the error names the flag.
-	if name != "" && !core.ValidStoreName(name) {
-		return "", "", "", fmt.Errorf("bad name %q", name)
+	if why := core.StoreNameReason(name); name != "" && why != "" {
+		return "", "", "", fmt.Errorf("bad name %q: %s", name, why)
 	}
 	ch = channel
 	if ch == "" {
 		ch = branchChannelFromGit()
 	}
-	if !core.ValidStoreName(ch) {
-		return "", "", "", fmt.Errorf("bad channel %q", ch)
+	if why := core.StoreNameReason(ch); why != "" {
+		return "", "", "", fmt.Errorf("bad channel %q: %s", ch, why)
 	}
 	if _, _, jerr := Join(ch, ""); jerr != nil {
 		return "", "", "", jerr
@@ -298,7 +298,16 @@ func forkLaunchArgv(sid, model, name, prompt string) []string {
 // the profile the peer was recorded with, not the applier's.
 func launchPrefix(profile string) []string {
 	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
-	if !strings.Contains(cfg, "/.ccs/instances/") {
+	// third site of the same forward-slash literal, and the acceptance gate for it is
+	// that the fragment greps to ZERO tree-wide rather than that three sites were listed.
+	// Unreachable in phase 1 (every launching verb refuses on windows), fixed anyway
+	// because the class is identical and a surviving copy is what the next port trips on.
+	//
+	// The spawn tests covering this pass on windows TODAY for the wrong reason: their env
+	// fixtures are unix literals, so the old Contains matched there regardless of platform.
+	// The structural check changes what they measure; they should still pass, and one that
+	// flips is a finding rather than noise.
+	if !isCCSInstanceDir(cfg) {
 		return []string{"claude"}
 	}
 	if profile == "" {

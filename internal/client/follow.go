@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"claudebus/internal/core"
@@ -196,11 +195,15 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 	}
 	defer func() { f.Close() }()
 	peerDir := filepath.Dir(inbox)
-	dev, ino := devInoOf(f)
+	dev, ino, _, _ := fileIdentityOf(f)
 	consumed := offsetOf(f)
 	// record the starting position immediately, so a crash before the first message
 	// cannot make the next arm re-apply the migration rule and seek END a second time.
-	writeCursor(peerDir, dev, ino, consumed)
+	// error ignored, unlike the loop write below: this seeds offset 0 and lastSaved is set
+	// to the same 0, so a failure self-corrects — the first real boundary differs from
+	// lastSaved and the loop writes anyway. The asymmetry with the loop write is
+	// deliberate, not an oversight.
+	_ = writeCursor(peerDir, dev, ino, consumed)
 	lastSaved := consumed
 	r := bufio.NewReader(f)
 	pend := ""
@@ -255,18 +258,38 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 				sink.emit(kindDormant, []byte(d.marker()))
 				return // one-way door (R14): dormancy is never re-entered
 			}
+			// lastSaved advances ONLY on success (cbus-que.13). It used to advance
+			// regardless, so one denied rename latched the cursor forever: the guard went
+			// false and no write was ever attempted again for that boundary.
+			//
+			// THE LOOP IS THE RETRY. Nothing is queued and there is no backoff — on
+			// failure the guard simply stays true, so the next tick re-enters this same
+			// block, which means identityCause is re-checked before every attempt. A
+			// displaced follower goes dormant instead of retrying, so a retry cannot
+			// escape the gate; the hazard is unconstructible rather than merely avoided.
+			//
+			// Unbounded on purpose. A cap REINTRODUCES THE LATCH with extra steps: a cap
+			// that gives up is a stale cursor that stopped trying, which is this defect
+			// wearing a policy. At the 200ms production cadence a permanent failure costs
+			// five small-file attempts per second on a peer whose cursor already cannot be
+			// written, and spinning visibly beats latching silently. warnCursorWriteOnce
+			// is what makes such a condition OBSERVED rather than inferred from a process
+			// that seems busy.
 			if boundary != lastSaved {
-				writeCursor(peerDir, dev, ino, boundary)
-				lastSaved = boundary
+				if err := writeCursor(peerDir, dev, ino, boundary); err == nil {
+					lastSaved = boundary
+				} else {
+					warnCursorWriteOnce(peerDir, err)
+				}
 			}
 			idleTicks = 0
 		}
 		time.Sleep(poll)
-		st, err := os.Stat(inbox)
-		if err != nil {
+		curDev, curIno, curSize, ok := fileIdentity(inbox)
+		if !ok {
 			continue // inbox vanished — keep the old fd and keep polling; never self-exit
 		}
-		if rotated(dev, ino, consumed, st) {
+		if rotated(dev, ino, consumed, curDev, curIno, curSize) {
 			// a rotation is the foreign-reopen trigger: the inbox we are about to follow
 			// may belong to a DIFFERENT peer that reclaimed this path. Check before
 			// reopening, never after, so a stranger's bytes are never read at all.
@@ -281,12 +304,15 @@ func follow(inbox string, resume resumePoint, id *listenerIdentity, sink frameSi
 			}
 			// reopen reads from byte 0 (survives a rejoin's rm+recreate or truncate).
 			f = nf
-			dev, ino = devInoOf(f)
+			dev, ino, _, _ = fileIdentityOf(f)
 			consumed = 0
 			// the cursor is keyed to the inode, so a rotation must republish it against
 			// the NEW file; leaving the old pair would make the next arm read a stale
 			// inode, fall to byte 0, and replay what we are about to stream anyway.
-			writeCursor(peerDir, dev, ino, consumed)
+			// error ignored for the same reason as the arm-time seed: this republishes
+			// offset 0 against the new inode and lastSaved is set to 0 beside it, so a
+			// failure self-corrects on the next boundary.
+			_ = writeCursor(peerDir, dev, ino, consumed)
 			lastSaved = 0
 			r = bufio.NewReader(f)
 			pend = ""
@@ -317,9 +343,13 @@ func openFollow(inbox string, resume resumePoint, poll time.Duration, stop <-cha
 // killing the follower). Retrying keeps the follower alive across a rejoin's
 // rm+recreate; a permanently-gone inbox simply polls forever (never self-exit). The
 // stop seam lets a test bound the retry.
+//
+// openSharedRead, not os.Open: this handle is held for the LIFE OF THE ARM, and a
+// stdlib handle blocks deletion on windows, so the rm half of the rm+recreate this
+// retry exists to survive could not happen at all while a peer was armed.
 func reopenUntilSuccess(path string, poll time.Duration, stop <-chan struct{}) (*os.File, bool) {
 	for {
-		if f, err := os.Open(path); err == nil {
+		if f, err := openSharedRead(path); err == nil {
 			return f, true
 		}
 		if stopped(stop) {
@@ -329,38 +359,19 @@ func reopenUntilSuccess(path string, poll time.Duration, stop <-chan struct{}) (
 	}
 }
 
-// rotated reports whether the inbox at cur is a different file than the open fd
-// (dev+ino changed — a rejoin's rm+recreate) OR has shrunk below what we have read
-// (size < consumed — a truncate-in-place). Either triggers a reopen-from-0. Mirrors
-// bin/cbus:569 (`st.st_ino != ino or st.st_size < f.tell()`), with dev added to the
-// inode check (a ruled delta over the bash ino-only compare).
-func rotated(prevDev, prevIno uint64, consumed int64, cur os.FileInfo) bool {
-	dev, ino, ok := statDevIno(cur)
-	if !ok {
-		return false
-	}
-	if dev != prevDev || ino != prevIno {
+// rotated reports whether the inbox identified by cur* is a different file than the
+// open fd (dev+ino changed — a rejoin's rm+recreate) OR has shrunk below what we have
+// read (size < consumed — a truncate-in-place). Either triggers a reopen-from-0.
+// Mirrors bin/cbus:569 (`st.st_ino != ino or st.st_size < f.tell()`), with dev added
+// to the inode check (a ruled delta over the bash ino-only compare).
+//
+// Pure over the identity pair and the size rather than reading them itself, so the
+// rotation DECISION is provable from any host while only fileIdentity is per-platform.
+func rotated(prevDev, prevIno uint64, consumed int64, curDev, curIno uint64, curSize int64) bool {
+	if curDev != prevDev || curIno != prevIno {
 		return true
 	}
-	return cur.Size() < consumed
-}
-
-// statDevIno pulls dev+ino out of a FileInfo (unix only — the whole follower is).
-func statDevIno(fi os.FileInfo) (dev, ino uint64, ok bool) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, 0, false
-	}
-	return uint64(st.Dev), uint64(st.Ino), true
-}
-
-func devInoOf(f *os.File) (uint64, uint64) {
-	fi, err := f.Stat()
-	if err != nil {
-		return 0, 0
-	}
-	d, i, _ := statDevIno(fi)
-	return d, i
+	return curSize < consumed
 }
 
 // offsetOf is the fd's current byte offset (the seek position after openFollow) — the

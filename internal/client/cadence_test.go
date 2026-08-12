@@ -70,13 +70,10 @@ func TestQuietFollowerWritesNothing(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	peer, inbox, _, id := armedPeer(t, "ch", "al")
 
-	_, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	buf, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
 	defer stopJoin()
 	appendLine(t, inbox, "p", "q", "one")
-	waitFor(t, func() bool {
-		_, _, off, st := readCursor(peer)
-		return st == cursorValid && off > 0
-	}, "the initial cursor")
+	waitForOwnCursor(t, peer, running, buf.String, "the initial cursor")
 
 	first, err := os.Stat(cursorPath(peer))
 	if err != nil {

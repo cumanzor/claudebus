@@ -1191,7 +1191,8 @@ Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex
   traffic before `D`, or a `stop_hook_active` re-entry with nothing new, prints
   nothing and allows the stop — **the timeout is a failure, never a signal**. A
   dot-prefixed `.stop-cursor` sidecar (distinct from the follower `.cursor`) tracks
-  delivered position. Never fails the session.
+  delivered position. Never fails the session on darwin/linux — excluded from
+  windows builds in phase 1 instead (below).
 
 Codex hooks provision entirely on argv (`-c` + `--dangerously-bypass-hook-trust`)
 for a spawned worker, or via `~/.codex/hooks.json` for a human's exec sessions.
@@ -1211,6 +1212,12 @@ decodes codex's snake/camel stdin) together:
 
 Set `CBUS_CHANNEL` (and optionally `CBUS_ALIAS`) in the codex process env so the
 SessionStart join has a channel. The `Stop` timeout must exceed `--wait`.
+
+On windows (phase 1), `codex-stop-hook` is one of the excluded verbs (cbus-que.3,
+[behavior spec §9.2](behavior-spec.md)): it exits 1 and prints `cbus: codex-stop-hook
+is not available on windows in phase 1: ...` instead of running the poll above. An
+operator wiring the `~/.codex/hooks.json` Stop hook on a windows host per the snippet
+above will see that exit code and refusal text in their hook's output.
 
 ---
 
@@ -1872,13 +1879,21 @@ add steps to try to suppress it."**
 
 ### `/bus-spawn [window|tab|tmux|pane] [channel|ch@host] [--model M] [--name N]`
 
-`allowed-tools: Bash(cbus:*), AskUserQuestion`
+`allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion`
 
-Thin wrapper over `cbus spawn` (§9): opens a **fresh** session (blank transcript,
-not a fork) in a new terminal, joined and armed on its own. The model asks for a
-target via AskUserQuestion only if none was passed, runs `cbus spawn`, and reports
-the result. The skill's argument hint surfaces `--model`/`--name`; `--role` is a
-`cbus spawn` flag used directly (§9).
+Wrapper over `cbus spawn` (§9) that wires BOTH sides. Before spawning, the skill
+joins the spawning session to the channel and arms its persistent Monitor tail —
+both skipped if a cbus Monitor is already armed for that channel. An omitted
+channel is derived up front, mirroring `spawnDefaultAddress`: own registration
+(`cbus whoami`), else git toplevel basename, else `global` — the join verb
+requires a name, so the skill can't leave derivation to spawn. Local: `cbus
+join` (idempotent), so a fresh channel gives the parent `main` and the child
+`fork-N`, the same layout as `cbus branch`. Remote `ch@host`: no join verb —
+explicit alias + the `cbus tail` ws arm-spec flow. Then it opens a **fresh**
+session (blank transcript, not a fork) in a new terminal, joined and armed on
+its own, and reports both addresses. The model asks for a target via
+AskUserQuestion only if none was passed. The skill's argument hint surfaces
+`--model`/`--name`; `--role` is a `cbus spawn` flag used directly (§9).
 
 ### `/bus-formation <verb> ...`
 

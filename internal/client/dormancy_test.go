@@ -219,13 +219,10 @@ func TestOrphanDoesNotMoveTheNewEpochCursor(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	peer, inbox, _, id := armedPeer(t, "ch", "al")
 
-	_, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	buf, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
 	defer stopJoin()
 	appendLine(t, inbox, "p", "q", "first")
-	waitFor(t, func() bool {
-		_, _, off, st := readCursor(peer)
-		return st == cursorValid && off > 0
-	}, "the follower's own cursor")
+	waitForOwnCursor(t, peer, running, buf.String, "the follower's own cursor")
 
 	// the peer is reclaimed by a new epoch, which clears the sidecar
 	if err := os.RemoveAll(peer); err != nil {
@@ -267,13 +264,10 @@ func TestDisplacedFollowerStopsMovingTheCursor(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	peer, inbox, meta, id := armedPeer(t, "ch", "al")
 
-	_, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
+	buf, running, stopJoin := startFollowAs(t, inbox, resumePoint{}, id)
 	defer stopJoin()
 	appendLine(t, inbox, "p", "q", "before-the-steal")
-	waitFor(t, func() bool {
-		_, _, off, st := readCursor(peer)
-		return st == cursorValid && off > 0
-	}, "the follower's own cursor")
+	waitForOwnCursor(t, peer, running, buf.String, "the follower's own cursor")
 	_, _, atSteal, _ := readCursor(peer)
 
 	// the steal: a different listener takes the tuple. Same inbox, same inode, no

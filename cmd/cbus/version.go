@@ -64,11 +64,21 @@ func versionParts(v string) []int {
 	return out
 }
 
-// assetNameFor is the release asset filename for a platform: cbus-<os>-<arch>. It is
-// the EXACT string selfupdate hands gh as --pattern, and it must equal the Makefile's
-// dist output (unix-only, no .exe) — TestAssetNameMatchesMakefile pins that (S5).
+// assetNameFor is the release asset filename for a platform: cbus-<os>-<arch>, plus
+// .exe on windows. It is the EXACT string selfupdate hands gh as --pattern, and it
+// must equal the Makefile's dist output — TestAssetNameMatchesMakefile pins that (S5).
+//
+// The windows suffix is required rather than conventional: selfupdate downloads to a
+// temp file named for the asset and execs it to version-gate it, and os/exec resolves
+// a path-qualified name through findExecutable, which on windows stats only name+ext
+// for each PATHEXT entry and never the bare path. An extensionless windows asset is
+// refused as unrunnable on every box, so nothing ever installs (cbus-que.5).
 func assetNameFor(goos, goarch string) string {
-	return "cbus-" + goos + "-" + goarch
+	name := "cbus-" + goos + "-" + goarch
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return name
 }
 
 func assetName() string {

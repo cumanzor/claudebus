@@ -4,13 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -397,15 +397,27 @@ func readClaim(peerDir string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// acquireMintLock takes a per-channel lock via flock(2) on an open fd. This is the
-// kernel primitive for exactly this job and it settles a problem three rounds of
-// hand-rolled file dances kept re-leaking: flock RELEASES ON CRASH (the kernel drops
-// it when the holder's fd closes, including on process death) and confers true
+// errLockContended is the ONE caller-visible signal for "another holder has it", and it
+// is the reason this loop does not compare a platform errno directly. flock reports
+// contention as EWOULDBLOCK and LockFileEx reports it as ERROR_LOCK_VIOLATION; a check
+// written against either constant cannot match on the other platform, so it would fall
+// straight through to the unexpected-error branch and give up on the FIRST contended
+// try. The loop would look correct, compile everywhere, and abandon the retry it exists
+// for under exactly the concurrency it was built to survive. Each platform maps its own
+// errno onto this sentinel so the decision here is platform-blind.
+var errLockContended = errors.New("mint lock held by another process")
+
+// acquireMintLock takes a per-channel lock on an open fd via the kernel's own file-lock
+// primitive: flock(2) on unix, LockFileEx on windows. That choice settles a problem
+// three rounds of hand-rolled file dances kept re-leaking, and both primitives carry the
+// two properties that made it settle. They RELEASE ON CRASH (the kernel drops the lock
+// when the holder's handle closes, including on process death) and they confer true
 // ownership, so there is no pid to be recycled, no token to go partial, and no
-// rename-to-steal TOCTOU. LOCK_NB makes acquisition non-blocking so we control the
-// retry cadence; the lock is a local file under CBUSDir(), so the classic NFS flock
-// caveats do not apply. ok=false only if the lock stays held past all patience, in
-// which case the caller records a blank run rather than mint unsynchronized.
+// rename-to-steal TOCTOU. Both are acquired non-blocking (LOCK_NB / FAIL_IMMEDIATELY) so
+// we control the retry cadence rather than queueing in the kernel. The lock is a local
+// file under CBUSDir(), so the classic NFS flock caveats do not apply. ok=false only if
+// the lock stays held past all patience, in which case the caller records a blank run
+// rather than mint unsynchronized.
 func acquireMintLock(ch string) (release func(), ok bool) {
 	if err := os.MkdirAll(ledgerRoot(), 0o755); err != nil {
 		return nil, false
@@ -415,15 +427,17 @@ func acquireMintLock(ch string) (release func(), ok bool) {
 		return nil, false
 	}
 	for tries := 0; tries < 4000; tries++ { // ~4s at 1ms; a real mint is microseconds
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err := tryLockExclusive(f)
 		if err == nil {
 			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				// unobservable by construction: Close alone drops the lock on both platforms, so a
+				// mutant deleting this call stays green. It is here to state the intent, not to be tested.
+				_ = unlockFile(f)
 				_ = f.Close()
 			}, true
 		}
-		if err != syscall.EWOULDBLOCK {
-			_ = f.Close() // an unexpected flock error is not something to spin on
+		if !errors.Is(err, errLockContended) {
+			_ = f.Close() // an unexpected lock error is not something to spin on
 			return nil, false
 		}
 		time.Sleep(time.Millisecond)
@@ -463,28 +477,7 @@ func channelPopulatedExcept(ch, skip string) bool {
 // opencode), reusing the same ancestor walk and argv[0] identity that OwnerPID uses.
 // Empty when no harness ancestor is found — never guessed.
 func HarnessName() string {
-	p := os.Getppid()
-	for depth := 0; p > 1 && depth < 16; depth++ {
-		comm, ppid, err := procParent(p)
-		if err != nil {
-			return ""
-		}
-		if base := commBase(comm); isHarnessComm(base) {
-			return normalizeHarness(base)
-		}
-		if argv, aerr := procArgs(p); aerr == nil {
-			if f := strings.Fields(argv); len(f) > 0 {
-				if base := commBase(f[0]); isHarnessComm(base) {
-					return normalizeHarness(base)
-				}
-			}
-		}
-		if ppid <= 1 {
-			break
-		}
-		p = ppid
-	}
-	return ""
+	return harnessWalk(os.Getppid(), procWalkRoot, procLookup())
 }
 
 // normalizeHarness collapses the claude-* variants onto one name so a ledger

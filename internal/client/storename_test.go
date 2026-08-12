@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"claudebus/internal/core"
@@ -22,6 +24,14 @@ func TestBranchChannelFromGitYieldsAStoreLegalName(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.dir, func(t *testing.T) {
+			// Win32 strips trailing dots and reports SUCCESS: MkdirAll("....") does not
+			// fail, it aliases onto the parent and returns nil, so the fixture would
+			// measure the parent's basename instead of the case's. The shape is what
+			// matters — a success return pointing at a different directory, not an error
+			// anything would notice. branchChannelFromGit is not implicated.
+			if runtime.GOOS == "windows" && strings.HasSuffix(c.dir, ".") {
+				t.Skip("windows strips trailing dots and silently aliases the create onto the parent, returning success: this fixture cannot exist here")
+			}
 			repo := filepath.Join(t.TempDir(), c.dir)
 			if err := os.MkdirAll(repo, 0o755); err != nil {
 				t.Fatal(err)

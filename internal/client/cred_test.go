@@ -85,15 +85,36 @@ func TestFileBackend(t *testing.T) {
 	if v, _ := fb.get("nuc", "cf-id"); v != "" {
 		t.Fatalf("absent get = %q, want empty", v)
 	}
+	// the mode-bit half lives in TestFileBackendPermissions: it is the only unix-only
+	// part, and a t.Skip needs its own function to be visible as a skip at all.
+	if b, _ := os.ReadFile(filepath.Join(dir, "cbus", "nuc", "token")); string(b) != "abc123" {
+		t.Errorf("file content = %q, want abc123 (no trailing newline)", b)
+	}
+}
+
+// TestFileBackendPermissions is the unix-only half of the file backend's contract: the
+// store dir is 0700 and each secret file 0600. Windows has no POSIX mode bits, so NTFS
+// reports the classic 0777/0666 and these cannot hold there; what the contract should BE
+// on windows is cbus-que.4 material rather than a mode comparison that reads as a defect.
+//
+// It is a separate function so the windows result is a visible SKIP. Guarding the asserts
+// inline would have left the test reporting PASS on a platform where it checked nothing,
+// which is the shape this formation keeps refusing.
+func TestFileBackendPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no POSIX mode bits on windows: the file-backend permission contract there is cbus-que.4")
+	}
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := (fileBackend{}).put("nuc", "token", "abc123"); err != nil {
+		t.Fatal(err)
+	}
 	if fi, _ := os.Stat(filepath.Join(dir, "cbus", "nuc")); fi.Mode().Perm() != 0o700 {
 		t.Errorf("dir perm = %o, want 700", fi.Mode().Perm())
 	}
 	ffi, _ := os.Stat(filepath.Join(dir, "cbus", "nuc", "token"))
 	if ffi.Mode().Perm() != 0o600 {
 		t.Errorf("file perm = %o, want 600", ffi.Mode().Perm())
-	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "cbus", "nuc", "token")); string(b) != "abc123" {
-		t.Errorf("file content = %q, want abc123 (no trailing newline)", b)
 	}
 }
 

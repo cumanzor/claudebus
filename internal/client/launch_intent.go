@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -157,16 +156,18 @@ func reclaimCorpse(path, tmp string) bool {
 	return os.Rename(tmp, path) == nil
 }
 
-// acquireReclaimLock takes the per-marker reclaim lock via flock(2) on an open fd,
-// non-blocking: a loser refuses, it does not queue.
+// acquireReclaimLock takes the per-marker reclaim lock on an open fd via the
+// tryLockExclusive seam (flock(2) on unix, LockFileEx on windows), non-blocking:
+// a loser refuses, it does not queue.
 //
 // The two halves of this file want OPPOSITE properties, which is the whole reason one
 // is a file and the other is a kernel lock. The MARKER must SURVIVE its writer — the
 // launcher exits on the success path, and the guard has to outlive it — so it is a
 // file cleared by TTL or the same-sid join, and a kernel lock would be exactly wrong
 // there. The RECLAIM window is the opposite: transient mutual exclusion that must
-// DIE with its holder, which is what flock gives for free. The kernel drops it when
-// the fd closes, including on process death, so a reclaimer killed mid-section leaks
+// DIE with its holder, which is what a kernel fd lock gives for free. The kernel
+// drops it when the fd closes, including on process death, so a reclaimer killed
+// mid-section leaks
 // nothing — there is no token to go stale, no pid to be recycled, no heal path to
 // re-race. ledger.go's mint lock took this same route after three rounds of
 // hand-rolled file dances, and this milestone found the same class three times before
@@ -178,12 +179,12 @@ func acquireReclaimLock(path string) (release func(), ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := tryLockExclusive(f); err != nil {
 		_ = f.Close()
 		return nil, false
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = unlockFile(f)
 		_ = f.Close()
 	}, true
 }

@@ -138,6 +138,11 @@ var applyForker client.TerminalForker = client.OSAForker{}
 const defaultWait = 90 * time.Second
 
 func runFormationApply(args []string) int {
+	// on the apply path rather than on runFormation's dispatch, so save/list/show/rm
+	// and bootstrap survive on a platform that only loses the launcher (D44).
+	if m := phase1Refusal("formation apply"); m != "" {
+		return die("%s", m)
+	}
 	const use = "usage: cbus formation apply <name> [--channel ch] [--mode resume|fork|template] [--only a,b] [--dry-run] [--wait 90s|0] [--brief TEXT]"
 	if len(args) == 0 {
 		return die(use)

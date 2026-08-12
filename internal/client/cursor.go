@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // The durable replay cursor (D4). It records how far a peer's inbox has actually been
@@ -92,14 +93,21 @@ func readCursor(peerDir string) (dev, ino uint64, off int64, state cursorState) 
 // No fsync. A crash between the last emit and this write re-delivers a few frames; the
 // alternative is an fsync per drain batch to buy a guarantee we have already said we do
 // not need.
-func writeCursor(peerDir string, dev, ino uint64, off int64) {
+// writeCursor returns its failure instead of swallowing it. The error names WHICH half
+// failed and carries the errno, which is what the caller needs to decide whether the
+// recorded position actually moved. cbus-que.13: the loop write used to advance its
+// lastSaved regardless, so ONE denied rename froze the cursor for the life of the arm and
+// the next arm resumed from a stale offset, re-delivering everything since.
+func writeCursor(peerDir string, dev, ino uint64, off int64) error {
 	tmp := filepath.Join(peerDir, ".cursor.tmp."+strconv.Itoa(os.Getpid()))
 	if err := os.WriteFile(tmp, []byte(fmt.Sprintf("%d %d %d\n", dev, ino, off)), 0o644); err != nil {
-		return
+		return err
 	}
-	if os.Rename(tmp, cursorPath(peerDir)) != nil {
+	if err := os.Rename(tmp, cursorPath(peerDir)); err != nil {
 		_ = os.Remove(tmp)
+		return err
 	}
+	return nil
 }
 
 // resolveResume is the replay decision table. It must run BEFORE armMeta overwrites
@@ -125,9 +133,8 @@ func resolveResume(inbox, metaPath string) resumePoint {
 	peerDir := filepath.Dir(inbox)
 	switch dev, ino, off, state := readCursor(peerDir); state {
 	case cursorValid:
-		if st, err := os.Stat(inbox); err == nil {
-			curDev, curIno, iok := statDevIno(st)
-			if iok && curDev == dev && curIno == ino && off <= st.Size() {
+		if curDev, curIno, size, ok := fileIdentity(inbox); ok {
+			if curDev == dev && curIno == ino && off <= size {
 				return resumePoint{offset: off}
 			}
 		}
@@ -139,4 +146,17 @@ func resolveResume(inbox, metaPath string) resumePoint {
 		return resumePoint{seekEnd: true} // migration: cursor-less but ever-armed
 	}
 	return resumePoint{offset: 0}
+}
+
+// warnCursorWriteOnce reports the FIRST cursor-write failure per peer and stays quiet
+// after, because the retry is unbounded and a message per tick would bury the signal in
+// its own noise. One line is what separates a permanent condition from a process that
+// merely looks busy — the silent-forever class this port keeps finding.
+var cursorWarned sync.Map
+
+func warnCursorWriteOnce(peerDir string, err error) {
+	if _, seen := cursorWarned.LoadOrStore(peerDir, true); seen {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "cbus: cursor write failed for %s, retrying every poll: %v\n", peerDir, err)
 }

@@ -82,8 +82,8 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 	}
 	// name IS the child's alias now, so it must pass the store rule the reservation
 	// enforces. Checked here too, pre-fork, so the error names the flag.
-	if name != "" && !core.ValidStoreName(name) {
-		return "", "", fmt.Errorf("bad name %q", name)
+	if why := core.StoreNameReason(name); name != "" && why != "" {
+		return "", "", fmt.Errorf("bad name %q: %s", name, why)
 	}
 	addr = address
 	if addr == "" {
@@ -108,8 +108,8 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 			title, prompt = addr, SpawnPrompt(addr) // alias unknowable — child picks
 		}
 	} else {
-		if !core.ValidStoreName(addr) {
-			return "", "", fmt.Errorf("bad channel %q", addr)
+		if why := core.StoreNameReason(addr); why != "" {
+			return "", "", fmt.Errorf("bad channel %q: %s", addr, why)
 		}
 		// spawn is always a fresh, blank-transcript session (cbus-m9l birth-record).
 		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model); err != nil {

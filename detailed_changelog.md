@@ -1,5 +1,157 @@
 # Changelog (detailed)
 
+## [2026-08-12 00:24:05 UTC] [Merge/Windows] windows-port reconciled with main (v0.9.0-v0.9.3)
+
+[Attempt #1] `d64b038` (full `d64b038` merge commit, second parent `b5dab23` = main tip).
+Merge of 30 main commits spanning four release eras (v0.9.0 formations resume, v0.9.1
+bare-shell transcript roots, v0.9.2 blank-profile instance sweep, v0.9.3 string fixes)
+plus the README/docs restructure, into the 27-commit windows-port branch.
+
+[Motivating problem]
+Main moved four eras while the port branch slept; every further port milestone would
+land on a stale base, and the que.5 live-selfupdate gate needs a release cut from a
+reconciled tree.
+
+[Conflicts]
+Four textual (formation.go, transcript.go, both changelogs), two SEMANTIC -- and both
+semantic ones are the same class: main develops without the port's platform gates, so
+it reintroduces exactly the classes the port eliminated.
+
+- `internal/client/transcript.go` -- main's `fb948f8` (cbus-phh: profile root resolves
+  from HOME, not the env, so bare/GUI shells can resume profiled formations) is the
+  newer ruling and is KEPT structurally intact. But it carried the forward-slash
+  `"/.ccs/instances/"` detection literal at TWO sites: the transcriptRoots cfg-hint
+  branch and the new InstanceProfiles sweep. That is the que.9/D70 class: a real
+  windows CLAUDE_CONFIG_DIR uses backslashes, the Contains never matches, and the
+  branch silently vanishes with no error anywhere. Both sites now call the structural
+  `isCCSInstanceDir` (kept from the port side of the conflict). The D70 instrument
+  itself was pinned before judging: the UNQUOTED fragment legitimately appears in test
+  env values and one doc comment at the D70-clean baseline (92a6e54), so the
+  acceptance form is the QUOTED literal in *.go -- zero at baseline, zero post-merge.
+  `strings` import dropped (its only uses were the two replaced Contains calls);
+  `sort` kept for InstanceProfiles.
+- `internal/client/launch_intent.go` -- NOT a textual conflict; caught by the
+  `GOOS=windows go build ./...` gate. Main's `f3bb9cc` (cbus-rze F1: flock the reclaim
+  window) called `syscall.Flock` untagged, the que.1 class. Swapped onto the existing
+  M2 platform seam: `tryLockExclusive`/`unlockFile` (flock(2) on unix, LockFileEx via
+  NewLazyDLL on windows), which preserves both properties the site needs -- non-blocking
+  (a loser refuses, does not queue; contention maps to errLockContended, and this
+  caller refuses on ANY error so the sentinel distinction is moot here) and
+  dies-with-holder (both kernels drop the lock on fd/handle close including process
+  death). Doc comment reworded platform-blind. Folded INTO the merge commit so the
+  merge itself is green on every platform.
+- `cmd/cbus/formation.go` -- port's D44 apply-path refusal guard + main's `--mode` in
+  the usage string; both kept, trivially compatible.
+- changelogs -- timestamp-ordered union: 11 port-side entries + 6 main-side entries
+  over 107 (simple) / 91 (detailed) shared, counts verified by inclusion-exclusion
+  against both parents. One ordering anomaly is pre-existing on main (a 2026-07-18
+  entry with a date but no time).
+
+[Auto-merged but verified by hand]
+- `roles/*.md` + `profiles/*` came out identical to main (b5dab23's doctrine-block
+  string sweep). The three-part invariant re-verified post-merge: shared-core awk hash
+  is 1-unique across all four role files.
+- `internal/client/spawn.go` took main's b5dab23 prompt strings cleanly.
+
+[Possible Ripple Effects]
+- The port now sits on the v0.9.3 feature surface (resume/--mode/anchors); windows
+  refusal tests that enumerate verbs may meet new verbs main added -- none surfaced in
+  the suite, but logos has not seen this tree yet.
+- InstanceProfiles' cfg-hint branch now WORKS on windows (structural check) where
+  main's literal silently disabled it -- behavior change on windows only, in the
+  direction the D70 ruling requires.
+- The reclaim lock on windows now takes LockFileEx byte-range semantics rather than
+  failing to compile; cbus-rze's darwin tests pass unchanged, but the windows half is
+  compile-verified only, first-executes on logos.
+
+[Testing Notes]
+- darwin: `go build ./...` + FULL `go test ./...` green (all packages).
+- windows: tree-wide `GOOS=windows go build` green (RED before the launch_intent fix,
+  which is what surfaced it); `go test -c` compiles for internal/client AND cmd/cbus.
+- linux: amd64 + arm64 builds green. Container runtime gate NOT run -- the resolution
+  touched no process-state code (the liveness.go merge was main's side, auto-merged).
+- D70 fragment grep: quoted literal zero tree-wide in *.go, matching baseline.
+
+## [2026-08-11 21:27:02 UTC] [Commands/Docs] /bus-spawn both-sides flow + spool external-readers note
+
+[Attempt #1] `10a1a8d` (full `10a1a8dea03c152d3c2ea57664bda95c39196536`) +
+`f7f370a` (full `f7f370a5e9341d5b7a506f0b7143911f48f5a724`).
+2 commits, 3 files: commands/bus-spawn.md + docs/architecture/command-reference.md
+(10a1a8d, 50 insertions/17 deletions), relay/internal/spool/spool.go (f7f370a,
+4 insertions, comment-only). Carlos-authored working-tree changes that predate this
+session, reviewed and committed here with one gap closed. Riders on the windows-port
+branch by circumstance only -- neither is port work.
+
+[Motivating problem]
+`/bus-spawn` was a thin one-step wrapper: run `cbus spawn`, report the output. The
+child joins and arms itself, but the SPAWNING side never joined, so the parent could
+not hear the child until someone manually ran /bus-join -- the common case being you
+spawn a worker and immediately want to talk to it.
+
+[Files Changed]
+
+`10a1a8d` -- /bus-spawn wires both sides:
+- `commands/bus-spawn.md` -- description now says "both sides joined"; `Monitor` added
+  to allowed-tools (the skill arms a listener now). The one-step body becomes three
+  steps: (1) join THIS session first -- local: `cbus join <channel>` (idempotent);
+  remote `ch@host`: no join verb, so explicit alias + `cbus tail` to print the ws arm
+  spec (`cbus auth set <host>` if credentials are missing); (2) arm the persistent
+  Monitor (command source locally, ws source remotely; the ⚠ never-run-local-tail-in-
+  Bash warning carried over from bus-join.md); (3) `cbus spawn` as before. Steps 1-2
+  are skipped when a cbus Monitor is already armed for the channel. Join-before-spawn
+  ordering is called out as load-bearing: on a fresh channel the parent takes `main`
+  and the child's reservation takes `fork-1`, matching `cbus branch` layout (verified
+  against `pickAlias`, internal/client/store.go:62). The confirmation line reports
+  both addresses.
+- REVIEW GAP CLOSED IN THE SAME COMMIT: the draft left the no-channel invocation
+  undefined -- the argument-hint marks the channel optional and the old flow delegated
+  derivation to `cbus spawn` itself (`spawnDefaultAddress`: own registration, else
+  git toplevel basename, else `global`), but the new step 1 needs a concrete name and
+  bare `cbus join` refuses with usage (cmd/cbus/main.go:741). The vague "defaults to
+  this session's own channel, else the repo-derived name" sentence became an
+  actionable instruction: derive before step 1, mirroring spawnDefaultAddress --
+  channel half of `cbus whoami`'s first line (exits 1 when not joined), else git
+  toplevel basename, else `global` -- and use that name in every step.
+- `docs/architecture/command-reference.md` -- the §/bus-spawn entry rewritten from
+  "thin wrapper" to the both-sides description, including the derivation rule and the
+  main/fork-N layout claim; allowed-tools line updated to include Monitor.
+
+`f7f370a` -- spool layout is a compatibility surface:
+- `relay/internal/spool/spool.go` -- 4-line comment appended to the package doc:
+  bd-dashboard's formations sweep reads `{new,cur}` dir mtimes (read-only, never
+  content) as a peer-activity signal, so restructuring the Maildir layout blinds
+  those readers. Claim VERIFIED before committing against the NUC's deployed
+  `~/bd-dashboard/cc_sessions/activity.py:107-115`: iterates
+  `spool/<channel>/<peer>/`, appends the `cur` and `new` dir mtimes to its candidate
+  set, newest wins; its own header says "Read-only, mtimes only, never parse". The
+  LOCAL bd-dashboard checkout (April 2026, feature/tracker-binding) predates that
+  code entirely -- the deployed copy is the referent.
+
+[Possible Ripple Effects]
+- /bus-spawn sessions now hold a joined registration + armed Monitor the old flow
+  never created; anything counting channel members after a spawn sees one more peer
+  (the parent) than before. That is the point, but scripts asserting exact rosters
+  would notice.
+- The skill's fresh-channel layout promise (parent=main, child=fork-N) depends on
+  join-before-spawn ordering; reordering the steps silently changes who gets `main`.
+- The spool comment constrains future relay refactors: renaming/merging `{new,cur}`
+  now carries a documented external-reader cost (bd-dashboard degrades to
+  inbox-mtime-only for relay-armed peers, silently).
+- Merge note: main's command-reference.md is heavily restructured (v0.9.x docs era),
+  but its §/bus-spawn body is byte-identical to this branch's pre-edit text, so the
+  reconcile conflict, if any, resolves by taking this side of the section.
+
+[Testing Notes]
+- Doc/comment-only: no binary change intended; `go build ./...` unaffected.
+- Claims audited against source rather than executed: join usage refusal
+  (main.go:741), pickAlias main/fork-N (store.go:62), spawnDefaultAddress fallback
+  chain (spawn.go:139-146 + branchChannelFromGit, harness.go:247), whoami output
+  shape `channel/alias` + exit 1 on empty (main.go:687-707), bd-dashboard reader
+  (NUC activity.py, over ssh).
+- Not exercised: a live /bus-spawn invocation through a real session (the skill text
+  is model-directed prose; its first live run is the real test -- watch the omitted-
+  channel path in particular).
+
 ## [2026-08-09 23:10:00 UTC] [Formation/Resume] blank-profile envelopes: instance sweep
 
 [Attempt #1] `7903eb1`. Found by Carlos's first field test of resume on an older
@@ -305,6 +457,1812 @@ that hand edit, minus the editor.
   both; `--anchor git_head=x` refuses rc=1 with the machine-owned message.
 - Read-only against the real store: 14 envelopes list, `rn-foundry` renders
   with its existing anchor — old envelopes read fine under the new binary.
+
+## [2026-08-03 18:09:01 UTC] [Build/Release/Windows] cbus-que M9: windows build/release wiring, plus a fleet-wide release-safety fix
+
+[Attempt #1] `927ac9c` (full `927ac9c4eaf59fc3cd62418671b8b15a8f5ee4ec`) +
+`9288f6d` (full `9288f6dc0bc99f4d8abbf007d10cdedb79d89059`) +
+`ca71c00` (full `ca71c00871b6e6ad6843606084664f3bb5e53f0d`) (M9, cbus-que.5).
+3 commits, 8 files touched across the batch: Makefile (927ac9c, 9288f6d), cmd/cbus/version.go,
+cmd/cbus/selfupdate_test.go, cmd/cbus/selfupdate.go, cmd/cbus/swap_unix.go (new),
+cmd/cbus/swap_windows.go (new), cmd/cbus/swap_windows_test.go (new).
+47 insertions/20 deletions (927ac9c) + 15/2 (9288f6d) + 381/21 (ca71c00).
+
+Built by the `winship` formation (orchestrator, coder, reviewer, tester, documenter) --
+successor to `winport` (M1-M8), same five-seat shape, standing up on the 2026-08-03
+handover to take cbus-que.5 and cbus-que.6.
+
+[Motivating problem]
+Three separable problems land together because all three sit on the release path que.5
+owns: (1) windows/amd64 was entirely absent from the build matrix; (2) the asset-naming
+question the epic's que.5 handoff flagged as a four-place decision with a fail-silent
+consequence if answered inconsistently; (3) a platform-independent release-safety gap
+found while touching the Makefile for (1)/(2), unrelated to windows but caught in the
+same pass; (4) the selfupdate blocker the prior formation measured at the primitive
+(`os.Rename` denied against a running windows binary) and handed off as a scoped fix.
+
+[Files Changed] (8 paths across 3 commits)
+
+`927ac9c` -- windows/amd64 target + `.exe` asset naming:
+- `Makefile` -- PLATFORMS gains `windows/amd64`; the stale unix-only comment (cbus-7sg
+  D25) is rewritten to say the ruling is superseded rather than left contradicting the
+  list it sits above. The dist rule gains `case $$os in windows) ext=.exe;; *) ext=;;
+  esac` and appends `$$ext` to the output path.
+- `cmd/cbus/version.go` -- `assetNameFor` appends `.exe` when `goos == "windows"`. Doc
+  comment rewritten to state WHY the suffix is required rather than conventional:
+  selfupdate execs the downloaded asset to version-gate it, and windows `os/exec`
+  resolves a path-qualified name through `findExecutable`, which stats only name+ext per
+  PATHEXT entry and never the bare path -- an extensionless windows asset is refused as
+  unrunnable everywhere, so nothing ever installs.
+- `cmd/cbus/selfupdate_test.go` -- `TestAssetNameMatchesMakefile` (S5) restructured from
+  a computed `want` (which would pass under any rule, including a dropped `.exe`) to
+  literal per-platform want strings, `windows/amd64` added to the matrix. Two new
+  substring/regex checks against the Makefile text itself: `$(BINARY)-$$os-$$arch$$ext`
+  (the output-path shape) and `windows) ext=.exe` (the suffix rule), plus a
+  line-anchored regex for the `windows/amd64` PLATFORMS entry so an unanchored match
+  can't be satisfied by the word appearing only in the rewritten comment above the list.
+
+`9288f6d` -- dirty-tree release guard (fleet-wide, not windows-scoped):
+- `Makefile` -- `release` recipe restructured. `git status --porcelain` is checked
+  first; a dirty tree refuses with the offending paths on stderr. `dist` moves from a
+  `.PHONY` prerequisite to an explicit `$(MAKE) dist || exit 1` line inside the recipe
+  body, so a build failure halts before `gh release create` runs rather than falling
+  through to it with whatever partial `dist/` exists.
+
+`ca71c00` -- windows self-replacement:
+- `cmd/cbus/selfupdate.go` -- `swapBinary`'s body (15 lines) removed and replaced with a
+  one-line comment pointing at the two new per-platform files; `copyFile` stays shared.
+  `runSelfupdate` gains a `cleanDisplaced(exePath)` call right after resolving the
+  current binary path, before the download starts; a non-empty stuck-list prints one
+  stderr note naming the leftover(s) rather than failing or staying silent.
+- `cmd/cbus/swap_unix.go` (new, 34 lines, `//go:build darwin || linux`) -- the exact
+  prior `swapBinary` body moved verbatim (rename onto the running binary, cross-fs
+  sibling-stage-then-rename fallback), plus a no-op `cleanDisplaced` with a comment
+  stating why: unix replaces in place, so nothing is ever displaced.
+- `cmd/cbus/swap_windows.go` (new, 78 lines) -- `swapBinary` renames the running image
+  aside to `dst + ".old." + pid` first, then calls `placeBinary` (rename if same volume,
+  copy+remove fallback since `src` sits under `%TEMP%`) to put the new binary at the
+  freed path; on a placement failure it renames the displaced image back and returns the
+  original error plus a note if even the rollback fails. `cleanDisplaced` lists `dir`,
+  matches entries by the PID-qualified prefix (not `filepath.Glob` -- `exePath` is not a
+  pattern and a literal `[` in a real path would make Glob silently match nothing), and
+  returns the names it could not remove.
+- `cmd/cbus/swap_windows_test.go` (new, 259 lines) -- covers `swapBinary` success,
+  placement-failure rollback, `cleanDisplaced` removing a stale displaced image and
+  reporting one it cannot remove, and the D27 contrast kill (below).
+
+[Design]
+
+- THE `.exe` DECISION IS CORRECTNESS, NOT STYLE. The que.5 handoff framed this as a
+  naming choice with two defensible answers; the coder resolved it as a forced move once
+  `findExecutable`'s PATHEXT behavior was checked: an extensionless windows asset is not
+  merely inconsistent, it is UNRUNNABLE, so `verifyDownloaded` (which execs the
+  downloaded binary to confirm it works before swapping it in) fails on every windows
+  install regardless of what the asset actually contains. The handoff's own warning --
+  answer it in one place and the other three silently disagree -- is why S5 was
+  restructured to literal wants rather than trusted to keep tracking a computed one.
+
+- THE DIRTY-RELEASE DEFECT is platform-independent and predates all windows work,
+  found by touching the Makefile for an unrelated reason. `assets.go`'s `go:embed`
+  snapshots the working tree at build time and `VERSION` is `git describe --dirty`; the
+  release target checked only that an exact tag sits on HEAD, not that the tree matches
+  it. A dirty release would stamp a `-dirty` suffix into the published binary's own
+  version string, which `versionMatchesTag` -- run by every peer's selfupdate check --
+  then rejects against the exact tag that was actually published, refusing the update ON
+  EVERY MACHINE AND PLATFORM. This is a defect a user finds after the fact, not one
+  `make release` itself would have caught.
+
+- THE SECOND DEFECT, found restructuring the guard for the first: the recipe was a
+  single semicolon-chained shell command, so a failed `dist` build (a compile error on
+  one of five platforms) fell through to the `gh release create` line anyway, uploading
+  whatever partial `dist/` existed -- potentially publishing a release missing one or
+  more platform binaries with no error surfaced. Verified in both directions with `gh`
+  stubbed: unpatched, a forced `dist` failure still reached the `gh` call; patched, it
+  exits before reaching it.
+
+- WINDOWS SELF-REPLACEMENT MECHANISM. `swapBinary` on unix works because `os.Rename`
+  onto a running binary succeeds -- the kernel keeps the open inode alive independent of
+  the directory entry. Windows' `os.Rename` is `MoveFileEx` with
+  `MOVEFILE_REPLACE_EXISTING`, and that specific clause is denied with
+  ERROR_ACCESS_DENIED whenever ANY handle is open on the target, REGARDLESS OF SHARE
+  MODE -- the loader always holds such a handle on a running image, so no share-flag
+  fix (the seam M5 built for a different problem, delete-blocking) touches this at all.
+  This is the THIRD distinct windows kernel check this epic has now catalogued under one
+  confusing errno: M5 found deleting a held file honors FILE_SHARE_DELETE; M7 found
+  renaming a directory with open children fails regardless of the directory's own share
+  state; this milestone found renaming-and-replacing a file onto a held target is
+  share-immune by design. What windows DOES permit: renaming the running image ASIDE (no
+  replace clause involved), with the process continuing to execute from the moved file.
+  `swapBinary` on windows therefore vacates `dst` first, then places the new binary at
+  the now-empty path -- rename if same volume (the common case once `%TEMP%` and the
+  install dir happen to share one), copy+remove fallback otherwise. A placement failure
+  triggers rollback: the displaced image is renamed back to `dst`, and if THAT also fails
+  the error names both the original failure and the stuck displaced path so nothing is
+  silently lost.
+
+- LEFTOVER CLEANUP TIMING AND MATCHING. A displaced image is left on disk between runs
+  by design, not swept eagerly: cleaning at every `cbus` invocation would cost a
+  directory read for an artifact only `selfupdate` itself ever creates, so cleanup runs
+  once, at the START of the next `selfupdate`, before the new download begins.
+  `cleanDisplaced` matches by a PID-qualified prefix (`filepath.Base(exePath) +
+  ".old." + pid`) rather than `filepath.Glob`, because `exePath` is a real path, not a
+  pattern, and a literal `[` in a user's install path would make `Glob` silently match
+  nothing rather than error -- a false-negative failure mode inappropriate for a cleanup
+  step whose whole job is finding files reliably.
+
+- MECHANISM HISTORY. The blocker was predicted from source and measured at the raw
+  primitive (`os.Rename` behavior against a live loader-held image) by the PRIOR
+  `winport` formation, recorded in the que.5 cold-pickup handoff as a measured blocker
+  with the fix shape already identified (vacate-then-place, no new dependency). This
+  milestone closed it AT THE FUNCTION level -- `swapBinary` itself, not just the
+  primitive underneath it -- with two independent mutants against a real loader-held
+  image, run separately by the coder and the reviewer, both landing on the aimed
+  assertion.
+
+- D27 ENFORCEMENT, FOUND HALF-PINNED. The ruling that a stuck displaced leftover must
+  be reported rather than silently discarded was initially pinned by a test that only
+  checked `cleanDisplaced`'s RETURN VALUE (the stuck-names slice) -- nothing asserted
+  that `runSelfupdate` actually PRINTS the note a user would see. Review caught the gap
+  and closed it with a contrast kill: a mutant that drops the `fmt.Fprintf` call but
+  leaves the return value and control flow untouched now fails the test, where it
+  previously would have passed silently.
+
+[Ripple]
+None filed. This bead's scope (asset naming, release guard, self-replacement) is now
+addressed in full per the que.5 handoff's own gate description; `make dist` producing
+the windows artifact and a selfupdate dry-run resolving the correct asset name remain to
+be confirmed against the actual gate, per the bead's own acceptance criterion, separately
+from this changelog pass.
+
+Not pushed, commit gate open with Carlos.
+
+## [2026-08-03 16:06:52 UTC] [Client] cbus-que M8: cursor write failure no longer latches -- first fleet-wide fix of the epic
+
+[Attempt #1] `5158271` (full `5158271725dec40ec85a13eef9c9b16f08478c20`, M8, cbus-que.13).
+3 files, 113 insertions, 7 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Full record on `cbus-que.13`; resolves `cbus-que.10` as a side
+effect; `cbus-que.14` inherits the fix shape.
+
+[Motivating problem]
+Found by the coder while closing a gap in M7's H8 investigation, and filed as
+its own bead deliberately rather than folded under the windows-scoped
+`cbus-que.10`: this is a PRODUCTION defect on every platform, and burying a
+fleet-wide finding under a windows-numbered bead is exactly the
+next-reader-looks-in-the-wrong-place problem this epic already ruled against
+once for `cbus-que.9`'s case-collision note. `follow.go`'s loop cursor write
+(`if boundary != lastSaved { writeCursor(...); lastSaved = boundary }`)
+advanced `lastSaved` UNCONDITIONALLY, and `writeCursor` (`cursor.go`) discarded
+both of its own failure modes -- a failed `os.WriteFile` returned bare, a
+failed `os.Rename` removed its temp file and returned bare. So a single
+transient write failure latched: the guard went false forever after, no
+further write attempt was ever made for that boundary, and the cursor froze at
+its last good offset while the follower kept streaming past it. The next arm
+resumes from that stale offset and re-delivers everything sent since --
+silent, and it survives the very condition (a single transient failure) that
+caused it. Measured concretely by M7 on windows (all four `cbus-que.10`
+members deterministically stuck, valid cursor, offset zero, while the follower
+looped normally); the same latch is live on darwin/linux and needs only one
+transient `ENOSPC`/`EIO` to trigger.
+
+[Files Changed] (3 paths)
+- `internal/client/cursor.go` -- `writeCursor` changes signature from no return
+  to `error`, naming which half failed (write vs rename) and carrying the
+  underlying errno -- the signature M5 deliberately left alone specifically so
+  it would not prejudge this bead's design. New `warnCursorWriteOnce(peerDir,
+  err)`, backed by a `sync.Map` keyed on peer dir, prints one stderr line on
+  the FIRST failure for a given peer and stays silent after.
+- `internal/client/follow.go` -- the loop write (the only site that can ever
+  carry a nonzero offset for a live follower) now advances `lastSaved` only
+  when `writeCursor` returns nil, and calls `warnCursorWriteOnce` on failure.
+  The two other call sites (arm-time seed, post-rotation reseed) keep ignoring
+  the error (`_ = writeCursor(...)`), each with a new comment stating why:
+  both write offset 0 and set `lastSaved` to that same 0 immediately after, so
+  a failure there is self-correcting the moment a real boundary arrives --
+  guarding them would add branches whose asymmetry with the loop write a
+  future reader would have to re-derive from nothing.
+- `internal/client/latch_test.go` (new, 58 lines) --
+  `TestFailedCursorWriteDoesNotLatch`, portable, runs on every platform. Blocks
+  every write by making the cursor path itself a directory (`os.Rename` onto a
+  directory fails deterministically everywhere, sidestepping the windows-only
+  rename-replace denial `cbus-que.10`/M7 needed to reach the same failure
+  class). Asserts the follower keeps running through several failing ticks,
+  then unblocks and asserts the very next successful tick lands the cursor --
+  proving retry, not merely surviving the failure. Kill mutation named
+  directly in the comment: restore the unconditional `lastSaved = boundary`
+  and the case fails, because the unblocked write below never gets attempted
+  again.
+
+[Design]
+- THE FIX IS A GUARD, NOT A RETRY MECHANISM, by design and worth stating
+  precisely: nothing is queued, there is no backoff, and no new scheduling
+  concept was introduced. `lastSaved` simply stops advancing on failure, which
+  leaves the existing gate (`boundary != lastSaved`) true, so the EXISTING
+  poll loop becomes the retry for free. This is why `identityCause` gets
+  re-checked before every attempt without any new code doing the checking: a
+  retry is just the same gated block running again on the next tick, with
+  every precondition it already had. Consequence argued as decisive rather
+  than incidental: the hazard of a queued retry landing after a steal and
+  moving a DISPLACED follower's cursor becomes UNCONSTRUCTIBLE, not merely
+  avoided by careful sequencing -- a displaced follower takes the dormancy
+  door instead of ever reaching a retry, so there is no retry left to escape
+  anything.
+- UNBOUNDED, RULED AGAINST A CAP: a cap that eventually gives up on a
+  permanently-failing peer IS a stale cursor that stopped trying -- the
+  original defect, wearing a retry-count policy instead of a silent
+  assignment, but landing at exactly the same silent-forever place. Cost of
+  unbounded at the 200ms production cadence: roughly five small-file write
+  attempts per second against a peer whose cursor genuinely cannot be
+  written, accepted because a visibly spinning process beats a silently
+  latched one. `warnCursorWriteOnce` is what converts "permanent condition"
+  from something an operator would have to infer (a process that looks busy
+  for no visible reason) into one observed stderr line, firing exactly once
+  per peer directory rather than once per tick (a per-tick log is what
+  perturbed M7's own probe results into rate-incomparability -- deliberately
+  not repeated here).
+- SIGNATURE CHOICE (R1): `writeCursor` returns `error` rather than a bool.
+  The error's WHICH-half-plus-errno shape is exactly the scaffolding M7 built
+  by hand as a throwaway, non-shippable probe to characterize this exact
+  defect -- landing it for real here means the investigation's own
+  instrumentation becomes the production signature, rather than a separate
+  simplified one being invented after the fact.
+- OTHER CALL SITES (R2): the arm-time seed and post-rotation reseed writes
+  stay unguarded on purpose, each now commented with why, so the asymmetry
+  with the loop write reads as deliberate rather than an oversight a future
+  pass might "fix" into uniformity. Both write offset 0 and immediately set
+  `lastSaved` to that same 0, so any failure there self-corrects the moment a
+  real (nonzero) boundary is next computed by the loop.
+- FIRST LOCALLY-KILLABLE MUTANT for this entire cluster: every prior
+  verification round in `cbus-que.10`/M7 needed the actual windows target
+  machine, because the underlying denial (`MoveFileEx` rename-replace against
+  a held handle) is windows-specific. The reviewer's addition here -- pin the
+  latch itself, not the windows-specific trigger, using a PLATFORM-NEUTRAL
+  failure injection (a directory where the cursor file needs to go, which
+  fails `os.Rename` deterministically everywhere) -- gives this cluster its
+  first mutant killable on darwin, at `latch_test.go:57`.
+- ACCEPTANCE, registered before the run specifically so it could falsify
+  rather than just confirm: `cbus-que.10`'s four members had to run
+  COMPLETELY UNCHANGED against the exact harness M7 committed (`fa8a353`), same
+  scope, same 8 runs, on logos. Editing those tests as part of this fix would
+  have spent the pre-registered D79 prediction -- a green bought by touching
+  the instrument is worth less than a clean red, so the tests were left alone
+  on principle even though this milestone's own author could have "improved"
+  them.
+- DARWIN BLAST RADIUS, stated precisely: only the loop write's behavior
+  changes, and only under failure. A transient `ENOSPC`/`EIO` there now
+  retries on the next tick instead of latching forever -- darwin-visible
+  strictly in exactly the place where, today, unpatched, it silently
+  corrupts. No behavior changes on a successful write anywhere.
+
+[Possible Ripple Effects]
+- `cbus-que.10` resolves as a side effect of this fix and can close, per the
+  D79 falsifiable prediction registered on M7 -- the prediction was CONFIRMED
+  (see Testing Notes), not merely assumed satisfied by shipping a plausible
+  fix.
+- `cbus-que.14` (the `.stop-cursor` sidecar, a separate cursor file for the
+  codex Stop-hook delivery path, explicitly out of M7's production-reader
+  enumeration) inherits this exact fix shape for whenever that bead is
+  worked -- the guard-not-retry-mechanism design and the unbounded-plus-
+  log-once ruling both transfer directly if the sidecar has the same
+  discard-on-failure shape.
+- The new `warnCursorWriteOnce` stderr line is new user-visible output on
+  every platform, gated behind a rare failure condition. RULED not to get a
+  behavior-spec section: the existing 9.x and section-2 surfaces are shaped
+  around VERBS, REFUSALS and VALIDATORS -- things a user invokes or a name
+  they choose -- and this is a DIAGNOSTIC emitted under a failure path nobody
+  triggers deliberately, so filing it beside refusal strings would misfile
+  its class (the same reasoning as the case-collision and section-2
+  placement rulings). Kept here in Ripple Effects instead, with its
+  once-per-peer behavior named, so an operator who sees the line once and
+  never again can find out why. If it ever becomes something users are TOLD
+  to look for, it earns a doc section then.
+
+[Testing Notes]
+- Reviewer: killed the new platform-neutral mutant on darwin at
+  `latch_test.go:57` (restoring the unconditional `lastSaved = boundary`
+  fails the case as predicted).
+- `cbus-que.10` confirmation run (tester, on an UNPERTURBED build -- no
+  per-attempt logging, unlike M7's own direct-instrument artifacts, so this
+  result IS rate-comparable with the pre-fix baseline in a way M7's own probes
+  explicitly were not): all four members 8/8 PASS, tests themselves completely
+  unchanged from the committed `fa8a353` harness. All four D79 pre-named
+  escape shapes (non-independent retries, a red on a later assertion, a retry
+  escaping the identity gate, backoff past the deadline) individually checked
+  and found ABSENT, not merely unobserved.
+- Phase-structure quantification (reported by the orchestrator; not
+  independently re-derived by the documenter from raw data): a random-phase
+  write attempt against the rename window denies at approximately 0.0%, while
+  a real member's FIRST attempt denies at approximately 53% -- the gap between
+  those two numbers is offered as the structural signature explaining why
+  retrying works BY MECHANISM (breaking a phase lock between the poll cadence
+  and whatever holds the handle) rather than by accumulated luck. This also
+  resolves the milestone's standing "anchor mystery":
+  `TestQuietFollowerWritesNothing`, zero of eight first-attempt successes
+  pre-fix and the most deterministically-stuck que.10 member throughout M7,
+  turns out to be the member whose write timing was most reliably mis-phased
+  against the denial window -- an explanation for WHY it was the anchor, not
+  just a confirmation that it was one.
+- Not pushed.
+
+## [2026-08-03 15:04:03 UTC] [Client/Windows] cbus-que M7: cluster-B mechanism established -- no fix, an investigation milestone
+
+[Attempt #1] `fa8a353` (full `fa8a3530a6ca1a55bbee38b2e520c2dd23b6b4de`, M7, cbus-que.10).
+4 files, 228 insertions, 20 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). No numbered rulings list here the way prior entries carry one --
+this milestone ran as a long probe sequence (roughly a dozen rounds) rather than
+a plan-then-build cycle, and the mechanism history section below carries the
+shape of that instead. Full record on `cbus-que.10`; disposition on
+`cbus-que.13`; new bead `cbus-que.14`.
+
+[Shape of this entry]
+Unlike every prior milestone in this epic, M7 shipped NO FIX. The single code
+commit is test-only: a diagnostic harness added to the suite, not a defect
+closed. What justifies its own changelog entry is that it converted a
+symptom-only finding (three, later four, tests timing out waiting for a cursor
+write, "mechanism entirely uncharacterised" per the bead's own opening
+description) into a fully source-verified causal chain. The entry below
+documents that chain and the instrument corrections along the way, since both
+are the actual product of the milestone.
+
+[Files Changed] (4 paths)
+- `internal/client/cursorwait_diag_test.go` (new, 220 lines) -- `waitForOwnCursor`,
+  byte-for-byte the old `waitFor`'s loop (same deadline, interval, success
+  condition; it decides NOTHING differently) with a signal capture added AFTER
+  the timeout only. Captures `cursorState` (ABSENT vs CORRUPT vs VALID),
+  whether the follower is still `running`, and whether a `.cursor.tmp.<pid>`
+  survived. A `CURSORWAIT` marker line emits on BOTH outcomes (pass and
+  timeout) so a run can be COUNTED rather than inferred from the absence of
+  failures -- a passing member, a never-executed member, and a wedged binary
+  otherwise all look identical (no failure line).
+- `internal/client/cadence_test.go`, `cursor_test.go`, `dormancy_test.go` --
+  all four que.10 members (`TestQuietFollowerWritesNothing`,
+  `TestCursorNeverPointsMidFrame`, `TestOrphanDoesNotMoveTheNewEpochCursor`,
+  `TestDisplacedFollowerStopsMovingTheCursor`) switched from the bare `waitFor`
+  closure to `waitForOwnCursor`, threading through the follower's `running`
+  check and its output buffer.
+
+[Design -- the mechanism, established via a probe sequence not in this commit]
+- STARTING POINT: cluster B (filed to this bead in M5) was three, later four,
+  windows-only timeouts waiting for a cursor write, independently NOT owned by
+  M5/M8's sharing-violation cluster (a discriminating solo-run probe had shown
+  the decisive member, `TestQuietFollowerWritesNothing`, held 8/8-fail before
+  AND after the M5 fix, at identical scope). No sharing-violation string
+  appeared in any of their output. A source read (coder, M7's actual first
+  step) reframed all three/four as ONE unmet predicate seen from different
+  fixtures: `readCursor` reaching `cursorValid` with `off>0`, satisfied only by
+  the follower loop's conditional write, which itself requires both a
+  frame-boundary advance AND a passing identity check (the latter exits the
+  follower entirely on failure -- two structurally different ways to hang).
+- FOUR INITIAL HYPOTHESES (H1-H4) with discriminating probes were framed and
+  run via an additive-only instrumentation harness (the direct predecessor to
+  what shipped): H1 (the follower exits via its identity gate before ever
+  writing) and H4 (a que.12-shaped transient-read corruption) were both KILLED
+  outright by a unanimous 32-of-32 probe result: cursor state VALID at every
+  observation, offset always 0, follower always `running`. H2 (writeCursor's
+  own silently-discarded write/rename errors) was NOT ruled out by the same
+  round (zero leftover `.cursor.tmp` files, but a failed `os.Rename` cleans up
+  its own tmp file before returning, so tmp-absence cannot distinguish "no
+  failure" from "failure that cleaned up after itself").
+- WRITE-SIDE FOLLOW-UP surfaced three further candidates (H5 spurious file
+  rotation resetting the read cursor, H6 a plain size-tracking regression, H7
+  the reader never receiving bytes at all) alongside H2. A sink-frame-count
+  probe (measuring the CONSEQUENCE of a rotation -- a full re-delivery of
+  everything already sent -- rather than inferring one from its inputs) killed
+  H5, H6 and H7 together: every member showed exactly one message delivered as
+  exactly three framing lines (the counter reports lines, not messages -- see
+  the units-caveat note below), matching what a single successful delivery with
+  no rotation looks like. H2 survived alone, unanimously, across all four
+  members: the read side works, delivery happens once, the follower stays
+  alive, and the cursor write itself is where the failure has to be.
+- H8 (handle contention denying the cursor's rename specifically) was proposed
+  next, tested first with a binary 3ms-vs-200ms poll-width probe, and that
+  design was immediately identified (by the tester, before results) as
+  CONFOUNDED: widening the poll interval changes both how often a handle opens
+  AND how much CPU the polling loop burns, so a landing cursor at 200ms would
+  be equally explained by relieving scheduler contention as by anything about
+  handles. The corrected design (STAT-ONLY at the ORIGINAL 3ms: `os.Stat`
+  never opens a handle on the target at all, so frequency and CPU load stay
+  fixed while only handle-holding varies) is what made a real test possible.
+- FIRST RESULT: stat-only-at-3ms passed all four members 8/8; the read-based
+  control at the same frequency still timed out; a dose ladder (3/25/200ms,
+  read-based) passed cleanly at 25ms and 200ms both. Read as CONFIRMING H8. It
+  was WRONG. The orchestrator, re-reading its own probe's source after the
+  tester published results, found the baseline capture discarded its `os.Stat`
+  error: an absent `.cursor` at capture time left the baseline timestamp at Go's
+  ZERO time, and since the arm-time cursor write happens asynchronously in the
+  follower's own goroutine, the very first successful stat after that race
+  would satisfy "timestamp changed" regardless of what actually changed it.
+  The giveaway in the data itself: every "passing" stat-mode run showed
+  `off=0` -- passing while the value the test cared about had never moved,
+  the symptom wearing a pass. H8 confirmation WITHDRAWN. The reviewer, who had
+  separately verified the underlying `os.Stat` primitive meticulously (tracing
+  it to `GetFileAttributesEx`, confirming no handle opens for a plain file),
+  had checked the RIGHT primitive and the WRONG predicate line one above it --
+  a correctly-executed check and an unsound probe coexisting is the sharpest
+  instrument lesson of the milestone, named explicitly on the record as its
+  own class.
+- The FIXED stat variant (wait for the file to exist first, THEN capture a
+  checked baseline) was built, and immediately exposed the OPPOSITE failure on
+  darwin: a fast filesystem can complete BOTH transitions (absence-to-seed,
+  seed-to-loop-write) inside a single poll interval, so the "fixed" baseline
+  sometimes captures the FINAL state and can never observe a subsequent
+  change -- reported as a timeout on a machine where the mechanism it probes
+  demonstrably isn't present. Ruled STRUCTURALLY BLIND and retired: the design
+  needs the offset to distinguish its two transitions, and reading the offset
+  requires opening the file, which is the one thing a stat-only probe exists
+  not to do. A collapse detector was landed anyway (a stat-mode run that shows
+  no timestamp change but a nonzero offset reports COLLAPSED and skips, rather
+  than reporting a misleading TIMEOUT) as an honesty fix to an instrument
+  already shipped in the tree.
+- THE DIRECT INSTRUMENT: rather than keep proxying, the path forward was
+  reading `writeCursor`'s own two discarded errors directly. Built as an
+  explicitly PROBE-ONLY, NEVER-INTENDED-TO-SHIP edit on a throwaway freeze
+  (reviewer-gated on four conditions: the freeze is pinned and marked
+  non-shippable, the edit is observational only and preserves discard-and-
+  continue semantics exactly, both failure halves are captured with their raw
+  error codes, and the tree is restored and diff-verified after), because
+  making `writeCursor` return an error for real would have PREJUDGED
+  `cbus-que.13`'s own fix design (return-vs-retry, hot-loop risk) rather than
+  just measuring the current behavior. A `t.Logf` call per `writeCursor`
+  invocation moved results from deterministic 8/8-timeout to a MIX of pass and
+  fail -- initially read as merely contaminating the rate (correct), then
+  REFRAMED as itself informative: a purely structural defect (wrong identity
+  comparison, a boundary gate that never opens) would not care whether an
+  instrument logs a line, so timing-sensitivity to logging is positive
+  evidence FOR a contention mechanism and against every structural candidate
+  still standing. It also retroactively explained why an earlier occupancy-
+  arithmetic argument (that a ~0.1% duty cycle couldn't plausibly deny renames
+  at the observed rate) had failed to predict the result: that argument
+  modeled contention against a single write attempt, not against whatever the
+  logging call itself perturbed -- a real calculation aimed at the wrong
+  quantity.
+- RESULT, the full causal chain, from data the direct instrument made
+  possible: the SEED write (offset 0, at arm time) always succeeds. The LOOP
+  write computes the CORRECT nonzero offset and writes it to
+  `.cursor.tmp.<pid>`. Its RENAME onto `.cursor` is DENIED (errno 5). `.cursor`
+  therefore keeps the seed value forever. The reader sees `off=0` and times
+  out. This single sequence accounts for every signal collected all
+  milestone: `frames=3` (delivery happened), `off=0` (the reader sees the
+  stale seed), `tmp=0` (discard-and-continue cleans up its own temp file),
+  `state=VALID` (the seed file itself is intact and readable), `running=YES`
+  (the follower is fine and looping normally). Denial-to-timeout correlation
+  across all 32 member-runs measured in this artifact: 32 agree, 0 disagree.
+  The denial landed on the LOOP write 21 times and the SEED write 0 times out
+  of the same 32 opportunities -- consistent with something starting to poll
+  the file only after arm time, not before.
+- ERRNO CAVEAT, caught before anyone banked the result: errno 5
+  ("Access is denied") is NOT uniquely diagnostic of a held handle on this
+  volume. A controlled four-case probe found a READONLY file with NO handle at
+  all also produces errno 5 -- so 5 fails to REFUTE the handle hypothesis
+  without being able to CONFIRM it alone. What actually points at a handle is
+  the seed/loop asymmetry above (nothing polls before arm time) plus a direct
+  reproduction from primitives: a poller doing the exact 3ms read-based access
+  pattern against 200 renames produced a ~22.5% denial rate, all errno 5,
+  confirming a brief open-read-close window is enough to deny a rename landing
+  inside it, and that the denial is a RACE rather than a persistent lock (which
+  is also why the observed rate was 21-of-32, not 32-of-32).
+- ONE MORE FINDING PRE-EMPTS THE OBVIOUS FIX: the same four-case probe held a
+  handle opened via the M5 `openSharedRead` seam (all three share flags,
+  including `FILE_SHARE_DELETE`) against the rename target, and it STILL
+  denied with errno 5. Confirmed at source by the reviewer: Go's `os.Rename` on
+  windows calls `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` only -- the
+  CLASSIC rename path, which denies when ANY handle is open on the target
+  REGARDLESS of that handle's share mode. Share flags govern open-time
+  compatibility and deletion; the classic rename-replace target check never
+  consults them at all. (The API that WOULD allow replacing an in-use target,
+  `FileRenameInformationEx` with `FILE_RENAME_POSIX_SEMANTICS`, exists on
+  modern NTFS but Go's standard library does not use it -- a known upstream
+  gap.) Consequence: routing the cursor write through `openSharedRead` -- the
+  obvious next move given it fixed an analogous problem in M5 -- WOULD NOT
+  WORK, and would look like it should.
+- THE THREE-CHECKS TRIPLE, worth keeping as a standing reference for this
+  epic: three DIFFERENT windows kernel checks, now each independently
+  measured, that a bare errno blurs together. (1) DELETE of a held file:
+  `FILE_SHARE_DELETE` is honored (M5's `openSharedRead` seam and its pinning
+  test). (2) RENAME-TO-A-FRESH-NAME of a directory with open children inside
+  it: its own rule, denies regardless (the M5 prune-claim defect, D67). (3)
+  RENAME-REPLACE onto an already-existing, held target: SHARE-IMMUNE BY
+  DESIGN, denies no matter what share flags the holder used (M7, this
+  milestone). None of the three contradicts either of the others; they are
+  three separate kernel checks that happen to surface through similar-looking
+  errors.
+- DISPOSITION (recorded as D79 on the tracker): `cbus-que.10` itself is a
+  TEST-side defect. A blind, no-coordination production-code enumeration
+  (grepping every reference to `readCursor`, `cursorPath`, `cursorFile` and the
+  literal `.cursor` across all non-test source, tracing every hit to its
+  caller) found exactly four production sites touching a peer's `.cursor`:
+  three OPENERS, all one-shot, all running once during the arm sequence
+  BEFORE the follower's own write loop starts (so there is no concurrency
+  window against that loop by construction), and one UNLINKER (a plain
+  `os.Remove` at join, a different hazard class, not part of the rename
+  question). There is no production loop, ticker, or retry polling a peer's
+  `.cursor` at any interval, let alone the test's 3ms -- the contention this
+  milestone measured was manufactured entirely by the test's own polling
+  predicate. That licenses calling the OFF=0 SYMPTOM a test artifact. It does
+  NOT clear the underlying rename hazard: any single unlucky production reader
+  can still deny one rename, rarely, and `cbus-que.13`'s own LATCH is what
+  turns that one rare denial PERMANENT for the life of an arm, since nothing
+  retries after it. Rare-and-permanent is worse than frequent-and-
+  self-correcting; the severity lives entirely in the latch, not in the rate.
+  THE PREDICTION, registered on `cbus-que.13` BEFORE any fix existed there so
+  it can falsify the disposition rather than be claimed after the fact: fixing
+  `cbus-que.13` so that a failed write does not advance `lastSaved` is expected
+  to resolve `cbus-que.10`'s test symptom as a side effect, CONDITIONAL on
+  retry attempts being near-independent. Five pre-named shapes distinguish a
+  falsification from a confirmation, each readable off an instrument that
+  already exists rather than argued after the fact: (s1) NON-INDEPENDENT
+  RETRIES -- timer quantization or phase-lock making successive attempts deny
+  serially (signature: many attempts, all denied; the attempt counter reads
+  this), which stays inside `cbus-que.13`'s own design space rather than
+  falsifying the disposition. (s2) RED ON A POST-LANDING ASSERTION -- a
+  member whose cursor now lands but which then fails a LATER assertion for an
+  unrelated windows reason the stall had been masking; read by WHICH assertion
+  failed, and it counts as a NEW finding, not a disposition failure. (s3)
+  RETRY ESCAPING THE IDENTITY GATE -- a queued retry landing after a steal and
+  moving a DISPLACED follower's cursor, which would fail that member
+  LEGITIMATELY; this is why "retries must stay inside the identity gate"
+  became a design constraint on `cbus-que.13` rather than a caveat here.
+  (s4) BACKOFF PAST THE DEADLINE -- a retry policy that stretches past the
+  test's 2-second window, timing out an otherwise-healthy member; read by
+  `waitedms`. (s5), registered later and notable because it INVERTS how a red
+  reads: if the per-attempt denial rate at PRODUCTION's actual polling ratio
+  is near 100%, the retry clause is REGIME-DEPENDENT -- the latch fix is
+  correct and sufficient for production (where nothing polls a `.cursor` at
+  all), and `cbus-que.13`-fixed-plus-`cbus-que.10`-still-red becomes the
+  EXPECTED outcome that CONFIRMS the disposition rather than falsifies it, not
+  a sign the fix failed.
+- The `.stop-cursor` sidecar (a separate cursor file for the codex Stop-hook
+  delivery path, distinct from the follower's `.cursor`) was explicitly named
+  as OUT of this milestone's production-reader enumeration and needing its own
+  pass -- filed as new bead `cbus-que.14` rather than assumed clear by
+  extension.
+
+[Mechanism history / instrument corrections, kept because the class recurs]
+- VACUOUS PASS, H8's first "confirmation": described above under Design; kept
+  here too because it's this milestone's sharpest instance of the
+  "verify-the-instrument" thread this epic's changelogs have named
+  consistently since M4's F1 -- a test can pass for a reason that has nothing
+  to do with what it claims to measure, and the tell was in the data
+  (`off=0` on every "success") rather than in the test's own logic reading
+  clean.
+- STRUCTURALLY BLIND, not just wrong: the fixed stat variant's failure mode
+  (two transitions colliding into one poll interval on a fast filesystem) is
+  definitional to its own design, not a bug fixable within it -- the reason it
+  was retired outright rather than patched again.
+- OBSERVER EFFECT REFRAMED AS EVIDENCE: an instrument's own side effect (a log
+  call moving outcomes) became a positive argument for the mechanism class
+  (timing/contention) over the alternative (a structural defect indifferent to
+  logging) -- turning a normally-unwanted confound into data, once correctly
+  scoped to NOT license a rate comparison against un-instrumented runs.
+- UNITS CAVEAT: a sink-frame counter reporting LINES compared against a field
+  literally named "frames" produced an exact numeric agreement (3-vs-3) that
+  would have read as a 3x EXCESS (reviving a dead rotation-hypothesis family)
+  under the more "obvious" denominator (messages, where one message is three
+  lines). Both the coder and tester independently caught the mismatch before
+  it was used. Standing rule adopted: comparisons stay in whatever unit the
+  counter actually reports, and a denominator arriving in a different unit
+  gets flagged rather than silently divided.
+- TRACKER SIZE CEILING: the tracker's own notes field hit an undocumented
+  64KB limit mid-investigation and further appends failed with a MISLEADING
+  CONNECTION ERROR that briefly read as a network problem rather than a size
+  limit -- a handful of short diagnostic probe entries in the tracker record
+  are the visible residue of chasing that red herring before the real cause
+  was found; later content moved to the design field as a workaround.
+- Every probe artifact in this investigation was explicitly marked
+  NON-SHIPPABLE and tracked separately from the release build-identity chain,
+  with dead (superseded) artifact hashes published alongside their specific
+  reason for being dead -- a practice adopted mid-milestone specifically
+  because this investigation produced enough throwaway builds that silent
+  reuse of a stale one became a real risk.
+
+[Testing Notes]
+- No production code shipped; nothing to gate in the usual sense. The
+  diagnostic harness itself was verified additive-only at decision level
+  against source (the shared wait loop is byte-for-byte the prior `waitFor`;
+  every added line runs only after a timeout has already been reached, with
+  one narrowly-scoped exception -- a pre-existing nil-`running` handling gap
+  in one member, named and fixed as part of landing the harness since the new
+  signal capture needed it measurable there).
+- Every probe round in the investigation itself was run under an explicit
+  emission-count guard (a known expected count checked BEFORE any value from
+  that round is read), adopted after an early near-miss where an empty result
+  file rendered as an all-zero rate table, momentarily reading as "cluster B
+  already fixed by an unrelated milestone" before being caught on the
+  anchor member's implausible zero.
+- The milestone's closing state IS the D79 disposition above: no further
+  fix-verdict applies here, since none was proposed. Follow-up work and its own
+  gates belong to `cbus-que.13`/`cbus-que.14`.
+- Not pushed.
+
+## [2026-08-03 04:48:10 UTC] [Commands] /bus-spawn joins the spawning session too
+
+[Attempt #1] Uncommitted skill-text change, no Go code touched.
+
+[Motivating problem]
+`/bus-spawn` was one-sided: the child joined and armed itself via its launch
+prompt, but the skill explicitly told the parent "there is nothing to arm on
+this side," so the session that spawned a worker had no address on the channel
+and couldn't hear the child at all. Observed live: spawning `main` into a fresh
+`test-channel1` left the parent unjoined. Carlos's ask: the spawning session
+should also connect.
+
+[Files Changed]
+- `commands/bus-spawn.md` -- rewritten from one step to three. Step 1 joins the
+  parent (local: `cbus join <channel>`, idempotent; remote `ch@host`: explicit
+  alias + `cbus tail` for the Monitor ws arm spec, `cbus auth` prerequisite
+  noted), step 2 arms the parent's persistent Monitor (with the never-Bash tail
+  warning and the remote re-arm-on-`[WebSocket closed]` note, both lifted from
+  bus-join), step 3 is the unchanged `cbus spawn`. Steps 1-2 are skipped when a
+  cbus Monitor is already armed for the channel (covers the omitted-channel
+  default, which resolves to the session's own channel). Join is deliberately
+  BEFORE spawn so a fresh local channel gives the parent `main` and the child
+  `fork-N`, matching `cbus branch`'s parent/child layout -- the old flow gave
+  the child `main`; the skill text pins the ordering so a future edit doesn't
+  "fix" it back. Frontmatter: description now says "both sides joined";
+  `allowed-tools` gains Monitor. Final report line now carries both addresses.
+- `docs/architecture/command-reference.md` -- §12 `/bus-spawn` entry rewritten
+  to match (no longer "thin wrapper ... nothing to arm"; documents the
+  parent-join, the skip condition, the main/fork-N layout change, and the
+  Monitor addition to allowed-tools).
+- `~/.claude/commands/bus-spawn.md` (outside the repo) -- hand-synced copy so
+  this machine's sessions pick the fix up now; canonical delivery stays
+  go:embed -> release -> `cbus selfupdate`.
+
+[Possible Ripple Effects]
+- Child alias shifts on fresh channels: formations or habits that assumed a
+  spawned-first child is `main` will now find the PARENT holding `main` and the
+  child at `fork-1` (or its `--name`). `cbus branch` users already live with
+  this layout. `--name` spawns are unaffected.
+- The NUC and any other machine keep the old one-sided behavior until the next
+  release + selfupdate (commands are embedded in the binary).
+- `cbus formation save` from the parent now captures the parent as a channel
+  member, which is what it is.
+
+[Testing Notes]
+- Live-validated the new flow in the session that motivated it: `cbus join
+  test-channel1` (parent took `fork-1` -- child had already claimed `main`
+  under the OLD ordering), Monitor armed on `cbus tail test-channel1/fork-1`,
+  `cbus list test-channel1` shows both peers.
+- Fresh-channel `main`/`fork-N` layout follows from ReserveAlias ordering, same
+  mechanism `cbus branch` uses; not separately re-measured.
+
+## [2026-08-03 04:19:30 UTC] [Client/Windows] cbus-que M6: transcript/launch profile resolution and trailing-dot store names
+
+[Attempt #1] `972a77c` (full `972a77cd3f774c4640a67ed5b6e4eab161256286`, M6, cbus-que.9).
+8 files, 119 insertions, 19 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Ruling D69 plus the D70 corrections cycle it triggered. Full record
+on `cbus-que.9`.
+
+[Motivating problem]
+Both fixes trace to measurements already made in M4/M5, not fresh windows
+execution this milestone -- coder's own framing, kept because it names a real
+shape difference from M4/M5: neither defect needed windows to be CORRECT, both
+needed windows to be FOUND, and this milestone's logos runs are REGRESSION
+EVIDENCE for an already-designed fix, not first proof of a mechanism.
+`transcript.go:52` hardcoded a forward-slash path fragment a real windows
+`CLAUDE_CONFIG_DIR` never matches, so a peer's profile hint died silently (M4's
+confirmed production defect). `internal/core/name.go`'s store-name validators
+both accept trailing-dot names, which windows silently mishandles (found
+investigating a different M4 fixture failure).
+
+[Files Changed] (8 paths, final manifest 8b0392f9e4fd1d97)
+- `internal/client/transcript.go` -- new `isCCSInstanceDir(cfg)`: structural
+  `filepath.Base`/`filepath.Dir` component comparison replacing the
+  `strings.Contains(cfg, "/.ccs/instances/")` literal. The literal is
+  DELIBERATELY not reproduced in the new comment: the acceptance check for this
+  fix is that the fragment greps to ZERO tree-wide, and quoting it in a comment
+  would defeat that mechanical check for a historical note prose can carry
+  instead.
+- `internal/client/formation_apply.go` -- `peerEnv` (reviewer finding F1,
+  BLOCKING) routed through the same `isCCSInstanceDir`. Its own doc comment
+  promises the SAME derivation `transcriptRoots` uses so a resumed session and
+  a relaunched one can't disagree about the profile; fixing `transcriptRoots`
+  alone would have falsified that documented invariant asymmetrically on
+  windows -- the transcript would resolve, the relaunch profile would not.
+- `internal/client/harness.go` -- `launchPrefix` (reviewer finding F2, a THIRD
+  site of the identical literal) also routed through `isCCSInstanceDir`.
+  Phase-1-unreachable through the CLI today (every verb that calls it already
+  refuses on windows), fixed anyway under the class-not-enumeration principle:
+  a documented landmine surviving because nothing currently trips it is the
+  one wrong option, and the fix cost is identical to the other two sites.
+- `internal/client/formation_apply_test.go` -- `TestApplyPeerProfile` rebuilt
+  off a real `t.TempDir()` root with `filepath.Join`, replacing hardcoded unix
+  literals; independently confirmed as F1's second locus once F1 landed
+  (well-formed path, WRONG profile selected -- a different failure shape than
+  the pre-fix unresolved-path failure, converging with the reviewer's own
+  source-read finding via an independent instrument).
+- `internal/core/name.go` -- `ValidStoreName` gains
+  `!strings.HasSuffix(s, ".")`. New `StoreNameReason(s) string` returns the
+  human-readable why for each rejection class, INTERPOLATING the caller's
+  actual input (`fmt.Sprintf` with `%q` twice: the typed name and its
+  trailing-dot-stripped form) rather than a fixed example -- see Design.
+  `ValidName` (wire authority) untouched, proved byte-identical by extracting
+  the function body from HEAD and diffing it, not just asserted in a comment.
+- `internal/core/name_test.go` -- three trailing-dot cases (`"foo."`,
+  `"foo..."`, `"a.b."`) beside the pre-existing `"a..b"` discriminating
+  neighbor (an interior dot run stays legal, so a reject-any-dot mutant fails
+  there rather than passing by accident on the new block). Two new coherence
+  checks beyond the bool/reason agreement: every trailing-dot reason must name
+  THIS input specifically (not a fixed example), and no reason may ever carry
+  a stem (`"foo"`) the caller didn't type.
+- `internal/client/store.go`, `spawn.go` -- `checkStoreName` and `Spawn`'s name/
+  channel checks switch from a bare `ValidStoreName` bool to `StoreNameReason`,
+  completing the four-door wiring alongside `harness.go`'s `Branch`.
+
+[Design]
+- D69 approved the coder's four-part plan; the reserved-device-name clause was
+  deferred pending the tester's behavioral probe (resolved negatively, see
+  below) rather than pre-ruled, and the darwin-visible blast radius of the
+  trailing-dot tightening was explicitly handed to review rather than argued
+  by the orchestrator.
+- REVIEWER FINDINGS (verdict 1/2): milestone stayed OPEN on two production
+  sites the original plan hadn't reached. F1 (`peerEnv`, BLOCKING): the second
+  attributed red (`TestApplyPeerProfile`) was still failing after the
+  `transcript.go` fix alone, because `peerEnv` carried its own independent
+  copy of the same literal, and its doc comment's promised parity with
+  `transcriptRoots` made fixing one without the other a documented-invariant
+  violation, not just an incomplete fix. F2 (`launchPrefix`, classified but not
+  blocking): a third copy, phase-1-unreachable via the CLI, with its own
+  existing tests passing SPURIOUSLY on windows today because their env
+  fixtures are unix-style literals that `Contains`-match regardless of
+  platform. D70 ruled BOTH fixed together in one corrections cycle
+  (class-not-enumeration, same shape as D66 on M5): the not-one-fix principle
+  proved load-bearing a second time in this epic -- two attributed reds
+  mapped to two DIFFERENT production sites, and the original plan had only
+  reached the first.
+- The D70 acceptance gate is MECHANICAL, not an enumerated site list: the
+  fragment greps to zero tree-wide. This caught the coder's own first attempt
+  at closing it -- a reworded comment that still QUOTED the old literal for
+  illustration, which would have kept the grep non-zero forever and turned the
+  gate into a human judgment call instead of a verifiable one. The final
+  comment at `isCCSInstanceDir` deliberately omits the literal for exactly
+  this reason.
+- Interpolation (the `StoreNameReason` trailing-dot message naming the
+  caller's actual input) came from a TESTER finding, not the original plan: a
+  hardcoded `"foo"`/`"foo..."` illustrative example would tell a user who
+  typed `bar...` that their name becomes `"foo"` -- someone else's name,
+  reading as the tool being confused rather than the name being wrong.
+  Sharper: different names at different call sites is what EXPOSED this in
+  testing at all; the obvious same-name-everywhere test fixture would have
+  read as a clean pass, because a fixed example is invisible to any test that
+  reuses the example as its own input. The landed test pin took three
+  attempts, each defeated by a fact already documented in the same file
+  (not every reason interpolates; the all-dots/leading-dot precedence means
+  shape-keying is wrong), landing as REASON-keyed (if the trailing-dot message
+  text appears, it must name the input) plus a branch-independent pin that NO
+  reason, from any branch, may ever carry a stem the caller never typed.
+- Reviewer ruling on the trailing-dot tightening: FLEET-WIDE, four grounds.
+  Store names are fleet artifacts crossing machines by name through the relay,
+  and the per-platform alternative has the worst failure mode -- no refusal
+  for the darwin user who picked the name, store corruption for the windows
+  peer who didn't. `ValidStoreName` already tightens fleet-wide for the same
+  class of platform-adjacent hazard (leading dot, leading hyphen). FIELD-
+  SMOKED before ruling: a `find` across the real MBP store for both
+  trailing-dot patterns came back empty (the NUC store is unverified and
+  recorded as an explicit residual, not assumed clean). Version-skew is
+  bounded and stated honestly, not claimed as instant fleet-wide enforcement.
+  BINDING CONDITION: the refusal must name the real reason on every platform,
+  applied by the coder as a CLASS (all four doors) rather than the single
+  enumerated site the condition literally named -- a bare "bad name" refusal
+  at branch/spawn would have invited exactly the workaround the condition
+  exists to prevent.
+- TESTER SELF-CORRECTION against its own July wording, kept because it
+  changed what the fix is FOR: the originally-measured harm
+  ("silently aliases onto the parent, reporting success") applied only to an
+  ALL-DOTS name, which the pre-existing leading-dot rule already refuses
+  before it ever reaches the filesystem -- the July probe had measured an
+  unreachable shape. The REACHABLE shape (`foo...`) passes both
+  pre-tightening validators, windows creates a directory named `foo` (dots
+  silently stripped), and the operation then FAILS LOUDLY -- nothing believes
+  it succeeded. True harm: STORE POLLUTION plus NAME-IDENTITY MISMATCH (a
+  failed `join foo...` leaves a bare `foo` directory a later legitimate
+  `join foo` walks into pre-existing), not silent data loss. The tightening
+  stayed justified on the corrected harm; "a fix argued from a harm that does
+  not occur is a fix nobody can later verify."
+- REVIEWER REAFFIRMATION at the corrected severity added a new argument the
+  correction itself surfaced: in an addressing system, NAME-IDENTITY MISMATCH
+  IS the harm class, because the store directory's name IS the channel's
+  identity for list/send-resolution/reclaim -- independent of data loss, a
+  mismatch alone breaks addressing coherence, and the pre-existing-real-`foo`
+  sub-case turns it into cross-channel pollution of an innocent name.
+- Reserved-device-names (`NUL`, `CON`, etc.) CLOSED END TO END WITHOUT A LINE
+  OF CODE: the tester's Go-layer probe (not the earlier PowerShell probe,
+  which measured .NET path validation, a layer cbus never executes, and was
+  confidently reassuring and FALSE) found a store operation on `NUL` fails
+  loudly at first use with a middle-component semantics error -- nothing
+  created, nothing lost. A `NUL`-naming validator clause is recorded as
+  defense-in-depth for later, not a fix for a live hazard.
+
+[Possible Ripple Effects]
+- The refusal message is new user-reachable content at four doors. Behavior-
+  spec proposal (new "Name validation" subsection at the end of section 2,
+  Address Grammar -- the fleet-wide rule doesn't belong under the
+  windows-numbered run, per orchestrator ruling on my placement question --
+  plus a one-line cross-reference as its own `9.4` entry after `9.3`) lands
+  with this docs batch.
+- `internal/core` now has its own build-artifact identity in this epic's gate
+  record, since the validator lives there rather than in `internal/client`.
+- Only three of the four `StoreNameReason` doors are windows-reachable today
+  (`spawn`/`branch` sit behind the D48 platform refusal by design), so their
+  trailing-dot evidence necessarily comes from darwin, not logos -- a
+  logos-only four-door test would be one-third structurally unobservable, not
+  incomplete by oversight.
+- The darwin-visible behavior change (a trailing-dot name that worked before
+  now refuses) is field-smoked safe against the current MBP store; the NUC
+  store's equivalent scan is still an explicit open residual.
+
+[Testing Notes]
+- Reviewer: UNCONDITIONAL final sign-off, after an initial FINDINGS verdict
+  (F1 blocking, F2 classified) resolved by the D70 corrections cycle. Mutant
+  work was a first for the epic: all three original validator mutants were
+  EXECUTED BY THE REVIEWER ITSELF on darwin (`name_test` is platform-neutral,
+  no logos round-trip needed for them) -- `mb` killed on exactly the three
+  trailing-dot rows; `mc` killed by the discriminating neighbor `a..b` AND a
+  second witness (`a.b_c-d`) the plan never claimed; `md` (the silent-refusal
+  mutant) killed by the coherence assertion alone, proving it has teeth of its
+  own independent of the trailing-dot rows. Reviewer's own instrument
+  self-correction on record: its first two `md` forms were COMPILE-DEAD (a
+  stranded import), producing silence its assertion grep read as a pass --
+  caught only by reading the actual output, the same class of error as a
+  no-op mutation reported as a kill, from the opposite direction.
+- D70 corrections triggered a full mutant re-run: the CORE package's build
+  hash moving voided the reviewer's carry-forward condition on `mb`/`mc`/`md`,
+  so all three were rebuilt and re-executed at the corrections freeze
+  alongside two NEW mutants: `me` (the hardcoded example restored, killed by
+  BOTH interpolation pins, with `a.b.` as the discriminating input --
+  adopting the tester's different-names-per-door instrument directly into the
+  mutant design) and the logos pair `m6mutT`/`m6mutP` (the transcript fragment
+  and the peerEnv fragment restored respectively), both predicted single-test
+  reds on logos and GREEN on darwin -- the fragment matches unix-style paths,
+  so only logos measures it, and the asymmetry itself is the proof. All SIX
+  killed on their aimed assertions. A SEVENTH mutant, targeting the
+  phase-1-unreachable `launchPrefix` (F2) site, is recorded STRUCTURALLY
+  UNABLE TO KILL with its reason stated rather than silently omitted or
+  faked: no windows-reachable test path exists to exercise a site every
+  calling verb already refuses.
+- Closing runs: client suite 533 RUN / 382 PASS / 3 FAIL, all three
+  attributed to `cbus-que.10` (the independent flaky follower/cursor cluster
+  filed in M5, not owned by this bead) -- nothing this milestone touches is
+  red. `internal/core` 19/19, with the D7 gofmt-scan exclusion VERIFIED
+  ABSENT from the run (not merely assumed skipped) after a process incident:
+  an orchestrator ping describing the tester's target as "internal/core on
+  logos" omitted the D7 exclusion by name, which read literally would have
+  re-run the unbounded `TestGofmtClean` walk on the live machine -- the exact
+  incident that created D7 in the first place. The tester STOPPED rather than
+  read the omission as an implicit escalation (a message cannot expand what a
+  seat is allowed to do to its target), enumerated a positive
+  nineteen-test `-test.run` alternation excluding the D7 test by name instead
+  of relying on unexpressible negation, and required an explicit reversal
+  before proceeding. None was given; D7 stood.
+- Pollution probe converted to regression evidence: after five refusal
+  attempts against the trailing-dot validator, the store contained only the
+  test's own control entry -- the refusal fires before any creation, so the
+  stray-directory pollution class the validator exists to prevent is
+  confirmed gone, not merely assumed fixed by the validator's presence.
+- Coder process note (mechanism history): "I searched for what was FAILING
+  instead of for what was WRONG" -- kept verbatim in substance because it's
+  the reasoning behind the grep-to-zero acceptance gate being adopted as
+  stronger than an enumerated site list: a list is only as good as the search
+  that produced it, and this milestone's F1/F2 findings are exactly the class
+  a site-enumeration approach would have missed.
+- Footprint zero. Not pushed.
+
+## [2026-08-02 23:35:50 UTC] [Client/Windows] cbus-que M5: silent windows reclaim failures now surface, first production fix of the epic
+
+[Attempt #1] `72c2779` (full `72c2779cf0e67806866a5bb696e50d2cf6cc9520`, M5, cbus-que.8).
+11 files, 342 insertions, 43 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Rulings D62-D68, plus D11/D38 (carried since M1, closed here) and
+D59 (carried since M4). Full record on `cbus-que.8`; successor beads `cbus-que.10`
+(follower/cursor timeout cluster, independent of this fix), `cbus-que.11` (cmd/cbus
+windows accounting, first execution), `cbus-que.12` (transient-read handles).
+
+[Motivating problem]
+The epic's own design field listed the in-process follower under "Already
+portable, no work." False: framing, rotation and replay carry, but the follower's
+HANDLE-HOLDING does not, because it interacts with windows deletion semantics
+nobody costed. Verified at the syscall source, not assumed:
+`GOROOT/src/syscall/syscall_windows.go:395` passes
+`FILE_SHARE_READ|FILE_SHARE_WRITE` and nothing else to every `os.Open`/`os.OpenFile`
+call, unconditionally. `follow.go`'s `reopenUntilSuccess` opens the inbox with
+`os.Open` and the follow loop holds that handle for the ENTIRE LIFE OF THE ARM, so
+an armed windows peer continuously blocks deletion of its own inbox -- a permanent
+condition, not a narrow race. `store.go` calls `os.RemoveAll` and discards the
+error at every site, so a reclaim, prune, leave or rename against a peer whose
+inbox is still held FAILS and reports success anyway: the old directory survives
+underneath a caller that believes it cleaned up. Reachable rather than
+theoretical: the reclaim path fires against a peer that READS dead
+(`listenerIdentityHolds` returns false on ANY liveness-probe error, by design),
+and join-reclaim is not an edge case -- it is the path every seat in this
+formation used to start.
+
+[Files Changed] (11 paths, final manifest 3beda9bbc0b5b829)
+- `openshared_unix.go` (new, `darwin || linux`) -- `openSharedRead` is a bare
+  `os.Open`; unix already permits unlinking a held-open file, so there is nothing
+  to add on this side.
+- `openshared_windows.go` (new) -- `openSharedRead` via hand-rolled `CreateFile`
+  requesting `FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE`. Read-only and
+  FILE-ONLY by ruling (D64): no `FILE_FLAG_BACKUP_SEMANTICS`, so a directory
+  target fails loudly rather than silently. Carries two corrections landed
+  in-tree as comment clauses: the "restores unix behaviour" claim is qualified as
+  measured on the TARGET VOLUME specifically (logos NTFS: a held handle blocked
+  neither a remove nor a 50-iteration rm+recreate loop, 8/8; a filesystem with
+  delete-pending semantics instead would let the remove succeed but could delay a
+  same-path recreate, and the follower survives either way since it polls and
+  reopens); and the READ-ONLY boundary names its reason explicitly -- the three
+  O_APPEND writers (`presence.go`, `ledger.go`'s append, `ledger.go`'s mint lock)
+  stay unrouted because hand-rolling create-plus-append-plus-permissions risks
+  getting `FILE_APPEND_DATA` wrong and CORRUPTING A LEDGER, strictly worse than
+  the blocked-delete this milestone fixes, and the mint lock's correctness
+  separately rests on close-drops-the-lock; converting a writer is its own
+  ruling, not assumed here.
+- `openshared_test.go` (new, portable) -- `TestOpenSharedReadSurvivesRemoval`:
+  opens a file through the seam, removes it while the handle is still open, and
+  asserts both that the remove succeeds AND the holder keeps reading the original
+  bytes after the unlink. Deterministic because the TEST owns the handle's
+  lifetime. This is the D38-shape verifying test the epic has recorded as missing
+  since M1.
+- `openshared_windows_test.go` (new) -- `TestOpenSharedReadRefusesADirectory`,
+  with a same-path file-open control inside so the directory case is proven to
+  discriminate something.
+- `fileid_windows.go` -- `fileIdentity` folds onto `openSharedRead` (D65): deletes
+  its own hand-rolled `CreateFile` block (20 lines), since the three-flag mask now
+  exists exactly once. Editing this M1-approved file was a named delta in review,
+  isolated by the reviewer's copy instrument.
+- `follow.go` -- `reopenUntilSuccess` (the arm-lifetime handle, the main event of
+  this bead) now opens via `openSharedRead`.
+- `formation_apply.go`, `codexstophook.go` -- their inbox-polling `os.Open` calls
+  route through `openSharedRead` too.
+- `store.go` -- ten `os.RemoveAll` discard sites addressed (the bead's own title
+  said twelve, which measured out to be the TREE-WIDE call count, not the
+  file's discard count). EIGHT surface their error (see Design for the corrected,
+  twice-revised site classification); THREE keep the discard with a stated-why
+  comment (`Unreserve`, and two litter-cleanup branches inside `PruneChannel`).
+- `cmd/cbus/main.go` -- `runLeave` prints successful `left <ch>/<al>` lines before
+  checking the error, instead of dying on the first error and hiding leaves that
+  already succeeded (class-C c2).
+- `prune_windows_test.go` (new, windows-only by filename suffix) --
+  `TestPruneDoesNotSkipADeadPeerInSilence` (renamed from an earlier working title;
+  see Design for the two-round eighth-site story) and
+  `TestUnregisterDoesNotAnnounceAFailedRemoval`, both fixtured with a held
+  `os.Open` handle -- the measured mechanism itself, not a staged condition.
+
+[Design]
+- D62/D63 answered the coder's plan questions: the ten-discard-site set was
+  confirmed (`selfupdate.go:83` and `spool.go:147` reviewed and left unchanged),
+  and the split rule was "false-success sites surface, best-effort cleanup sites
+  keep the discard with a stated-why comment" -- surfacing every discard as a
+  caller-visible error on every platform would ship a behavior change serving no
+  defect anyone has.
+- D66 corrected the coder's first classification, which had inherited an error
+  from the bead's own site-to-function map (it labeled two sites as prune when
+  they were actually `Leave` and `Unregister`, measured from source). Corrected
+  rule: classify by WHAT THE CODE DOES AFTER THE REMOVAL, not by name or
+  proximity. Site 526 (`PruneChannel`'s normal path) is the worst case in the
+  file: at baseline, a failed removal didn't just fail to clean up -- the code had
+  already appended a "pruned" line, written a terminal ledger LEAVE event and
+  BROADCAST departed to every listener by the time the discarded error was
+  reached, while the directory survived renamed under a dot-prefixed `.reap.<pid>`
+  name that the entry loop's own glob skips, an orphan nothing lists again. Fixed
+  by skipping that whole announce trio unless the directory is actually gone.
+  `Rename` follows the same shape for a different reason: its removal precedes a
+  `departed (name reclaimed)` broadcast on the very next line, so a discarded
+  failure there announces a departure the removal never accomplished, even though
+  the following `os.Rename` would separately fail loudly moments later.
+- `Leave` iterates every channel a session is joined to; the fix keeps the loop
+  running past a failed removal on one channel rather than aborting the rest,
+  because those channels' leaves are independent and already broadcast. What must
+  not happen is reporting the FAILED one as left -- so `left` and `err` can both
+  come back non-empty for a partial leave, a shape callers handle rather than a
+  single pass/fail. `cmd/cbus/main.go`'s `runLeave` was updated to match (c2):
+  print the successes first, then die on the error, so a partial leave's real
+  work isn't hidden behind the one channel that failed.
+- THE EIGHTH SITE, told in full because it took two corrections rounds and is a
+  live instance of trusting a measurement at the wrong scope: `PruneChannel`
+  renames a dead peer's directory aside before removing it, and that RENAME
+  itself also discarded its error, one line above site 526. The first pinning
+  test (`TestPruneDoesNotAnnounceADepartureItCouldNotPerform`) was written
+  expecting a two-way outcome (removal blocks, or it doesn't) but the coder
+  corrected that to three ways before it ever ran on logos: removal blocks
+  (526 confirmed), the RENAME blocks first (peer dir found back at its original,
+  un-renamed path -- a second discarded error, not the one the test was aimed
+  at), or neither blocks on this volume (real possibility given the measured
+  POSIX-delete datum, recorded as the pin going UNEXERCISED rather than counted
+  green). MEASURED ANSWER on logos: row two. The rename blocks FIRST -- a held
+  handle inside the peer directory defeats the rename before the removal is ever
+  reached -- so `PruneChannel` was skipping the dead peer SILENTLY, msgs empty,
+  the exact messageless silent-skip class this epic exists to close, one site
+  the original seven-site ruling had not reached. RULED (D67): the rename discard
+  is surfaced as an EIGHTH site, with a could-NOT line naming the peer and the
+  mechanism, same message discipline as the other seven. The pin test was
+  rewritten and renamed (`TestPruneDoesNotSkipADeadPeerInSilence`): its primary
+  assertion is now never-skipped-in-silence, and it REPORTS which half blocked --
+  the rename-claim-failed wording if the ghost dir is still at its original path,
+  or a `t.Log`ged UNEXERCISED-on-this-volume note if the 526 removal branch never
+  got exercised because the rename got there first. The 526 branch itself stays
+  in the code, for volumes where the rename succeeds and the removal is what
+  fails. Two kill mutations, one per branch, are named directly in the test
+  comment. The coder owned its own row-three misreading in the comment too: the
+  POSIX-delete datum this design leans on was measured at a mask that INCLUDED
+  `FILE_SHARE_DELETE`; this fixture's held handle omits it, so something always
+  blocks at THIS mask, and only which half was ever in doubt -- a measurement
+  taken at one mask, misapplied to a different one, the same class of error this
+  epic has caught itself making before (a mask/scope mismatch, not a new kind of
+  mistake).
+- The three kept-discard sites (`Unreserve`, and two `PruneChannel` litter-cleanup
+  branches) are each commented with why: `Unreserve` is best-effort with no caller
+  reporting its success, so a failure just leaves a stale reservation the next
+  join reclaims through the now-surfaced `ReserveAlias` path; the litter sites
+  drop the reaper's OWN temp copy after a race already resolved elsewhere, so a
+  failure there leaves litter, not a lie, and nothing downstream reads either
+  outcome.
+- Two coder mechanism reads, tasked by the reviewer before the corrections could
+  land, both resolved WITHOUT expanding this milestone's scope:
+  1. `TestForeignReopenIsNotStreamed`'s residual (still red at narrow scope after
+     the fix): no code path HOLDS `meta.json` open -- every reader is
+     open-read-close, every writer is write-tmp-rename. The actual blocker is
+     TRANSIENT handles at HIGH FREQUENCY: `os.ReadFile` IS an `os.Open` one call
+     down (`GOROOT src/os/file.go:865`), carrying the same no-FILE_SHARE_DELETE
+     mask for its microseconds; the armed follower re-reads `meta.json` roughly
+     once a second for the life of an arm (`identityEvery`, 5 ticks), and 23
+     separate `os.ReadFile` sites exist in `internal/client` -- dense enough
+     scheduling that a remove-vs-read overlap is near-certain. The original bead
+     enumeration missed this entirely because it grepped for `os.Open` and
+     `os.OpenFile` textually, and `os.ReadFile` matches NEITHER string while
+     BEING one a call down -- the same mentions-vs-calls instrument gap M4's F1
+     hit one layer up, an instrument that can't see through its own indirection.
+     Filed to new bead `cbus-que.12`, correctly out of this milestone's scope
+     (which covered only the long-held reads).
+  2. `TestDisplacedFollowerStopsMovingTheCursor`'s flip (1/8 pre-fix to 8/8
+     post-fix at narrow scope) is NOT a regression. A discriminating probe (8
+     solo runs each, pre-fix and post-fix artifacts) settled it: pre-fix 7/8
+     FAIL, post-fix 8/8 FAIL -- the test was failing near-constantly before M5
+     ever existed, and the original 7-test-scope 1/8 pre-fix reading was itself
+     the outlier, most likely because the four A-i neighbor tests died fast
+     (0.01-0.06s) pre-fix and ran slow (0.35-0.67s) post-fix, changing the
+     parallel scheduling profile enough to stop suppressing an already
+     near-constant failure (a hypothesis, not asserted as proven). Filed with two
+     siblings (`TestQuietFollowerWritesNothing`, `TestCursorNeverPointsMidFrame`)
+     to new bead `cbus-que.10`. The tester's own initial "possible regression"
+     caution is recorded as the right call to raise, with a now-measured negative
+     answer.
+- D68: `cmd/cbus`'s windows suite had NEVER executed on logos before this round
+  (M3 scoped its own logos run to just the three-verb refusal trio). Rather than
+  block this milestone on a first-ever full run of an unrelated surface, the gate
+  was scoped by ruling to exactly what this milestone touches: every
+  `Leave`-matching test, plus the M3 refusal trio as a regression check,
+  declared in advance via `-test.list` so the boundary is verifiable, not
+  post-hoc. Two first-execution discoveries outside that scope (a
+  `TestUsageAdvertisesClose` hang, and seven `TestClose` windows failures) are
+  filed to new bead `cbus-que.11` rather than gating this milestone, since they
+  are discoveries on a surface that has simply never run before, not regressions
+  this bead introduced.
+
+[Possible Ripple Effects]
+- Five verbs change CLI-visible failure behavior on windows: `join`, `leave`,
+  `unregister`, `rename`, `prune`. A behavior-spec proposal (new subsection,
+  verbatim strings) was prepared and held pending review; `ReserveAlias`'s
+  identical reclaim string is real but not currently windows-reachable, since all
+  three of its callers sit behind verbs M3 already refuses wholly (verified by
+  grep).
+- `fileid_windows.go`'s `fileIdentity` losing its own hand-rolled `CreateFile` in
+  favor of the shared seam means a future divergence between the two open paths
+  is now structurally impossible rather than merely undesired.
+- `cbus-que.12` (new): the transient-`os.ReadFile` class is broader than what
+  this milestone fixed (six originally-enumerated long-held opens) -- 23 call
+  sites carry the same mask, and a blanket conversion would inherit D64's
+  silent-false-on-directory behavior on any path that can name a directory,
+  meaning it needs per-site treatment or a read helper preserving `os.ReadFile`
+  semantics while swapping only the open, not a mechanical find-and-replace.
+- `cbus-que.10` (new): three follower/cursor tests, independent of the sharing-
+  violation cluster this milestone fixed, still unowned.
+- `cbus-que.11` (new): `cmd/cbus`'s windows suite has two first-execution
+  failures of its own, entirely orthogonal to this milestone's changes, now
+  tracked rather than left as an unscoped gate risk for whichever milestone
+  touches that code next.
+
+[Testing Notes]
+- Reviewer: UNCONDITIONAL final sign-off. Every registered condition closed
+  across two review rounds; the milestone record it closes: eight surfaced sites
+  each with commit-last ordering verified, three kept discards with their why at
+  the site, the `openSharedRead` seam with its mask in exactly one file, D38 and
+  the rename-claim defect both measured from both sides (fix-green plus
+  mutant-red), and the operator-facing silent-skip class eliminated at every site
+  that announces. Reviewer's own instrument self-correction on record: a first
+  `m5mut2b` was built from a pre-correction freeze and would have red for
+  unrelated reasons; withdrawn and replaced by `m5mut2b.v2` before being trusted.
+- Closing run (final freeze, manifest `3beda9bbc0b5b829`, artifacts `db32b5f5`,
+  `f9fa6859`, `c7704065`): gate-scope 533 RUN / 380 PASS / 5 FAIL, all five
+  attributed and nothing outside the set (3 `cbus-que.10`, 2 `cbus-que.9`
+  unchanged since M4). Narrow-scope co-instrument, run alongside for the
+  two-scope fact rather than instead of the gate-scope number:
+  `TestQuietFollowerWritesNothing` 8/8, `TestCursorNeverPointsMidFrame` 8/8,
+  `TestDisplacedFollowerStopsMovingTheCursor` 7/8 (all three `cbus-que.10`,
+  independent of this fix per the discriminating probe), `TestForeignReopenIsNotStreamed`
+  8/8 red at narrow scope on the `meta.json` transient class (`cbus-que.12`) while
+  green at gate scope -- both facts true and both preserved in the record, not
+  averaged into one number. `TestOrphanDoesNotMoveTheNewEpochCursor` and both
+  `Follow` tests (`TestFollowRotationRecreate`, `TestFollowDirDeletionNeverExits`)
+  are GENUINELY FIXED at BOTH scopes, 0/8 red at narrow scope where they were
+  previously among the sharing-violation cluster.
+- `cmd/cbus` D68-scoped subset: 6/6 green (every `Leave`-matching test plus the
+  M3 refusal trio), run-count-first so the excluded hang-prone set is outside by
+  declared name, not by accident.
+- Two final mutants, both killed 8/8 on their aimed assertions: `m5mut3` (the
+  rename-discard kill) at the primary silence `t.Fatalf`, with the predicted
+  ABSENCE of a could-NOT line verified at count zero rather than assumed;
+  `m5mut2b.v2` firing both signature halves, including the departed broadcast
+  landing in the observer's inbox -- the user-visible silent-success harm
+  demonstrated directly by restoring it. Sixteen runs total across both mutants,
+  no wedge truncation in any of them.
+- Instrument-error thread this milestone, named consistently per standing
+  practice: the meta.json transient-`ReadFile` mentions-vs-calls gap (same class
+  as M4's F1, one layer deeper); the reviewer's own pre-correction `m5mut2b`
+  built from a stale freeze; and the coder's row-three misreading of the
+  POSIX-delete datum (measured at one share mask, misapplied to a fixture using
+  a different one). None changed a shipped result; all are recorded because the
+  pattern recurring across milestones is worth more than any single instance.
+- Footprint zero. Not pushed.
+
+## [2026-08-02 22:16:37 UTC] [Client/Windows] cbus-que M4: platform test fixtures so internal/client RUNS on windows
+
+[Attempt #1] `4a9ac3b` (full `4a9ac3b0ff3899b12739f0f871494b7356ebd41d`, M4, cbus-que.7).
+22 files, 688 insertions, 379 deletions.
+
+Built by the `winport` formation (orchestrator, coder, reviewer, tester,
+documenter). Rulings D51-D61 plus F1; D9, D21, D28 carried in and D38 finally
+closed. Full record on `cbus-que.7`; findings beyond this bead's own scope filed
+to `cbus-que.8` and `cbus-que.9`.
+
+[Motivating problem]
+Found 2026-07-26 by the tester seat by RUNNING the suite on logos, not reading it --
+invisible to every gate M1-M3 define, since `internal/client` was already clean to
+COMPILE for windows/amd64 and this defect is orthogonal to compilation. 20+ call
+sites across liveness, procinfo, send, formation_plan, birth, close and harness
+tests spawn unix binaries (`tail -f`, `sleep 30`, `/bin/sh -c true`, `true`,
+`/bin/sh`, `/bin/bash`, `perl`) to build live and dead test processes; all are
+absent from logos PATH, verified rather than assumed. The structural liveness
+matrix cbus-que.6 names has literally no processes to build against until this is
+fixed.
+
+[Files Changed] (22 paths, final manifest efccf9e0278755fd)
+- `procfixture_test.go`, `procfixture_unix_test.go`, `procfixture_windows_test.go`
+  (new) -- the `liveProc(t)`/`deadProc(t)` seam trio. Windows: `waitfor.exe
+  <per-call-unique-signal> /t 30` for live, `cmd /c exit 0` / `cmd /c exit 259` for
+  dead with a chosen code. Unix: the prior sleep/true, unchanged in spirit.
+- `pidalive_windows_test.go` (new) -- four cases: exit-259 held-handle (the D9
+  discriminator), exit-0 control, a genuinely live process (coder-added fourth
+  case, kills an always-false stub the two false-asserting cases alone cannot), and
+  the D28 access-denied-reads-alive case (skips naming elevation).
+- `harness_launcher_unix_test.go`, `liveness_zombie_unix_test.go` (new,
+  `darwin || linux`) -- `TestLauncherScriptExecutes` (D51: porting it would invent
+  a windows launcher for a verb M3 already refuses) and
+  `TestPredicateStructuralZombieReadsDead` (D55: windows' analogue is the 259
+  retained-object case) extracted per-test into tagged files, never whole files.
+- `formation_apply_tmux_unix_test.go` (new, `darwin || linux`) -- the three
+  tmux pane-anchor tests plus their `fakeTmux` fixture, extracted whole (D56/D57
+  item 4): the fixture can only describe a unix machine (shebang file,
+  colon-separated PATH), so there is no windows shape to port. One extraction
+  target (`TestApplyDryRunNeedsNoJoinNorChannel`) was moved BACK untagged after
+  the fix batch (F1, see Design) once verified it never calls `fakeTmux`.
+- `fileid_windows_test.go` -- `TestFileIdentityProbeDoesNotLockOutWriters` rewritten
+  through the real `fileIdentity(path)` door (the D38 hand-rolled `CreateFile`
+  seam) instead of testing the property through a raw `os.Open`, plus the fix for
+  its now-corrected-backwards doc comment. This is the test cbus-que.8 recorded as
+  not existing; it exists now and D38 is logos-verified.
+- `formation_test.go`, `role_test.go` -- hardcoded forward-slash path expectations
+  replaced with `filepath.Join`-built ones (D57 items 2 and G).
+- `transcript_test.go` -- sets the platform-appropriate home env for its test
+  (`os.UserHomeDir` reads `USERPROFILE` on windows, ignores `HOME`) rather than
+  asserting a unix-shaped path (D57 item 3).
+- `cred_test.go` -- gains a windows-only runtime skip naming cbus-que.4 on the
+  mode-bit assertions specifically (D61), NOT a whole-test skip: Go cannot
+  partially skip a test function, so the portable-round-trip assertions were
+  extracted into their own new `TestFileBackendPermissions`, which is what carries
+  the skip. `TestFileBackend` itself keeps running on windows.
+- `cursor_test.go` -- gains a windows-only runtime skip on the unreadable-cursor
+  case, naming the measured mechanism: `os.Chmod` on windows maps only to
+  `FILE_ATTRIBUTE_READONLY`, so the euid-guarded unreadable state this test wants
+  cannot be constructed via chmod there; production `readCursor` itself verified
+  correct, the coverage gap (an ACL-denial or sharing-violation route) filed to
+  cbus-que.9 rather than faked here.
+- `storename_test.go`, `formation_apply_test.go` -- fixture entries for the Win32
+  trailing-dot case made platform-conditional (D58): the `"...."` subtest skips on
+  windows naming the aliasing mechanism (below), the rest of the matrix unaffected.
+  `formation_apply_test.go` also drops ~160 lines net as part of the tmux-fixture
+  extraction.
+- `birth_test.go`, `cursor_regression_test.go`, `formation_plan_test.go`,
+  `harness_test.go`, `liveness_structural_test.go`, `liveness_test.go`,
+  `send_test.go` -- the 12+1 original fixture-seam conversions (cursor_regression's
+  local helper explains the one unlisted 13th site the reviewer flagged and
+  resolved as accounted-for), two duplicate dead-pid helpers collapsed onto
+  `deadProc`. `formation_plan_test.go` also drops a stale comment describing a
+  deleted pre-P3 mechanism (argv-grep, a tail-f-holds-the-inbox fixture) that would
+  have pointed a future reader at building exactly the delete-blocking fixture
+  cbus-que.8 exists to warn against.
+
+[Design]
+- `waitfor.exe` needed a per-call UNIQUE signal name: the binary exits when ANY
+  sender raises the named signal, so two tests sharing a name could have one test's
+  cleanup kill another's still-running fixture. Fenced inside `liveProc` (which
+  generates its own name), not left as a call-site obligation -- the same shape as
+  the F2 tick-collision trap this milestone's plan cites as a precedent to avoid.
+- Git for Windows ships sleep/true/sh/perl/tail at a fixed absolute path and was
+  rejected as the fixture substrate on purpose: depending on it makes the suite
+  silently require an unrelated install on every future windows machine, the
+  undeclared-dependency class this epic has spent effort closing elsewhere (the
+  codex socket, the flock primitive).
+- Never resolve a shell by bare name on windows: bare `bash` resolves to the WSL
+  launcher stub (WSL rejected for this epic 2026-07-19). Re-probed 2026-08-02 and
+  sharpened: bare `bash` actually resolves to TWO sources (the system32 stub and a
+  WindowsApps alias), so which one fires is not even pinned across machines -- a
+  fixture hitting this would fail differently machine to machine.
+- The exit-259 fixture is D9's missing evidence. Until a test could make
+  `WaitForSingleObject` and `GetExitCodeProcess` actually DISAGREE, D9's choice
+  between them was justified by argument (259 collides with a real exit code), not
+  measurement. Trap: reaping the child and dropping every handle before asserting
+  makes `OpenProcess` fail and BOTH implementations correctly report dead -- a
+  vacuous pass, the same shape as the coder's own earlier F4 finding (a case
+  passing with or without a guard because `0 <= 0` holds either way). The fixture
+  instead opens and HOLDS the handle from before the exit, reproducing the real
+  Windows retained-object state (what D9 says stands in for a zombie there) rather
+  than staging an artificial disagreement. Result: `m4mut1` (the
+  GetExitCodeProcess/STILL_ACTIVE swap) killed EXACTLY `TestPidAliveExitCode259` on
+  its own assertion, nothing stray -- the strongest evidence D9 has had. The paired
+  early-reap mutant (`m4mut2`) killed 8/8 at suite level but NON-DETERMINISTICALLY
+  per test (259 case red 8/8, the held-handle-exit-zero case red only 6/8):
+  reap-then-open races kernel object teardown, and when the object lingers the open
+  succeeds and the assert passes for the wrong reason. LOAD-BEARING: the two-test
+  redundancy on this fixture is not decorative -- the 259 case is the reliable
+  mutant guard, and the 8/8-vs-6/8 asymmetry plus scope caveat is recorded directly
+  on the `TestPidAliveHeldHandleExitZero` doc block so a future reader trimming
+  "redundant" tests sees the rates before doing it.
+- The A-ii rewrite (`TestFileIdentityProbeDoesNotLockOutWriters`) is D38's own
+  missing evidence, same shape as D9's: `fileIdentity` was fixed at M1 to hand-roll
+  `CreateFile` with all three share flags, but the test verifying that property had
+  been opening ITS OWN probe with a raw `os.Open` and testing the claim through the
+  wrong door -- its own doc comment, "guards the trap the os.Open choice exists
+  for," was backwards under the corrected premise (`os.Open` IS the trap; D11's
+  stated reason, that Go opens with all three share flags, was measured false
+  during the M4 first-execution run, though the API choice `CreateFile` remained
+  right). The rewrite calls `fileIdentity(path)` directly and asserts `os.Remove`
+  succeeds while the probe is in flight. Two-half design (D59): a deterministic
+  no-leak half plus a race-window share-flag half, each half's strength stated in
+  its own comment; the deterministic version (production handle exposed for
+  testing) files to cbus-que.8 alongside the handle-exposing change it needs.
+  `fixmutA` (share mask degraded to the `os.Open` set) killed 8/8, every kill at
+  the aimed loop-half assertion (`fileid_windows_test.go:152`) alone, sequential
+  half green throughout -- D38 CONVERTS TO MEASURED-VERIFIED, the oldest carried
+  gap on the epic (held since M1 as construction-only) closes. The catching
+  iteration varied 0/1/2/4/4/6/14 across runs, so the 50-iteration loop is
+  LOAD-BEARING: a single-shot probe would miss most runs. `fixmutB` (the
+  `CloseHandle` call deleted) SURVIVED 8/8 exactly as registered, a predicted
+  survivor rather than a miss: it confirms the passing test pins share-flags-at-
+  remove-time, not leak absence (reviewer micro-note n1).
+- Measured in passing, feeding cbus-que.8's fix design directly: from the fixmutB
+  predicted-survivor run, a LEAKED handle carrying all three share flags blocked
+  NEITHER a sequential remove NOR a 50-iteration rm+recreate loop on logos NTFS,
+  8/8 runs. The target volume exhibits POSIX-delete semantics -- a measured
+  property of that volume, not a general Windows claim -- which validates in
+  advance the fix shape que.8 records (route the follower's inbox open through a
+  hand-rolled `CreateFile` carrying `FILE_SHARE_DELETE`).
+- D58, the Win32 trailing-dot case: the `"...."` fixture subtest doesn't fail
+  because MkdirAll dies -- it fails because Win32 SILENTLY STRIPS trailing dots and
+  the create ALIASES ONTO THE PARENT directory while still reporting success
+  (verified two ways: a PowerShell `New-Item` probe returned created-ok with
+  `FullName` equal to the base path and no child directory; the Go-side test itself
+  read back "001," the `t.TempDir` counter belonging to the parent). The code under
+  test behaved correctly given the directory it was actually handed -- the defect
+  is Win32's, not this repo's, so the fix is a platform-conditional skip, worded to
+  say the failure mode is a SUCCESS pointing at the wrong directory, not an error,
+  since that distinction is the whole point of recording it. The class generalized
+  beyond this fixture: cbus-que.9 separately found trailing-dot STORE names pass
+  both of internal/core's name validators today and would alias onto the parent
+  store directory in production, filed there as validator hardening, not fixed in
+  this test-only batch.
+- F1 correction: an earlier extraction had flagged
+  `TestApplyDryRunNeedsNoJoinNorChannel` as touching the `fakeTmux` fixture via a
+  mentions-based scan, but the coder verified it never actually CALLS `fakeTmux`
+  (unreachable transitively) -- the extraction itself was a real windows-coverage
+  regression, moved back untagged with the header claim trimmed to match.
+- D61: Go cannot partially skip a test function, so "skip only the mode-bit
+  assertions in `TestFileBackend`" isn't expressible as a `t.Skip()` inside that
+  function without also skipping its portable round-trip coverage. The mode-bit
+  assertions were extracted into their own `TestFileBackendPermissions`, which
+  carries the windows skip naming cbus-que.4; `TestFileBackend` keeps exercising
+  the portable path on windows.
+- D60, the close-condition shape: the fix batch closed everything inside this
+  bead's scope, but one residual cluster (three follower/cursor timeouts) proved
+  genuinely nondeterministic under an 8-run scoped tally (one deterministic 8/8
+  fail, two at 6/8), not settled one way or the other by the batch and not
+  necessarily downstream of the sharing-violation cluster it's provisionally
+  grouped with. Rather than chase an exact pass count that a flaky cluster makes
+  meaningless, the close condition became an ATTRIBUTED SET: every non-pass on the
+  gate run must be either a declared skip or a member of the named, filed set
+  (que.8's four sharing-violation cases plus up to three flaky timeouts, que.9's
+  two path-resolution cases), with nothing outside that set in either direction.
+
+[Possible Ripple Effects]
+- `cbus-que.8` (os.Open blocking deletion) gains: the sharing-violation mechanism
+  now measured at a second locus (5 more failures, not just the original follower
+  handle), D11's stated reason falsified by measurement though its conclusion
+  stands, the deterministic half of the A-ii test as a production-change companion,
+  and the NTFS POSIX-delete datum validating its fix shape in advance.
+- `cbus-que.9` (new bead, filed from this milestone's first-execution results):
+  the confirmed production defect at `transcript.go:52` (hardcoded forward-slash
+  `/.ccs/instances/` fragment, silent-no-op class, reachable in production), the
+  trailing-dot store-name aliasing hazard found adjacent to the D58 fixture defect
+  (passes both `internal/core` name validators today), and a worse adjacent class
+  found during the same probe: `NUL`/`nul` as a store-path component silently
+  discards written content with every syscall reporting success (an instrument
+  correction is recorded alongside it: a PowerShell probe of reserved device names
+  read as reassuring because .NET path validation is a layer cbus never executes;
+  the Go-layer probe that actually matters found the opposite).
+- `cbus-que.4` (relay credential store) gains a binding windows skip target
+  (`TestFileBackendPermissions`) and confirmation that no test in the suite
+  exercises windows credential behavior beyond the portable round trip.
+- No behavior-spec impact: test-only diff, no dispatch or printed-string changes.
+
+[Testing Notes]
+- Reviewer: APPROVED across two rounds (initial CONDITIONAL APPROVE on the fixture
+  seam, then CONDITIONAL APPROVE on the fix batch with F1 and D61 as binding
+  conditions, both discharged). All GA-GG gates closed; three independent windows
+  test-binary rebuilds hashed byte-identical across the milestone (coder, tester,
+  reviewer), a fourth and fifth after the fix batch and the closing run.
+- Laptop: darwin suite green throughout (537 RUN / 396 PASS / 0 FAIL / 1 SKIP on
+  the final run, the one skip being `TestKeychainIntegration` on its
+  `CBUS_KEYCHAIN_IT` opt-in guard, unchanged all milestone), windows and linux vet
+  clean, gofmt clean.
+- Logos, final closing run per D60 on the final artifact (manifest
+  efccf9e0278755fd, artifact `2b3cb2decd3cce19`, run record pins the executed
+  binary sha, stderr captured and empty): 529 RUN / 373 PASS / 8 FAIL / 9 skip
+  events (8 top-level + 1 subtest). All 8 fails inside the registered attributed
+  set: 4 que.8 sharing-violation cases, 2 of 3 que.8 flaky follower-timeout cases
+  (the third, `TestDisplacedFollowerStopsMovingTheCursor`, passed this run at
+  0.37s vs a prior 2.05s timeout fail -- inside its own measured flake band, not a
+  fix), 2 que.9 path-resolution cases (fail differently from each other: one
+  resolves to nothing, the other to a backslashed volume-less string). Nothing
+  outside the attributed set in either direction.
+- Mutation coverage this milestone, two separate pairs: `m4mut1`/`m4mut2` (against
+  the original fixture seam, converting D9 to measured evidence) and
+  `fixmutA`/`fixmutB` (against the A-ii rewrite in the fix batch, converting D38 to
+  measured evidence) -- both pairs' full results are in [Design] above rather than
+  repeated here.
+- Instrument-error thread this milestone (naming the class consistently, per
+  standing practice): a CRLF-in-output bug produced a garbage first name-set diff,
+  caught because it contradicted independently-held counts; a PowerShell
+  case-insensitive-variable collision (`$n`/`$N`) plus discarded stderr would have
+  reported a mutation surviving when it was actually the harness never running,
+  caught by un-discarding stderr; the reserved-device-name PowerShell-vs-Go-layer
+  divergence above; and F1's mentions-vs-calls extraction error. None changed a
+  shipped result, all are recorded because the pattern recurring is worth more than
+  any single instance.
+- Footprint delta zero after one `rm`. Not pushed.
+
+## [2026-08-02 20:17:19 UTC] [Client/Windows] cbus-que M3: honest refusals for every windows-excluded verb
+
+[Attempt #1] `f81c8f2` (full `f81c8f20656158195ec11ae2eb5efcb30bf8fd13`, M3, cbus-que.3).
+12 files, 246 insertions, 7 deletions.
+
+Built by the `winport` formation, relaunched 2026-08-02 for M3 with five seats
+(orchestrator, coder, reviewer, tester, documenter -- documenter added mid-run).
+Rulings D44-D50, plus the D25 and n4 carry-ins from the M1 review. Full record on
+`cbus-que` / `cbus-que.3`.
+
+[Motivating problem]
+que.3 excludes three out-of-scope subsystems from the windows build: the codex bridge
+(unix-socket rendezvous + process-group teardown), terminal forking (`branch`/`spawn`/
+`formation apply` -- Windows Terminal targeting is phase 2), and `cbus close` (its
+owner walk is the hardest part of the port and is deferred). The requirement was not
+just "don't build it" -- every excluded verb must refuse with a message naming the
+platform and the phase and a non-zero exit, because a silent no-op or a generic
+unknown-command answer both read as "you mistyped it," the class the cbus-vjo
+phantom-channel finding and the codex silent-bridge-death gap were shaped like.
+
+[Files Changed]
+- `cmd/cbus/unsupported_windows.go` (new) -- `phase1Refusal(verb) string`, one switch
+  over the seven excluded verbs. `branch`/`spawn`/`formation apply` share a
+  `forkPhase` fragment carrying "(terminal forking lands in phase 2)"; `close`,
+  `codex`, `codex-bridge`, `codex-stop-hook` don't, since none names a phase-2
+  destination. Returns "" for every verb phase 1 doesn't touch.
+- `cmd/cbus/unsupported_unix.go` (new, `//go:build darwin || linux`) -- same
+  signature, always "": every excluded verb runs natively off this platform.
+- `cmd/cbus/unsupported_windows_test.go` (new, windows-only by filename suffix, no
+  explicit build tag) -- three tests: refusal-message-and-rc for all seven verbs bare
+  AND argument-satisfied; live-verb non-refusal for the formation/bootstrap
+  survivors; template-covers-every-verb (plus a `send` negative control).
+- `cmd/cbus/main.go` -- `phase1Refusal` guard added at the top of `runCodexStopHook`,
+  `runCodexWrap`, `runCodexBridge`, `runBranch`, `runSpawn`, `runClose`, each ahead of
+  its own arg parsing.
+- `cmd/cbus/formation.go` -- same guard at the top of `runFormationApply`, ahead of
+  its usage line.
+- `internal/client/close_windows.go`, `codexwrap_windows.go` -- refusal strings gain
+  "in phase 1" (M1 review forward-pointer n4); both now say explicitly these are the
+  LIBRARY answer, superseded at the CLI door by the dispatch-level guard above.
+- `cmd/cbus/detach_unix.go` -- gains `//go:build darwin || linux` (D25); comment
+  updated to say the tag is what enforces unix-only now, not the filename.
+- `cmd/cbus/detach_windows.go` (new) -- no-op `detachProcess`; a windows child
+  already outlives its parent so there's no session to leave.
+- `internal/client/ledger.go` -- one comment on the mint-lock release closure noting
+  `unlockFile` is unobservable by construction (`Close` alone drops the lock on both
+  platforms; a mutant deleting the call stays green).
+- `docs/architecture/behavior-spec.md` -- new `### 9.2 Windows phase 1 exclusions`,
+  the seven-verb refusal table verbatim from the diff plus the refusal-beats-
+  arg-validation closing rule; citation corrected post-review from a surviving bash
+  `bin/cbus:913` reference to the actual Go site, `main.go:113`.
+- `docs/architecture/command-reference.md` -- Codex integration section: qualified
+  "Never fails the session" to darwin/linux (D49 breaks it unqualified on windows),
+  added a measurable-only windows paragraph for `codex-stop-hook` after the
+  `~/.codex/hooks.json` snippet.
+
+[Design]
+- The refusal check sits at the very top of each excluded handler, before argument
+  parsing, target resolution or any store write (D48, generalizing D46). A bad flag
+  or a missing peer answering FIRST would walk a windows user through fixing
+  something that was never going to work -- measured live: `codex-bridge` with no
+  args answers "--sock PATH is required," a dead-end walkthrough. `close` is the
+  concrete case D46 names: `closeOne` resolves its target before `ClosePeer` would
+  ever refuse, so an early dispatch guard is the only way a fresh box with no
+  matching peer reports "not supported" instead of "no such peer."
+- Exclusion is decided by mechanism reachability, not the design doc's verb list read
+  literally (D44). `applyForker` (`client.OSAForker`) is reached only from
+  `formation.go:111`, the apply path; `formation bootstrap` and top-level `bootstrap`
+  are print-only (`BootstrapPeer`/`BootstrapPrompt`), touching no forker, so they
+  stay live along with `formation save/list/show/rm`. `formation apply --dry-run`
+  refuses too even though the dry-run path itself reaches no forker (D45): its
+  output is a launch plan, and a plan reported as executable on a host that can
+  execute none of it is the same silent-lie class que.3 exists to forbid.
+- The codex subsystem refuses as a whole -- wrapper, bridge, AND stop-hook -- against
+  a coder recommendation to leave the lower-traffic bridge/hook verbs unrefused as
+  practically unreachable (D47). que.3's scope line excludes the subsystem, and the
+  unreachable-in-practice argument is the same shape the coder itself had already
+  rejected elsewhere in the same review round. `codex-stop-hook` additionally keeps
+  exit 1 with its refusal rather than adopting the Stop-hook convention of never
+  failing the session (D49): the registered instrument for this milestone asserts
+  rc != 0 on all seven excluded verbs, uniformly, and a hand-wired codex hook on a
+  platform where codex refuses is a misconfiguration that deserves a visible non-zero.
+- Excluded verbs stay REGISTERED in dispatch rather than vanishing under a build tag.
+  The unknown-command fallback (`main.go:113`) also exits 1, so a check reading only
+  rc cannot distinguish "excluded on this platform" from "you mistyped it" -- the
+  gate instrument therefore matches on the PRINTED string (verb, "windows", "phase 1"
+  all present; "usage:" and "unknown command" both absent), with rc recorded but not
+  decisive. Same reasoning killed a source-grep shortcut: the phase token existed in
+  a doc comment at `codexwrap_windows.go` before this milestone, which a grep would
+  have credited and no user would ever have read.
+- D25 folded in rather than deferred: `detach_unix.go` was the only one of eight
+  `*_unix*.go` files with no `//go:build` line, so its filename suffix was asserting
+  a guarantee the build system never enforced. `detach_windows.go` is a documented
+  no-op, not a port: a windows child already outlives its parent. One residual delta,
+  accepted not fixed: the update poll stays attached to the launching console on
+  windows, so a later Ctrl+C there reaches a process the unix side would have
+  already detached away from.
+- A class-C fold landed mid-milestone: `main.go`'s stop-hook header comment claimed
+  "always exits 0," false on windows since D49. The originally proposed proof of
+  harmlessness (rebuild plus byte-compare against the frozen exe) was ITSELF
+  falsified before use (D50): Go embeds a build id hashed over source content, so any
+  comment edit moves it, and a line-count change additionally moves the DWARF and
+  pcln tables (~1.48 MB of a 10.5 MB exe measured). The comment-shaping option that
+  would have deleted a documented fact to fit the (wrong) measuring device was
+  rejected; the adopted proof is a reviewer-read diff enumerating only comment/doc
+  lines, plus one full rule-8 re-run, which is the numbers reported below.
+
+[Possible Ripple Effects]
+- `unsupported_windows_test.go` is windows-only by the implicit `_windows_test.go`
+  filename suffix (no explicit `//go:build windows` needed) -- consistent with how
+  `unsupported_unix.go` carries an explicit tag (unix isn't a GOOS) while its windows
+  counterpart needs none.
+- The refusal template lives in exactly one place (`phase1Refusal`); the CLI dispatch
+  guards and the `internal/client` library answers (`ClosePeer`, `RunCodexWrap`) now
+  intentionally diverge in wording -- library strings are documented as unreachable
+  from the CLI door. A future direct caller of either library function outside
+  `cmd/cbus` inherits the library wording, not the dispatch wording.
+- `formation apply --dry-run` refusing wholly (D45) means there is currently no way
+  to preview a formation launch plan on windows even read-only. Loosening that later
+  needs a new ruling, not a quiet reversal.
+- colima cross-platform container-runtime gate WAIVED for M3 by the orchestrator: no
+  process-state code changed this milestone (dispatch, refusal strings, one build
+  tag), which is the class that gate exists to catch. Recorded not-run-not-claimed.
+- Doc-embed scope correction found during the class-C rebuild-confirm: doc edits
+  under `docs/` do not reach the binary, but the nine embedded `.md` files under
+  `commands/` and `roles/` ARE compile inputs (`assets.go:12,19`) and an edit there
+  moves both build shas and trips `assets_test`. An earlier roles-only embed claim
+  was wrong and is corrected here.
+
+[Testing Notes]
+- Reviewer: APPROVED. G1-G6 all met and reproduced first-hand; G2 sweep found no
+  eighth verb reaching osascript, tmux, the codex UDS dial or an unguarded kill;
+  library unreachability verified by caller enumeration (`ClosePeer` sole caller
+  `main.go:930`, `RunCodexWrap` sole caller `main.go:347`, both behind guards); G6
+  every hunk maps to a ruling, no smuggle. One retracted instrument on the record:
+  the byte-compare harmlessness proof for the class-C fold (see Design) was false --
+  it fires on every comment edit, so a delta proves nothing either way.
+- Tester, laptop half: tree-wide windows build zero diagnostics (against the tester's
+  own 1-diagnostic morning baseline); artifacts rebuilt from scratch (old ones
+  deleted first) so a silent build failure couldn't ship stale binaries; fresh pair
+  byte-identical to the coder's post-fold pair, independently reproduced twice this
+  milestone.
+- Tester, logos half, run twice (pre-fold and a full rule-8 re-run post-fold), GREEN
+  both times: section E 25/25 (refuse 15/15 -- all seven verbs bare AND
+  argument-satisfied, plus `apply --dry-run`; live 7/7 zero over-refusal; controls
+  3/3), windows test binary 3 RUN / 3 PASS, harness header pins the executed binary
+  sha into the run record. Post-fold run additionally verified BYTE FOR BYTE
+  identical case-line output against the pre-fold run, so the comment fold changed
+  the binary's build id and line tables (as predicted) and exactly zero bytes of
+  user-visible behavior -- measured, not argued. Final artifact pair: `87aa5e94` /
+  `42f4d033`. Footprint delta zero after one `rm`.
+- G5 mutation pass on logos: 4 unique binary hashes (control + 3 reviewer-authored
+  mutants, each proven on-disk and baseline-restore-verified before reading its
+  result), every aimed red landed on the intended assertion. One deviation
+  adjudicated, not a mechanism miss: bare `close` under two of the mutants fired
+  three assertions instead of the predicted usage-only, because a usage line names
+  neither "windows" nor "phase 1" -- an enumeration-granularity gap in the reviewer's
+  own pre-registration, not a discriminator failure. One unpredicted positive: under
+  one mutant the library `CloseReport` text surfaced on raw stdout outside the
+  capture, live proof the dispatch guard and the M1 library seam are two separable
+  output paths.
+- NOT covered by this green, stated rather than papered over: no release ldflags
+  (the gate exe is not a release artifact); nothing privilege-sensitive ran, so no
+  claim about the unelevated production path; amd64, one machine, one profile; the
+  M1/M2 carried gaps (D38 fileIdentity fix construction-only, Gate 4 two-process lock
+  cases never run, pidAlive access-denied branch unexercised) are untouched by this
+  milestone.
+- Final freeze manifest `8aa2ad1dcd199766` (12 paths, reproduced independently by
+  coder, orchestrator and reviewer). Not pushed.
+
+## [2026-07-27 03:18:12 UTC] [Client/Windows] cbus-que M1+M2: internal/client cross-compiles for windows
+
+[Attempt #1] `23ddb92` (M1, cbus-que.1) and `5d73db4` (M2, cbus-que.2).
+
+Built by the `winport` formation on channel `winport`: orchestrator (Opus 5), coder
+(Opus 5), reviewer (Fable 5), tester (Opus 5, an orchestrator-authored seat at
+`~/.claude-bus/roles/tester.md` since there is no committed tester role by ruling).
+43 labeled rulings, D1-D43. The full record is on `cbus-que`.
+
+[Motivating problem]
+logos runs Windows-native Claude Code and has no WSL distribution, and WSL was
+ruled out on 2026-07-19, so a native port is the only route to fleet membership.
+`internal/core` and `relay/...` already built clean for windows; `internal/client`
+did not, and plain `go build` understated the surface because it stops at 10
+errors. `-gcflags=-e` emitted 27.
+
+[Files Changed]
+- `internal/client/procinfo_windows.go` (new, 219 lines) — the four platform
+  functions plus `pidAlive`. GetProcessTimes for the (pid,starttime) witness,
+  Toolhelp for parent and image name, `procZombie` false with a comment saying
+  the state IS handled, upstream at `pidAlive`, rather than absent; `procArgs` an
+  explicit refusal because Toolhelp `szExeFile` is the on-disk image name and
+  cannot be renamed the way darwin `ucomm` can, so argv stops being load-bearing.
+- `internal/client/{procinfo,procctl,fileid,close,codexwrap}_{unix,windows}.go`
+  (new) — five seam pairs. `procctl` exists because `pane.go:159` also calls
+  `boundedCmd`; extracting its two platform lines leaves both call sites untouched.
+- `internal/client/procwalk.go` (new, 80 lines) — the harness ancestor walk, pure
+  over injected `procRecord`s.
+- `internal/client/filelock_{unix,windows}.go` + `filelock_test.go` (new) — the
+  mint-lock seam and its laptop-half tests.
+- `internal/client/{close,codexwrap,cursor,follow,ledger,liveness,marker,starttime,
+  codexstophook}.go` — modified; `close.go` reduced to `CloseReport` plus
+  `boundedCmd`, `liveness.go` loses `pidAlive`, `follow.go` loses `statDevIno` and
+  `rotated` goes pure.
+- `close_test.go` -> `close_unix_test.go`, `procinfo_test.go` ->
+  `procinfo_unix_test.go` (renamed with tags; both assert unix-only behavior).
+- `relay/internal/conformance/conformance_test.go` — one comment: the
+  `exec.LookPath("go")` guard must stay ABOVE `trackSources`, because that is a
+  `..\..\..` walk and reversing them turns a skip into a filesystem walk from
+  wherever cwd happens to be.
+
+[Design]
+- `pidAlive` uses `WaitForSingleObject(h, 0)`, NOT `GetExitCodeProcess` with a
+  STILL_ACTIVE test. STILL_ACTIVE is 259, drawn from the same value space as a
+  real exit code, so a process legitimately exiting with 259 reads alive forever.
+  The sentinel collides with the space it is drawn from, so the bug is not rare in
+  practice, it is unfixable in that primitive. Access-denied means the process
+  exists, which is the EPERM twin.
+- `fileIdentity` replaces `statDevIno` and returns identity AND size. All three
+  live call sites need both, GetFileInformationByHandle returns the size fields in
+  the same call, and folding them deletes a second stat and the window where the
+  two reads could disagree. Windows identity is `dwVolumeSerialNumber` plus the
+  composed 64-bit file index, which fits the two uint64 fields the cursor already
+  persists, so the on-disk format does not change.
+- Windows `fileIdentity` opens with a hand-rolled `CreateFile` carrying
+  FILE_SHARE_DELETE. Go's `os.Open` passes only READ|WRITE
+  (`syscall_windows.go:395`), so a handle it returns BLOCKS DELETION and turns an
+  identity probe into a lock against a rejoin's rm+recreate. An earlier version of
+  that comment asserted the opposite; the correction history is kept in the code
+  deliberately, because a corrected mechanism whose history is erased invites the
+  same wrong assumption again.
+- The ancestor walk is pure over injected records so the stop conditions are table
+  tests on any host, and it gains a parent-age check. Windows does not clear
+  ParentProcessId when a parent exits and it reuses pids, so a walk can climb into
+  an unrelated live process. Measured on the target machine rather than assumed:
+  15 live processes there carried a parent id naming a pid that no longer existed,
+  and 2 claimed a parent born AFTER the child. The terminator was also a unix-ism
+  (`p > 1`, `ppid <= 1`); there is no pid 1 on windows, so the intended stop
+  condition never fired and a depth backstop was silently doing the mechanism's job.
+- The mint lock's contention signal is the load-bearing part. flock reports
+  contention as EWOULDBLOCK and LockFileEx as ERROR_LOCK_VIOLATION, so a loop
+  comparing either constant directly compiles on both platforms, locks correctly on
+  both, and on the OTHER one falls through to the unexpected-error branch and gives
+  up on the first contended try. It would look correct and abandon the retry under
+  exactly the concurrency it exists for. Each platform maps its own errno onto one
+  `errLockContended` sentinel; the loop asks `errors.Is` and is platform-blind.
+- LockFileEx/UnlockFileEx and AdjustTokenPrivileges are absent from package
+  `syscall`, so they are reached through `syscall.NewLazyDLL` rather than by adding
+  `golang.org/x/sys`. The question arose at two independent sites in one session,
+  so it was ruled as policy rather than per-site: the module stays dependency-free.
+  go.mod declares zero dependencies and there is no go.sum.
+- The windows lock takes the MAXIMUM byte range, not one byte, because windows
+  locks a REGION and exclusion holds only between callers naming the same one.
+  `LazyProc.Call` always returns a non-nil error carrying GetLastError (Errno(0) on
+  success), so r1 is checked first; that trap is commented at the call.
+
+[Possible Ripple Effects]
+- Five `_unix` files now carry explicit `//go:build darwin || linux`. Any new
+  unix-only file must too: the `_unix` filename suffix is COSMETIC, because `unix`
+  is not a GOOS, so the name asserts a guarantee the build system never enforces.
+  `cmd/cbus/detach_unix.go` is the one file in the tree that relied on it and is
+  the sole remaining tree-wide windows diagnostic, filed to `cbus-que.3`.
+- `fileIdentity` on windows cannot open a DIRECTORY, because CreateFile without
+  FILE_FLAG_BACKUP_SEMANTICS refuses one, where unix `os.Stat` succeeds. No live
+  caller probes a directory today. `cbus-que.8` will move more opens onto this seam
+  and the first one that touches a directory inherits a silent false.
+- `cbus-que.8`, filed not fixed: `follow.go:321` opens the inbox with `os.Open` and
+  the follow loop holds that handle for the ENTIRE LIFE OF AN ARM, so a windows peer
+  continuously blocks deletion of its own inbox; and `store.go` discards the error at
+  TWELVE `RemoveAll` sites, two of them the join-reclaim path. On windows a failed
+  reclaim is therefore silent and the joiner proceeds as though it succeeded. Both
+  predate this epic. Reachable rather than theoretical: reclaim fires against a peer
+  that READS dead, and a live peer whose `procStartTime` is denied reads dead at
+  `liveness.go:128` while its process and its follower handle are both alive.
+- The epic design field listed the in-process follower under "Already portable, no
+  work". Framing, rotation and replay carry; the handle-holding does not. Premise
+  falsified and recorded.
+- `cbus-que.7`, filed not fixed: 20+ tests build live and dead processes by spawning
+  unix binaries (sleep, true, tail, /bin/sh, perl). None is on PATH on logos, so
+  `internal/client` compiles for windows without being able to RUN there.
+
+[Testing Notes]
+- Gates on both commits: darwin build and full suite green; linux/amd64 and
+  linux/arm64 build; gofmt clean; go.mod diff empty, no go.sum. After M1 the windows
+  residual was exactly five diagnostics on two source lines (`ledger.go:418,421`),
+  enumerated rather than summarized; after M2, `internal/...` is ZERO and the windows
+  test binary links UNSTUBBED for the first time in this epic.
+- The acceptance harness runs cross-compiled `go test -c` PE32+ binaries shipped to
+  logos, which has no Go toolchain and where no install was authorized. 487ms round
+  trip, 8s for the whole repo. Constraints learned by hitting them: a `go test -c`
+  binary does not inherit the package dir as cwd, PowerShell mangles unquoted dotted
+  flags (`-test.v` arrives as `-test`), and PowerShell returns CRLF so a parsed value
+  compared against a literal needs an explicit `\r` strip.
+- Every mutation audit proved the mutant ON DISK before reading any result and
+  confirmed the baseline restored after. Two audits initially reported no failure
+  because the mutation was never applied; a mutation run that was never mutated is
+  the most convincing wrong answer available.
+- Repository-subject tests (gofmt, the embed canary, selfupdate's `../../` reads) are
+  permanently OUT of the logos matrix, recorded not-attempted and never passed. Under
+  a mirrored layout their upward walks find an almost-empty tree and would report
+  green having inspected nothing. One of them walked the entire C: drive for 35s
+  before this was ruled.
+- GAPS CARRIED, stated rather than papered over. Gate 4 is OPEN: the two-process
+  lock exclusion and release-on-death cases were never run, because `cmd/cbus` does
+  not yet cross-compile and `acquireMintLock` is unexported, so there is no entry
+  point across a process boundary. `TestCloseWithoutUnlockReleases` is named a PROXY
+  in its own comment because it proves close-drops-lock, not release-on-process-death.
+  The `fileIdentity` share-flag fix is VERIFIED BY CONSTRUCTION ONLY with no logos
+  evidence: the test that would gate it constructs its own `os.Open` handle and
+  therefore never reaches the changed path. The `pidAlive` access-denied branch has
+  its premise OBSERVED on logos (csrss returns ERROR_ACCESS_DENIED at the production
+  mask once SeDebugPrivilege is dropped) and the BRANCH itself unexercised.
+- The `unlockFile` call inside `release()` is unobservable by construction: `f.Close()`
+  follows it and drops the lock either way, so a mutant deleting the call stays GREEN.
+  It is kept, because deleting it would make correctness depend entirely on an implicit
+  kernel behavior, and a one-line comment saying it cannot be covered is queued.
+
+## [2026-07-24 22:49:51 UTC] [Roles/Profiles] model-generation split: mandate in roles, tuning in profiles
+
+[Attempt #1] `122ea66` — no Go changes, prompts and docs only.
+
+Sources: the Opus 5 prompting guide
+(platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5),
+the Claude-5 context-engineering rules
+(claude.com/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models),
+and the Fable 5 field guide
+(claude.com/blog/a-field-guide-to-claude-fable-finding-your-unknowns).
+
+[Motivating problem]
+The role files mixed two kinds of guidance. The seat mandate (what a coder gates,
+how a verdict is shaped, what the documenter owns) was earned from live failures
+here and holds for whoever runs the seat. Model tuning is the opposite: "you
+already verify your own work, do not add a pass" is right for one model and
+harmful for another. With orchestrator and coder on Opus 5, reviewer on Fable 5,
+documenter on Sonnet 5, and codex peers on another provider, any tuning written
+into the shared doctrine block is wrong for most seats by construction.
+
+[Files Changed]
+- `roles/orchestrator.md` — `MODEL: fable` -> `MODEL: opus`; doctrine 2 re-synced
+  (the pruned/re-JOIN sentence it was missing); new doctrine 12 (subagents); new
+  process rules 14 (complete milestone at kickoff, then let the peer work) and 15
+  (name each peer's model, send its profile, and the note that arming doctrines
+  are Claude-harness facts rather than universal ones).
+- `roles/coder.md` — new doctrine 16 (subagents); process rule 10 extended to bind
+  in both directions, so under-delivery is as much a violation as scope creep.
+- `roles/reviewer.md` — new doctrine 18 (subagents); new process rule 11, report
+  every finding classified, so the size ceiling splits a verdict instead of
+  trimming the small findings out of it.
+- `roles/documenter.md` — doctrine 2 re-synced; new doctrine 13 (subagents); new
+  process rule 10, match an entry's length to its substance.
+- `profiles/README.md` (new) — the split, why it is separate from roles, the
+  intended resolution path, handoff semantics, and why absence is safe.
+- `profiles/opus5.md` (new), `profiles/fable5.md` (new), `profiles/codex.md` (new).
+
+[Design]
+- Mandate stays in `roles/`, tuning moves to `profiles/`, appended after the role
+  body at launch. A handoff carries the SUCCESSOR's profile resolved from the
+  successor's model, never a copy of the predecessor's, so the mandate survives a
+  handoff unchanged while the tuning is re-resolved for whoever picks it up.
+- The subagent doctrine is an attribution rule, not a prohibition. The first draft
+  banned subagents outright and was wrong: research into an axiom no seat covered
+  is legitimate. What binds is that the output is a hypothesis the seat owns and
+  verifies, that it never writes to the shared tree or sends on the bus, and that
+  it never substitutes for a peer's gate.
+- New doctrines APPEND rather than insert. `cmd/cbus/list_golden_test.go:58` and
+  `internal/client/formation_kickoff_test.go:80` cite doctrine numbers per-file,
+  so renumbering would silently invalidate those citations.
+- Only `orchestrator.md`'s MODEL: line moved. Coder stays opus, reviewer stays
+  fable, documenter stays sonnet, so the next formation changes exactly one
+  variable and the comparison is readable.
+- Profiles are written only where a source can be cited. There is deliberately no
+  `sonnet5.md`; a seat with no matching profile runs on its role file alone, which
+  is what every seat did before this directory existed.
+
+[Drift found and fixed]
+The doctrine canary was printing 4 unique hashes instead of 1. Items 1-10 had
+split two ways: `coder` and `reviewer` carried the "no such peer means pruned,
+re-JOIN before re-arm" sentence in doctrine 2, `orchestrator` and `documenter`
+did not. This is the exact failure mode the duplication ruling exists to prevent
+and it was live. Shared core is back to one hash across all four; the two shared
+tail doctrines (quoting, subagents) are byte-identical modulo their item number.
+
+[Cross-provider defect this surfaces]
+Role doctrines 1 and 2 state the listener rules as universal. They are not.
+`internal/client/codexbridge.go` arms as the alias's local listener and tails the
+inbox itself, turning each frame into one injection. A codex peer therefore has
+no Monitor tool and must not run `cbus tail`. Handing a codex peer a role file
+alone instructs it to do something it cannot do, in the first two doctrines it
+reads. `profiles/codex.md` corrects this, along with one-frame-is-one-turn cost
+and the fact that repo policy a Claude peer picks up automatically does not reach
+a codex peer at all.
+
+[Possible Ripple Effects]
+- Delivery is a hand step (orchestrator rule 15) until `cbus-7l8` wires
+  resolution into the launch path. A hand step will be skipped, so the current
+  state is better than before but not yet load-bearing.
+- `profiles/` is NOT in the `go:embed` set in `assets.go`. `install-assets` will
+  not ship profiles to a machine that lacks the repo. Adding it means updating
+  `assets_test.go`, which asserts the embedded set exactly. Deferred to cbus-7l8.
+- An Opus 5 orchestrator that satisfies a routing need with a Task subagent
+  instead of a bus peer would bypass the channel ledger, the formation_run_id
+  claim, and every review gate. That is the reason the subagent doctrine landed
+  in the same pass as the orchestrator model flip rather than after it.
+- The context-engineering guide argues against the shape of these files as a
+  whole (roughly 10KB each, hard rules, worked examples, one block repeated four
+  times). Not acted on. The doctrines are environment gotchas, which that guide
+  says to keep; the process rules are where real over-constraint lives. An
+  unhobbling pass is its own effort and would have made this one unreadable.
+
+[Testing Notes]
+- `go test ./...` green across all packages (claudebus, cmd/cbus, internal/client,
+  internal/core, relay/*).
+- Doctrine parity verified three ways: shared core items 1-10 hash identical
+  across all four files; the subagent doctrine text hashes identical with the item
+  number stripped; the quoting doctrine likewise.
+- `assets_test.go`'s runtime-FS canary (embedded bytes equal repo source) passes,
+  confirming the embed snapshot picked up the edited role files.
+- No behavior change to verify at runtime: no Go source was touched.
 
 ## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id (bdx-mec.2)
 
