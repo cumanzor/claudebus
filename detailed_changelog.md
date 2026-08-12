@@ -1,5 +1,77 @@
 # Changelog (detailed)
 
+## [2026-08-12 00:24:05 UTC] [Merge/Windows] windows-port reconciled with main (v0.9.0-v0.9.3)
+
+[Attempt #1] `d64b038` (full `d64b038` merge commit, second parent `b5dab23` = main tip).
+Merge of 30 main commits spanning four release eras (v0.9.0 formations resume, v0.9.1
+bare-shell transcript roots, v0.9.2 blank-profile instance sweep, v0.9.3 string fixes)
+plus the README/docs restructure, into the 27-commit windows-port branch.
+
+[Motivating problem]
+Main moved four eras while the port branch slept; every further port milestone would
+land on a stale base, and the que.5 live-selfupdate gate needs a release cut from a
+reconciled tree.
+
+[Conflicts]
+Four textual (formation.go, transcript.go, both changelogs), two SEMANTIC -- and both
+semantic ones are the same class: main develops without the port's platform gates, so
+it reintroduces exactly the classes the port eliminated.
+
+- `internal/client/transcript.go` -- main's `fb948f8` (cbus-phh: profile root resolves
+  from HOME, not the env, so bare/GUI shells can resume profiled formations) is the
+  newer ruling and is KEPT structurally intact. But it carried the forward-slash
+  `"/.ccs/instances/"` detection literal at TWO sites: the transcriptRoots cfg-hint
+  branch and the new InstanceProfiles sweep. That is the que.9/D70 class: a real
+  windows CLAUDE_CONFIG_DIR uses backslashes, the Contains never matches, and the
+  branch silently vanishes with no error anywhere. Both sites now call the structural
+  `isCCSInstanceDir` (kept from the port side of the conflict). The D70 instrument
+  itself was pinned before judging: the UNQUOTED fragment legitimately appears in test
+  env values and one doc comment at the D70-clean baseline (92a6e54), so the
+  acceptance form is the QUOTED literal in *.go -- zero at baseline, zero post-merge.
+  `strings` import dropped (its only uses were the two replaced Contains calls);
+  `sort` kept for InstanceProfiles.
+- `internal/client/launch_intent.go` -- NOT a textual conflict; caught by the
+  `GOOS=windows go build ./...` gate. Main's `f3bb9cc` (cbus-rze F1: flock the reclaim
+  window) called `syscall.Flock` untagged, the que.1 class. Swapped onto the existing
+  M2 platform seam: `tryLockExclusive`/`unlockFile` (flock(2) on unix, LockFileEx via
+  NewLazyDLL on windows), which preserves both properties the site needs -- non-blocking
+  (a loser refuses, does not queue; contention maps to errLockContended, and this
+  caller refuses on ANY error so the sentinel distinction is moot here) and
+  dies-with-holder (both kernels drop the lock on fd/handle close including process
+  death). Doc comment reworded platform-blind. Folded INTO the merge commit so the
+  merge itself is green on every platform.
+- `cmd/cbus/formation.go` -- port's D44 apply-path refusal guard + main's `--mode` in
+  the usage string; both kept, trivially compatible.
+- changelogs -- timestamp-ordered union: 11 port-side entries + 6 main-side entries
+  over 107 (simple) / 91 (detailed) shared, counts verified by inclusion-exclusion
+  against both parents. One ordering anomaly is pre-existing on main (a 2026-07-18
+  entry with a date but no time).
+
+[Auto-merged but verified by hand]
+- `roles/*.md` + `profiles/*` came out identical to main (b5dab23's doctrine-block
+  string sweep). The three-part invariant re-verified post-merge: shared-core awk hash
+  is 1-unique across all four role files.
+- `internal/client/spawn.go` took main's b5dab23 prompt strings cleanly.
+
+[Possible Ripple Effects]
+- The port now sits on the v0.9.3 feature surface (resume/--mode/anchors); windows
+  refusal tests that enumerate verbs may meet new verbs main added -- none surfaced in
+  the suite, but logos has not seen this tree yet.
+- InstanceProfiles' cfg-hint branch now WORKS on windows (structural check) where
+  main's literal silently disabled it -- behavior change on windows only, in the
+  direction the D70 ruling requires.
+- The reclaim lock on windows now takes LockFileEx byte-range semantics rather than
+  failing to compile; cbus-rze's darwin tests pass unchanged, but the windows half is
+  compile-verified only, first-executes on logos.
+
+[Testing Notes]
+- darwin: `go build ./...` + FULL `go test ./...` green (all packages).
+- windows: tree-wide `GOOS=windows go build` green (RED before the launch_intent fix,
+  which is what surfaced it); `go test -c` compiles for internal/client AND cmd/cbus.
+- linux: amd64 + arm64 builds green. Container runtime gate NOT run -- the resolution
+  touched no process-state code (the liveness.go merge was main's side, auto-merged).
+- D70 fragment grep: quoted literal zero tree-wide in *.go, matching baseline.
+
 ## [2026-08-11 21:27:02 UTC] [Commands/Docs] /bus-spawn both-sides flow + spool external-readers note
 
 [Attempt #1] `10a1a8d` (full `10a1a8dea03c152d3c2ea57664bda95c39196536`) +
