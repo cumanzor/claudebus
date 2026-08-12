@@ -703,8 +703,8 @@ Properties to preserve or consciously rethink:
 Std-lib-only Go binary (`relay/cmd/cbus-relay`, `go 1.26`, zero deps). Flags:
 `-listen` (default `127.0.0.1:8090` — loopback; the CF tunnel fronts it, no TLS in the
 binary), `-spool` (default `spool`), `-token-file` (default `token`). Production unit:
-`ExecStart=… -listen 127.0.0.1:8090 -spool /home/relay/cbus-relay/spool -token-file
-/home/relay/cbus-relay/token`, `Restart=on-failure`/5 s.
+`ExecStart=… -listen 127.0.0.1:8090 -spool <dest>/spool -token-file
+<dest>/token` (templated per site by deploy.sh), `Restart=on-failure`/5 s.
 
 Token: env `CBUS_RELAY_TOKEN` (trimmed) wins; else the token file; fatal if empty or
 if it contains any of `=` `,` `/` or space — it must be **subprotocol-safe**

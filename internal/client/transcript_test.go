@@ -151,3 +151,58 @@ func TestDedupeStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestTranscriptRootsBareShellFindsProfiled(t *testing.T) {
+	// the session-resume handler case: a bare or GUI shell has NO CLAUDE_CONFIG_DIR,
+	// and the profile root must resolve from HOME + the recorded profile anyway —
+	// the envelope is the authority, the env is a hint
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	sid := "bare-shell-sid"
+	want := writeTranscript(t, filepath.Join(home, ".ccs", "instances", "beta"), "-Users-dev-proj", sid)
+	got, ok := TranscriptPath("beta", sid)
+	if !ok || got != want {
+		t.Fatalf("bare-shell profiled lookup = %q,%v want %q", got, ok, want)
+	}
+	// the inverse stays true and documented: blank profile + bare shell cannot
+	// see instance roots THROUGH THIS LOOKUP — the recovery for pre-profile
+	// envelopes is InstanceProfiles, a deliberate named sweep, never an implicit
+	// widening of every caller's search (cbus-kl4)
+	if _, ok := TranscriptPath("", sid); ok {
+		t.Fatal("blank profile from a bare shell must not find instance transcripts")
+	}
+}
+
+// TestInstanceProfilesSweep: the recovery input for envelopes that record no
+// profile — the transcript's own location names the profile. HOME-derived like
+// transcriptRoots, so a bare shell (no CLAUDE_CONFIG_DIR) can still sweep.
+func TestInstanceProfilesSweep(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	beta := filepath.Join(home, ".ccs", "instances", "beta")
+	alpha := filepath.Join(home, ".ccs", "instances", "alpha")
+	sidBeta := "aaaaaaaa-1111-2222-3333-444444444444"
+	sidBoth := "bbbbbbbb-1111-2222-3333-444444444444"
+	writeTranscript(t, beta, "-Users-dev-work-repo", sidBeta)
+	writeTranscript(t, beta, "-Users-dev-work-repo", sidBoth)
+	writeTranscript(t, alpha, "-Users-dev-play-repo", sidBoth)
+
+	if got := InstanceProfiles(sidBeta); len(got) != 1 || got[0] != "beta" {
+		t.Errorf("single-owner sweep = %v, want [beta]", got)
+	}
+	// ambiguity is reported sorted, never silently resolved by glob order
+	if got := InstanceProfiles(sidBoth); len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+		t.Errorf("two-owner sweep = %v, want [alpha beta]", got)
+	}
+	if got := InstanceProfiles("ffffffff-0000-0000-0000-000000000000"); len(got) != 0 {
+		t.Errorf("absent sid swept to %v, want none", got)
+	}
+	// same untrusted-text screen as TranscriptPath: globs and traversals die
+	for _, bad := range []string{"*", "../../../etc", "a/b", ""} {
+		if got := InstanceProfiles(bad); len(got) != 0 {
+			t.Errorf("InstanceProfiles(%q) = %v, want refused", bad, got)
+		}
+	}
+}

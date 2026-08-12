@@ -36,6 +36,7 @@ type RosterPeer struct {
 	Machine   string // meta.host, which is ShortHostname() on the writing machine
 	Origin    string
 	Model     string
+	Profile   string // the CCS instance the session stamped about itself at join
 	Listening bool
 	RunID     string // the peer's run claim, read from its dir (blank when unclaimed)
 	HasClaim  bool   // whether a claim file was present at all, distinct from RunID==""
@@ -84,6 +85,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Machine:   m.Host,
 			Origin:    m.Origin,
 			Model:     m.Model,
+			Profile:   m.Profile,
 			Listening: MetaListenerAlive(metaPath),
 			RunID:     runID,
 			HasClaim:  runID != "",
@@ -111,6 +113,10 @@ type SaveReport struct {
 	// more than one — a split or corruption. The envelope run is left blank and the
 	// CLI surfaces this rather than silently picking a run.
 	RunConflict []string
+	// AnchorMissing is set when a REFRESH still comes out anchorless (a legacy file
+	// re-saved from outside the channel). Minting one refuses instead; this is the
+	// path that has to save and say so.
+	AnchorMissing bool
 }
 
 // loadRepoTemplate reads a committed template as a save refresh base. It reads the
@@ -128,15 +134,22 @@ func loadRepoTemplate(name string) (*Formation, error) {
 // existing file in place.
 //
 // What it captures is bounded by what the substrate records. meta.json holds a
-// peer's alias, sessionId, cwd and host; there is no model, no role, no origin, no
-// profile anywhere on disk. So save owns exactly four fields per peer and treats
-// everything else as the human's: it fills a blank once, and never overwrites what
-// it finds. That is what makes a re-save at a milestone boundary safe — it refreshes
-// sid checkpoints without eating the prose around them.
+// peer's alias, sessionId, cwd and host, a profile when the session stamped one at
+// join, and origin/model when the launcher recorded them; there is no role and no
+// prose anywhere on disk. Save refreshes the session facts, fills the
+// launcher-recorded ones once, and treats everything else as the human's: it never
+// overwrites a hand edit. That is what makes a re-save at a milestone boundary
+// safe — it refreshes sid checkpoints without eating the prose around them.
 //
 // A peer in the file but no longer on the channel is KEPT, not dropped: a paused
 // effort is the main thing a formation exists to hold.
-func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
+//
+// anchors are the caller's --anchor pairs, written into drift_anchors (nil is
+// fine). git_head is refused up front — it is the one machine-owned key.
+func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *SaveReport, error) {
+	if err := checkHandAnchors(anchors); err != nil {
+		return nil, nil, err
+	}
 	path, err := FormationPath(name)
 	if err != nil {
 		return nil, nil, err
@@ -261,11 +274,55 @@ func SaveFormation(name, ch string) (*Formation, *SaveReport, error) {
 	if f.AnchorAlias == "" {
 		f.AnchorAlias = anchorDefault(ch, f.Peers)
 	}
+	// The anchor is load-bearing for restore, so an envelope without one is a defect.
+	// A NEW envelope refuses rather than auto-picking a peer: a wrong anchor becomes
+	// the wrong restore seat every time the formation is resumed, which outlasts a
+	// failed save. A REFRESH still saves — refusing would strand legacy files saved
+	// from outside the channel — and a re-save from a joined session heals it through
+	// anchorDefault above, so the fleet converges without a migration.
+	if f.AnchorAlias == "" {
+		if rep.New {
+			return nil, nil, fmt.Errorf("refusing to save %q with no anchor: this session is not a peer on %q, "+
+				"so there is no alias to anchor to — join %s and save again (the saving session becomes the anchor), "+
+				"or write anchorAlias by hand into %s", name, ch, ch, path)
+		}
+		rep.AnchorMissing = true
+	}
 	setGitHeadAnchor(f)
+	setHandAnchors(f, anchors)
 	if err := f.Save(); err != nil {
 		return nil, nil, err
 	}
 	return f, rep, nil
+}
+
+// checkHandAnchors refuses the machine-owned key before any store work: git_head
+// is recorded from the repo at save (setGitHeadAnchor), so a hand value would be
+// silently overwritten on the very next save — refusing beats lying.
+func checkHandAnchors(anchors map[string]string) error {
+	if _, ok := anchors["git_head"]; ok {
+		return fmt.Errorf("--anchor git_head is machine-owned (recorded from the repo at save time); pick another key")
+	}
+	return nil
+}
+
+// setHandAnchors writes the caller's anchor pairs. An explicit pair overwrites a
+// same-named key already in the file: the preservation rule protects hand edits
+// from the MACHINE, and a flag is the hand acting.
+func setHandAnchors(f *Formation, anchors map[string]string) {
+	if len(anchors) == 0 {
+		return
+	}
+	if f.DriftAnchors == nil {
+		f.DriftAnchors = map[string]json.RawMessage{}
+	}
+	for k, v := range anchors {
+		b, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		f.DriftAnchors[k] = b
+	}
 }
 
 // capturePeer copies what the store knows onto a peer. The three always-known facts
@@ -281,6 +338,18 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 	p.SessionID = r.SessionID
 	p.Cwd = r.Cwd
 	p.Machine = r.Machine
+
+	// Profile is a session fact the session stamps about itself at join, so it
+	// refreshes like cwd — but a blank meta (pre-profile binary, non-CCS host) never
+	// clobbers a hand-filled envelope, and a token the envelope would reject is
+	// skipped and surfaced like a corrupted birth-record.
+	if r.Profile != "" {
+		if core.ValidName(r.Profile) {
+			p.Profile = r.Profile
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: profile %q (meta not a usable profile token)", r.Alias, r.Profile))
+		}
+	}
 
 	if p.Origin == "" && r.Origin != "" {
 		if validOrigin(r.Origin) {

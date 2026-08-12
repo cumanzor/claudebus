@@ -1,7 +1,7 @@
 #!/bin/sh
 # cbus bootstrap installer for macOS and Linux.
 #
-# Downloads the cbus binary from a private GitHub release via the gh CLI, then
+# Downloads the cbus binary from a GitHub release via the gh CLI, then
 # installs the /bus-* skill commands and role prompts it carries. After the first
 # install, update in place with `cbus selfupdate` — no need to re-run this.
 #
@@ -40,7 +40,7 @@ BIN="cbus-${OS}-${ARCH}"
 
 if ! command -v gh >/dev/null 2>&1; then
     cat >&2 <<EOF
-cbus: the gh CLI is required (the repo is private).
+cbus: the gh CLI is required (releases are fetched via gh).
   macOS:  brew install gh
   Linux:  https://github.com/cli/cli/blob/trunk/docs/install_linux.md
 then: gh auth login   and re-run this installer.

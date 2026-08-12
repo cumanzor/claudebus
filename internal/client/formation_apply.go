@@ -60,6 +60,7 @@ type ApplyOptions struct {
 	Wait    time.Duration // how long to wait for kickoff answers; 0 = do not wait
 	Brief   string        // effort brief, verbatim into every kickoff
 	Channel string        // per-run channel override (a template serves any effort); "" keeps the envelope's
+	Mode    string        // per-run mode override for the peers apply would launch; "" keeps each peer's own
 }
 
 // overrideChannel applies the per-run --channel override to the IN-MEMORY formation,
@@ -79,6 +80,32 @@ func overrideChannel(f *Formation, opts ApplyOptions) error {
 	return nil
 }
 
+// overrideMode applies the per-run --mode override to the IN-MEMORY formation, the
+// same shape overrideChannel has: the envelope file is never written, so the choice
+// lasts exactly this run. It exists because resume-vs-blank is late-bound by nature —
+// save cannot know a future intent, so the envelope's per-peer mode is policy, and
+// this is the moment intent becomes expressible without hand-editing the file.
+//
+// It rewrites the PLANNED mode and nothing else. decidePeer is untouched, which is
+// the point: a present peer, this session, one deselected by --only and one recorded
+// on another host all return before p.Mode is ever read, so reconcile stays sacred
+// with no second check to keep in sync — and every identity gate below it (fork-born,
+// duplicate sid, unrecorded origin, missing transcript, live-armed sid) still fires
+// against the override, so a blanket --mode resume degrades or refuses per peer
+// instead of forcing a resume through.
+func overrideMode(f *Formation, opts ApplyOptions) error {
+	if opts.Mode == "" {
+		return nil
+	}
+	if err := oneOf("--mode", opts.Mode, ModeResume, ModeFork, ModeTemplate); err != nil {
+		return err
+	}
+	for i := range f.Peers {
+		f.Peers[i].Mode = opts.Mode
+	}
+	return nil
+}
+
 // Apply reconciles a formation against the live channel: it launches the peers that
 // are missing, briefs each one, and verifies convergence by round-trip.
 //
@@ -93,6 +120,9 @@ func overrideChannel(f *Formation, opts ApplyOptions) error {
 // the field, which is the entire reason this rule exists.
 func Apply(f *Formation, opts ApplyOptions, forker TerminalForker) (*ApplyReport, error) {
 	if err := overrideChannel(f, opts); err != nil {
+		return nil, err
+	}
+	if err := overrideMode(f, opts); err != nil {
 		return nil, err
 	}
 	// A dry-run sends no kickoffs, so it needs no reply-to and no joined applier: a

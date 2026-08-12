@@ -9,15 +9,15 @@ import (
 
 // kickoffResume / kickoffFork open a RESTORED session's turn. A resumed peer already
 // has its history, so it is told what happened to it and what to re-do — its Monitor
-// died with its old process, and a local re-arm seeks to the END of the inbox, so
-// anything sent while it was dark is gone. Saying so is the difference between a
+// died with its old process, and its re-join truncates the inbox and voids the
+// replay cursor, so anything sent while it was dark is gone. Saying so is the difference between a
 // peer that asks for a resend and one that silently misses its orders.
 const kickoffResume = `You are being restored into the "$formation" formation as $addr — this is the SAME session you were before (same transcript, same session id), brought back after its process ended.
-Re-join and re-arm, in this order: run 'cbus join $channel $alias', then arm the Monitor tool (persistent) on 'cbus tail $addr', description 'cbus:$addr' — the Monitor tool, NEVER Bash (a bash 'cbus tail' execs a follower that never exits and blocks forever). Your old listener died with your old process.
-A local re-arm seeks to the END of your inbox: anything sent while you were down was NOT replayed. Assume you missed messages and ask peers to resend rather than trusting replay.`
+Re-join and re-arm, in this order: run 'cbus join $channel $alias', then arm the Monitor tool (persistent) on 'cbus tail $addr', description 'cbus:$addr' — the Monitor tool, NEVER Bash (a bash 'cbus tail' runs a follower loop that never exits and blocks forever). Your old listener died with your old process.
+Your re-join truncated your inbox: anything sent while you were down was NOT replayed. Assume you missed messages and ask peers to resend rather than trusting replay.`
 
 const kickoffFork = `You are a FORK of the session that was "$alias" in the "$formation" formation, restored as $addr. You carry that session's transcript up to its checkpoint, but you are a NEW session — the original may still exist and may still be running. You are not it.
-Join and arm: run 'cbus join $channel $alias', then arm the Monitor tool (persistent) on 'cbus tail $addr', description 'cbus:$addr' — the Monitor tool, NEVER Bash (a bash 'cbus tail' execs a follower that never exits and blocks forever).
+Join and arm: run 'cbus join $channel $alias', then arm the Monitor tool (persistent) on 'cbus tail $addr', description 'cbus:$addr' — the Monitor tool, NEVER Bash (a bash 'cbus tail' runs a follower loop that never exits and blocks forever).
 Your transcript carries your parent's intent up to the checkpoint. Do NOT act on unfinished work you find there: it may already be done, and it may not be yours. Confirm before continuing anything.`
 
 // KickoffPrompt composes a peer's first turn: how to get on the bus, who it is, the

@@ -99,6 +99,9 @@ type PlanWorld struct {
 	LiveSids      map[string]string // sid -> "channel/alias" of a LIVE-ARMED holder
 	Self          string            // this session's alias on the channel, if it is a peer
 	HasTranscript func(profile, sid string) bool
+	// InstanceProfiles sweeps the CCS instances for a sid — the recovery input
+	// for peers whose envelope records no profile (see client.InstanceProfiles).
+	InstanceProfiles func(sid string) []string
 }
 
 // GatherPlanWorld collects the live state. This is the I/O half; BuildPlan is the
@@ -123,12 +126,13 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 		}
 	}
 	return &PlanWorld{
-		Host:          ShortHostname(),
-		GitHead:       head,
-		Roster:        roster,
-		LiveSids:      liveSids(),
-		Self:          self,
-		HasTranscript: func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
+		Host:             ShortHostname(),
+		GitHead:          head,
+		Roster:           roster,
+		LiveSids:         liveSids(),
+		Self:             self,
+		HasTranscript:    func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
+		InstanceProfiles: InstanceProfiles,
 	}, nil
 }
 
