@@ -1,5 +1,69 @@
 # Changelog (detailed)
 
+## [2026-08-13 20:15:00 UTC] [Roles/Commands] opus token pinned to claude-opus-4-8 (temporary)
+
+[Attempt #1] `6920262` on `chore/opus-48-pin` (branched from main at `b5dab23`, kept
+off windows-port on purpose: the port branch is mid-flight and this pin should be
+mergeable/revertable on its own).
+
+[Motivating problem]
+The harness's short alias `opus` now resolves to Opus 5, so every seat whose role
+file or formation envelope said "opus" silently changed model generation. Carlos's
+ruling from live formations: the Fable-5-orchestrator + Opus-4.8-coder pairing
+beats Opus 5, so the token is pinned to the full id `claude-opus-4-8` until
+further notice.
+
+[Files Changed]
+- roles/coder.md:3, roles/orchestrator.md:3 -- `MODEL: opus` -> `MODEL:
+  claude-opus-4-8`. The full id passes roleModel's screen and Spawn's pre-fork
+  gate unchanged (`^[A-Za-z0-9._-]+$`, no leading dash), so it flows to
+  `claude --model claude-opus-4-8` with zero code change.
+- commands/bus-spawn.md, commands/bus-branch.md -- the "valid values today"
+  instruction now names claude-opus-4-8 and tells the skill to pass the full id
+  verbatim when the user says "opus", never bare `opus`.
+- internal/client/role_test.go -- TestLoadRoleRepoToplevel's literal moved from
+  "opus" to "claude-opus-4-8". The expectation is a literal that guards the
+  committed file's ruled value; it moves WITH the ruling, in the same change.
+
+[Live-store edits, outside this commit]
+LoadRole resolves repo-first only when spawning from inside a checkout;
+everywhere else reads $CBUS_DIR/roles, and a formation member's explicit model
+beats the role default. So the pin was also applied by hand at every live layer
+on both machines (2026-08-13):
+- $CBUS_DIR/roles/{coder,orchestrator,tester}.md on the MBP and the NUC
+  (tester is a runtime-only role with no repo copy).
+- Saved formation envelopes: `"model": "opus"` -> `"model": "claude-opus-4-8"`,
+  33 fields across 17 MBP .formations JSONs + 3 fields in the NUC's; every
+  touched file re-parsed as valid JSON, zero `opus` model tokens left.
+- Installed /bus-* skills (~/.claude/commands/bus-{spawn,branch}.md), both
+  machines.
+
+[Possible Ripple Effects]
+- The next `cbus selfupdate` / `install-roles` from a release that does NOT
+  carry this commit restores `MODEL: opus` in $CBUS_DIR/roles and the installed
+  skills. The .formations edits persist (user data, never overwritten by
+  install). Durability requires this commit riding a release; reverting is the
+  same substitution in reverse, with the formations the only fan-out layer.
+- The parked orch-fable re-flip (`25189d1`, branch chore/orch-fable) edits the
+  same orchestrator.md MODEL line; when it lands, fable wins that seat per the
+  concluded eval and the conflict is a one-line resolution.
+- profiles/opus5.md is Opus-5-specific tuning; a claude-opus-4-8 seat has no
+  profile file, which is the documented safe state (profiles/README: absence is
+  safe, the seat runs on its role file alone). Orchestrators following process
+  rule 15 should NOT send opus5.md to a 4.8 seat.
+- formations/dev-trio.json members all defer (`"model": ""`), so the committed
+  starter inherits the pin through the role files with no edit.
+
+[Testing Notes]
+`go build ./...` clean; `go test ./internal/client/ ./cmd/cbus/` green after
+the literal move, including 3x `-count=1` reruns of internal/client (one
+uncaptured red on the first post-checkout run did not reproduce; this diff has
+no timing surface). The roles doctrine canary passes -- the MODEL header sits
+outside the shared doctrine block, whose 4x duplication is untouched. Grep
+verification on both machines' live stores: `MODEL:` histogram reads 3x
+claude-opus-4-8, 1x fable (reviewer), 1x sonnet (documenter); zero
+`"model": "opus"` remaining in .formations.
+
 ## [2026-08-09 23:10:00 UTC] [Formation/Resume] blank-profile envelopes: instance sweep
 
 [Attempt #1] `7903eb1`. Found by Carlos's first field test of resume on an older
