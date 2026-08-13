@@ -53,15 +53,16 @@ func TestLoadRoleCBUSDirFallback(t *testing.T) {
 }
 
 // TestLoadRoleRepoToplevel: run from inside the repo, the committed
-// roles/coder.md resolves first (its MODEL line is ruled: opus).
+// roles/coder.md resolves first (its MODEL line is ruled: claude-opus-4-8,
+// the temporary full-id pin — bare "opus" now resolves to Opus 5).
 func TestLoadRoleRepoToplevel(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	body, model, err := LoadRole("coder")
 	if err != nil {
 		t.Skipf("repo roles/ not present here: %v", err)
 	}
-	if model != "opus" {
-		t.Fatalf("coder MODEL = %q, want opus", model)
+	if model != "claude-opus-4-8" {
+		t.Fatalf("coder MODEL = %q, want claude-opus-4-8", model)
 	}
 	if !strings.Contains(strings.ToLower(body), "# coder") {
 		t.Fatalf("body head = %q", body[:min(80, len(body))])

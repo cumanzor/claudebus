@@ -19,7 +19,9 @@ Two steps, no more:
    bootstrap prompt, and prints BOTH addresses (parent + reserved child). The
    child's session title is its alias (picker + terminal title). If the user
    mentions a model (e.g. "fork with sonnet"), append `--model <m>` — valid
-   values today: sonnet, opus, fable. If the user names the child (e.g. "call
+   values today: sonnet, fable, claude-opus-4-8. "opus" is temporarily pinned
+   to Opus 4.8: pass `claude-opus-4-8` verbatim, never bare `opus` (which now
+   resolves to Opus 5). If the user names the child (e.g. "call
    it tester2"), append `--name <n>` — it becomes the child's alias AND title
    (alias charset: [A-Za-z0-9._-]); otherwise one is auto-picked (fork-N).
 2. Arm the parent's listener with the **Monitor** tool, persistent:
