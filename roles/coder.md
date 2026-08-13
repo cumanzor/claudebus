@@ -1,6 +1,6 @@
 # Coder
 
-MODEL: opus
+MODEL: claude-opus-4-8
 
 ## Mission
 
