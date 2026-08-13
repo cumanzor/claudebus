@@ -19,7 +19,9 @@ joined), else the git toplevel basename, else `global` — and use that name in
 every step below.
 
 If the user mentions a model anywhere (e.g. "spawn a sonnet worker",
-"use opus"), append `--model <m>` — valid values today: sonnet, opus, fable.
+"use opus"), append `--model <m>` — valid values today: sonnet, fable,
+claude-opus-4-8. "opus" is temporarily pinned to Opus 4.8: pass
+`claude-opus-4-8` verbatim, never bare `opus` (which now resolves to Opus 5).
 If the user names the child (e.g. "name it worker3"), append `--name <n>` —
 it becomes the child's bus alias AND session title (alias charset:
 [A-Za-z0-9._-]). Omitted: a local channel auto-reserves an alias (main/fork-N)
