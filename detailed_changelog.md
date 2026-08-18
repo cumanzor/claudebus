@@ -1,5 +1,77 @@
 # Changelog (detailed)
 
+## [2026-08-18 23:56:54 UTC] [Docs/Cross-session] retire the closed-boundary rationale
+
+[Attempt #1] Uncommitted, on branch `worktree-docs-cross-session` off `origin/main`
+(09eaaa7), in a worktree so the unrelated windows-port work stays put. Tracked as
+`cbus-kda`. Docs only: 4 files, no code, no behavior change.
+
+[Motivating problem]
+A session investigating why `@ <sender>` markers had started appearing in cbus panes
+found the markers were not cbus at all: Claude Code shipped cross-session messaging
+in 2.1.224+, and a peer session had used the built-in `SendMessage`. Following that
+back through the repo found four docs asserting the opposite, including the sentence
+this project's stated reason to exist rests on: "A session can only message agents it
+forked itself -- there is no cross-session addressing at all. That closed boundary is
+exactly what claudebus provides." Publishing anything about the comparison without
+fixing these would have made the README disagree with its own linked architecture.
+
+[Files Changed]
+- `README.md` -- new "How this relates to Claude Code's own coordination" section
+  before Docs, with an 8-row table across Subagent / Agent Teams / SendMessage /
+  Workflow / cbus. Every cell was fact-checked by an independent peer against the
+  official docs plus controlled probes; the corrections it forced are listed under
+  Testing Notes. Also fixes the Docs-table blurb for how-it-works.md, which promised
+  "why the built-in teammate mailbox doesn't cover this".
+- `docs/how-it-works.md` -- "Why not the built-in teammate mailbox?" marked superseded
+  2026-08-18. States what the built-ins do now (socket at `/tmp/cc-socks/<pid>.sock`,
+  ListAgents/SendMessage, the hook/Bash-child socket env vars, teammates as separate
+  instances with panes), what still holds (session-scoped flat team roster, Claude-only
+  peers), and what the cbus case rests on instead. The original paragraph is kept
+  verbatim as a dated blockquote rather than deleted.
+- `docs/architecture/overview.md` -- three sites. The vertical/horizontal summary marked
+  superseded with the original probe retained; the "Monitor-tail is the only turn-native
+  answer" line qualified, since hooks now get a session socket (it still only reaches the
+  session owning the hook, which is why the Monitor-tail remains what cbus uses to wake an
+  arbitrary peer); and section 5.2 "The closed mailbox (why this project exists)" retitled
+  to "why this project was built", with an explicit note that the premise expired and the
+  transport decisions below it did not.
+- `docs/prior-art-and-cc-internals.md` -- the section 1 Agent Teams parenthetical and the
+  reverse-engineered-inbox entry both corrected, the landscape "only turn-native answer"
+  line qualified, and a new section 6 "The boundary opened (2026-08-18)" carrying the
+  measured findings with per-claim tags: [M] measured here, [D] doc-derived and not run,
+  [1] single-source.
+
+[Possible Ripple Effects]
+- `CHEATSHEET.md:222-226` was already correct about the ~90-120s silent-WS-drop loss
+  window and is deliberately untouched; the README section was written to agree with it
+  rather than the reverse.
+- The docs now say cbus's differentiation is openness and reach rather than being the only
+  session-to-session path. Any marketing-ish copy written later should not regress to the
+  old framing.
+- `how-it-works.md:17-28` already documents the ~440 bytes/line and ~2800 chars/notification
+  Monitor bounds; the README section cites that budget instead of saying "long messages",
+  so the two agree.
+- Nothing here touches roles/, so the 4x doctrine duplication and its canary are unaffected.
+
+[Testing Notes]
+- `go build ./...` clean and `go test ./...` green across all 7 packages with tests. Docs
+  only, but run because the repo embeds command/role assets.
+- Link and anchor checks: the `#why-not-the-built-in-teammate-mailbox` target exists in
+  how-it-works.md, and the relative paths from docs/architecture/ and docs/ resolve.
+- Fact-check corrections folded in before writing, from an independent peer briefed to
+  refute rather than confirm: `Sendable from a hook or script: no` for SendMessage was
+  FALSE (hooks and Bash children get `CLAUDE_CODE_MESSAGING_SOCKET` and
+  `CLAUDE_CODE_MESSAGING_TOKEN`; confirmed directly in this session's Bash env); a column
+  misalignment put Workflow's "one level" nesting under SendMessage; subagent nesting is 3
+  layers by default and configurable, not unbounded; the teammate-roster quote was
+  presented as exact while altering punctuation and truncating it; Agent Teams pane
+  behavior is configuration-specific rather than the default; and the Store row was wrong
+  in 3 of 5 cells. "cbus nesting is unlimited" softened to no enforced limit.
+- Lifetime claims are from controlled runs: a clean lead exit (`/exit` and SIGTERM both)
+  tears the teammate down and closes its pane; a SIGKILLed lead leaves it running at
+  t+120s. The SIGKILL half is single-source and tagged as such in section 6.
+
 ## [2026-08-13 20:15:00 UTC] [Roles/Commands] opus token pinned to claude-opus-4-8 (temporary)
 
 [Attempt #1] `6920262` on `chore/opus-48-pin` (branched from main at `b5dab23`, kept

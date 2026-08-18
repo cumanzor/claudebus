@@ -80,14 +80,34 @@ Each participating session **joins a channel** and **arms a listener**:
 
 ## Why not the built-in teammate mailbox?
 
-Claude Code's teammate `SendMessage` is **closed by design**: teammates are spawn-bound
-subprocesses, registered with their parent session **in-process at spawn time**. There
-*are* team files on disk (`<config>/teams/session-<sid>/` — config, inboxes), but they are
-not a delivery path: a hand-launched `claude` process with matching `--team-name` /
-`--parent-session-id` flags comes up alive yet is unreachable via SendMessage, and writing
-to the inbox files registers nothing (verified empirically). A session can only message
-agents it forked itself — there is no cross-session addressing at all. That closed
-boundary is exactly what claudebus provides: an open, file-based channel any process,
-window, or CCS profile can append to, built from stable documented primitives with a
-liveness-aware registry. The two compose: SendMessage for in-session fan-out, cbus for
-session-to-session.
+**Superseded 2026-08-18.** Claude Code gained cross-session messaging (2.1.224+), so the
+closed boundary this section was built on is open. The original finding is kept at the
+bottom because it explains why claudebus looks the way it does, not because it still
+describes the product.
+
+What the built-ins do today: `ListAgents` enumerates independent sessions on the machine
+and `SendMessage` addresses them by name, over a per-session socket at
+`/tmp/cc-socks/<pid>.sock`. Hooks and Bash children are handed
+`CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` and may post into their
+own session, so external processes are not shut out either. Teammates are separate Claude
+Code instances rather than in-process workers, and under `teammateMode: tmux` each gets its
+own terminal pane.
+
+What still holds: teammates are addressed through a session-scoped team roster rather than
+the cross-session one, that roster is flat (a teammate cannot spawn a teammate, only
+foreground subagents), and every reachable peer is a Claude Code session.
+
+So the case for cbus is no longer that it is the only thing crossing a session boundary. It
+is that the boundary is **open** rather than merely wider: a file and a CLI any process can
+use with no socket handshake and no token, peers that are not Claude Code (Codex today,
+with the protocol harness-open), a relay you own and can inspect, and an explicit on-disk
+mailbox and ledger with liveness and replay semantics you can read with `cat`.
+
+> *Original finding (2026-07, accurate when written and now historical):* Claude Code's
+> teammate `SendMessage` is **closed by design**: teammates are spawn-bound subprocesses,
+> registered with their parent session **in-process at spawn time**. There *are* team files
+> on disk (`<config>/teams/session-<sid>/` — config, inboxes), but they are not a delivery
+> path: a hand-launched `claude` process with matching `--team-name` /
+> `--parent-session-id` flags comes up alive yet is unreachable via SendMessage, and
+> writing to the inbox files registers nothing (verified empirically). A session can only
+> message agents it forked itself — there is no cross-session addressing at all.
