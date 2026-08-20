@@ -81,6 +81,12 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
 
 ## How this relates to Claude Code's own coordination
 
+Why I built it, and why it stayed: the shapes that fan out inside one task kept
+failing the same way. A teammate reports *finished* and never delivers its report,
+so the only recovery is asking an agent what it remembers concluding — an open
+invitation to reconstruct a verdict after the fact. A peer that owns a terminal and
+a file on disk fails visibly instead: scroll its pane, `cat` its inbox.
+
 Claude Code has cross-session messaging of its own since 2.1.224, so the bus is no
 longer the only thing that crosses a session boundary. Four mechanisms overlap what
 cbus does, and this is where each one lands (measured on 2.1.235, macOS + iTerm2):
