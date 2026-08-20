@@ -1,5 +1,42 @@
 # Changelog (detailed)
 
+## [2026-08-20 22:05:45 UTC] [Docs/README] motivation paragraph on the coordination comparison
+
+[Attempt #1] `b3869a5` on main (off `4c11834`). 1 file changed (README.md, +6).
+Docs only.
+
+[Motivating problem]
+`dc97b44` gave the README an accurate comparison of Subagent / Agent Teams /
+SendMessage / Workflow / cbus, but it is entirely a where-each-one-lands table. It
+never says what actually went wrong often enough to justify building and keeping a
+bus. The prompting case: a native Agent Teams run printed "Teammate @fact-check
+finished" for a fact-checker that had gone idle without delivering its report, so the
+lead had to ask it to send the findings and to state plainly which claims it never
+got to rather than reconstructing verdicts after the fact. The report existed; it
+lived in a place nobody can open.
+
+[Files Changed]
+- `README.md:84-88` — 5-line paragraph directly under the section heading, above the
+  "Claude Code has cross-session messaging of its own since 2.1.224" paragraph so the
+  colon still introduces the table. States the recurring failure (finished-without-
+  delivering, recovery only by asking an agent what it remembers) and the contrast (a
+  peer with its own terminal and its own file fails visibly: scroll the pane, `cat`
+  the inbox). Deliberately claims no capability the table does not already carry.
+
+[Possible Ripple Effects]
+- Authored off `origin/main` rather than the checked-out `windows-port`, which is four
+  docs commits behind and does not contain this section at all. Reaches the port at the
+  next main reconcile; a version written on the port would have collided here.
+- An earlier draft of this content was written on `windows-port` and reverted: it
+  argued from "SendMessage can only reach what you forked", which `dc97b44` measured
+  as false since 2.1.224. Any future motivation copy has to survive that retirement —
+  the argument is openness and visible failure, not a closed boundary.
+
+[Testing Notes]
+- Rendered structure checked by eye: heading, motivation, intro paragraph ending in a
+  colon, table. No link, anchor, or table cell touched.
+- No build or test run: documentation-only change.
+
 ## [2026-08-18 23:56:54 UTC] [Docs/Cross-session] retire the closed-boundary rationale
 
 [Attempt #1] Uncommitted, on branch `worktree-docs-cross-session` off `origin/main`
