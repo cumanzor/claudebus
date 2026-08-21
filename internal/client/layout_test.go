@@ -331,3 +331,71 @@ func TestRunLayoutOpsBestEffortFailureDoesNotAbort(t *testing.T) {
 		t.Errorf("applied = %d, want 2 — the failed resize must not count", applied)
 	}
 }
+
+// ---- peer resolution -------------------------------------------------------------
+
+// TestPeerPaneNeverArmedIsNotReportedAsDead: a fresh join writes ownerPid AND
+// listenerPid null, and both are only stamped when a listener arms. Calling that
+// "not running" is a false statement about a live session, and it sends the user
+// hunting a process that is fine — which is exactly what happened the first time
+// arrange was pointed at a real orchestrator.
+func TestPeerPaneNeverArmedIsNotReportedAsDead(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	seedPeer(t, root, "ch", "orchestrator", "sid-1")
+
+	_, err := PeerPane("ch", "orchestrator", map[string]string{})
+	if err == nil {
+		t.Fatal("a pidless peer should not resolve")
+	}
+	if !strings.Contains(err.Error(), "never armed") {
+		t.Errorf("error should say it never armed, got %q", err)
+	}
+	if strings.Contains(err.Error(), "is not running") {
+		t.Errorf("a joined-but-unarmed peer is NOT dead; error must not claim it: %q", err)
+	}
+}
+
+// TestSelfPaneResolvesThisSessionFromEnv: the caller is the one peer whose pane needs
+// no lookup, and the only one resolvable BEFORE it arms. Without this an orchestrator
+// could not place itself in its own layout until it had armed a Monitor.
+func TestSelfPaneResolvesThisSessionFromEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self") // never armed: no pid to find
+
+	byTTY := map[string]string{"/dev/ttys001": "%7"}
+	if got := selfPane("ch", "orchestrator", byTTY); got != "%7" {
+		t.Errorf("selfPane = %q, want %%7 from $TMUX_PANE", got)
+	}
+	// ...and only for THIS session's own registration
+	seedPeer(t, root, "ch", "somebody-else", "sid-other")
+	if got := selfPane("ch", "somebody-else", byTTY); got != "" {
+		t.Errorf("selfPane hijacked another peer's alias: got %q", got)
+	}
+}
+
+// TestSelfPaneRejectsStaleEnv: $TMUX_PANE is inherited, so it outlives the pane it
+// names. An unvalidated value would become a `-t` landing a join on whatever pane now
+// holds that id, which is the same class of bug as trusting a stored pane id — the
+// thing this whole design avoids by resolving live.
+func TestSelfPaneRejectsStaleEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+
+	live := map[string]string{"/dev/ttys001": "%7"}
+	for name, pane := range map[string]string{
+		"pane no longer exists": "%99",
+		"not a pane id":         "garbage",
+		"empty":                 "",
+	} {
+		t.Setenv("TMUX_PANE", pane)
+		if got := selfPane("ch", "orchestrator", live); got != "" {
+			t.Errorf("%s: selfPane returned %q, want \"\" (fall through to the real lookup)", name, got)
+		}
+	}
+}
