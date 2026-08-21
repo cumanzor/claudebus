@@ -1532,17 +1532,33 @@ child that had already grown sub-panes, landing the next sibling one level too d
 Each subtree is represented by its first leaf's pane, the one owning that region
 before the subtree exists.
 
-**Sizing** runs as a second pass after every join (a resize against a region still
-growing sizes the wrong geometry). The axis comes from the PARENT: `-x` under a
-columns node, `-y` under a rows node. A size on the root is dropped rather than
-errored on — the root has no sibling to take space from.
+**Sizing** is one rule: a node's children divide the parent region by weight. An
+explicit percentage is taken as written; every unsized child takes an equal cut of
+what is left. Even thirds for three peers is not a special case, it falls out of the
+rule. Percentages exceeding 100% under one split are refused rather than clamped.
+
+A percentage is realised by the join itself (`join-pane -l N%`), sized as the suffix
+of the weight list over the tail the target still holds — so the panes land at the
+right size instead of being reflowed afterwards. `-l N%` needs tmux >= 3.1, the same
+floor the pane splitter retries under, so every sized join carries an unsized fallback:
+a correctly-placed pane at the wrong width beats no pane at all.
+
+A CELL COUNT (`:80`) is the exception and keeps the old second pass, on the parent's
+axis (`-x` under a columns node, `-y` under a rows node), because a fixed number of
+cells cannot be expressed as a ratio of a region whose extent is unknown until tmux has
+drawn it. It contributes no weight, so its siblings size as if it were unsized.
+
+A size on the root is dropped rather than errored on — the root has no sibling to take
+space from.
 
 | Behavior | Detail |
 |---|---|
 | Target window | the window of the FIRST alias in the spec |
 | `--dry-run` | prints the tmux argv, byte-for-byte what a real run executes |
 | Join failure | **hard** — stops, exit 1, reports `applied N of M`; re-running finishes it |
-| Resize failure | **best-effort** — skipped, not counted as applied (old tmux lacks `%` sizing) |
+| Sized join failure | retried once unsized, then hard (`-l N%` needs tmux >= 3.1) |
+| Resize failure | **best-effort** — skipped, not counted as applied; cell-count sizes only |
+| Sizes over 100% | refused at plan time, before any tmux call |
 | Unresolved alias | all failures reported at once, before any tmux call runs |
 | `scatter` | `break-pane -d -n <alias>` per peer; one already alone in its window is renamed and reported, not an error |
 | `focus` | `select-window` then `select-pane` on the same pane id — a split and a window of its own are the same handle |

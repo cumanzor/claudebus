@@ -136,8 +136,8 @@ var threePanes = map[string]string{"orchestrator": "%1", "coder": "%2", "reviewe
 // right one stacked. Two joins and nothing else — no create, no kill, no select.
 func TestPlanLayoutMarquee(t *testing.T) {
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -v -s %3 -t %2",
+		"tmux join-pane -d -h -s %2 -t %1 -l 50%",
+		"tmux join-pane -d -v -s %3 -t %2 -l 50%",
 	}
 	if got := planOf(t, "orchestrator | (coder / reviewer)", threePanes); !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
@@ -155,9 +155,9 @@ func TestPlanLayoutMarquee(t *testing.T) {
 func TestPlanLayoutBuildsLevelBeforeDescending(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3", "d": "%4"}
 	want := []string{
-		"tmux join-pane -d -h -s %3 -t %1", // columns first, both sides still single panes
-		"tmux join-pane -d -v -s %2 -t %1", // then inside the left column
-		"tmux join-pane -d -v -s %4 -t %3", // then inside the right
+		"tmux join-pane -d -h -s %3 -t %1 -l 50%", // columns first, both sides still single panes
+		"tmux join-pane -d -v -s %2 -t %1 -l 50%", // then inside the left column
+		"tmux join-pane -d -v -s %4 -t %3 -l 50%", // then inside the right
 	}
 	got := planOf(t, "(a / b) | (c / d)", panes)
 	if !slices.Equal(got, want) {
@@ -165,35 +165,100 @@ func TestPlanLayoutBuildsLevelBeforeDescending(t *testing.T) {
 	}
 }
 
-// TestPlanLayoutChainsSiblings: three columns join sibling-to-previous-sibling, not
-// all against the first. Joining c against a would place it between a and b, putting
-// the panes in an order the user did not write.
-func TestPlanLayoutChainsSiblings(t *testing.T) {
+// TestPlanLayoutThreeSiblingsSplitEvenly is the anti-50/25/25 test, and it covers the
+// sizing rule as a whole: children divide the PARENT by weight, and an unsized child's
+// weight is inferred from how many unsized children there are. Without it each join
+// halves the previous SIBLING, so `a | b | c` came out 50/25/25 — measured on a real
+// 174-column window as 87/43/42 before this changed.
+//
+// The ratios are suffix-over-tail, not 1/n: joining b takes 66% of a's region (leaving
+// a its third) and joining c then halves what b holds. Chaining is still how the tree
+// is built; only the sizing of each join changed.
+func TestPlanLayoutThreeSiblingsSplitEvenly(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -h -s %3 -t %2",
+		"tmux join-pane -d -h -s %2 -t %1 -l 66%",
+		"tmux join-pane -d -h -s %3 -t %2 -l 50%",
 	}
 	if got := planOf(t, "a | b | c", panes); !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 }
 
-// TestPlanLayoutSizingRunsLastAndFollowsParentAxis: every resize lands after every
-// join, because a resize against a region that is still growing sizes the wrong
-// geometry. The axis comes from the PARENT — a child of a columns node is sized
-// across (-x), a child of a rows node down (-y) — so the two resizes here differ
-// despite both being written the same way in the spec.
-func TestPlanLayoutSizingRunsLastAndFollowsParentAxis(t *testing.T) {
+// TestPlanLayoutPercentSizesAreRealisedInTheJoin: a percentage is a share of the
+// parent region, which is exactly what join-pane's -l takes, so it is placed as the
+// pane lands rather than resized afterwards. That is one op instead of two and no
+// post-hoc reflow. `a:30%` leaves a its 30% by giving the joined group 70%; inside the
+// group `b:40%` leaves b its 40% by giving c 60%.
+func TestPlanLayoutPercentSizesAreRealisedInTheJoin(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -v -s %3 -t %2",
-		"tmux resize-pane -t %1 -x 30%", // a: child of the columns root
-		"tmux resize-pane -t %2 -y 40%", // b: child of the rows group
+		"tmux join-pane -d -h -s %2 -t %1 -l 70%",
+		"tmux join-pane -d -v -s %3 -t %2 -l 60%",
 	}
-	if got := planOf(t, "a:30% | (b:40% / c)", panes); !slices.Equal(got, want) {
+	got := planOf(t, "a:30% | (b:40% / c)", panes)
+	if !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+	for _, op := range got {
+		if strings.Contains(op, "resize-pane") {
+			t.Errorf("a percentage should need no resize pass, got %q", op)
+		}
+	}
+}
+
+// TestPlanLayoutCellSizeStillResizes is the other half of the rule and the reason the
+// resize pass survives at all: `:80` is a fixed number of cells, and it cannot be
+// turned into a ratio without knowing the region's extent, which is not known until
+// tmux has drawn it. So it contributes no weight (a and b split evenly) and is applied
+// afterwards, on the parent's axis.
+func TestPlanLayoutCellSizeStillResizes(t *testing.T) {
+	want := []string{
+		"tmux join-pane -d -h -s %2 -t %1 -l 50%",
+		"tmux resize-pane -t %1 -x 80",
+	}
+	if got := planOf(t, "a:80 | b", map[string]string{"a": "%1", "b": "%2"}); !slices.Equal(got, want) {
+		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// TestPlanLayoutRejectsOversizedSplit: percentages that add past 100 describe a layout
+// that cannot exist. Refusing beats silently clamping, which would hand back a window
+// that does not match what was asked for with no indication why.
+func TestPlanLayoutRejectsOversizedSplit(t *testing.T) {
+	n, err := ParseLayout("a:60% | b:60%")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = PlanLayout(n, map[string]string{"a": "%1", "b": "%2"})
+	if err == nil {
+		t.Fatal("120% of a region should be refused")
+	}
+	if !strings.Contains(err.Error(), "120") {
+		t.Errorf("error should name the total, got %q", err)
+	}
+}
+
+// TestPlanLayoutJoinsCarryAPlainFallback: `-l N%` needs tmux >= 3.1, the same floor the
+// pane splitter already retries under. A join is a HARD op, so it cannot be skipped on
+// failure the way a resize can — it carries an unsized retry instead, because a
+// correctly-placed pane at the wrong width beats no pane at all.
+func TestPlanLayoutJoinsCarryAPlainFallback(t *testing.T) {
+	n, err := ParseLayout("a | b | c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2", "c": "%3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range ops {
+		if slices.Contains(op.Argv, "-l") && len(op.Fallback) == 0 {
+			t.Errorf("sized join %v has no fallback", op.Argv)
+		}
+		if slices.Contains(op.Fallback, "-l") {
+			t.Errorf("the fallback must be unsized, got %v", op.Fallback)
+		}
 	}
 }
 
@@ -223,7 +288,7 @@ func TestPlanLayoutSizeOpsAreBestEffort(t *testing.T) {
 // and a user who wrote it still gets the layout they asked for.
 func TestPlanLayoutRootSizeDropped(t *testing.T) {
 	got := planOf(t, "(a | b):50%", map[string]string{"a": "%1", "b": "%2"})
-	want := []string{"tmux join-pane -d -h -s %2 -t %1"}
+	want := []string{"tmux join-pane -d -h -s %2 -t %1 -l 50%"}
 	if !slices.Equal(got, want) {
 		t.Errorf("plan = %v, want %v", got, want)
 	}
@@ -375,5 +440,34 @@ func TestSelfPaneRejectsStaleEnv(t *testing.T) {
 		if got := selfPane("ch", "orchestrator", live); got != "" {
 			t.Errorf("%s: selfPane returned %q, want \"\" (fall through to the real lookup)", name, got)
 		}
+	}
+}
+
+// TestRunLayoutOpsRetriesWithFallback: the plan tests prove a sized join CARRIES a
+// fallback; this proves the runner USES it. On a tmux older than 3.1 the `-l N%` form
+// is the only reason the join fails, and the whole point of the retry is that the
+// arrange still completes, unsized, instead of dying on a width.
+func TestRunLayoutOpsRetriesWithFallback(t *testing.T) {
+	var ran [][]string
+	tmuxRun = func(argv []string) ([]byte, error) {
+		ran = append(ran, argv)
+		if slices.Contains(argv, "-l") {
+			return []byte("unknown option -l"), fmt.Errorf("exit status 1")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxRun = defaultTmuxRun })
+
+	sized := []string{"join-pane", "-d", "-h", "-s", "%2", "-t", "%1", "-l", "66%"}
+	plain := []string{"join-pane", "-d", "-h", "-s", "%2", "-t", "%1"}
+	applied, err := RunLayoutOps([]LayoutOp{{Argv: sized, Fallback: plain}})
+	if err != nil {
+		t.Fatalf("the retry should carry the arrange: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("applied = %d, want 1 — a join that succeeded on retry still landed", applied)
+	}
+	if len(ran) != 2 || slices.Contains(ran[1], "-l") {
+		t.Errorf("want a sized attempt then an unsized retry, got %v", ran)
 	}
 }

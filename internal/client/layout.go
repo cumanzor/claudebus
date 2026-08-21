@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"claudebus/internal/core"
@@ -41,6 +42,10 @@ func (n *LayoutNode) Leaf() bool { return len(n.Kids) == 0 }
 type LayoutOp struct {
 	Argv       []string
 	BestEffort bool
+	// Fallback is retried when Argv fails, for ops whose sizing form is newer than the
+	// tmux that may be running: `-l N%` needs tmux >= 3.1, and the pane matters more
+	// than its width. Empty means no retry.
+	Fallback []string
 }
 
 // ParseLayout builds the tree from a spec string. Errors carry the offending text
@@ -121,12 +126,25 @@ func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
 		if err != nil {
 			return err
 		}
-		for _, k := range n.Kids[1:] {
+		w, err := childWeights(n)
+		if err != nil {
+			return err
+		}
+		for i, k := range n.Kids[1:] {
 			src, err := repPane(k, panes)
 			if err != nil {
 				return err
 			}
-			ops = append(ops, LayoutOp{Argv: []string{"join-pane", "-d", flag, "-s", src, "-t", prev}})
+			argv := []string{"join-pane", "-d", flag, "-s", src, "-t", prev}
+			plain := append([]string{}, argv...)
+			// -t prev currently holds the region for kids i+1..n-1 (0-based), and the
+			// joined pane takes everything after prev. Sizing it by that suffix ratio is
+			// what makes n children divide the PARENT evenly instead of each one halving
+			// the previous pane, which is where 50/25/25 came from.
+			if pct := suffixPct(w, i+1); pct > 0 && pct < 100 {
+				argv = append(argv, "-l", strconv.Itoa(pct)+"%")
+			}
+			ops = append(ops, LayoutOp{Argv: argv, Fallback: plain})
 			prev = src
 		}
 		for _, k := range n.Kids {
@@ -145,7 +163,10 @@ func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
 	// spec `(a|b):50%` is harmless, just unenforceable.
 	var size func(n *LayoutNode, parentRows bool, isRoot bool) error
 	size = func(n *LayoutNode, parentRows, isRoot bool) error {
-		if n.Size != "" && !isRoot {
+		if n.Size != "" && !isRoot && !strings.HasSuffix(n.Size, "%") {
+			// percentages are realised by the join's -l, which divides the parent region
+			// directly. A cell count cannot be turned into a ratio without knowing that
+			// region's extent, so it stays a post-hoc resize.
 			pane, err := repPane(n, panes)
 			if err != nil {
 				return err
@@ -167,6 +188,71 @@ func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
 		return nil, err
 	}
 	return ops, nil
+}
+
+// childWeights turns one node's children into shares of the parent region: an
+// explicit percentage is taken as written, and every unsized child takes an equal cut
+// of whatever is left. That is the whole sizing rule — the split is inferred from how
+// many children there are, unless the spec says otherwise — and even thirds for three
+// peers falls out of it rather than being a special case.
+//
+// A cell count (`:80`) contributes no weight and is left to the resize pass, since a
+// fixed number of columns cannot be expressed as a ratio of a region whose extent is
+// not known until tmux has drawn it.
+func childWeights(n *LayoutNode) ([]int, error) {
+	w := make([]int, len(n.Kids))
+	explicit, unsized := 0, 0
+	for i, k := range n.Kids {
+		if pct, ok := pctSize(k.Size); ok {
+			w[i] = pct
+			explicit += pct
+			continue
+		}
+		unsized++
+	}
+	if explicit > 100 {
+		return nil, fmt.Errorf("sizes under one split add up to %d%%, over 100%%", explicit)
+	}
+	if unsized > 0 {
+		share := (100 - explicit) / unsized
+		for i := range w {
+			if w[i] == 0 {
+				w[i] = share
+			}
+		}
+	}
+	return w, nil
+}
+
+// pctSize reads "30%" as 30. Anything else (a cell count, or no size) is not a weight.
+func pctSize(size string) (int, bool) {
+	if !strings.HasSuffix(size, "%") {
+		return 0, false
+	}
+	v, err := strconv.Atoi(strings.TrimSuffix(size, "%"))
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// suffixPct is the share of the CURRENT target region that the pane being joined
+// should take: everything from index i onward, over everything from i-1 onward. The
+// target still holds the whole tail at this point, so the ratio is against that tail
+// and not against the window.
+func suffixPct(w []int, i int) int {
+	if i <= 0 || i >= len(w) {
+		return 0
+	}
+	tail, whole := 0, 0
+	for j := i; j < len(w); j++ {
+		tail += w[j]
+	}
+	whole = tail + w[i-1]
+	if whole <= 0 {
+		return 0
+	}
+	return tail * 100 / whole
 }
 
 // repPane is the pane standing in for a whole subtree: its first leaf's, which is
@@ -194,6 +280,11 @@ var tmuxRun = defaultTmuxRun
 func RunLayoutOps(ops []LayoutOp) (applied int, err error) {
 	for _, op := range ops {
 		out, runErr := tmuxRun(op.Argv)
+		if runErr != nil && len(op.Fallback) > 0 {
+			// the sizing form is the only reason a join fails on an older tmux, and a
+			// correctly-placed pane at the wrong width beats no pane at all.
+			out, runErr = tmuxRun(op.Fallback)
+		}
 		if runErr != nil {
 			if op.BestEffort {
 				continue

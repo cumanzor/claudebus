@@ -270,6 +270,10 @@ is not.
 cbus arrange 'orchestrator:30% | (coder / reviewer)'
 #   |  columns, left to right          ()  group
 #   /  rows, top to bottom (binds tighter)   alias:30%  pin a width/height
+#
+# panes divide their parent by weight: what you pin is honoured, and whatever is
+# left is shared evenly by the rest. So 'a | b | c' is thirds, and
+# 'a:50% | b | c' is a half plus two quarters. Over 100% under one split is refused.
 
 cbus arrange '<spec>' --dry-run   # print the tmux calls, change nothing
 cbus arrange '<spec>' --channel <ch>   # peers outside this session's channel
