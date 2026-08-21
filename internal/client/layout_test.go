@@ -399,3 +399,23 @@ func TestSelfPaneRejectsStaleEnv(t *testing.T) {
 		}
 	}
 }
+
+// TestPeerPaneResolvesSelfBeforeMeta pins the LAYER, which is where the first attempt
+// at this fix went wrong: the short-circuit lived in ResolvePeerPanes, so arrange got
+// it and focus and scatter did not, and scatter reported the very session running it
+// as unlocatable. Every verb reaches PeerPane; only one reaches the wrapper.
+func TestPeerPaneResolvesSelfBeforeMeta(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self") // unarmed: the meta has no pid
+
+	pane, err := PeerPane("ch", "orchestrator", map[string]string{"/dev/ttys001": "%7"})
+	if err != nil {
+		t.Fatalf("PeerPane should resolve this session from $TMUX_PANE: %v", err)
+	}
+	if pane != "%7" {
+		t.Errorf("PeerPane = %q, want %%7", pane)
+	}
+}

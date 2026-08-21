@@ -86,13 +86,14 @@ func runScatter(args []string) int {
 	for _, w := range windows {
 		counts[w]++
 	}
-	broke := 0
+	broke, resolved := 0, 0
 	for _, p := range roster {
 		pane, err := client.PeerPane(ch, p.Alias, byTTY)
 		if err != nil {
 			fmt.Printf("%s: skipped (%v)\n", p.Alias, err)
 			continue
 		}
+		resolved++
 		if counts[windows[pane]] < 2 {
 			// nothing to break, but the window still gets the peer's name: scatter's
 			// contract is one named window per peer, and a result where only the panes
@@ -117,7 +118,10 @@ func runScatter(args []string) int {
 		broke++
 		fmt.Printf("%s: broken out\n", p.Alias)
 	}
-	if broke == 0 {
+	// success is the desired STATE, not work done: a channel whose peers already each
+	// have a window is scattered, and reporting that as failure contradicts the verb's
+	// own idempotence. Only "could not see a single peer" is a failure.
+	if resolved == 0 {
 		return 1
 	}
 	return 0

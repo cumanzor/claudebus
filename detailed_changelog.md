@@ -1,5 +1,69 @@
 # Changelog (detailed)
 
+## [2026-08-21 19:35:23 UTC] [Client/Layout] the self-pane fix at the right layer, and scatter's exit code
+
+[Attempt #2] `89ee4ab` on `fix/selfpane-all-paths` off main (`4e4fa17`). 3 files.
+Attempt #1 was `11b97fa` (v0.10.1), which fixed the symptom in one of three paths.
+
+[Motivating problem]
+Immediately after releasing v0.10.1 and selfupdating both machines, the fix was
+re-tested through the INSTALLED binary instead of being assumed good. Two commands
+that should agree did not:
+
+    cbus arrange 'orchestrator' --dry-run   -> exit 0
+    cbus focus layouttest/orchestrator      -> "has no recorded pid"
+
+`selfPane` had been added to `ResolvePeerPanes`. Only `arrange` goes through that
+wrapper. `runFocus` and `runScatter` call `PeerPane` directly, so neither saw it. The
+scatter case is the one with teeth: an unarmed caller sharing a window is reported
+"skipped" and never broken out, so scatter silently fails to do its job for the one
+peer most likely to be running the command.
+
+The lesson is about where a fix goes, not what it does. The behaviour was right and
+the layer was wrong, and a test asserting the behaviour through the wrapper passed
+while two of three verbs stayed broken.
+
+[Files Changed]
+- `internal/client/layout.go` `PeerPane` — the `selfPane` short-circuit moved here from
+  `ResolvePeerPanes`, at the top, before the meta read. Every verb reaches `PeerPane`;
+  only `arrange` reaches the wrapper.
+- `internal/client/layout.go` `ResolvePeerPanes` — the duplicate short-circuit removed.
+- `cmd/cbus/layout.go` `runScatter` — counts `resolved` alongside `broke` and exits 1
+  only when `resolved == 0`. Previously `broke == 0` meant failure, so a channel whose
+  peers already each had a window (the definition of scattered) exited 1. The verb's
+  own comment calls it idempotent; the exit code disagreed.
+- `internal/client/layout_test.go` — `TestPeerPaneResolvesSelfBeforeMeta`, asserting
+  through `PeerPane` directly rather than the wrapper. The existing `selfPane` tests
+  were not wrong, they just could not see this: they tested the function, and the
+  defect was in who called it.
+
+[Possible Ripple Effects]
+- `PeerPane` is now non-pure with respect to the environment for one specific alias
+  (this session's own registration in `ch`). Bounded by the `ResolveSelf()` match, so it
+  can only ever apply to an alias whose meta records THIS session id, and by the live
+  pane-set validation carried over from attempt #1.
+- `scatter`'s exit code changed for a case that previously reported failure. Anything
+  scripted against `scatter` returning non-zero for "nothing moved" would now see 0.
+  Nothing in this repo does; the verb is a day old.
+
+[Testing Notes]
+- Full suite green, gofmt clean.
+- Mutation check on the layer: deleting the `selfPane` call from `PeerPane` fails
+  `TestPeerPaneResolvesSelfBeforeMeta` on the aimed assertion, with the never-armed
+  message. Reverted, green.
+- Live through the built binary on the real channel, all three verbs against an
+  unarmed caller: `arrange 'orchestrator'` exit 0, `focus` printing "focused %0",
+  `scatter` printing "already its own window" and exiting 0 (it exited 1 before).
+- Process note worth keeping: v0.10.1 was released, both machines selfupdated, and
+  THEN the fix was exercised through the installed binary. That last step is what
+  found this. Verifying a release by re-running the tests that passed pre-merge would
+  have found nothing, since the tests were the thing that was incomplete.
+- Related process note from the same session: `cbus join` prunes dead peers in the
+  channel first, and an unarmed peer reads as dead, so seeding a throwaway peer to test
+  an error path pruned the orchestrator registration and made the first regression
+  attempt inconclusive. Pre-existing behaviour, not introduced here, but it means a
+  joined-and-never-armed peer is fragile against any subsequent join in its channel.
+
 ## [2026-08-21 17:42:57 UTC] [Client/Layout] the caller's own pane, and the unarmed-is-not-dead distinction
 
 [Attempt #1] `11b97fa` on `fix/layout-self-pane` off main (`8e35cc4`). 2 files
