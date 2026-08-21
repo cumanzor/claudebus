@@ -229,6 +229,12 @@ func TmuxPanesByTTY() (map[string]string, error) {
 // stranger's process, and here that would drag an unrelated session's pane into
 // someone's layout.
 func PeerPane(ch, alias string, byTTY map[string]string) (string, error) {
+	// the caller's own pane resolves here, not in one wrapper, so arrange, scatter and
+	// focus all get it. Putting it in ResolvePeerPanes gave it to arrange alone, and
+	// scatter then reported the very session running it as unlocatable and skipped it.
+	if pane := selfPane(ch, alias, byTTY); pane != "" {
+		return pane, nil
+	}
 	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
 	m, ok := ReadPeerMeta(metaPath)
 	if !ok {
@@ -306,10 +312,6 @@ func ResolvePeerPanes(ch string, aliases []string) (map[string]string, error) {
 	panes := make(map[string]string, len(aliases))
 	var bad []string
 	for _, a := range aliases {
-		if pane := selfPane(ch, a, byTTY); pane != "" {
-			panes[a] = pane
-			continue
-		}
 		pane, err := PeerPane(ch, a, byTTY)
 		if err != nil {
 			bad = append(bad, err.Error())
