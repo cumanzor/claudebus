@@ -176,7 +176,8 @@ No other command reads stdin.
 | anything else | `cbus: unknown command '<X>' (cbus --help)`, exit 1 | |
 
 > **Go-native verbs (post-cutover).** `spawn`, the `formation …` family,
-> `close`, `selfupdate`, `install-commands`, `install-roles`, and
+> `close`, `arrange`/`scatter`/`focus` (§9), `selfupdate`, `install-commands`,
+> `install-roles`, and
 > `--version`/`version` are not in the bash dispatch above. They route through
 > `cmd/cbus/main.go`'s switch to `runSpawn` / `runFormation` / `runClose` /
 > `runSelfupdate` / `runInstallCommands` / `runInstallRoles` (§7, §9–§11). A
@@ -1443,6 +1444,59 @@ permissions**; ignore the inherited "no completion record" background-task
 note; confirm the join in one line and wait for instructions.
 
 ---
+
+### `cbus arrange <spec> [--channel CH] [--dry-run]` / `cbus scatter [CH] [--dry-run]` / `cbus focus <ch>/<alias>`
+
+Post-spawn layout mutation, **tmux only**. Where `branch`/`spawn` with `target=pane`
+PLACE a peer at birth, these three rearrange peers that already exist. There is no
+iTerm2 path and there will not be one: AppleScript has no join/break verb, so a
+running iTerm2 session cannot move between a tab and a split at all. Every alias in a
+spec must already be a live peer — nothing is launched, nothing is closed, no
+transcript is touched.
+
+**Spec grammar** (pane tree, not prose — the `/bus-layout` skill does the English):
+
+```
+expr  := row ('|' row)*        columns, left to right
+row   := term ('/' term)*      rows, top to bottom — binds TIGHTER than '|'
+term  := alias | '(' expr ')'  each optionally followed by ':N' or ':N%'
+```
+
+So `a | b / c` is `a | (b / c)`. Separators are all outside `core.ValidName`'s
+charset, so an alias never needs quoting inside the spec (the shell still does: `|`
+and `(` are metacharacters, so single-quote the whole spec). Duplicate aliases are
+refused — a peer occupies one pane.
+
+**Resolution.** alias → pane is resolved LIVE, never stored: `meta.json` →
+`ownerPid` (falling back to the listener's owner under the same
+`listenerIdentityHolds` test `close` applies) → `ps -o tty= -p` →
+`tmux list-panes -a -F '#{pane_tty} #{pane_id}'`. A stored pane id would be wrong
+after a tmux server restart, when ids reset to `%0`; this cannot be. It also means a
+peer that joined long before these verbs existed resolves like any other.
+
+**Placement order** is breadth-then-depth and that is load-bearing. At each node
+every sibling is joined against the previous sibling *while it is still a single
+pane*, and only then is each child's subtree built. Descending first would split a
+child that had already grown sub-panes, landing the next sibling one level too deep.
+Each subtree is represented by its first leaf's pane, the one owning that region
+before the subtree exists.
+
+**Sizing** runs as a second pass after every join (a resize against a region still
+growing sizes the wrong geometry). The axis comes from the PARENT: `-x` under a
+columns node, `-y` under a rows node. A size on the root is dropped rather than
+errored on — the root has no sibling to take space from.
+
+| Behavior | Detail |
+|---|---|
+| Target window | the window of the FIRST alias in the spec |
+| `--dry-run` | prints the tmux argv, byte-for-byte what a real run executes |
+| Join failure | **hard** — stops, exit 1, reports `applied N of M`; re-running finishes it |
+| Resize failure | **best-effort** — skipped, not counted as applied (old tmux lacks `%` sizing) |
+| Unresolved alias | all failures reported at once, before any tmux call runs |
+| `scatter` | `break-pane -d -n <alias>` per peer; one already alone in its window is renamed and reported, not an error |
+| `focus` | `select-window` then `select-pane` on the same pane id — a split and a window of its own are the same handle |
+| Not in tmux | `tmux list-panes` fails with tmux's own message (`error connecting to …`) |
+| Remote peer | refused: `focus is local-only` |
 
 ## 10. Commands: formations
 
