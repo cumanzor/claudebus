@@ -1,5 +1,79 @@
 # Changelog (detailed)
 
+## [2026-08-21 22:38:22 UTC] [Client/Layout] arrange idempotence, and percentages only
+
+[Attempt #1] `bafa16e` (normalisation) and `6dc5a59` (percentages only) on
+`feat/layout-weighted-split`. Both found by driving a real four-peer formation under
+the corrected process; neither was reachable from the suite.
+
+[Motivating problem]
+1. Re-running the same arrange on its own output was not idempotent OR stable. Measured
+   at 174 columns, `orchestrator | (coder / reviewer)` three times: 86/87/87, then
+   42/131/131, then 20/153/153. `join-pane` removes its source from wherever it sits;
+   when that is the window being built, the removal frees space tmux reflows into panes
+   already placed, so every later `-l` percentage measures a region that just moved. In
+   the trace, coder absorbed reviewer's freed 87 columns before being split, which is
+   where 131 comes from. "Arrange, look at it, arrange differently" is the most obvious
+   thing a user does with this verb, and it degraded the layout each time.
+2. `a:40 | b | c` gave 40/75/57. The 40 was exact; the other two were supposed to share
+   the remainder and did not, because the post-hoc resize takes its cells from the
+   immediate neighbour only. A cell count cannot compose with the weight rule: it is not
+   a share of anything knowable at plan time.
+
+[Files Changed]
+- `internal/client/layout.go` `normalizeOps` (new) — `break-pane -d` for every spec pane
+  in the ANCHOR's window, emitted before every join. Only the anchor's window needs it;
+  spec panes sharing some other window are joined straight out, because that window is
+  about to be dismantled and its reflow never touches the one being built. Breaking them
+  out anyway is wasted ops and extra frames of flicker.
+- `internal/client/layout.go` `PlanLayout` — takes the pane->window map for the above.
+- `internal/client/layout.go` `size()` — a size must end in `%`. A cell count is refused
+  BY NAME (`cell counts are not supported`) rather than silently dropped, because
+  ignoring a size the user wrote produces a layout that does not match the spec with
+  nothing said about why.
+- `internal/client/layout.go` — the whole sizing second pass deleted. Every size is now
+  realised by its join's `-l`, so a plan is break-panes and join-panes and nothing else.
+- `internal/client/layout.go` `LayoutOp.BestEffort` — REMOVED with its two tests. The
+  resize pass was its only producer; a best-effort tier nothing sets is a mechanism that
+  passes its own tests while guarding nothing.
+- `cmd/cbus/layout.go` — fetches `TmuxPaneWindows` and passes it to the planner.
+- `docs/architecture/command-reference.md`, `CHEATSHEET.md`, `commands/bus-layout.md` —
+  percentages-only, plus two new dispatch-table rows (cell-count refusal, already-
+  arranged idempotence).
+
+[Possible Ripple Effects]
+- Breaking change for any spec using `:N` cells. Two days old, almost certainly unused.
+- The geometry goldens now pass a pane->window map placing each pane in its own window,
+  which is the precondition they always silently assumed. Making it explicit is what let
+  the normalisation cases be tested at all.
+- `arrange` now emits break-panes, so a window that held spec panes may be destroyed
+  (tmux drops a window whose last pane leaves) and rebuilt. Visible as a frame of
+  flicker; verified not to move the active window.
+
+[Testing Notes]
+- Full suite green; `gofmt` clean.
+- Live, on the real formation at 174x67, and this is the whole point of the round:
+  * same arrange five times running -> byte-identical every time (was halving)
+  * alternating a columns spec and a rows spec, three cycles -> stable both ways
+  * three levels deep, `orchestrator | (coder / (reviewer | tester))` -> 86x67, 87x33,
+    43x33, 43x33, correct and idempotent on repeat
+  * spec ORDER controls placement (left=0, 60, 117 in written order)
+  * subset arrange leaves unnamed peers alone
+  * a peer in a DIFFERENT tmux session joins across correctly
+  * tmux's pane-size floor, forced in a peer's window (never the user's) at 20x4:
+    `create pane failed: pane too small (applied 1 of 2 steps)`, exit 1, half-applied
+    state reported honestly
+  * `orchestrator:40` refused; `orchestrator:40%` -> 69 of 174
+- Prune behaviour understood correctly this time, having first told Carlos something
+  wrong. It is NOT "any join reaps an unarmed peer". `PeerDead` gives a never-armed peer
+  a 10-minute grace on `lastActivity` (`liveness.go:15`), explicitly so join's auto-prune
+  cannot reap a sibling mid-setup. The orchestrator was reaped because it had sat unarmed
+  for hours. The sharper fact, found by asking what refreshes the stamp: NOTHING does
+  except the armed follower (`follow.go:172`); join writes it once (`store.go:214`). So an
+  unarmed registration does not risk being pruned, it is CERTAIN to die ten minutes after
+  joining, which makes the selfPane affordance real for ten minutes and a lie afterwards.
+  Open decision with Carlos.
+
 ## [2026-08-21 20:04:53 UTC] [Client/Layout] one sizing rule: children divide the parent by weight
 
 [Attempt #1] `8cf3189` on `feat/layout-weighted-split` off main (`28b4641`). 4 files.
