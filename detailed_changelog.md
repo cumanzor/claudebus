@@ -1,5 +1,78 @@
 # Changelog (detailed)
 
+## [2026-08-21 17:42:57 UTC] [Client/Layout] the caller's own pane, and the unarmed-is-not-dead distinction
+
+[Attempt #1] `11b97fa` on `fix/layout-self-pane` off main (`8e35cc4`). 2 files
+(`internal/client/layout.go`, `internal/client/layout_test.go`). v0.10.0 ships the
+defect; this is the follow-up.
+
+[Motivating problem]
+The very first live use of `cbus arrange` against a real formation refused, and the
+refusal was two false statements in one line:
+
+    cbus: orchestrator is not running; ghost is not running
+
+`orchestrator` was THIS session, alive, running the command. `ghost` had joined and
+never armed. Neither was "not running". The demo only proceeded by dropping the
+orchestrator out of the spec, which is precisely the case the verb exists for: you
+arrange a formation from inside it.
+
+Root cause is in the store's shape, not in tmux. `Join` writes `ownerPid: null` AND
+`listenerPid: null` (store.go), and both are stamped only when a listener arms. So a
+joined-but-unarmed peer has NOTHING for the meta -> pid -> tty chain to start from,
+and the code collapsed "no pid recorded" into the same branch as "pid recorded and
+dead". Confirmed on the live store: orchestrator's meta had both fields null while
+coder's (armed) had `ownerPid: 77071, listenerPid: 79483`.
+
+[Files Changed]
+- `internal/client/layout.go` `PeerPane` — the pidless branch splits three ways.
+  `listenerPid == 0` reports joined-but-never-armed AND what to do (arm its Monitor,
+  or run arrange from that session); a listener pid that resolves to no owner says
+  that instead; `is not running` is now reached only by a recorded pid that fails
+  `pidAlive`/`procZombie`. An error a user acts on has to name the right condition.
+- `internal/client/layout.go` `selfPane` (new) + `ResolvePeerPanes` — the caller's own
+  registration in the target channel resolves from `$TMUX_PANE` directly, skipping the
+  chain. This is the only peer locatable before it arms, and it needed no lookup in the
+  first place.
+- `internal/client/layout.go` `selfPane` validation — `$TMUX_PANE` is INHERITED, so it
+  outlives the pane it names. The value is checked against the live pane set and falls
+  through to the normal chain on any doubt. Trusting it would make it a `-t` landing a
+  join on whatever pane now holds that id, which is the stored-pane-id failure this
+  whole design avoids by resolving live. Reintroducing it via an env var would have
+  been a poor trade.
+- `internal/client/layout_test.go` — 3 tests, on `seedPeer` (the store tests' existing
+  never-armed helper, not a hand-built fixture): the unarmed message, self-resolution
+  plus the negative that it does not hijack another peer's alias, and the stale-env
+  guard over three shapes.
+
+[Possible Ripple Effects]
+- `selfPane` runs BEFORE `PeerPane` for every alias, so a session registered under an
+  alias in the target channel now resolves to its own pane even if the meta disagrees.
+  Bounded by the `ResolveSelf()` match: it only ever applies to an alias whose meta
+  records THIS session id.
+- Outside tmux `$TMUX_PANE` is unset and `selfPane` returns "" immediately, so the
+  iTerm2 and no-tmux paths are unchanged.
+- The new messages are longer than the one they replace. Deliberate: the old one was
+  short and wrong, and the fix a user needs (arm the Monitor) is not guessable.
+
+[Testing Notes]
+- Full suite green; `gofmt` clean.
+- Mutation check on the stale-env guard. First attempt replaced the `if !live` block
+  with nothing and did not COMPILE (`declared and not used: live`), which is not
+  evidence — a mutant that never runs proves nothing. Redone as `_ = live`, which
+  compiles and skips the guard: `TestSelfPaneRejectsStaleEnv` then fails on the aimed
+  assertion, `selfPane returned "%99", want ""`. Reverted, green.
+- Verified live before and after on a real 3-peer tmux formation (`layouttest`:
+  orchestrator + coder + reviewer, the latter two spawned with `target=tmux` so each
+  got its own window). Before: refusal with the two false claims. After: dry-run
+  planned `join-pane -d -h -s %1 -t %0` then `join-pane -d -v -s %2 -t %1`, and the
+  real run reported "arranged 3 panes in 3 steps" producing `%0 0,0 34x67` (30% of
+  116), `%1 35,0 81x33`, `%2 35,34 81x33` in ONE window, from three.
+- The `arrange 'coder / reviewer'` case worked before the fix and still does, which is
+  why the defect survived the original review: every test and every smoke used peers
+  that had already armed. The caller-includes-itself case is the one a real user hits
+  first, and no test covered it.
+
 ## [2026-08-21 05:05:37 UTC] [Client/Layout] arrange/scatter/focus — post-spawn pane layout for tmux peers
 
 [Attempt #1] `2518155` on `feat/tmux-layout`, a worktree off `main` (a4243b4) so the
