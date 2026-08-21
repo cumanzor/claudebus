@@ -115,11 +115,26 @@ func TestLayoutAliasesOrder(t *testing.T) {
 // user is shown.
 func planOf(t *testing.T, spec string, panes map[string]string) []string {
 	t.Helper()
+	// each pane in a window of its own, which is the precondition every geometry
+	// golden below assumes: nothing needs breaking out, so the plan is joins only.
+	windows := make(map[string]string, len(panes))
+	i := 0
+	for _, pane := range panes {
+		windows[pane] = fmt.Sprintf("@%d", i)
+		i++
+	}
+	return planOfIn(t, spec, panes, windows)
+}
+
+// planOfIn is planOf with the pane->window map given, for the cases where the STARTING
+// arrangement is the thing under test rather than the resulting geometry.
+func planOfIn(t *testing.T, spec string, panes, windows map[string]string) []string {
+	t.Helper()
 	n, err := ParseLayout(spec)
 	if err != nil {
 		t.Fatalf("ParseLayout(%q): %v", spec, err)
 	}
-	ops, err := PlanLayout(n, panes)
+	ops, err := PlanLayout(n, panes, windows)
 	if err != nil {
 		t.Fatalf("PlanLayout(%q): %v", spec, err)
 	}
@@ -230,7 +245,7 @@ func TestPlanLayoutRejectsOversizedSplit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = PlanLayout(n, map[string]string{"a": "%1", "b": "%2"})
+	_, err = PlanLayout(n, map[string]string{"a": "%1", "b": "%2"}, nil)
 	if err == nil {
 		t.Fatal("120% of a region should be refused")
 	}
@@ -248,7 +263,7 @@ func TestPlanLayoutJoinsCarryAPlainFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2", "c": "%3"})
+	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2", "c": "%3"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +286,7 @@ func TestPlanLayoutSizeOpsAreBestEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2"})
+	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +317,7 @@ func TestPlanLayoutMissingPane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = PlanLayout(n, map[string]string{"orchestrator": "%1"})
+	_, err = PlanLayout(n, map[string]string{"orchestrator": "%1"}, nil)
 	if err == nil {
 		t.Fatal("PlanLayout with an unresolved alias should error")
 	}
@@ -469,5 +484,60 @@ func TestRunLayoutOpsRetriesWithFallback(t *testing.T) {
 	}
 	if len(ran) != 2 || slices.Contains(ran[1], "-l") {
 		t.Errorf("want a sized attempt then an unsized retry, got %v", ran)
+	}
+}
+
+// TestPlanLayoutBreaksOutPanesAlreadyInTheAnchorWindow is the idempotence fix, and the
+// numbers in this comment are measured, not imagined. join-pane removes its source from
+// wherever it sits; when that is the window being BUILT, the removal frees space that
+// tmux reflows into panes already placed, so every later -l is measured against a region
+// that just moved. Re-running `orchestrator | (coder / reviewer)` on its own output went
+// 86/87/87 -> 42/131/131 -> 20/153/153, halving the anchor each time.
+//
+// Breaking them out first means no join ever removes a pane from the target window.
+func TestPlanLayoutBreaksOutPanesAlreadyInTheAnchorWindow(t *testing.T) {
+	panes := map[string]string{"orchestrator": "%0", "coder": "%3", "reviewer": "%4"}
+	// the state a second arrange starts from: everything already in one window
+	windows := map[string]string{"%0": "@25", "%3": "@25", "%4": "@25"}
+	want := []string{
+		"tmux break-pane -d -s %3",
+		"tmux break-pane -d -s %4",
+		"tmux join-pane -d -h -s %3 -t %0 -l 50%",
+		"tmux join-pane -d -v -s %4 -t %3 -l 50%",
+	}
+	got := planOfIn(t, "orchestrator | (coder / reviewer)", panes, windows)
+	if !slices.Equal(got, want) {
+		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// TestPlanLayoutLeavesOtherWindowsAlone: only the ANCHOR's window needs normalising.
+// Spec panes sharing some OTHER window can be joined straight out of it, because that
+// window is about to be dismantled and its reflow never touches the one being built.
+// Breaking them out anyway would be two wasted ops and two extra frames of flicker.
+func TestPlanLayoutLeavesOtherWindowsAlone(t *testing.T) {
+	panes := map[string]string{"orchestrator": "%0", "coder": "%3", "reviewer": "%4"}
+	windows := map[string]string{"%0": "@1", "%3": "@2", "%4": "@2"} // coder+reviewer share @2
+	for _, op := range planOfIn(t, "orchestrator | (coder / reviewer)", panes, windows) {
+		if strings.Contains(op, "break-pane") {
+			t.Errorf("no pane shares the anchor window; nothing should be broken out, got %q", op)
+		}
+	}
+}
+
+// TestPlanLayoutNormalisationRunsBeforeEveryJoin: ordering IS the fix. A break emitted
+// after a join has already run is worse than no break at all, because it dismantles the
+// layout that join just built.
+func TestPlanLayoutNormalisationRunsBeforeEveryJoin(t *testing.T) {
+	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
+	windows := map[string]string{"%1": "@1", "%2": "@1", "%3": "@1"}
+	seenJoin := false
+	for _, op := range planOfIn(t, "a | b | c", panes, windows) {
+		if strings.Contains(op, "join-pane") {
+			seenJoin = true
+		}
+		if strings.Contains(op, "break-pane") && seenJoin {
+			t.Errorf("break-pane after a join would dismantle what the join built: %q", op)
+		}
 	}
 }

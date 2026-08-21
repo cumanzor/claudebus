@@ -99,6 +99,45 @@ func LayoutAliases(n *LayoutNode) []string {
 	return out
 }
 
+// normalizeOps breaks every pane in the spec OUT of the anchor's window before any
+// join runs, so that no join has to remove a pane from the window it is building.
+//
+// This is not tidiness, it is correctness. join-pane removes the source from wherever
+// it is, and when that is the target's own window the removal frees space which tmux
+// immediately reflows into the panes already placed — so every later `-l` percentage is
+// measured against a region that just moved. Re-running the same arrange on an
+// already-arranged window is therefore not idempotent, and not even stable: measured
+// live, `orchestrator | (coder / reviewer)` went 86/87/87 then 42/131/131 then
+// 20/153/153, halving the anchor every time.
+//
+// Only panes sharing the ANCHOR's window need breaking out. Spec panes sitting together
+// in some other window can be joined directly: their removal reflows that window, which
+// is about to be dismantled anyway, and never touches the one being built.
+func normalizeOps(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp, error) {
+	if len(windows) == 0 {
+		return nil, nil
+	}
+	anchor, err := repPane(root, panes)
+	if err != nil {
+		return nil, err
+	}
+	anchorWin, ok := windows[anchor]
+	if !ok {
+		return nil, nil
+	}
+	var ops []LayoutOp
+	for _, alias := range LayoutAliases(root) {
+		pane := panes[alias]
+		if pane == anchor {
+			continue
+		}
+		if windows[pane] == anchorWin {
+			ops = append(ops, LayoutOp{Argv: []string{"break-pane", "-d", "-s", pane}})
+		}
+	}
+	return ops, nil
+}
+
 // PlanLayout turns the tree plus an alias→pane map into the tmux calls that realize
 // it. Pure, so --dry-run prints exactly what a real run executes.
 //
@@ -111,8 +150,11 @@ func LayoutAliases(n *LayoutNode) []string {
 //
 // Sizing runs as a second pass over the whole tree, after every join, because a
 // resize against a region that is still growing is a resize of the wrong geometry.
-func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
-	var ops []LayoutOp
+func PlanLayout(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp, error) {
+	ops, err := normalizeOps(root, panes, windows)
+	if err != nil {
+		return nil, err
+	}
 	var build func(n *LayoutNode) error
 	build = func(n *LayoutNode) error {
 		if n.Leaf() {

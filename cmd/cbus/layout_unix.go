@@ -39,7 +39,11 @@ func runArrange(args []string) int {
 	if err != nil {
 		return die("%v", err)
 	}
-	ops, err := client.PlanLayout(root, panes)
+	windows, err := client.TmuxPaneWindows()
+	if err != nil {
+		return die("%v", err)
+	}
+	ops, err := client.PlanLayout(root, panes, windows)
 	if err != nil {
 		return die("%v", err)
 	}
