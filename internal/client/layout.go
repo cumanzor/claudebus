@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -237,7 +238,16 @@ func PeerPane(ch, alias string, byTTY map[string]string) (string, error) {
 	if pid == 0 && m.ListenerPid > 0 && pidAlive(m.ListenerPid) && listenerIdentityHolds(m, metaPath) {
 		pid, _ = ownerFromPid(m.ListenerPid)
 	}
-	if pid == 0 || !pidAlive(pid) || procZombie(pid) {
+	if pid == 0 {
+		// BOTH pid fields are null in a fresh join and only stamped when the listener
+		// arms, so a pidless meta means "never armed", not "dead". Reporting a live
+		// session as not running sends the user hunting a process that is fine.
+		if m.ListenerPid == 0 {
+			return "", fmt.Errorf("%s has no recorded pid: it joined but never armed a listener, so there is nothing to locate it by (arm its Monitor, or run arrange from that session)", alias)
+		}
+		return "", fmt.Errorf("%s: cannot resolve the process owning listener pid %d", alias, m.ListenerPid)
+	}
+	if !pidAlive(pid) || procZombie(pid) {
 		return "", fmt.Errorf("%s is not running", alias)
 	}
 	tty := ttyOf(pid)
@@ -251,6 +261,40 @@ func PeerPane(ch, alias string, byTTY map[string]string) (string, error) {
 	return pane, nil
 }
 
+// selfPane short-circuits the lookup for THIS session's own registration: $TMUX_PANE
+// names the caller's pane directly, so the one peer running the command never needs
+// the meta -> pid -> tty chain. It is also the only peer that can be located BEFORE it
+// arms, because a fresh join writes ownerPid AND listenerPid null and both are stamped
+// at arm time — without this, an orchestrator could not put itself in its own layout
+// until it had armed a Monitor, and the failure read as "not running" about the very
+// session typing the command.
+//
+// The env value is validated against the LIVE pane set rather than trusted: a stale
+// $TMUX_PANE inherited from a dead pane would otherwise become a -t landing a join on
+// whatever pane now holds that id. Falls through to the normal chain on any doubt.
+func selfPane(ch, alias string, byTTY map[string]string) string {
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" || !validTmuxPaneID(pane) {
+		return ""
+	}
+	live := false
+	for _, p := range byTTY {
+		if p == pane {
+			live = true
+			break
+		}
+	}
+	if !live {
+		return ""
+	}
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch && reg.Alias == alias {
+			return pane
+		}
+	}
+	return ""
+}
+
 // ResolvePeerPanes resolves every alias in one pass, reporting ALL failures rather
 // than the first: told "coder is not running" a user fixes coder and reruns, only to
 // learn reviewer is in iTerm2. One message, one round trip.
@@ -262,6 +306,10 @@ func ResolvePeerPanes(ch string, aliases []string) (map[string]string, error) {
 	panes := make(map[string]string, len(aliases))
 	var bad []string
 	for _, a := range aliases {
+		if pane := selfPane(ch, a, byTTY); pane != "" {
+			panes[a] = pane
+			continue
+		}
 		pane, err := PeerPane(ch, a, byTTY)
 		if err != nil {
 			bad = append(bad, err.Error())
