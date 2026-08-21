@@ -5,7 +5,11 @@
 [Attempt #1] `2518155` on `feat/tmux-layout`, a worktree off `main` (a4243b4) so the
 in-flight windows-port work in the primary tree stays put. 10 files, +1283/-2: 5 new
 (2 source, 2 test, 1 skill), 5 touched (dispatch, usage, embed expectation, and the
-two docs that enumerate verbs).
+two docs that enumerate verbs). Merged to main as `8e35cc4` (PR #4, merge commit, not
+squashed — the changelog commit stays separable from the code commit) and **released
+as v0.10.0**. Minor rather than patch by this repo's own precedent: features take the
+minor (v0.1.0 formations, v0.2.0 compaction notices, v0.3.0 chain-split), fixes and
+pins take the patch (v0.9.1, v0.9.4). Three new user-facing verbs is a feature.
 
 [Motivating problem]
 `pane.go` PLACES a peer at birth and that is the end of it. On iTerm2 there is no
@@ -114,6 +118,16 @@ name a live pane belonging to someone else.
 - The tty->pane join verified with real processes, running the LITERAL commands the
   code runs: `ps -o tty= -p <pane_pid>` -> `ttys005`, `tmux list-panes -a -F
   '#{pane_tty} #{pane_id}'` -> `/dev/ttys005 %0`, `/dev/`+tty resolves to `%0`.
+- Release gate, run on the MERGE COMMIT `8e35cc4` rather than on the branch tip: build
+  clean, full suite green (7 packages). A merge can break what both parents passed, so
+  the tag is only as good as a check on the commit it actually names.
+- Release-artifact check before publishing, through the built `dist/cbus-darwin-arm64`
+  (not the dev binary): `--version` prints `cbus-go v0.10.0` (the ldflags stamp landed),
+  `--help` carries the arrange block, and `install-commands --path <tmp>` writes 6
+  files including `bus-layout.md` byte-identical to `commands/bus-layout.md` (`diff`
+  clean). go:embed snapshots at BUILD time, so a repo-vs-repo comparison would not have
+  proven the shipped binary serves the new skill — only installing from the release
+  artifact does.
 - End to end through the built binary, on an isolated socket (`TMUX_TMPDIR` set for
   BOTH tmux and cbus, since cbus shells out to plain `tmux` and a `-L` socket would
   not be shared — the first attempt failed exactly there, and failed with a legible
