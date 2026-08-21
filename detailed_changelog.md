@@ -1,5 +1,136 @@
 # Changelog (detailed)
 
+## [2026-08-21 05:05:37 UTC] [Client/Layout] arrange/scatter/focus — post-spawn pane layout for tmux peers
+
+[Attempt #1] `2518155` on `feat/tmux-layout`, a worktree off `main` (a4243b4) so the
+in-flight windows-port work in the primary tree stays put. 10 files, +1283/-2: 5 new
+(2 source, 2 test, 1 skill), 5 touched (dispatch, usage, embed expectation, and the
+two docs that enumerate verbs).
+
+[Motivating problem]
+`pane.go` PLACES a peer at birth and that is the end of it. On iTerm2 there is no
+verb to move a running session between a tab and a split — AppleScript has no
+join/break — so a formation's layout is decided at spawn time and lives with it. tmux
+has `join-pane`/`break-pane`, which makes the layout mutable AFTER the peers exist:
+the same pane id keeps working whether it is currently a split or a window of its
+own. That is the one place the tmux backend can do something the iTerm2 backend
+cannot, and nothing was built on it.
+
+The trigger question was whether a peer -> pane mapping needed a new field in
+`meta.json` stamped at join, alongside `profile` and the in-flight `harness`. It does
+not. `sweepSurface` (close.go:152) has resolved a peer to its tmux pane by tty since
+the close verb shipped; hoisting that chain is strictly better than storing a pane id,
+because pane ids reset to `%0` on a tmux server restart and a stored one could then
+name a live pane belonging to someone else.
+
+[Files Changed]
+- `internal/client/layout.go` (new, 433) — `ParseLayout` (recursive descent over the
+  pane-tree grammar), `PlanLayout` (tree + alias->pane map -> ordered `[]LayoutOp`,
+  pure), `RunLayoutOps`, `PeerPane` / `ResolvePeerPanes`, `TmuxPanesByTTY` /
+  `TmuxPaneWindows`, `parsePaneTable`. Grammar: `expr := row ('|' row)*`,
+  `row := term ('/' term)*`, `term := alias | '(' expr ')'`, each optionally `:N` /
+  `:N%`, so `/` binds tighter and `a | b / c` is a column beside a stack. Separators
+  are all outside `core.ValidName`'s charset, so no tokenizer state is needed.
+- `internal/client/layout.go:~100` — the placement invariant, breadth-then-depth: at
+  each node every sibling is joined against the previous sibling while it is STILL A
+  SINGLE PANE, and only then is each child's subtree built. Depth-first would split a
+  child that had already grown sub-panes, landing the next sibling one level too deep
+  (a two-by-two comes out three deep). Each subtree is represented by its first
+  leaf's pane, which is the pane owning that region before the subtree exists.
+- `internal/client/layout.go` sizing pass — a SECOND walk after every join, because a
+  resize against a region still growing sizes the wrong geometry. The axis comes from
+  the PARENT (`-x` under a columns node, `-y` under a rows node); a size on the root
+  is dropped, not errored on, since the root has no sibling to take space from.
+- `internal/client/layout.go` `PeerPane` — meta -> `OwnerPid` (with ClosePeer's
+  listener fallback AND its `listenerIdentityHolds` test, for the same reason: a
+  recycled listener pid must not donate a stranger's process, which here would drag an
+  unrelated session's pane into someone's layout) -> `ttyOf` -> `/dev/`+tty into the
+  pane table. `ResolvePeerPanes` reports ALL failures at once rather than the first.
+- `internal/client/layout.go` `tmuxRun` seam + `defaultTmuxRun` — indirected only so a
+  test can drive the partial-failure and best-effort paths, which are about what
+  happens AFTER a tmux call fails and cannot be asked of a real tmux on cue.
+- `cmd/cbus/layout.go` (new, 247) — `runArrange`, `runScatter`, `runFocus`,
+  `parseLayoutArgs`, `layoutChannel`. Own argv scanner rather than `splitVerbArgs`,
+  which stops at the first positional and would swallow a trailing `--dry-run` as the
+  spec or the channel and run for real. Layout is built in the FIRST alias's window.
+- `cmd/cbus/main.go:83-88` — the three cases in `run()`'s switch, after `close`.
+- `cmd/cbus/usage.go:166-180` — the help block, carrying the grammar BY EXAMPLE
+  (`orchestrator | (coder / reviewer)`) and `alias:30%`; neither is guessable.
+- `commands/bus-layout.md` (new, 56) — the skill that translates English into a spec
+  and picks the verb. The binary never parses prose: a layout stays reproducible and
+  hand-typable, and the model does the part it is actually good at.
+- `assets_test.go:22` — `bus-layout.md` added to the embed-count expectation, which is
+  a hardcoded literal by design (adding a command without updating it fails the build).
+- `CHEATSHEET.md:164-189` — a "Rearrange the layout (tmux only)" section above
+  "Install & update", with the grammar as an annotated example.
+- `docs/architecture/command-reference.md:1448-1502` — the formal section, placed at
+  the end of §9 (forking & spawning, where the `pane` target is documented) rather than
+  as a new §10, which would have renumbered six sections and every TOC anchor. The
+  dispatch table's Go-native-verbs note (`:179`) gains the three verbs. Both docs
+  enumerate the verb set, so a release without them would have shipped drift.
+- `internal/client/layout_test.go` (new, 333) + `cmd/cbus/layout_test.go` (new, 110) —
+  18 tests.
+
+[Possible Ripple Effects]
+- Nothing existing is called differently. `pane.go`, `close.go` and formation apply are
+  untouched; the new code only READS `ReadPeerMeta`, `ttyOf`, `pidAlive`, `procZombie`,
+  `ownerFromPid`, `listenerIdentityHolds`, `validTmuxPaneID`, `cmdStderr`.
+- Merge collision with `windows-port`: that branch splits `close.go` into
+  `close_unix.go` / `close_windows.go`, and `layout.go` calls `ttyOf` + `procZombie`
+  from it. On the port `layout.go` needs the same `darwin || linux` tag and a windows
+  stub in the `unsupported_windows.go` shape. Written on main deliberately — the
+  feature is unix-only and has no business on the port branch.
+- `cbus scatter` renames the window it leaves behind when a peer is already alone in
+  one, so scatter's result is uniform (one named window per peer). It will overwrite a
+  window name the user set by hand.
+- `arrange` moves panes between WINDOWS, so a peer's window can disappear (tmux
+  destroys a window whose last pane is joined elsewhere). Verified: four windows
+  collapse to one, and `scatter` restores four.
+- A half-applied arrange is possible by construction (joins are sequential tmux calls).
+  It fails loudly with an applied count rather than pressing on, and re-running the
+  same command finishes it. Sizing failures are best-effort and skipped, matching
+  `forkTmuxPane`'s resize — but they are NOT counted as applied.
+
+[Testing Notes]
+- Full suite green (`go test ./...`): claudebus, cmd/cbus, internal/client,
+  internal/core, relay x3.
+- Cross-platform compile gate: `GOOS=linux GOARCH=amd64` and `arm64` both build clean.
+  Windows not gated — `close.go` on main does not build there either (that is what the
+  port branch is for).
+- Mutation check on the placement invariant: rewriting `PlanLayout`'s walk to descend
+  before completing each level turns
+  `[-h %3 -t %1, -v %2 -t %1, -v %4 -t %3]` into `[-v %2 -t %1, -h %3 -t %1, ...]`.
+  `TestPlanLayoutBuildsLevelBeforeDescending` fails on the aimed assertion (the order
+  comparison, layout_test.go:164) and it is the ONLY test that fails — the marquee case
+  passes under the mutant, which is why the nested test exists separately. Reverted,
+  green again. The op SET is identical either way; ORDER is the entire assertion.
+- Field smoke against a real tmux server (isolated `-L cbuslayouttest` socket, never
+  the user's): four single-pane windows on a 200x50 terminal, plan for
+  `(a / b) | (c / d)` applied by hand -> `%0 0,0 100x25`, `%1 0,26 100x24`,
+  `%2 101,0 99x25`, `%3 101,26 99x24`, one window left. Then
+  `orchestrator:30% | (coder / reviewer)` -> `%0 0,0 60x50` (30% of 200), `%1 61,0
+  139x25`, `%2 61,26 139x24`. Then break-pane on all three -> three windows. The
+  planner's geometry is what tmux actually produces.
+- The tty->pane join verified with real processes, running the LITERAL commands the
+  code runs: `ps -o tty= -p <pane_pid>` -> `ttys005`, `tmux list-panes -a -F
+  '#{pane_tty} #{pane_id}'` -> `/dev/ttys005 %0`, `/dev/`+tty resolves to `%0`.
+- End to end through the built binary, on an isolated socket (`TMUX_TMPDIR` set for
+  BOTH tmux and cbus, since cbus shells out to plain `tmux` and a `-L` socket would
+  not be shared — the first attempt failed exactly there, and failed with a legible
+  "error connecting to /private/tmp/tmux-501/default", which is the right failure).
+  Three panes, three real peers registered by the real `cbus join`: `--dry-run`
+  printed `join-pane -d -h -s %1 -t %0` / `join-pane -d -v -s %2 -t %1`; the real run
+  reported "arranged 3 panes in 3 steps" and produced `%0 0,0 60x50`, `%1 61,0
+  139x25`, `%2 61,26 139x24`; `focus testch/beta` selected `%1`; killing a peer made
+  `arrange` refuse with "gamma is not running" and `scatter` report "alpha: broken
+  out / beta: already its own window / gamma: skipped (gamma is not running)".
+- Residual, and it is narrow: the smoke's peers were `sleep` processes. `cbus join`
+  wrote each meta, but it records `ownerPid: null` when the caller has no claude
+  ancestor, so that ONE field was patched to the pane's pid. What is therefore
+  untested is only the assumption that a live claude peer's `ownerPid` names a process
+  whose controlling tty is its pane's — the same assumption `sweepSurface` has shipped
+  on since the close verb. Worth one look on a real formation before release.
+
 ## [2026-08-20 22:05:45 UTC] [Docs/README] motivation paragraph on the coordination comparison
 
 [Attempt #1] `b3869a5` on main (off `4c11834`). 1 file changed (README.md, +6).
