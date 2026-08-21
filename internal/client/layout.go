@@ -36,12 +36,12 @@ type LayoutNode struct {
 // Leaf reports whether n names a peer rather than splitting a region.
 func (n *LayoutNode) Leaf() bool { return len(n.Kids) == 0 }
 
-// LayoutOp is one tmux invocation in a plan. BestEffort marks the sizing tail: an
-// older tmux without percentage sizing must not fail an otherwise-good arrange, the
-// same call the pane splitter already makes for its resize.
+// LayoutOp is one tmux invocation in a plan. Every op is a break-pane or a join-pane
+// and every one is load-bearing, so there is no best-effort tier: the only tolerated
+// failure is a sized join, which retries unsized via Fallback rather than being
+// skipped.
 type LayoutOp struct {
-	Argv       []string
-	BestEffort bool
+	Argv []string
 	// Fallback is retried when Argv fails, for ops whose sizing form is newer than the
 	// tmux that may be running: `-l N%` needs tmux >= 3.1, and the pane matters more
 	// than its width. Empty means no retry.
@@ -199,36 +199,6 @@ func PlanLayout(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp,
 	if err := build(root); err != nil {
 		return nil, err
 	}
-	// parentRows picks the axis: a child of a columns node is sized across (-x), a
-	// child of a rows node down (-y). The root has no parent region to divide, so its
-	// own Size is meaningless and deliberately dropped rather than errored on — the
-	// spec `(a|b):50%` is harmless, just unenforceable.
-	var size func(n *LayoutNode, parentRows bool, isRoot bool) error
-	size = func(n *LayoutNode, parentRows, isRoot bool) error {
-		if n.Size != "" && !isRoot && !strings.HasSuffix(n.Size, "%") {
-			// percentages are realised by the join's -l, which divides the parent region
-			// directly. A cell count cannot be turned into a ratio without knowing that
-			// region's extent, so it stays a post-hoc resize.
-			pane, err := repPane(n, panes)
-			if err != nil {
-				return err
-			}
-			axis := "-x"
-			if parentRows {
-				axis = "-y"
-			}
-			ops = append(ops, LayoutOp{Argv: []string{"resize-pane", "-t", pane, axis, n.Size}, BestEffort: true})
-		}
-		for _, k := range n.Kids {
-			if err := size(k, n.Rows, false); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := size(root, false, true); err != nil {
-		return nil, err
-	}
 	return ops, nil
 }
 
@@ -237,10 +207,6 @@ func PlanLayout(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp,
 // of whatever is left. That is the whole sizing rule — the split is inferred from how
 // many children there are, unless the spec says otherwise — and even thirds for three
 // peers falls out of it rather than being a special case.
-//
-// A cell count (`:80`) contributes no weight and is left to the resize pass, since a
-// fixed number of columns cannot be expressed as a ratio of a region whose extent is
-// not known until tmux has drawn it.
 func childWeights(n *LayoutNode) ([]int, error) {
 	w := make([]int, len(n.Kids))
 	explicit, unsized := 0, 0
@@ -266,7 +232,8 @@ func childWeights(n *LayoutNode) ([]int, error) {
 	return w, nil
 }
 
-// pctSize reads "30%" as 30. Anything else (a cell count, or no size) is not a weight.
+// pctSize reads "30%" as 30. The parser guarantees the suffix, so the only miss here
+// is an absent size, which means "infer my share".
 func pctSize(size string) (int, bool) {
 	if !strings.HasSuffix(size, "%") {
 		return 0, false
@@ -328,9 +295,6 @@ func RunLayoutOps(ops []LayoutOp) (applied int, err error) {
 			out, runErr = tmuxRun(op.Fallback)
 		}
 		if runErr != nil {
-			if op.BestEffort {
-				continue
-			}
 			return applied, fmt.Errorf("tmux %s: %v: %s",
 				strings.Join(op.Argv, " "), runErr, strings.TrimSpace(string(out)))
 		}
@@ -465,9 +429,15 @@ func (s *layoutScanner) term() (*LayoutNode, error) {
 	return &LayoutNode{Alias: alias, Size: size}, nil
 }
 
-// size reads an optional :30% or :80 suffix. No whitespace is skipped before the
-// colon: `coder :30%` is a typo, and reading it as a size would silently accept a
-// spec the user did not write.
+// size reads an optional :30% suffix. Percentages only, BY RULING: a size is a share
+// of the parent region, and a cell count is not a share of anything the planner can
+// know — it cannot be turned into a ratio until tmux has drawn the region, so it could
+// only ever be applied as a post-hoc resize, which takes its cells from one neighbour
+// and leaves the siblings uneven (`a:40 | b | c` measured 40/75/57 live). Half-support
+// was worse than none.
+//
+// No whitespace is skipped before the colon: `coder :30%` is a typo, and reading it as
+// a size would silently accept a spec the user did not write.
 func (s *layoutScanner) size() (string, error) {
 	if s.i >= len(s.src) || s.src[s.i] != ':' {
 		return "", nil
@@ -478,11 +448,12 @@ func (s *layoutScanner) size() (string, error) {
 		s.i++
 	}
 	digits := s.i - start
-	if s.i < len(s.src) && s.src[s.i] == '%' {
-		s.i++
+	if s.i >= len(s.src) || s.src[s.i] != '%' {
+		return "", fmt.Errorf("a size must be a percentage like :30%% (got %q) — cell counts are not supported", s.src[start-1:s.i])
 	}
+	s.i++
 	if digits == 0 {
-		return "", fmt.Errorf("size after ':' must be a number of columns or a percentage")
+		return "", fmt.Errorf("a size must be a percentage like :30%%")
 	}
 	return s.src[start:s.i], nil
 }

@@ -1539,14 +1539,17 @@ rule. Percentages exceeding 100% under one split are refused rather than clamped
 
 A percentage is realised by the join itself (`join-pane -l N%`), sized as the suffix
 of the weight list over the tail the target still holds — so the panes land at the
-right size instead of being reflowed afterwards. `-l N%` needs tmux >= 3.1, the same
+right size instead of being reflowed afterwards, and a plan contains no resize ops at
+all. `-l N%` needs tmux >= 3.1, the same
 floor the pane splitter retries under, so every sized join carries an unsized fallback:
 a correctly-placed pane at the wrong width beats no pane at all.
 
-A CELL COUNT (`:80`) is the exception and keeps the old second pass, on the parent's
-axis (`-x` under a columns node, `-y` under a rows node), because a fixed number of
-cells cannot be expressed as a ratio of a region whose extent is unknown until tmux has
-drawn it. It contributes no weight, so its siblings size as if it were unsized.
+Sizes are PERCENTAGES ONLY. A cell count (`:80`) is refused, by ruling: it is not a
+share of anything the planner can know, so it could only be applied as a post-hoc
+resize, which takes its cells from one neighbour and leaves the siblings uneven
+(`a:40 | b | c` measured 40/75/57 live before the form was dropped). Half-supporting it
+was worse than not supporting it, and the parser refuses it by name rather than
+silently ignoring the size.
 
 A size on the root is dropped rather than errored on — the root has no sibling to take
 space from.
@@ -1557,8 +1560,9 @@ space from.
 | `--dry-run` | prints the tmux argv, byte-for-byte what a real run executes |
 | Join failure | **hard** — stops, exit 1, reports `applied N of M`; re-running finishes it |
 | Sized join failure | retried once unsized, then hard (`-l N%` needs tmux >= 3.1) |
-| Resize failure | **best-effort** — skipped, not counted as applied; cell-count sizes only |
 | Sizes over 100% | refused at plan time, before any tmux call |
+| Cell-count size (`:80`) | refused at parse time; percentages only |
+| Already-arranged window | spec panes in the anchor's window are broken out first, so a repeat arrange is idempotent |
 | Unresolved alias | all failures reported at once, before any tmux call runs |
 | `scatter` | `break-pane -d -n <alias>` per peer; one already alone in its window is renamed and reported, not an error |
 | `focus` | `select-window` then `select-pane` on the same pane id — a split and a window of its own are the same handle |

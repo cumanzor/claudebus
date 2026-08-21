@@ -47,7 +47,6 @@ func TestParseLayoutShapes(t *testing.T) {
 		{"((a))", "a"},                           // ...repeatedly
 		{"  a  |  b  ", "(a | b)"},               // whitespace around separators
 		{"a:30% | b", "(a:30% | b)"},             // percentage size
-		{"a:80 | b", "(a:80 | b)"},               // cell-count size
 		{"(a / b):70% | c", "((a / b):70% | c)"}, // a group carries a size too
 		{"a-1.x_y | b", "(a-1.x_y | b)"},         // the full alias charset
 	} {
@@ -79,8 +78,10 @@ func TestParseLayoutErrors(t *testing.T) {
 		{"a@b", "unexpected"},
 		{"a | a", "twice"},
 		{"a | (b / a)", "twice"},
-		{"a: | b", "must be a number"},
-		{"a:% | b", "must be a number"},
+		{"a: | b", "must be a percentage"},
+		{"a:% | b", "must be a percentage"},
+		{"a:80 | b", "cell counts are not supported"}, // dropped by ruling
+		{"a:80", "cell counts are not supported"},     // ...at end of spec too
 		{"a :30% | b", "unexpected"},
 	} {
 		n, err := ParseLayout(tc.spec)
@@ -222,18 +223,17 @@ func TestPlanLayoutPercentSizesAreRealisedInTheJoin(t *testing.T) {
 	}
 }
 
-// TestPlanLayoutCellSizeStillResizes is the other half of the rule and the reason the
-// resize pass survives at all: `:80` is a fixed number of cells, and it cannot be
-// turned into a ratio without knowing the region's extent, which is not known until
-// tmux has drawn it. So it contributes no weight (a and b split evenly) and is applied
-// afterwards, on the parent's axis.
-func TestPlanLayoutCellSizeStillResizes(t *testing.T) {
-	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1 -l 50%",
-		"tmux resize-pane -t %1 -x 80",
+// TestParseLayoutCellCountIsRefusedNotIgnored: `a:80` must not parse as a bare alias
+// with the size quietly dropped. Silently ignoring a size the user wrote produces a
+// layout that does not match the spec, with nothing said about why — the exact failure
+// mode that made cell counts worth removing rather than half-supporting.
+func TestParseLayoutCellCountIsRefusedNotIgnored(t *testing.T) {
+	n, err := ParseLayout("a:80 | b")
+	if err == nil {
+		t.Fatalf("a cell count should be refused, got %s", renderTree(n))
 	}
-	if got := planOf(t, "a:80 | b", map[string]string{"a": "%1", "b": "%2"}); !slices.Equal(got, want) {
-		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	if !strings.Contains(err.Error(), "30%") {
+		t.Errorf("the error should show the accepted form, got %q", err)
 	}
 }
 
@@ -273,27 +273,6 @@ func TestPlanLayoutJoinsCarryAPlainFallback(t *testing.T) {
 		}
 		if slices.Contains(op.Fallback, "-l") {
 			t.Errorf("the fallback must be unsized, got %v", op.Fallback)
-		}
-	}
-}
-
-// TestPlanLayoutSizeOpsAreBestEffort: an older tmux without percentage sizing must
-// not fail an otherwise-good arrange — the panes are the point, the width is a
-// nicety. The joins must NOT carry the same flag, or a failed join would be skipped
-// past and leave the tree silently wrong.
-func TestPlanLayoutSizeOpsAreBestEffort(t *testing.T) {
-	n, err := ParseLayout("a:30% | b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, op := range ops {
-		wantBestEffort := op.Argv[0] == "resize-pane"
-		if op.BestEffort != wantBestEffort {
-			t.Errorf("op %v BestEffort = %v, want %v", op.Argv, op.BestEffort, wantBestEffort)
 		}
 	}
 }
@@ -378,37 +357,6 @@ func TestRunLayoutOpsStopsAtFirstHardFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "can't find pane") {
 		t.Errorf("error %q should carry tmux's own message", err)
-	}
-}
-
-// TestRunLayoutOpsBestEffortFailureDoesNotAbort is the other half, and the one that
-// would rot silently: a resize that an old tmux rejects must leave the arrange
-// standing. It must also NOT be counted as applied — reporting a step that failed as
-// done is how "applied N of M" stops meaning anything.
-func TestRunLayoutOpsBestEffortFailureDoesNotAbort(t *testing.T) {
-	var ran int
-	tmuxRun = func(argv []string) ([]byte, error) {
-		ran++
-		if argv[0] == "resize-pane" {
-			return []byte("unknown option"), fmt.Errorf("exit status 1")
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxRun = defaultTmuxRun })
-
-	applied, err := RunLayoutOps([]LayoutOp{
-		{Argv: []string{"join-pane", "-t", "%1"}},
-		{Argv: []string{"resize-pane", "-t", "%1", "-x", "30%"}, BestEffort: true},
-		{Argv: []string{"join-pane", "-t", "%3"}},
-	})
-	if err != nil {
-		t.Fatalf("a failing best-effort op must not fail the run: %v", err)
-	}
-	if ran != 3 {
-		t.Errorf("ran %d ops, want all 3", ran)
-	}
-	if applied != 2 {
-		t.Errorf("applied = %d, want 2 — the failed resize must not count", applied)
 	}
 }
 

@@ -19,7 +19,7 @@ Your job is the translation. `cbus` takes a pane-tree spec, not English:
 | `a / b` | two rows, a on top, b below |
 | `a \| (b / c)` | left column a, right column split into b over c |
 | `(a / b) \| (c / d)` | two columns, each split into two rows |
-| `a:30% \| b` | same, with a pinned to 30% of the window width |
+| `a:30% \| b` | same, with a pinned to 30% (percentages only, no cell counts) |
 
 `/` binds tighter than `|`, so `a | b / c` already means `a | (b / c)`. A size on a
 child of a `|` node is a width, on a child of a `/` node a height. Every alias must
