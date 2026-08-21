@@ -1,5 +1,86 @@
 # Changelog (detailed)
 
+## [2026-08-21 20:04:53 UTC] [Client/Layout] one sizing rule: children divide the parent by weight
+
+[Attempt #1] `8cf3189` on `feat/layout-weighted-split` off main (`28b4641`). 4 files.
+
+[Motivating problem]
+Carlos's process correction (test the functionality before pushing, which is how cbus
+has been built since inception) was applied immediately: instead of tagging v0.10.2 off
+the merged fixes, the verbs were driven against a real four-peer formation. That found
+what three releases of unit tests, cross-compiles and synthetic-socket smokes had not.
+
+Three or more siblings at one level never split evenly. Measured on a 174x67 window:
+
+    orchestrator | coder | reviewer   ->  87 / 43 / 42   (want ~58 each)
+    (coder / reviewer / tester)       ->  33 / 16 / 16   (want ~22 each)
+
+50/25/25, because each join halved the previous SIBLING rather than dividing the
+parent. The mechanism was known when the chaining was written and judged acceptable;
+seeing it rendered, it is not. `a | b | c` is the most natural spec to type.
+
+The first fix proposed was an even-split special case for unsized siblings. Carlos
+reframed it: the split should be INFERRED, from the formation size or from the user's
+input. That is a better statement of the same want and it collapses two behaviours into
+one rule, so it is what got built.
+
+[Files Changed]
+- `internal/client/layout.go` `childWeights` (new) — one node's children to shares of
+  the parent: explicit percentage as written, every unsized child an equal cut of the
+  remainder. Refuses a total over 100%. This IS the rule; even thirds is not a branch.
+- `internal/client/layout.go` `suffixPct` (new) — the share of the CURRENT target
+  region the joined pane takes: weights from i onward over weights from i-1 onward. The
+  target still holds the whole tail at join time, so the ratio is against that tail and
+  not against the window. With equal weights it reduces to (n-i+1)/(n-i+2), which is
+  the 67%-then-50% chain that produces thirds.
+- `internal/client/layout.go` `PlanLayout` — joins carry `-l N%`; the resize pass is
+  now reached only by cell-count sizes.
+- `internal/client/layout.go` `LayoutOp.Fallback` + `RunLayoutOps` — a sized join
+  retries unsized on failure. `-l N%` needs tmux >= 3.1, the floor `forkTmuxPane`
+  already retries under. A join is a HARD op and cannot be skipped like a resize, so it
+  needs a retry rather than best-effort.
+- `docs/architecture/command-reference.md` + `CHEATSHEET.md` — both described sizing as
+  a second pass after every join, which is now true only of cell counts. Corrected in
+  the same commit; the reference gains three dispatch-table rows (sized-join retry,
+  resize scope, oversize refusal).
+
+[Possible Ripple Effects]
+- Every multi-pane arrange now produces different geometry than v0.10.0/v0.10.1. That
+  is the point, but anything that pinned the old proportions would move.
+- `-l` is passed on 2-child nodes too (`-l 50%`), where tmux's default was already
+  50/50. Redundant but explicit, and it keeps one code path instead of a special case
+  for n==2.
+- Integer weights: 100/3 = 33, so three siblings come out 34/33/33 rather than exactly
+  even. Measured as 59/56/57 across and 22/21/22 down, inside border noise. Not worth
+  fractional-weight machinery.
+- A cell-count size now sizes its siblings as if it were unsized, then corrects itself
+  in the resize pass. Slight double-handling, documented, and the alternative needs a
+  region extent that does not exist until tmux draws.
+
+[Testing Notes]
+- Full suite green, gofmt clean, 7 packages.
+- FIVE golden plans changed. Each was read before re-baselining rather than accepted
+  wholesale — a re-baselined golden is where a real regression hides. Four were value
+  changes (`-l` added). One, `TestPlanLayoutSizingRunsLastAndFollowsParentAxis`, had its
+  PREMISE invalidated: percentages no longer run last, so it was rewritten as
+  `TestPlanLayoutPercentSizesAreRealisedInTheJoin` and asserts the absence of any
+  resize op. Renaming it mattered as much as re-baselining it; a test whose name states
+  the opposite of the mechanism is worse than no test.
+- New: even-thirds (the anti-50/25/25 assertion, carrying the measured before-numbers
+  in its comment), cell-count-still-resizes, oversize refusal, fallback present in the
+  plan, and fallback USED by the runner (the plan tests prove it is carried, only the
+  runner test proves it is retried).
+- Live on the real formation at 174x67, the whole surface: columns 59/56/57, rows
+  22/21/22, `orchestrator:25% | (coder / reviewer)` -> 43 + stacked 130x33 each, mixed
+  `orchestrator:50% | coder | reviewer` -> 86/43/43, oversize refused naming the total,
+  plus focus on an armed peer and on the unarmed caller, scatter, and scatter again for
+  idempotence. Nothing was pushed before this ran.
+- One probe of mine was wrong and is worth recording: an early dead-peer test killed the
+  pid from `cbus list`, which is the LISTENER pid, not the owning session. The listener
+  re-armed and the arrange correctly moved a live pane, which read as a false pass. Redone
+  against `ownerPid` from the meta via `cbus close`, the dead peer refuses properly. The
+  instrument answered a different question than the one asked.
+
 ## [2026-08-24 05:56:32 UTC] [Commands/Formation] `/save-formation`, the zero-friction checkpoint
 
 [Attempt #1] on `feat/save-formation-command` off main (`28b4641`), worktree
