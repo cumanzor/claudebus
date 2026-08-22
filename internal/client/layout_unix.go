@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 func defaultTmuxRun(argv []string) ([]byte, error) {
@@ -93,7 +92,7 @@ func ResolvePeerPanes(ch string, aliases []string) (map[string]string, error) {
 		panes[a] = pane
 	}
 	if len(bad) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(bad, "; "))
+		return nil, unresolvedError(ch, bad)
 	}
 	return panes, nil
 }

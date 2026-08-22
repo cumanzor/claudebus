@@ -1518,6 +1518,23 @@ charset, so an alias never needs quoting inside the spec (the shell still does: 
 and `(` are metacharacters, so single-quote the whole spec). Duplicate aliases are
 refused — a peer occupies one pane.
 
+**The caller's own registration** is resolved from `$TMUX_PANE` directly, skipping the
+chain below, and resolving it also refreshes that peer's `lastActivity`. That second
+part is load-bearing: `lastActivity` is written by `join` and then only by the armed
+follower, so a joined-but-never-armed peer's stamp never moves and `PeerDead` reaps it
+once `unarmedGrace` (10m) elapses. Running one of these verbs is the only activity an
+unarmed peer can produce, and a peer resolving its own pane is proof it is alive. Only
+the caller's own registration is stamped — vouching for anyone else would keep an
+abandoned registration alive forever, which is the reaper's job undone. A
+daemon-managed registration (`connectionId` set) is never reaped by grace and its meta
+belongs to the connection lifecycle, so it is left untouched, the same rule `armMeta`
+follows. The write takes the peer's lifecycle lock.
+
+When an alias cannot be resolved AND this session holds no alias in the channel at all,
+the error says so and names the cause, because "no peer ch/alias" about a session the
+user can see running is otherwise unreadable. The hint points at `cbus connect <ch>`.
+A registered caller is asking about somebody else and is not told any of this.
+
 **Resolution.** alias → pane is resolved LIVE, never stored: `meta.json` →
 `ownerPid` (falling back to the listener's owner under the same
 `listenerIdentityHolds` test `close` applies) → `ps -o tty= -p` →

@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -331,10 +332,41 @@ func selfPane(ch, alias string, byTTY map[string]string) string {
 	}
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch && reg.Alias == alias {
+			// running this command IS activity, and it is the only activity an unarmed
+			// peer can produce: join stamps lastActivity once and nothing refreshes it
+			// afterwards except the armed follower, so without this an unarmed caller's
+			// registration is reaped 10 minutes after joining no matter how much work it
+			// is doing. Resolving a peer to its own pane is proof that peer is alive.
+			touchActivity(filepath.Join(CBUSDir(), ch, alias, "meta.json"))
 			return pane
 		}
 	}
 	return ""
+}
+
+// unresolvedError joins every alias failure into one error. When this session holds
+// no alias in ch at all, it also says why: the confusing case is a caller that put
+// itself in the spec after its registration was reaped, and "no peer ch/alias" about
+// a session the user can see running is otherwise unreadable. A registered caller is
+// asking about somebody else and is told nothing extra.
+func unresolvedError(ch string, bad []string) error {
+	msg := strings.Join(bad, "; ")
+	if !selfRegisteredIn(ch) {
+		msg += fmt.Sprintf("\n  this session is not registered in %q either. A legacy peer that "+
+			"joins without arming a listener is reaped after %s; reconnect with `cbus connect %s`",
+			ch, unarmedGrace, ch)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+// selfRegisteredIn reports whether this session holds ANY alias in ch.
+func selfRegisteredIn(ch string) bool {
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch {
+			return true
+		}
+	}
+	return false
 }
 
 // layoutScanner is a hand-rolled recursive-descent reader over the spec. The

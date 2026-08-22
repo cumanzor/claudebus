@@ -1,7 +1,10 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -487,5 +490,134 @@ func TestPlanLayoutNormalisationRunsBeforeEveryJoin(t *testing.T) {
 		if strings.Contains(op, "break-pane") && seenJoin {
 			t.Errorf("break-pane after a join would dismantle what the join built: %q", op)
 		}
+	}
+}
+
+// TestSelfPaneRefreshesOwnActivity: lastActivity is written by Join and then only by
+// the armed follower, so an unarmed peer's stamp never moves and PeerDead reaps it once
+// unarmedGrace passes. Resolving a peer to its own pane proves that peer is alive, so
+// it stamps. Without this, selfPane's whole affordance (arrange yourself before arming)
+// is true for ten minutes and false afterwards.
+func TestSelfPaneRefreshesOwnActivity(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+
+	metaPath := filepath.Join(root, "ch", "orchestrator", "meta.json")
+	stale := "2020-01-01T00:00:00Z"
+	rewriteLastActivity(t, metaPath, stale)
+	if !PeerDead(metaPath) {
+		t.Fatal("precondition: a 2020 stamp must read as past the unarmed grace")
+	}
+
+	if got := selfPane("ch", "orchestrator", map[string]string{"/dev/ttys001": "%7"}); got != "%7" {
+		t.Fatalf("selfPane = %q, want %%7", got)
+	}
+	if PeerDead(metaPath) {
+		t.Error("after resolving its own pane the peer must no longer read as dead")
+	}
+}
+
+// TestSelfPaneDoesNotStampOtherPeers: the refresh is a peer vouching for ITSELF. Doing
+// it for anyone else would keep a genuinely abandoned registration alive forever, which
+// is the reaper's whole job undone.
+func TestSelfPaneDoesNotStampOtherPeers(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "somebody-else", "sid-other")
+
+	metaPath := filepath.Join(root, "ch", "somebody-else", "meta.json")
+	rewriteLastActivity(t, metaPath, "2020-01-01T00:00:00Z")
+	_ = selfPane("ch", "somebody-else", map[string]string{"/dev/ttys001": "%7"})
+	if !PeerDead(metaPath) {
+		t.Error("another session's peer must not be kept alive by this session's command")
+	}
+}
+
+// TestSelfPaneLeavesDaemonManagedMetaAlone: a daemon-managed registration is never
+// reaped by grace and its meta belongs to the connection lifecycle, so the self-stamp
+// must not rewrite it, the same rule armMeta follows.
+func TestSelfPaneLeavesDaemonManagedMetaAlone(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+
+	metaPath := filepath.Join(root, "ch", "orchestrator", "meta.json")
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["connectionId"], _ = json.Marshal("conn-1")
+	raw["lastActivity"], _ = json.Marshal("2020-01-01T00:00:00Z")
+	before, _ := json.Marshal(raw)
+	if err := os.WriteFile(metaPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := selfPane("ch", "orchestrator", map[string]string{"/dev/ttys001": "%7"}); got != "%7" {
+		t.Fatalf("selfPane = %q, want %%7", got)
+	}
+	after, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("a daemon-managed meta must be byte-unchanged, got %s", after)
+	}
+}
+
+// TestUnresolvedErrorExplainsAnUnregisteredCaller: the error a user actually hit was
+// "no peer layouttest/orchestrator" about a session they could see running. The hint
+// fires only when this session holds no alias in the channel.
+func TestUnresolvedErrorExplainsAnUnregisteredCaller(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "")
+
+	err := unresolvedError("ch", []string{"no peer ch/orchestrator"})
+	if !strings.Contains(err.Error(), "not registered") || !strings.Contains(err.Error(), "cbus connect ch") {
+		t.Errorf("an unregistered caller should be told why and what to do, got %q", err)
+	}
+
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+	err = unresolvedError("ch", []string{"no peer ch/nosuchpeer"})
+	if strings.Contains(err.Error(), "not registered") {
+		t.Errorf("this session IS registered; the hint is noise here: %q", err)
+	}
+	if !strings.Contains(err.Error(), "no peer ch/nosuchpeer") {
+		t.Errorf("the underlying failure must still be reported, got %q", err)
+	}
+}
+
+// rewriteLastActivity backdates a peer's stamp in place, touching only that field so
+// the rest of the meta round-trips exactly as the store wrote it.
+func rewriteLastActivity(t *testing.T, metaPath, stamp string) {
+	t.Helper()
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["lastActivity"], _ = json.Marshal(stamp)
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, out, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
