@@ -7,7 +7,8 @@ package claudebus
 
 import "embed"
 
-// Commands holds commands/*.md (the /bus-* skills) as the binary serves them.
+// Commands holds commands/*.md (the slash-command skills: the /bus-* family plus
+// /save-formation) as the binary serves them.
 //
 //go:embed commands/*.md
 var Commands embed.FS

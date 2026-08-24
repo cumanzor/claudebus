@@ -252,6 +252,9 @@ cbus formation rm myeffort                          # delete (starters: use git 
 - `formations/dev-trio.json` ships in the repo: apply it from any checkout
   with `--channel <effort>`, no setup required.
 - `/bus-formation <verb> ...` wraps all of the above as a slash command.
+- `/save-formation` is the no-argument checkpoint: it resolves the channel from
+  `cbus whoami`, saves, then runs `show` and names the peers whose `role: TODO`,
+  stale sid, or `mode=template` would bite on the next `apply`. It never launches.
 
 ## Rearrange the layout (tmux only)
 

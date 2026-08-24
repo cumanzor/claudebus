@@ -30,7 +30,7 @@ and role prompts:
 ```sh
 go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
   -o ~/.local/bin/cbus ./cmd/cbus
-cbus install-commands   # the /bus-* skills -> ~/.claude/commands
+cbus install-commands   # the slash-command skills -> ~/.claude/commands
 cbus install-roles      # role prompts -> $CBUS_DIR/roles (the spawn-outside-repo fallback)
 cbus install-codex-skills # $CODEX_HOME/skills, default ~/.codex/skills
 ```
@@ -45,6 +45,9 @@ one is skipped (with a reason) unless `--force`. The commands placed are:
 | `commands/bus-spawn.md` | `~/.claude/commands/bus-spawn.md` | open a fresh session, joined to a channel |
 | `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | rename a legacy peer's alias (native rename is unsupported) |
 | `commands/bus-formation.md` | `~/.claude/commands/bus-formation.md` | save/apply/bootstrap a [formation](formations.md) |
+| `commands/bus-codex.md` | `~/.claude/commands/bus-codex.md` | bring a Codex CLI session onto a channel |
+| `commands/bus-layout.md` | `~/.claude/commands/bus-layout.md` | rearrange live peers into a tmux pane layout |
+| `commands/save-formation.md` | `~/.claude/commands/save-formation.md` | checkpoint this session's channel, then triage the save |
 
 Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's installed.
 
