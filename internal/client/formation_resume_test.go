@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,59 @@ func resumeWorld() *PlanWorld {
 		Host:          "host-a",
 		LiveSids:      map[string]string{},
 		HasTranscript: func(profile, sid string) bool { return true },
+	}
+}
+
+// surfacelessForker is a forker whose terminal surface cannot be reached — the shape
+// of `cbus formation resume` run from a bare shell for an anchor recorded as
+// target: tmux. It refuses through BOTH doors on purpose, so the only thing separating
+// a pass from a failure is WHICH door the verb knocks on, and when.
+type surfacelessForker struct{ forked bool }
+
+func (f *surfacelessForker) Precheck(string) error { return errors.New("not inside a tmux session") }
+
+func (f *surfacelessForker) Fork(ForkSpec) (string, error) {
+	f.forked = true
+	return "", errors.New("not inside a tmux session")
+}
+
+// TestResumeUnreachableSurfaceLeavesNoLaunchIntent: a resume that cannot launch must
+// not spend the launch-intent marker.
+//
+// The marker is claimed before the fork and is cleared by exactly two things, the
+// promised session's own join and the TTL — neither of which can answer for a child
+// that was never started. So a resume that claimed and then failed inside the fork left
+// a live marker behind, and the operator's OWN corrected retry was refused by it: run
+// once outside tmux, the next run — inside tmux, correct — was told a launch was
+// already booting and to go find its window. There was no window.
+func TestResumeUnreachableSurfaceLeavesNoLaunchIntent(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := resumeFixture()
+	f.Peers[0].Target = "tmux"
+
+	bad := &surfacelessForker{}
+	_, _, err := resumeAnchorWorld(f, "", bad, resumeWorld())
+	if err == nil {
+		t.Fatal("a resume onto an unreachable surface must refuse")
+	}
+	if !strings.Contains(err.Error(), "not inside a tmux session") {
+		t.Errorf("refusal %q should carry the surface's own reason", err)
+	}
+	if bad.forked {
+		t.Error("the fork must not be attempted once the surface is known to be unreachable")
+	}
+	if in, age, ok := FreshLaunchIntent(f.Channel, f.AnchorAlias); ok {
+		t.Errorf("a launch that never happened left a fresh intent (pid %d, written %s ago) — it now refuses every resume until the TTL runs out", in.Pid, age.Round(0))
+	}
+	// the half the operator actually feels: the corrected retry goes through at once,
+	// with no wait and nothing to clean up by hand
+	good := &recForker{ids: []string{"surface-1"}}
+	created, _, err := resumeAnchorWorld(f, "", good, resumeWorld())
+	if err != nil {
+		t.Fatalf("the corrected retry was refused: %v", err)
+	}
+	if created != "surface-1" || len(good.specs) != 1 {
+		t.Fatalf("created=%q specs=%d", created, len(good.specs))
 	}
 }
 
