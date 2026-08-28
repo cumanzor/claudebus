@@ -1,5 +1,131 @@
 # Changelog (detailed)
 
+## [2026-08-28 05:02:27 UTC] [Client/Resume] surface precheck before the launch-intent claim
+
+[Attempt #1] Committed on `fix/resume-surface-precheck`, branched from main: the fix is
+independent of the windows port, which is merely the branch the incident was hit on.
+2 source files changed (+72/-12) plus 2 test files (+108). Authored directly on Carlos's instruction during a
+live incident, not through a formation review gate.
+
+[Motivating problem]
+Carlos tried to resume the `waiver-sales-fleet` formation after its tmux session was
+gone. From a bare shell:
+
+    cbus formation resume 'waiver-sales-fleet'
+    cbus: not inside a tmux session
+
+then, correctly, from inside tmux:
+
+    cbus: a resume of "main" was launched 42s ago (pid 5805) and has not joined yet --
+    it is most likely still booting: find its window and use it. If it never came up,
+    this refusal expires in 2m18s
+
+There was no window to find. `resumeAnchorWorld` claims the launch-intent marker at
+`formation_resume.go:105` and forks at `:131`, while the surface precondition
+(`os.Getenv("TMUX") == ""`) lived inside `OSAForker.Fork` at `harness.go:352` -- after
+the claim. So the run that could not possibly launch anything still staked the marker,
+and the marker is cleared by exactly two things, the promised session's own join and
+the 180s TTL, neither of which can answer for a child that was never started. The first
+failed attempt therefore refused the operator's own corrected attempt. Confirmed on the
+live store: pid 5805 and pid 7776 (the marker on disk) both dead, no `restore` event in
+`.ledger/waiver-offlinemode-fastcheckin.jsonl` for that day, and one bare-zsh tmux pane
+in the whole session -- nothing had been forked by either run.
+
+This is the one pre-fork claim in the tree that was never released on failure. Both
+siblings already are: `spawn.go:133` and `formation_apply.go:330` call `Unreserve` on a
+fork error, and `pane_test.go`'s TestFailedPaneForkLeavesNoReservation pins that
+behavior.
+
+[Files Changed]
+- `internal/client/harness.go` -- new `SurfacePrechecker` optional interface next to
+  `TerminalForker`, and `OSAForker.Precheck(target string) error` holding the surface
+  conditions that used to sit inline in `Fork`: window/tab always reachable (iTerm2 is
+  launched on demand), pane needs `$TMUX` or `$ITERM_SESSION_ID`, tmux needs `$TMUX`,
+  anything else is an unknown target. `Fork` now calls `Precheck` first and keeps its
+  own switch for dispatch only, so there is exactly ONE copy of each condition. The
+  pane branch's second check (`iTermSessionUUID() != ""`) collapses into the fallthrough
+  because `Precheck` has already established it; the `default` arm keeps the unknown-
+  target error as an unreachable backstop rather than letting a future target silently
+  fall into the tmux arm.
+- `internal/client/formation_resume.go` -- the precheck, guarded by a type assertion on
+  `SurfacePrechecker`, immediately BEFORE `ClaimLaunchIntent`. Placed after every
+  identity gate for the same reason the claim is: a fork-born or transcript-less anchor
+  must hear about origin=fork or the missing transcript, not about a terminal it happens
+  not to be sitting in. The refusal wraps the forker's own text with the peer and its
+  recorded target.
+- `internal/client/formation_resume_test.go` -- `surfacelessForker` (refuses through
+  both `Precheck` and `Fork`, so the only variable is which door the verb knocks on) and
+  TestResumeUnreachableSurfaceLeavesNoLaunchIntent. Adds the `errors` import.
+- `internal/client/harness_test.go` -- TestPrecheckIsTheOnlySurfaceAuthority, an
+  8-case table over (target, $TMUX, $ITERM_SESSION_ID) that asserts the refusals and
+  then drives ONLY the refusing cases back through `Fork`, requiring byte-identical
+  error text. A passing case is deliberately not forked: it would launch a real
+  terminal.
+
+[Why the fork error path still does not clear the marker]
+The obvious symmetry with `Unreserve` -- clear the intent when `Fork` returns an error --
+was considered and rejected. `Fork` can fail AFTER a child exists: `paneSplitScript`
+returns `id of newS`, a step that runs after the split has already created the pane, so
+an AppleScript failure there is indistinguishable at the call site from one that created
+nothing. Releasing a claim whose child is booting reopens exactly the double-launch
+window the marker exists to close, and `launch_intent.go:14-18` already rules on that
+asymmetry: a spurious refusal names its own age and expiry and the operator waits, while
+a double-launch onto one transcript announces nothing and is found later by its damage.
+A precheck sidesteps the choice -- it refuses on conditions that are true before anything
+is created, so the claim is never spent rather than being spent and then risky to undo.
+The residual (a surface that WAS reachable and the launch failed anyway) still burns the
+TTL, and that is the intended trade. If it ever needs closing, the honest shape is for
+the forker to report "nothing was created", not for the caller to guess.
+
+[Possible Ripple Effects]
+- `Precheck` is optional: `TerminalForker` is unchanged, and every existing fake
+  (`recForker`, `fakeForker`, `errForker`) is unaffected because it does not implement
+  the method. Only `OSAForker` does.
+- `Fork`'s behavior is unchanged for every target the CLI can produce. Targets reach it
+  from `Branch`/`Spawn` (validated against `window|tab|tmux|pane`) and from
+  `launchTarget` (validated by `FormationPeer.validate`), so no caller can hand it a
+  target that `Precheck` newly rejects. The no-surface pane error text is byte-identical,
+  which is what keeps TestOSAForkPaneRefusesWithoutASurface green.
+- `Fork`'s receiver changed from `(OSAForker)` to `(f OSAForker)` -- a value receiver
+  still, so `OSAForker{}` callers and the `TerminalForker` satisfaction are unchanged.
+- Apply and spawn were left alone. They already release their pre-fork claim on error,
+  so they carry no burn; wiring the precheck through them would be a second behavior
+  change riding a fix, and is a separate call.
+
+[Testing Notes]
+- Red-before-green, verified by removing ONLY the precheck call from
+  `formation_resume.go` and re-running. All three aimed assertions fired, and the third
+  reproduces the field error verbatim:
+      formation_resume_test.go:68: the fork must not be attempted once the surface is
+        known to be unreachable
+      formation_resume_test.go:71: a launch that never happened left a fresh intent
+        (pid 17906, written 655.267ms ago) -- it now refuses every resume until the TTL
+        runs out
+      formation_resume_test.go:78: the corrected retry was refused: a resume of
+        "orchestrator" was launched 1s ago (pid 17906) and has not joined yet ...
+  TestPrecheckIsTheOnlySurfaceAuthority stayed GREEN through that mutation, which is the
+  point: it is not the gating instrument for the resume path, and the two tests fail
+  independently.
+- The red test asserts the operator-visible half too, not just the marker's absence: a
+  second `resumeAnchorWorld` with a working forker must launch immediately, which is the
+  thing that was actually broken for Carlos.
+- Full suite green after restoring the fix: `go test ./...`, all 7 packages ok
+  (internal/client 14.2s). `gofmt -l internal/client/` empty, `go vet ./internal/client/`
+  clean.
+- Cross-platform compile gate: `GOOS=linux GOARCH=amd64` and `GOOS=linux GOARCH=arm64`
+  build tree-wide from this branch, and `GOOS=linux go vet ./internal/client/` is clean,
+  so the test binaries compile there. The WINDOWS half is not gateable from main and was
+  not gated here: pristine main at 28b4641 already fails `GOOS=windows go build` in
+  close.go and codexwrap.go (Setpgid, syscall.Kill, procZombie, procStartTime), with and
+  without this change, identically; the fixes for that are the windows-port branch's
+  reason to exist. The change was separately built and vetted for windows on the
+  windows-port tree, where the rest of the tree compiles, and it touches neither file.
+  Container runtime gate NOT run: this touches no process-state code.
+- NOT field-smoked. The repo rule is to drive a real formation before commit, and the
+  live half here is Carlos re-running `cbus formation resume 'waiver-sales-fleet'` from
+  inside tmux against an installed build; the installed binary is v0.10.1 and does not
+  carry this change.
+
 ## [2026-08-21 19:35:23 UTC] [Client/Layout] the self-pane fix at the right layer, and scatter's exit code
 
 [Attempt #2] `89ee4ab` on `fix/selfpane-all-paths` off main (`4e4fa17`). 3 files.

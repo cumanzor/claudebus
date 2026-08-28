@@ -181,6 +181,16 @@ type TerminalForker interface {
 	Fork(ForkSpec) (created string, err error)
 }
 
+// SurfacePrechecker is a TerminalForker that can answer, before anything is created,
+// whether this shell can reach a target's surface at all. A caller that stakes a claim
+// BEFORE forking asks first, so a launch that cannot start never spends the claim.
+//
+// Optional by design: a fake forker that does not implement it is unaffected, and no
+// caller is obliged to ask.
+type SurfacePrechecker interface {
+	Precheck(target string) error
+}
+
 // Branch is the one-shot parent side of /bus-branch: derive the channel, join
 // idempotently, reserve the child's alias, and fork a bootstrapped child through
 // forker. The child's session title IS its reserved alias (--name at launch);
@@ -323,30 +333,59 @@ func forkReplicatedEnv() map[string]string {
 // runs a quoted one-liner (terminalCommand) — see each for the per-surface rationale.
 type OSAForker struct{}
 
-func (OSAForker) Fork(spec ForkSpec) (string, error) {
-	switch spec.Target {
+// Precheck answers the surface question from the ENVIRONMENT alone and touches
+// nothing: every condition here is already true or already false before a fork is
+// attempted, so a refusal from it proves no child was created. Fork calls it first,
+// which is what keeps these conditions in one place — a second copy in a caller would
+// drift, and a precheck that passes where Fork refuses is worse than none.
+//
+// Its reason to exist is the pre-fork claim (the launch-intent marker, an alias
+// reservation): a promise that a process is about to exist. Asking here lets such a
+// claim be SKIPPED rather than undone, which matters because undoing it is not always
+// safe — on a fork ERROR the iTerm2 pane path may have created the pane and failed
+// afterwards (paneSplitScript reads the new session's id, a step that runs after the
+// split), and releasing a claim whose child is booting reopens the very window the
+// claim exists to close.
+func (OSAForker) Precheck(target string) error {
+	switch target {
 	case "window", "tab":
-		return osaForkITerm(spec)
+		return nil // iTerm2 is launched on demand — there is nothing to be inside of
 	case "pane":
 		// tmux-first, matching CC's teammate precedence: a tmux user inside iTerm2
 		// expects tmux panes. No surface => refuse (see pane.go — splitting the
 		// frontmost session instead would be the wrong-window bug by design).
+		if os.Getenv("TMUX") == "" && iTermSessionUUID() == "" {
+			return fmt.Errorf("pane needs tmux or iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab")
+		}
+		return nil
+	case "tmux":
+		if os.Getenv("TMUX") == "" {
+			return fmt.Errorf("not inside a tmux session")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown target %q", target)
+	}
+}
+
+func (f OSAForker) Fork(spec ForkSpec) (string, error) {
+	if err := f.Precheck(spec.Target); err != nil {
+		return "", err
+	}
+	switch spec.Target {
+	case "window", "tab":
+		return osaForkITerm(spec)
+	case "pane":
 		if os.Getenv("TMUX") != "" {
 			return forkTmuxPane(spec)
 		}
-		if iTermSessionUUID() != "" {
-			return osaForkITerm(spec)
-		}
-		return "", fmt.Errorf("pane needs tmux or iTerm2 (neither $TMUX nor $ITERM_SESSION_ID is set) — use window|tab")
+		return osaForkITerm(spec) // Precheck established the iTerm2 uuid is present
 	case "tmux":
-		if os.Getenv("TMUX") == "" {
-			return "", fmt.Errorf("not inside a tmux session")
-		}
 		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
 		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
 		return "", exec.Command("tmux", "new-window", "-n", "cc-branch", terminalCommand(spec)).Run()
 	default:
-		return "", fmt.Errorf("unknown target %q", spec.Target)
+		return "", fmt.Errorf("unknown target %q", spec.Target) // unreachable: Precheck refuses first
 	}
 }
 

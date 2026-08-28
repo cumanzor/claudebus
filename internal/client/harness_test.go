@@ -750,3 +750,57 @@ func TestLauncherScriptExecutes(t *testing.T) {
 		t.Errorf("launcher must self-delete before exec; stat err = %v", err)
 	}
 }
+
+// ---- surface precheck ------------------------------------------------------------
+
+// TestPrecheckIsTheOnlySurfaceAuthority: the conditions Fork enforces and the ones a
+// caller can ask about ahead of time must be the SAME conditions, because they are the
+// same code. Two copies would drift, and the dangerous direction is silent — a precheck
+// that passes where Fork refuses re-opens the claim-then-fail window it was added to
+// close. Only the refusing cases are driven through Fork: a passing one would really
+// launch a terminal.
+func TestPrecheckIsTheOnlySurfaceAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		target  string
+		tmux    string
+		iterm   string
+		wantErr []string // substrings the refusal must carry; empty means it must pass
+	}{
+		{name: "tmux from a bare shell", target: "tmux", wantErr: []string{"not inside a tmux session"}},
+		{name: "tmux inside tmux", target: "tmux", tmux: "/tmp/tmux-501/default,1,0"},
+		{name: "pane with no surface at all", target: "pane", wantErr: []string{"tmux", "iTerm2", "window|tab"}},
+		{name: "pane under tmux", target: "pane", tmux: "/tmp/tmux-501/default,1,0"},
+		{name: "pane under iTerm2", target: "pane", iterm: "w0t0p0:1B2C3D4E-0000-0000-0000-000000000000"},
+		{name: "window is always reachable", target: "window"},
+		{name: "tab is always reachable", target: "tab"},
+		{name: "unknown target", target: "popup", wantErr: []string{`unknown target "popup"`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX", tc.tmux)
+			t.Setenv("ITERM_SESSION_ID", tc.iterm)
+			err := OSAForker{}.Precheck(tc.target)
+			if len(tc.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("Precheck(%q) = %v, want it to pass", tc.target, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Precheck(%q) passed, want a refusal", tc.target)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Precheck(%q) = %q, want it to name %q", tc.target, err, want)
+				}
+			}
+			_, ferr := OSAForker{}.Fork(ForkSpec{Target: tc.target, Argv: []string{"claude"}, Dir: "/tmp"})
+			if ferr == nil {
+				t.Fatalf("Fork(%q) launched something Precheck had already refused", tc.target)
+			}
+			if ferr.Error() != err.Error() {
+				t.Errorf("Fork(%q) = %q, Precheck = %q — the two must not drift", tc.target, ferr, err)
+			}
+		})
+	}
+}

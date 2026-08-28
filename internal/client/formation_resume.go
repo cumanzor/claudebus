@@ -91,6 +91,17 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 			return "", "", fmt.Errorf("the anchor's session %s has transcripts under %d CCS profiles (%s) and the envelope records none — the tool cannot pick; re-save this formation from a live seat so the profile is recorded, or resume the session by hand", p.SessionID, len(profiles), strings.Join(profiles, ", "))
 		}
 	}
+	// The surface, asked BEFORE the claim below. A launch that cannot start must not
+	// spend the marker: a resume run outside tmux for a target: tmux anchor used to
+	// claim, fail inside the fork, and then refuse the operator's own corrected in-tmux
+	// retry for the rest of the TTL. Placed after every identity gate for the same
+	// reason the claim is — a fork-born anchor must hear about origin=fork, not about a
+	// terminal it happens not to be sitting in.
+	if pc, ok := forker.(SurfacePrechecker); ok {
+		if err := pc.Precheck(launchTarget(p.Target)); err != nil {
+			return "", "", fmt.Errorf("cannot launch %q on its recorded target %q: %w", p.Alias, launchTarget(p.Target), err)
+		}
+	}
 	// The last gate, and the one the live-armed check above cannot cover: between the
 	// fork below and the child's re-join the anchor holds no meta and arms no
 	// listener, so liveSids reads its transcript as free. A second resume in that gap
