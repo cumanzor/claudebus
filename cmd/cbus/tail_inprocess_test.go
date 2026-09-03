@@ -25,10 +25,7 @@ import (
 // wedge this test the way a live session's blocking tail would. That bound is the
 // whole reason this is allowed here and nowhere else.
 func TestTailArmsAndStreamsInProcess(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	env := func(sid string) []string {
 		e := []string{"CBUS_DIR=" + root, "CLAUDE_CODE_SESSION_ID=" + sid}
@@ -143,10 +140,7 @@ func TestTailArmsAndStreamsInProcess(t *testing.T) {
 // ordinary (bad) target rather than silently doing something else. Exercised through
 // the real CLI, since a hidden flag is only reachable that way.
 func TestTailRejectsTheRetiredFollowerFlag(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	cmd := exec.Command(bin, "tail", "--inbox", filepath.Join(root, "x", "y", "inbox.jsonl"))
 	cmd.Env = []string{"CBUS_DIR=" + root, "PATH=" + os.Getenv("PATH")}
@@ -161,10 +155,7 @@ func TestTailRejectsTheRetiredFollowerFlag(t *testing.T) {
 // refusal's exit code, or what a displaced follower's Monitor actually sees — which is
 // the class of miss the review doctrine exists for.
 func TestStealDisplacesThroughTheRealCLI(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	env := func(sid string) []string {
 		e := []string{"CBUS_DIR=" + root, "CLAUDE_CODE_SESSION_ID=" + sid}
