@@ -102,7 +102,8 @@ func TestFileBackend(t *testing.T) {
 // which is the shape this formation keeps refusing.
 func TestFileBackendPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("no POSIX mode bits on windows: the file-backend permission contract there is cbus-que.4")
+		t.Skip("no unix mode bits on windows (emulated on NTFS): the windows evidence is the NTFS " +
+			"ACL inventory of the production credential store recorded on cbus-que.4, run with P5")
 	}
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
