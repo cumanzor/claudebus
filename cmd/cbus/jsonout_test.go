@@ -249,10 +249,7 @@ func TestListJSONKeepsATornMetaPeer(t *testing.T) {
 // cannot wedge the test. A live listener is unreachable any other way — the predicate
 // wants a live pid whose start time matches the recorded witness.
 func TestListJSONLivenessAgreesWithText(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	env := func(sid string) []string {
 		e := []string{"CBUS_DIR=" + root, "CLAUDE_CODE_SESSION_ID=" + sid}

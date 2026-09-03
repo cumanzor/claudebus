@@ -25,10 +25,7 @@ import (
 // through a real arm — MetaListenerAlive wants a live pid whose start time matches the
 // recorded witness, and no hand-written meta can honestly produce that pair.
 func TestListRenderingGolden(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
 

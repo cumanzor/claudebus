@@ -16,10 +16,7 @@ import (
 // broadcast into the real bus).
 func cbusRunner(t *testing.T) (func(sid, stdin string, args ...string) (string, string, int), string) {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "cbus")
-	if out, err := exec.Command("go", "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
-		t.Fatalf("build cbus: %v\n%s", err, out)
-	}
+	bin := buildCbus(t)
 	root := t.TempDir()
 	run := func(sid, stdin string, args ...string) (string, string, int) {
 		t.Helper()

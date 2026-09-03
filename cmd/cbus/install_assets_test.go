@@ -96,9 +96,12 @@ func TestInstallRoles(t *testing.T) {
 }
 
 func TestInstallDefaultRolesDir(t *testing.T) {
-	t.Setenv("CBUS_DIR", "/tmp/x-cbus")
-	if got := defaultRolesDir(); got != "/tmp/x-cbus/roles" {
-		t.Errorf("defaultRolesDir = %q", got)
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	// want is built with filepath.Join, not a slash literal: defaultRolesDir joins
+	// natively, so a hard-coded unix path would spuriously fail on windows.
+	if got, want := defaultRolesDir(), filepath.Join(root, "roles"); got != want {
+		t.Errorf("defaultRolesDir = %q, want %q", got, want)
 	}
 }
 
