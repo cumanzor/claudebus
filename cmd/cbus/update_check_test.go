@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// captureStderr is captureStdout for os.Stderr, and drains concurrently for the same
+// reason: a callback writing past the pipe buffer must not block a reader that starts
+// only after it returns.
 func captureStderr(t *testing.T, f func()) string {
 	t.Helper()
 	old := os.Stderr
@@ -17,11 +20,17 @@ func captureStderr(t *testing.T, f func()) string {
 		t.Fatal(err)
 	}
 	os.Stderr = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
 	f()
 	_ = w.Close()
 	os.Stderr = old
-	b, _ := io.ReadAll(r)
-	return string(b)
+	out := <-done
+	_ = r.Close()
+	return out
 }
 
 func TestUpdateCheckCacheRoundTrip(t *testing.T) {

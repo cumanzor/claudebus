@@ -12,7 +12,10 @@ import (
 	"claudebus/internal/core"
 )
 
-// captureStdout runs f with os.Stdout redirected and returns what it wrote.
+// captureStdout runs f with os.Stdout redirected and returns what it wrote. The
+// reader drains concurrently, in a goroutine started before f runs, so a callback
+// that writes more than the pipe buffer (4KB on windows) does not deadlock against a
+// reader that would otherwise only start after it returns.
 func captureStdout(t *testing.T, f func()) string {
 	t.Helper()
 	old := os.Stdout
@@ -21,11 +24,17 @@ func captureStdout(t *testing.T, f func()) string {
 		t.Fatal(err)
 	}
 	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
 	f()
 	_ = w.Close()
 	os.Stdout = old
-	b, _ := io.ReadAll(r)
-	return string(b)
+	out := <-done
+	_ = r.Close()
+	return out
 }
 
 func TestAuthSetAndStatus(t *testing.T) {
