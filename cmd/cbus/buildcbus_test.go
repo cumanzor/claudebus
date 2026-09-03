@@ -23,7 +23,11 @@ func buildCbus(t *testing.T) string {
 			host, runtime.GOOS, runtime.GOARCH)
 	}
 	t.Logf("buildCbus: using %s", goBin)
-	bin := filepath.Join(t.TempDir(), "cbus")
+	name := "cbus"
+	if runtime.GOOS == "windows" {
+		name += ".exe" // Go refuses to exec an extensionless binary on windows (que.5)
+	}
+	bin := filepath.Join(t.TempDir(), name)
 	if out, err := exec.Command(goBin, "build", "-o", bin, "claudebus/cmd/cbus").CombinedOutput(); err != nil {
 		t.Fatalf("build cbus: %v\n%s", err, out)
 	}

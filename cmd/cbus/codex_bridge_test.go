@@ -1,3 +1,9 @@
+//go:build darwin || linux
+
+// codex-bridge is a phase-1 windows-excluded verb (unsupported_windows.go): runCodexBridge
+// refuses ahead of arg parsing there, so this arg-error matrix only exercises the parser on
+// unix. Windows coverage is the codex-bridge refusal row in unsupported_windows_test.go.
+
 package main
 
 import "testing"
