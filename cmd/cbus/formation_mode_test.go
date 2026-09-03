@@ -1,3 +1,11 @@
+//go:build darwin || linux
+
+// formation apply is a phase-1 windows-excluded verb (unsupported_windows.go):
+// runFormationApply refuses ahead of the mode/resume planner, so both apply-through-CLI
+// mode tests here only exercise the planner on unix. Windows coverage is the
+// "formation apply" refusal row in unsupported_windows_test.go; formation save/list/show/
+// rm/bootstrap are live on windows and covered by the untagged formation tests.
+
 package main
 
 import (

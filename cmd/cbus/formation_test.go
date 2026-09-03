@@ -259,13 +259,8 @@ func TestFormationVerbErrors(t *testing.T) {
 	}{
 		{"no subverb", []string{}},
 		{"unknown subverb", []string{"frobnicate"}},
-		{"apply with no name", []string{"apply"}},
-		{"apply trailing junk", []string{"apply", "a", "b"}},
-		{"apply unknown flag", []string{"apply", "x", "--bogus"}},
-		{"apply bad wait", []string{"apply", "x", "--wait", "soon"}},
-		{"apply negative wait", []string{"apply", "x", "--wait", "-5s"}},
-		{"apply empty only", []string{"apply", "x", "--only", ","}},
-		{"apply missing formation", []string{"apply", "ghost"}},
+		// apply arg-error rows are windows-refused and split to TestFormationVerbErrorsApply
+		// (formation_apply_unix_test.go); the live subverbs below stay cross-platform.
 		{"bootstrap with no args", []string{"bootstrap"}},
 		{"bootstrap with no alias", []string{"bootstrap", "roles"}},
 		{"bootstrap trailing junk", []string{"bootstrap", "roles", "coder", "junk"}},
@@ -335,46 +330,6 @@ func TestFormationDispatch(t *testing.T) {
 	}
 }
 
-// TestFormationApplyVerbRefusesUnjoined: apply briefs peers to answer THIS session,
-// so it must be a peer first. The error has to name the join, not just complain.
-func TestFormationApplyVerbRefusesUnjoined(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-outsider")
-	saveFixture(t, dir, "roles", fixtureRoles())
-	if rc := runFormation([]string{"apply", "roles"}); rc == 0 {
-		t.Error("apply from a session that is not on the channel must fail")
-	}
-}
-
-// TestFormationApplyDryRunVerb: the read-only path through the real CLI. It must
-// launch nothing, so it is safe to run anywhere — including here.
-func TestFormationApplyDryRunVerb(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
-	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
-	saveFixture(t, dir, "roles", fixtureRoles())
-
-	out := captureStdout(t, func() {
-		if rc := runFormation([]string{"apply", "roles", "--dry-run", "--brief", "ship it"}); rc != 0 {
-			t.Fatalf("rc=%d", rc)
-		}
-	})
-	for _, want := range []string{"nothing was launched", "orchestrator", "present", "coder",
-		"re-run without --dry-run"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("dry-run output missing %q:\n%s", want, out)
-		}
-	}
-	// the applier is a peer of this formation and is running apply: never launched
-	if !strings.Contains(out, "running apply") {
-		t.Errorf("the applier should be reported as present because it IS apply:\n%s", out)
-	}
-}
-
 // TestFormationBootstrapVerb: prints one peer's first turn and nothing else, so it
 // can be piped straight into a paste.
 func TestFormationBootstrapVerb(t *testing.T) {
@@ -398,54 +353,6 @@ func TestFormationBootstrapVerb(t *testing.T) {
 	// an unknown peer names the real ones rather than just failing
 	if rc := runFormation([]string{"bootstrap", "roles", "nosuch"}); rc == 0 {
 		t.Error("unknown alias must fail")
-	}
-}
-
-// cmdRecForker records launches so an apply driven through the CLI can be inspected
-// without opening a terminal.
-type cmdRecForker struct{ specs []client.ForkSpec }
-
-func (f *cmdRecForker) Fork(s client.ForkSpec) (string, error) {
-	f.specs = append(f.specs, s)
-	return "", nil
-}
-
-// TestFormationApplyBriefThroughCLI is the reviewer's user's-door requirement for
-// D17: the brief must reach a rendered kickoff through runFormationApply itself, not
-// only through a client-level shim. It drives the real CLI verb with --brief and a
-// recording forker, then reads the delivered kickoff.
-func TestFormationApplyBriefThroughCLI(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CBUS_DIR", dir)
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
-	plantMeta(t, dir, "roles", "orchestrator", "sid-orch") // the applier, present
-	saveFixture(t, dir, "roles", fixtureRoles())
-
-	rec := &cmdRecForker{}
-	prev := applyForker
-	applyForker = rec
-	defer func() { applyForker = prev }()
-
-	// --wait 0 so the CLI returns without polling for an answer the recorder can't give
-	out := captureStdout(t, func() {
-		if rc := runFormation([]string{"apply", "roles", "--brief", "SHIP FORMATIONS V1", "--wait", "0"}); rc != 0 {
-			t.Fatalf("rc=%d", rc)
-		}
-	})
-	if len(rec.specs) == 0 {
-		t.Fatalf("apply launched nothing through the CLI:\n%s", out)
-	}
-	found := false
-	for _, s := range rec.specs {
-		prompt := s.Argv[len(s.Argv)-1]
-		if strings.Contains(prompt, "--- the effort ---") && strings.Contains(prompt, "SHIP FORMATIONS V1") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("the --brief text did not reach any rendered kickoff through the CLI path")
 	}
 }
 

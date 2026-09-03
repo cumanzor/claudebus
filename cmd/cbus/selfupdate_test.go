@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,11 @@ func fixtureBinary(t *testing.T, dir, versionLine string) string {
 // REFUSED, and only an exact match passes — the gate that stands between a bad
 // download and the swap.
 func TestVerifyDownloadedGate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the good fixture is a #!/bin/sh script, unrunnable on windows, so verifyDownloaded's " +
+			"run-check cannot pass a valid binary here; successor: a Go self-exec or windows-native " +
+			"fixture preserving match/mismatch/unrunnable (cbus-que.11)")
+	}
 	dir := t.TempDir()
 
 	good := fixtureBinary(t, dir, "cbus-go v0.3.0")
