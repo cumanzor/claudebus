@@ -73,7 +73,9 @@ func waitForMarker(t *testing.T, path string, within time.Duration) {
 }
 
 // tryLockBounded runs the single non-blocking attempt under a timer, so a blocking-lock
-// mutation reds the timer as its own outcome instead of wedging the whole binary.
+// mutation reds the 50ms timer as its own outcome. Its caller MUST NOT close the fd on the
+// timed-out branch: the goroutine is still blocked in the lock syscall and os.File.Close
+// waits on that in-flight call, which would wedge the test's own teardown.
 func tryLockBounded(f *os.File, bound time.Duration) (err error, timedOut bool) {
 	done := make(chan error, 1)
 	go func() { done <- tryLockExclusive(f) }()
@@ -88,8 +90,9 @@ func tryLockBounded(f *os.File, bound time.Duration) (err error, timedOut bool) 
 // TestMintLockGate4Exclusion: while a second process holds the lock, this process's single
 // tryLockExclusive must return errLockContended (exclusion) IMMEDIATELY (non-blocking), and
 // the three outcomes stay distinct — acquired(nil), contended(errLockContended), other-error
-// — with the timer as a fourth. The 50ms bound is the logos-measured basis (25x the ~2ms
-// default-timer tick); no timeBeginPeriod anywhere in this process.
+// — with the timer as a fourth. The 50ms bound generously separates an immediate return
+// (sub-millisecond) from a block that waits on the holder; it does not depend on the
+// platform timer tick.
 func TestMintLockGate4Exclusion(t *testing.T) {
 	setupStore(t)
 	const ch = "gate4x"
@@ -102,14 +105,18 @@ func TestMintLockGate4Exclusion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("contender could not open the mint file: %v", err)
 	}
-	defer f.Close()
 
 	lockErr, timedOut := tryLockBounded(f, 50*time.Millisecond)
-	switch {
-	case timedOut:
+	if timedOut {
+		// deliberately DO NOT close f: the leaked tryLockBounded goroutine is still blocked
+		// in the lock syscall on this fd, and os.File.Close waits on that in-flight call,
+		// which would wedge this test's own teardown. Leak it; the failing process exits.
 		t.Fatalf("NON-BLOCKING failed: contender BLOCKED past 50ms while the holder held " +
 			"(outcome=blocked/timer); want immediate errLockContended " +
 			"[outcomes: acquired(nil) / contended(errLockContended) / other-error / blocked(timer)]")
+	}
+	defer f.Close() // the attempt returned, so the goroutine is done and Close is safe
+	switch {
 	case lockErr == nil:
 		t.Fatalf("EXCLUSION failed: contender ACQUIRED the lock (outcome=acquired/nil) while another " +
 			"process held it [outcomes: acquired(nil) / contended(errLockContended) / other-error / blocked(timer)]")
