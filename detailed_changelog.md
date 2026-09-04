@@ -377,6 +377,78 @@ siblings and wedged the whole cmd/cbus windows test binary, masking an eighth fa
 - Not run on logos as part of this entry -- C1(1) fixes the mechanism; the close
   matrix's own logos pass belongs to C1(2)'s report.
 
+## [2026-08-18 16:44:05 UTC] [Store/Multi-harness] per-peer harness in meta.json
+
+[Attempt #1] Uncommitted on windows-port at time of writing. 2 files changed (+18/-1)
+plus 1 new test file. Tracked as `cbus-6ij.8` under the multi-harness epic `cbus-6ij`,
+closed on landing. Not reviewed by a formation gate: authored directly on Carlos's
+instruction during an investigation session.
+
+[Motivating problem]
+The session had been reasoning about whether to hand local delivery to the harness's
+own cross-session `SendMessage` and keep cbus for everything else, and concluded that
+any such choice has to be per peer rather than a global env var, because a mixed
+channel (one claude seat, one codex seat) is the whole point of `cbus-6ij`. The claim
+made at the time was that cbus had no harness identity at all and would need one
+built. That was wrong: `HarnessName()` at `ledger.go:476` already walks the process
+ancestry for claude/codex/grok/opencode and never guesses, and the ledger already
+records it on join and rebind. What was actually missing is that `meta.json` -- the
+per-peer record every consumer reads -- did not carry it, so the identity existed only
+in the event log and no peer-level decision could reach it.
+
+[Files Changed]
+- `internal/client/store.go` -- `peerMeta.Harness` (`harness`, omitempty, following the
+  Profile/Origin/Model precedent so a pre-harness meta rewrites byte-identically), set
+  at the Join meta-write site alongside `Profile: currentProfile()`. Deliberately NOT
+  set at the `ReserveAlias` write site: `HarnessName()` reads the CALLER's ancestry, so
+  the reserving parent would stamp ITS harness onto a child that has not booted. That
+  is the rule the ledger's spawn event already encodes by zeroing `ev.Cwd, ev.Harness,
+  ev.Pid`, and the same reason `Profile` is absent from a reservation. Also adds the
+  `harnessNameFn = HarnessName` seam.
+- `internal/client/liveness.go` -- `PeerMeta.Harness` on the public read shape plus
+  `Harness: rawStr(raw["harness"])` in `ReadPeerMeta`. `peerMeta` and `PeerMeta` are
+  separate structs (write shape vs read shape, the latter built field-by-field from a
+  raw map), so a write-side-only change would have been invisible to every consumer.
+- `internal/client/store_harness_test.go` (new) -- TestJoinStampsHarness,
+  TestReserveDoesNotStampHarness, TestRenamePreservesHarness,
+  TestReadPeerMetaSurfacesHarness.
+
+[Why the seam exists]
+A test binary's parent is `go test`, so `HarnessName()` returns "" under test. An
+assertion that join stamps the harness would therefore pass whether or not join stamps
+anything -- vacuous from birth, the shape already recorded for the all-zero-pair guard
+in cbus-que M1. `harnessNameFn` lets a test supply an ancestry it cannot otherwise
+have. `harnessWalk` itself keeps its existing direct fixture tests in
+`procwalk_test.go`; the seam is only over the non-injectable wrapper.
+
+[Possible Ripple Effects]
+- Both meta rewriters unmarshal into `peerMeta` and re-marshal, so the new field
+  round-trips automatically: the rebind write at `follow.go:172` and `renameMeta` at
+  `store.go`. TestRenamePreservesHarness pins the rename half, which is the hazard the
+  existing `listenerStart` comment already warns about ("EVERY rewriter must carry this
+  field").
+- omitempty means an existing meta with no harness rewrites byte-identically, so the
+  bash-era parity domain is untouched and an absent field reads as unknown rather than
+  as "no harness".
+- Formation save captures model and profile but not yet harness. A restore therefore
+  still cannot relaunch a codex seat as codex on harness evidence alone. Left alone
+  deliberately: that is a formation-envelope schema change and wants its own decision.
+- No consumer reads `Harness` yet, so behaviour is unchanged at every verb. This is
+  groundwork only.
+
+[Testing Notes]
+- `go test ./internal/client/ -run Harness -v` -- 4 new tests pass alongside the
+  existing `harnessWalk` fixture table.
+- Mutation-checked, both design rules, each red on its aimed assertion:
+  removing `Harness: harnessNameFn()` from the join site reds TestJoinStampsHarness
+  (`harness = "", want codex`) and TestRenamePreservesHarness; adding
+  `Harness: harnessNameFn()` to the `ReserveAlias` write reds
+  TestReserveDoesNotStampHarness (`reservation stamped harness = "codex"`).
+- `go test ./...` green across all 7 packages with tests. `gofmt -l` clean on
+  `internal/client/` and `cmd/`.
+- Cross-platform gate NOT run for this change (no process-state or path code touched;
+  the ancestry walk itself is unchanged and already platform-seamed).
+
 ## [2026-08-12 00:24:05 UTC] [Merge/Windows] windows-port reconciled with main (v0.9.0-v0.9.3)
 
 [Attempt #1] `d64b038` (full `d64b038` merge commit, second parent `b5dab23` = main tip).
