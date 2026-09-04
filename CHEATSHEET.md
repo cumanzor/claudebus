@@ -161,6 +161,32 @@ cbus formation rm myeffort                          # delete (starters: use git 
   with `--channel <effort>`, no setup required.
 - `/bus-formation <verb> ...` wraps all of the above as a slash command.
 
+## Rearrange the layout (tmux only)
+
+Peers that are ALREADY RUNNING can be moved between panes and windows. iTerm2 cannot
+do this (no AppleScript verb moves a live session between a tab and a split), so a
+formation's shape is frozen at spawn there. tmux has `join-pane`/`break-pane`, so it
+is not.
+
+```sh
+/bus-layout one column with orchestrator, the other coder over reviewer
+#  → cbus arrange 'orchestrator | (coder / reviewer)'
+
+cbus arrange 'orchestrator:30% | (coder / reviewer)'
+#   |  columns, left to right          ()  group
+#   /  rows, top to bottom (binds tighter)   alias:30%  pin a width/height
+
+cbus arrange '<spec>' --dry-run   # print the tmux calls, change nothing
+cbus arrange '<spec>' --channel <ch>   # peers outside this session's channel
+cbus scatter [channel]            # every peer back to its own window, named for it
+cbus focus <channel>/<alias>      # select a peer, split or window alike
+```
+
+Nothing is launched and nothing is closed: every alias must already name a live peer,
+and each may appear once. The layout is built in the window of the FIRST alias in the
+spec, so lead with the peer whose window should host it. `cbus scatter` undoes an
+arrange, which makes trying one cheap.
+
 ## Install & update
 
 ```sh

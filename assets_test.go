@@ -19,7 +19,7 @@ import (
 //     not prove the binary's own copies match — this compares the served content.
 func TestEmbedCountAndSourceMatch(t *testing.T) {
 	assertEmbed(t, Commands, "commands", []string{
-		"bus-branch.md", "bus-formation.md", "bus-join.md", "bus-rename.md", "bus-spawn.md",
+		"bus-branch.md", "bus-formation.md", "bus-join.md", "bus-layout.md", "bus-rename.md", "bus-spawn.md",
 	})
 	assertEmbed(t, Roles, "roles", []string{
 		"coder.md", "documenter.md", "orchestrator.md", "reviewer.md",

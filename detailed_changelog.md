@@ -377,6 +377,397 @@ siblings and wedged the whole cmd/cbus windows test binary, masking an eighth fa
 - Not run on logos as part of this entry -- C1(1) fixes the mechanism; the close
   matrix's own logos pass belongs to C1(2)'s report.
 
+## [2026-08-21 19:35:23 UTC] [Client/Layout] the self-pane fix at the right layer, and scatter's exit code
+
+[Attempt #2] `89ee4ab` on `fix/selfpane-all-paths` off main (`4e4fa17`). 3 files.
+Attempt #1 was `11b97fa` (v0.10.1), which fixed the symptom in one of three paths.
+
+[Motivating problem]
+Immediately after releasing v0.10.1 and selfupdating both machines, the fix was
+re-tested through the INSTALLED binary instead of being assumed good. Two commands
+that should agree did not:
+
+    cbus arrange 'orchestrator' --dry-run   -> exit 0
+    cbus focus layouttest/orchestrator      -> "has no recorded pid"
+
+`selfPane` had been added to `ResolvePeerPanes`. Only `arrange` goes through that
+wrapper. `runFocus` and `runScatter` call `PeerPane` directly, so neither saw it. The
+scatter case is the one with teeth: an unarmed caller sharing a window is reported
+"skipped" and never broken out, so scatter silently fails to do its job for the one
+peer most likely to be running the command.
+
+The lesson is about where a fix goes, not what it does. The behaviour was right and
+the layer was wrong, and a test asserting the behaviour through the wrapper passed
+while two of three verbs stayed broken.
+
+[Files Changed]
+- `internal/client/layout.go` `PeerPane` — the `selfPane` short-circuit moved here from
+  `ResolvePeerPanes`, at the top, before the meta read. Every verb reaches `PeerPane`;
+  only `arrange` reaches the wrapper.
+- `internal/client/layout.go` `ResolvePeerPanes` — the duplicate short-circuit removed.
+- `cmd/cbus/layout.go` `runScatter` — counts `resolved` alongside `broke` and exits 1
+  only when `resolved == 0`. Previously `broke == 0` meant failure, so a channel whose
+  peers already each had a window (the definition of scattered) exited 1. The verb's
+  own comment calls it idempotent; the exit code disagreed.
+- `internal/client/layout_test.go` — `TestPeerPaneResolvesSelfBeforeMeta`, asserting
+  through `PeerPane` directly rather than the wrapper. The existing `selfPane` tests
+  were not wrong, they just could not see this: they tested the function, and the
+  defect was in who called it.
+
+[Possible Ripple Effects]
+- `PeerPane` is now non-pure with respect to the environment for one specific alias
+  (this session's own registration in `ch`). Bounded by the `ResolveSelf()` match, so it
+  can only ever apply to an alias whose meta records THIS session id, and by the live
+  pane-set validation carried over from attempt #1.
+- `scatter`'s exit code changed for a case that previously reported failure. Anything
+  scripted against `scatter` returning non-zero for "nothing moved" would now see 0.
+  Nothing in this repo does; the verb is a day old.
+
+[Testing Notes]
+- Full suite green, gofmt clean.
+- Mutation check on the layer: deleting the `selfPane` call from `PeerPane` fails
+  `TestPeerPaneResolvesSelfBeforeMeta` on the aimed assertion, with the never-armed
+  message. Reverted, green.
+- Live through the built binary on the real channel, all three verbs against an
+  unarmed caller: `arrange 'orchestrator'` exit 0, `focus` printing "focused %0",
+  `scatter` printing "already its own window" and exiting 0 (it exited 1 before).
+- Process note worth keeping: v0.10.1 was released, both machines selfupdated, and
+  THEN the fix was exercised through the installed binary. That last step is what
+  found this. Verifying a release by re-running the tests that passed pre-merge would
+  have found nothing, since the tests were the thing that was incomplete.
+- Related process note from the same session: `cbus join` prunes dead peers in the
+  channel first, and an unarmed peer reads as dead, so seeding a throwaway peer to test
+  an error path pruned the orchestrator registration and made the first regression
+  attempt inconclusive. Pre-existing behaviour, not introduced here, but it means a
+  joined-and-never-armed peer is fragile against any subsequent join in its channel.
+
+## [2026-08-21 17:42:57 UTC] [Client/Layout] the caller's own pane, and the unarmed-is-not-dead distinction
+
+[Attempt #1] `11b97fa` on `fix/layout-self-pane` off main (`8e35cc4`). 2 files
+(`internal/client/layout.go`, `internal/client/layout_test.go`). v0.10.0 ships the
+defect; this is the follow-up.
+
+[Motivating problem]
+The very first live use of `cbus arrange` against a real formation refused, and the
+refusal was two false statements in one line:
+
+    cbus: orchestrator is not running; ghost is not running
+
+`orchestrator` was THIS session, alive, running the command. `ghost` had joined and
+never armed. Neither was "not running". The demo only proceeded by dropping the
+orchestrator out of the spec, which is precisely the case the verb exists for: you
+arrange a formation from inside it.
+
+Root cause is in the store's shape, not in tmux. `Join` writes `ownerPid: null` AND
+`listenerPid: null` (store.go), and both are stamped only when a listener arms. So a
+joined-but-unarmed peer has NOTHING for the meta -> pid -> tty chain to start from,
+and the code collapsed "no pid recorded" into the same branch as "pid recorded and
+dead". Confirmed on the live store: orchestrator's meta had both fields null while
+coder's (armed) had `ownerPid: 77071, listenerPid: 79483`.
+
+[Files Changed]
+- `internal/client/layout.go` `PeerPane` — the pidless branch splits three ways.
+  `listenerPid == 0` reports joined-but-never-armed AND what to do (arm its Monitor,
+  or run arrange from that session); a listener pid that resolves to no owner says
+  that instead; `is not running` is now reached only by a recorded pid that fails
+  `pidAlive`/`procZombie`. An error a user acts on has to name the right condition.
+- `internal/client/layout.go` `selfPane` (new) + `ResolvePeerPanes` — the caller's own
+  registration in the target channel resolves from `$TMUX_PANE` directly, skipping the
+  chain. This is the only peer locatable before it arms, and it needed no lookup in the
+  first place.
+- `internal/client/layout.go` `selfPane` validation — `$TMUX_PANE` is INHERITED, so it
+  outlives the pane it names. The value is checked against the live pane set and falls
+  through to the normal chain on any doubt. Trusting it would make it a `-t` landing a
+  join on whatever pane now holds that id, which is the stored-pane-id failure this
+  whole design avoids by resolving live. Reintroducing it via an env var would have
+  been a poor trade.
+- `internal/client/layout_test.go` — 3 tests, on `seedPeer` (the store tests' existing
+  never-armed helper, not a hand-built fixture): the unarmed message, self-resolution
+  plus the negative that it does not hijack another peer's alias, and the stale-env
+  guard over three shapes.
+
+[Possible Ripple Effects]
+- `selfPane` runs BEFORE `PeerPane` for every alias, so a session registered under an
+  alias in the target channel now resolves to its own pane even if the meta disagrees.
+  Bounded by the `ResolveSelf()` match: it only ever applies to an alias whose meta
+  records THIS session id.
+- Outside tmux `$TMUX_PANE` is unset and `selfPane` returns "" immediately, so the
+  iTerm2 and no-tmux paths are unchanged.
+- The new messages are longer than the one they replace. Deliberate: the old one was
+  short and wrong, and the fix a user needs (arm the Monitor) is not guessable.
+
+[Testing Notes]
+- Full suite green; `gofmt` clean.
+- Mutation check on the stale-env guard. First attempt replaced the `if !live` block
+  with nothing and did not COMPILE (`declared and not used: live`), which is not
+  evidence — a mutant that never runs proves nothing. Redone as `_ = live`, which
+  compiles and skips the guard: `TestSelfPaneRejectsStaleEnv` then fails on the aimed
+  assertion, `selfPane returned "%99", want ""`. Reverted, green.
+- Verified live before and after on a real 3-peer tmux formation (`layouttest`:
+  orchestrator + coder + reviewer, the latter two spawned with `target=tmux` so each
+  got its own window). Before: refusal with the two false claims. After: dry-run
+  planned `join-pane -d -h -s %1 -t %0` then `join-pane -d -v -s %2 -t %1`, and the
+  real run reported "arranged 3 panes in 3 steps" producing `%0 0,0 34x67` (30% of
+  116), `%1 35,0 81x33`, `%2 35,34 81x33` in ONE window, from three.
+- The `arrange 'coder / reviewer'` case worked before the fix and still does, which is
+  why the defect survived the original review: every test and every smoke used peers
+  that had already armed. The caller-includes-itself case is the one a real user hits
+  first, and no test covered it.
+
+## [2026-08-21 05:05:37 UTC] [Client/Layout] arrange/scatter/focus — post-spawn pane layout for tmux peers
+
+[Attempt #1] `2518155` on `feat/tmux-layout`, a worktree off `main` (a4243b4) so the
+in-flight windows-port work in the primary tree stays put. 10 files, +1283/-2: 5 new
+(2 source, 2 test, 1 skill), 5 touched (dispatch, usage, embed expectation, and the
+two docs that enumerate verbs). Merged to main as `8e35cc4` (PR #4, merge commit, not
+squashed — the changelog commit stays separable from the code commit) and **released
+as v0.10.0**. Minor rather than patch by this repo's own precedent: features take the
+minor (v0.1.0 formations, v0.2.0 compaction notices, v0.3.0 chain-split), fixes and
+pins take the patch (v0.9.1, v0.9.4). Three new user-facing verbs is a feature.
+
+[Motivating problem]
+`pane.go` PLACES a peer at birth and that is the end of it. On iTerm2 there is no
+verb to move a running session between a tab and a split — AppleScript has no
+join/break — so a formation's layout is decided at spawn time and lives with it. tmux
+has `join-pane`/`break-pane`, which makes the layout mutable AFTER the peers exist:
+the same pane id keeps working whether it is currently a split or a window of its
+own. That is the one place the tmux backend can do something the iTerm2 backend
+cannot, and nothing was built on it.
+
+The trigger question was whether a peer -> pane mapping needed a new field in
+`meta.json` stamped at join, alongside `profile` and the in-flight `harness`. It does
+not. `sweepSurface` (close.go:152) has resolved a peer to its tmux pane by tty since
+the close verb shipped; hoisting that chain is strictly better than storing a pane id,
+because pane ids reset to `%0` on a tmux server restart and a stored one could then
+name a live pane belonging to someone else.
+
+[Files Changed]
+- `internal/client/layout.go` (new, 433) — `ParseLayout` (recursive descent over the
+  pane-tree grammar), `PlanLayout` (tree + alias->pane map -> ordered `[]LayoutOp`,
+  pure), `RunLayoutOps`, `PeerPane` / `ResolvePeerPanes`, `TmuxPanesByTTY` /
+  `TmuxPaneWindows`, `parsePaneTable`. Grammar: `expr := row ('|' row)*`,
+  `row := term ('/' term)*`, `term := alias | '(' expr ')'`, each optionally `:N` /
+  `:N%`, so `/` binds tighter and `a | b / c` is a column beside a stack. Separators
+  are all outside `core.ValidName`'s charset, so no tokenizer state is needed.
+- `internal/client/layout.go:~100` — the placement invariant, breadth-then-depth: at
+  each node every sibling is joined against the previous sibling while it is STILL A
+  SINGLE PANE, and only then is each child's subtree built. Depth-first would split a
+  child that had already grown sub-panes, landing the next sibling one level too deep
+  (a two-by-two comes out three deep). Each subtree is represented by its first
+  leaf's pane, which is the pane owning that region before the subtree exists.
+- `internal/client/layout.go` sizing pass — a SECOND walk after every join, because a
+  resize against a region still growing sizes the wrong geometry. The axis comes from
+  the PARENT (`-x` under a columns node, `-y` under a rows node); a size on the root
+  is dropped, not errored on, since the root has no sibling to take space from.
+- `internal/client/layout.go` `PeerPane` — meta -> `OwnerPid` (with ClosePeer's
+  listener fallback AND its `listenerIdentityHolds` test, for the same reason: a
+  recycled listener pid must not donate a stranger's process, which here would drag an
+  unrelated session's pane into someone's layout) -> `ttyOf` -> `/dev/`+tty into the
+  pane table. `ResolvePeerPanes` reports ALL failures at once rather than the first.
+- `internal/client/layout.go` `tmuxRun` seam + `defaultTmuxRun` — indirected only so a
+  test can drive the partial-failure and best-effort paths, which are about what
+  happens AFTER a tmux call fails and cannot be asked of a real tmux on cue.
+- `cmd/cbus/layout.go` (new, 247) — `runArrange`, `runScatter`, `runFocus`,
+  `parseLayoutArgs`, `layoutChannel`. Own argv scanner rather than `splitVerbArgs`,
+  which stops at the first positional and would swallow a trailing `--dry-run` as the
+  spec or the channel and run for real. Layout is built in the FIRST alias's window.
+- `cmd/cbus/main.go:83-88` — the three cases in `run()`'s switch, after `close`.
+- `cmd/cbus/usage.go:166-180` — the help block, carrying the grammar BY EXAMPLE
+  (`orchestrator | (coder / reviewer)`) and `alias:30%`; neither is guessable.
+- `commands/bus-layout.md` (new, 56) — the skill that translates English into a spec
+  and picks the verb. The binary never parses prose: a layout stays reproducible and
+  hand-typable, and the model does the part it is actually good at.
+- `assets_test.go:22` — `bus-layout.md` added to the embed-count expectation, which is
+  a hardcoded literal by design (adding a command without updating it fails the build).
+- `CHEATSHEET.md:164-189` — a "Rearrange the layout (tmux only)" section above
+  "Install & update", with the grammar as an annotated example.
+- `docs/architecture/command-reference.md:1448-1502` — the formal section, placed at
+  the end of §9 (forking & spawning, where the `pane` target is documented) rather than
+  as a new §10, which would have renumbered six sections and every TOC anchor. The
+  dispatch table's Go-native-verbs note (`:179`) gains the three verbs. Both docs
+  enumerate the verb set, so a release without them would have shipped drift.
+- `internal/client/layout_test.go` (new, 333) + `cmd/cbus/layout_test.go` (new, 110) —
+  18 tests.
+
+[Possible Ripple Effects]
+- Nothing existing is called differently. `pane.go`, `close.go` and formation apply are
+  untouched; the new code only READS `ReadPeerMeta`, `ttyOf`, `pidAlive`, `procZombie`,
+  `ownerFromPid`, `listenerIdentityHolds`, `validTmuxPaneID`, `cmdStderr`.
+- Merge collision with `windows-port`: that branch splits `close.go` into
+  `close_unix.go` / `close_windows.go`, and `layout.go` calls `ttyOf` + `procZombie`
+  from it. On the port `layout.go` needs the same `darwin || linux` tag and a windows
+  stub in the `unsupported_windows.go` shape. Written on main deliberately — the
+  feature is unix-only and has no business on the port branch.
+- `cbus scatter` renames the window it leaves behind when a peer is already alone in
+  one, so scatter's result is uniform (one named window per peer). It will overwrite a
+  window name the user set by hand.
+- `arrange` moves panes between WINDOWS, so a peer's window can disappear (tmux
+  destroys a window whose last pane is joined elsewhere). Verified: four windows
+  collapse to one, and `scatter` restores four.
+- A half-applied arrange is possible by construction (joins are sequential tmux calls).
+  It fails loudly with an applied count rather than pressing on, and re-running the
+  same command finishes it. Sizing failures are best-effort and skipped, matching
+  `forkTmuxPane`'s resize — but they are NOT counted as applied.
+
+[Testing Notes]
+- Full suite green (`go test ./...`): claudebus, cmd/cbus, internal/client,
+  internal/core, relay x3.
+- Cross-platform compile gate: `GOOS=linux GOARCH=amd64` and `arm64` both build clean.
+  Windows not gated — `close.go` on main does not build there either (that is what the
+  port branch is for).
+- Mutation check on the placement invariant: rewriting `PlanLayout`'s walk to descend
+  before completing each level turns
+  `[-h %3 -t %1, -v %2 -t %1, -v %4 -t %3]` into `[-v %2 -t %1, -h %3 -t %1, ...]`.
+  `TestPlanLayoutBuildsLevelBeforeDescending` fails on the aimed assertion (the order
+  comparison, layout_test.go:164) and it is the ONLY test that fails — the marquee case
+  passes under the mutant, which is why the nested test exists separately. Reverted,
+  green again. The op SET is identical either way; ORDER is the entire assertion.
+- Field smoke against a real tmux server (isolated `-L cbuslayouttest` socket, never
+  the user's): four single-pane windows on a 200x50 terminal, plan for
+  `(a / b) | (c / d)` applied by hand -> `%0 0,0 100x25`, `%1 0,26 100x24`,
+  `%2 101,0 99x25`, `%3 101,26 99x24`, one window left. Then
+  `orchestrator:30% | (coder / reviewer)` -> `%0 0,0 60x50` (30% of 200), `%1 61,0
+  139x25`, `%2 61,26 139x24`. Then break-pane on all three -> three windows. The
+  planner's geometry is what tmux actually produces.
+- The tty->pane join verified with real processes, running the LITERAL commands the
+  code runs: `ps -o tty= -p <pane_pid>` -> `ttys005`, `tmux list-panes -a -F
+  '#{pane_tty} #{pane_id}'` -> `/dev/ttys005 %0`, `/dev/`+tty resolves to `%0`.
+- Release gate, run on the MERGE COMMIT `8e35cc4` rather than on the branch tip: build
+  clean, full suite green (7 packages). A merge can break what both parents passed, so
+  the tag is only as good as a check on the commit it actually names.
+- Release-artifact check before publishing, through the built `dist/cbus-darwin-arm64`
+  (not the dev binary): `--version` prints `cbus-go v0.10.0` (the ldflags stamp landed),
+  `--help` carries the arrange block, and `install-commands --path <tmp>` writes 6
+  files including `bus-layout.md` byte-identical to `commands/bus-layout.md` (`diff`
+  clean). go:embed snapshots at BUILD time, so a repo-vs-repo comparison would not have
+  proven the shipped binary serves the new skill — only installing from the release
+  artifact does.
+- End to end through the built binary, on an isolated socket (`TMUX_TMPDIR` set for
+  BOTH tmux and cbus, since cbus shells out to plain `tmux` and a `-L` socket would
+  not be shared — the first attempt failed exactly there, and failed with a legible
+  "error connecting to /private/tmp/tmux-501/default", which is the right failure).
+  Three panes, three real peers registered by the real `cbus join`: `--dry-run`
+  printed `join-pane -d -h -s %1 -t %0` / `join-pane -d -v -s %2 -t %1`; the real run
+  reported "arranged 3 panes in 3 steps" and produced `%0 0,0 60x50`, `%1 61,0
+  139x25`, `%2 61,26 139x24`; `focus testch/beta` selected `%1`; killing a peer made
+  `arrange` refuse with "gamma is not running" and `scatter` report "alpha: broken
+  out / beta: already its own window / gamma: skipped (gamma is not running)".
+- Residual, and it is narrow: the smoke's peers were `sleep` processes. `cbus join`
+  wrote each meta, but it records `ownerPid: null` when the caller has no claude
+  ancestor, so that ONE field was patched to the pane's pid. What is therefore
+  untested is only the assumption that a live claude peer's `ownerPid` names a process
+  whose controlling tty is its pane's — the same assumption `sweepSurface` has shipped
+  on since the close verb. Worth one look on a real formation before release.
+
+## [2026-08-20 22:05:45 UTC] [Docs/README] motivation paragraph on the coordination comparison
+
+[Attempt #1] `b3869a5` on main (off `4c11834`). 1 file changed (README.md, +6).
+Docs only.
+
+[Motivating problem]
+`dc97b44` gave the README an accurate comparison of Subagent / Agent Teams /
+SendMessage / Workflow / cbus, but it is entirely a where-each-one-lands table. It
+never says what actually went wrong often enough to justify building and keeping a
+bus. The prompting case: a native Agent Teams run printed "Teammate @fact-check
+finished" for a fact-checker that had gone idle without delivering its report, so the
+lead had to ask it to send the findings and to state plainly which claims it never
+got to rather than reconstructing verdicts after the fact. The report existed; it
+lived in a place nobody can open.
+
+[Files Changed]
+- `README.md:84-88` — 5-line paragraph directly under the section heading, above the
+  "Claude Code has cross-session messaging of its own since 2.1.224" paragraph so the
+  colon still introduces the table. States the recurring failure (finished-without-
+  delivering, recovery only by asking an agent what it remembers) and the contrast (a
+  peer with its own terminal and its own file fails visibly: scroll the pane, `cat`
+  the inbox). Deliberately claims no capability the table does not already carry.
+
+[Possible Ripple Effects]
+- Authored off `origin/main` rather than the checked-out `windows-port`, which is four
+  docs commits behind and does not contain this section at all. Reaches the port at the
+  next main reconcile; a version written on the port would have collided here.
+- An earlier draft of this content was written on `windows-port` and reverted: it
+  argued from "SendMessage can only reach what you forked", which `dc97b44` measured
+  as false since 2.1.224. Any future motivation copy has to survive that retirement —
+  the argument is openness and visible failure, not a closed boundary.
+
+[Testing Notes]
+- Rendered structure checked by eye: heading, motivation, intro paragraph ending in a
+  colon, table. No link, anchor, or table cell touched.
+- No build or test run: documentation-only change.
+
+## [2026-08-18 23:56:54 UTC] [Docs/Cross-session] retire the closed-boundary rationale
+
+[Attempt #1] Uncommitted, on branch `worktree-docs-cross-session` off `origin/main`
+(09eaaa7), in a worktree so the unrelated windows-port work stays put. Tracked as
+`cbus-kda`. Docs only: 4 files, no code, no behavior change.
+
+[Motivating problem]
+A session investigating why `@ <sender>` markers had started appearing in cbus panes
+found the markers were not cbus at all: Claude Code shipped cross-session messaging
+in 2.1.224+, and a peer session had used the built-in `SendMessage`. Following that
+back through the repo found four docs asserting the opposite, including the sentence
+this project's stated reason to exist rests on: "A session can only message agents it
+forked itself -- there is no cross-session addressing at all. That closed boundary is
+exactly what claudebus provides." Publishing anything about the comparison without
+fixing these would have made the README disagree with its own linked architecture.
+
+[Files Changed]
+- `README.md` -- new "How this relates to Claude Code's own coordination" section
+  before Docs, with an 8-row table across Subagent / Agent Teams / SendMessage /
+  Workflow / cbus. Every cell was fact-checked by an independent peer against the
+  official docs plus controlled probes; the corrections it forced are listed under
+  Testing Notes. Also fixes the Docs-table blurb for how-it-works.md, which promised
+  "why the built-in teammate mailbox doesn't cover this".
+- `docs/how-it-works.md` -- "Why not the built-in teammate mailbox?" marked superseded
+  2026-08-18. States what the built-ins do now (socket at `/tmp/cc-socks/<pid>.sock`,
+  ListAgents/SendMessage, the hook/Bash-child socket env vars, teammates as separate
+  instances with panes), what still holds (session-scoped flat team roster, Claude-only
+  peers), and what the cbus case rests on instead. The original paragraph is kept
+  verbatim as a dated blockquote rather than deleted.
+- `docs/architecture/overview.md` -- three sites. The vertical/horizontal summary marked
+  superseded with the original probe retained; the "Monitor-tail is the only turn-native
+  answer" line qualified, since hooks now get a session socket (it still only reaches the
+  session owning the hook, which is why the Monitor-tail remains what cbus uses to wake an
+  arbitrary peer); and section 5.2 "The closed mailbox (why this project exists)" retitled
+  to "why this project was built", with an explicit note that the premise expired and the
+  transport decisions below it did not.
+- `docs/prior-art-and-cc-internals.md` -- the section 1 Agent Teams parenthetical and the
+  reverse-engineered-inbox entry both corrected, the landscape "only turn-native answer"
+  line qualified, and a new section 6 "The boundary opened (2026-08-18)" carrying the
+  measured findings with per-claim tags: [M] measured here, [D] doc-derived and not run,
+  [1] single-source.
+
+[Possible Ripple Effects]
+- `CHEATSHEET.md:222-226` was already correct about the ~90-120s silent-WS-drop loss
+  window and is deliberately untouched; the README section was written to agree with it
+  rather than the reverse.
+- The docs now say cbus's differentiation is openness and reach rather than being the only
+  session-to-session path. Any marketing-ish copy written later should not regress to the
+  old framing.
+- `how-it-works.md:17-28` already documents the ~440 bytes/line and ~2800 chars/notification
+  Monitor bounds; the README section cites that budget instead of saying "long messages",
+  so the two agree.
+- Nothing here touches roles/, so the 4x doctrine duplication and its canary are unaffected.
+
+[Testing Notes]
+- `go build ./...` clean and `go test ./...` green across all 7 packages with tests. Docs
+  only, but run because the repo embeds command/role assets.
+- Link and anchor checks: the `#why-not-the-built-in-teammate-mailbox` target exists in
+  how-it-works.md, and the relative paths from docs/architecture/ and docs/ resolve.
+- Fact-check corrections folded in before writing, from an independent peer briefed to
+  refute rather than confirm: `Sendable from a hook or script: no` for SendMessage was
+  FALSE (hooks and Bash children get `CLAUDE_CODE_MESSAGING_SOCKET` and
+  `CLAUDE_CODE_MESSAGING_TOKEN`; confirmed directly in this session's Bash env); a column
+  misalignment put Workflow's "one level" nesting under SendMessage; subagent nesting is 3
+  layers by default and configurable, not unbounded; the teammate-roster quote was
+  presented as exact while altering punctuation and truncating it; Agent Teams pane
+  behavior is configuration-specific rather than the default; and the Store row was wrong
+  in 3 of 5 cells. "cbus nesting is unlimited" softened to no enforced limit.
+- Lifetime claims are from controlled runs: a clean lead exit (`/exit` and SIGTERM both)
+  tears the teammate down and closes its pane; a SIGKILLed lead leaves it running at
+  t+120s. The SIGKILL half is single-source and tagged as such in section 6.
+
 ## [2026-08-18 16:44:05 UTC] [Store/Multi-harness] per-peer harness in meta.json
 
 [Attempt #1] Uncommitted on windows-port at time of writing. 2 files changed (+18/-1)
@@ -448,6 +839,70 @@ have. `harnessWalk` itself keeps its existing direct fixture tests in
   `internal/client/` and `cmd/`.
 - Cross-platform gate NOT run for this change (no process-state or path code touched;
   the ancestry walk itself is unchanged and already platform-seamed).
+
+## [2026-08-13 20:15:00 UTC] [Roles/Commands] opus token pinned to claude-opus-4-8 (temporary)
+
+[Attempt #1] `6920262` on `chore/opus-48-pin` (branched from main at `b5dab23`, kept
+off windows-port on purpose: the port branch is mid-flight and this pin should be
+mergeable/revertable on its own).
+
+[Motivating problem]
+The harness's short alias `opus` now resolves to Opus 5, so every seat whose role
+file or formation envelope said "opus" silently changed model generation. Carlos's
+ruling from live formations: the Fable-5-orchestrator + Opus-4.8-coder pairing
+beats Opus 5, so the token is pinned to the full id `claude-opus-4-8` until
+further notice.
+
+[Files Changed]
+- roles/coder.md:3, roles/orchestrator.md:3 -- `MODEL: opus` -> `MODEL:
+  claude-opus-4-8`. The full id passes roleModel's screen and Spawn's pre-fork
+  gate unchanged (`^[A-Za-z0-9._-]+$`, no leading dash), so it flows to
+  `claude --model claude-opus-4-8` with zero code change.
+- commands/bus-spawn.md, commands/bus-branch.md -- the "valid values today"
+  instruction now names claude-opus-4-8 and tells the skill to pass the full id
+  verbatim when the user says "opus", never bare `opus`.
+- internal/client/role_test.go -- TestLoadRoleRepoToplevel's literal moved from
+  "opus" to "claude-opus-4-8". The expectation is a literal that guards the
+  committed file's ruled value; it moves WITH the ruling, in the same change.
+
+[Live-store edits, outside this commit]
+LoadRole resolves repo-first only when spawning from inside a checkout;
+everywhere else reads $CBUS_DIR/roles, and a formation member's explicit model
+beats the role default. So the pin was also applied by hand at every live layer
+on both machines (2026-08-13):
+- $CBUS_DIR/roles/{coder,orchestrator,tester}.md on the MBP and the NUC
+  (tester is a runtime-only role with no repo copy).
+- Saved formation envelopes: `"model": "opus"` -> `"model": "claude-opus-4-8"`,
+  33 fields across 17 MBP .formations JSONs + 3 fields in the NUC's; every
+  touched file re-parsed as valid JSON, zero `opus` model tokens left.
+- Installed /bus-* skills (~/.claude/commands/bus-{spawn,branch}.md), both
+  machines.
+
+[Possible Ripple Effects]
+- The next `cbus selfupdate` / `install-roles` from a release that does NOT
+  carry this commit restores `MODEL: opus` in $CBUS_DIR/roles and the installed
+  skills. The .formations edits persist (user data, never overwritten by
+  install). Durability requires this commit riding a release; reverting is the
+  same substitution in reverse, with the formations the only fan-out layer.
+- The parked orch-fable re-flip (`25189d1`, branch chore/orch-fable) edits the
+  same orchestrator.md MODEL line; when it lands, fable wins that seat per the
+  concluded eval and the conflict is a one-line resolution.
+- profiles/opus5.md is Opus-5-specific tuning; a claude-opus-4-8 seat has no
+  profile file, which is the documented safe state (profiles/README: absence is
+  safe, the seat runs on its role file alone). Orchestrators following process
+  rule 15 should NOT send opus5.md to a 4.8 seat.
+- formations/dev-trio.json members all defer (`"model": ""`), so the committed
+  starter inherits the pin through the role files with no edit.
+
+[Testing Notes]
+`go build ./...` clean; `go test ./internal/client/ ./cmd/cbus/` green after
+the literal move, including 3x `-count=1` reruns of internal/client (one
+uncaptured red on the first post-checkout run did not reproduce; this diff has
+no timing surface). The roles doctrine canary passes -- the MODEL header sits
+outside the shared doctrine block, whose 4x duplication is untouched. Grep
+verification on both machines' live stores: `MODEL:` histogram reads 3x
+claude-opus-4-8, 1x fable (reviewer), 1x sonnet (documenter); zero
+`"model": "opus"` remaining in .formations.
 
 ## [2026-08-12 00:24:05 UTC] [Merge/Windows] windows-port reconciled with main (v0.9.0-v0.9.3)
 
@@ -6947,7 +7402,6 @@ already burned into the launch argv. Resolution: the PARENT claims the alias fir
   sessions lacking CBUS_SITE_NUC_URL), so a real fork would exercise the old
   binary anyway. Validate child join-reclaim live after the window's redeploy.
 
-
 ## [2026-07-14 04:50:45 UTC] [Port/Go] Generalize relay-host resolution — drop the built-in `nuc`
 
 [Attempt #1]
@@ -7057,7 +7511,6 @@ role-titling (orchestrator spawning "tester2" etc.).
   still pending: cross-compile + scp per the post-cutover doctrine, commands/
   copied by hand.
 
-
 ## [2026-07-14 04:05:15 UTC] [CLI] `--model` on branch/spawn — child sessions on a chosen model
 
 [Attempt #1]
@@ -7095,7 +7548,6 @@ or fresh spawn starts on a specific model (sonnet / opus / fable today).
 - `go test -race -count=1 ./...` green; gofmt clean. Deployed to MBP + NUC
   (cbus-go 1a5821d), skills scp'd to both `~/.claude/commands/`. Smoke: bad model
   `-bad` rejected with no window spawned.
-
 
 ## [2026-07-14 03:20:41 UTC] [Port/Go] New `cbus spawn` + `/bus-spawn` — fresh session joined to a channel
 

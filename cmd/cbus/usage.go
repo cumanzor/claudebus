@@ -163,6 +163,21 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    left to the SessionEnd hook and prune; a peer
                                    that is already gone reports so and succeeds.
                                    --force escalates to SIGKILL after the grace
+  cbus arrange <spec> [--dry-run]  rearrange LIVE peers into a pane tree (tmux
+                                   only — iTerm2 cannot move a running session
+                                   between surfaces). spec: '|' splits columns,
+                                   '/' splits rows and binds tighter, parens
+                                   group, alias:30% pins a size. So
+                                   'orchestrator | (coder / reviewer)' is two
+                                   columns with the right one stacked. Built in
+                                   the FIRST alias's window; --channel <ch> when
+                                   the peers are not in this session's channel
+  cbus scatter [channel] [--dry-run]   arrange's inverse: give every live peer of
+                                   the channel its own window back, named for the
+                                   peer. One that already has a window of its own
+                                   is reported, not an error
+  cbus focus <channel>/<alias>     select the peer's pane wherever it is now —
+                                   a split or a window of its own, same id
 
 remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 

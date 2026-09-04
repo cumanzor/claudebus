@@ -12,7 +12,9 @@ Research date 2026-07-07, comparing file-based `cbus` against the field. The
 landscape splits into three architectures: **file-based mailbox** (our family —
 plain files on a shared filesystem, no daemon), **centralized broker** (a
 long-running HTTP/MCP daemon plus a real index), and **native Agent Teams**
-(Anthropic's own in-process teammate system, covered in §2).
+(Anthropic's own teammate system, covered in §2 — described here as in-process
+because that was the 2026-07 finding; teammates are separate Claude Code
+instances and take their own terminal pane under `teammateMode: tmux`, see §6).
 
 ### ██████████████ (████████████) — closest philosophical match
 
@@ -68,6 +70,11 @@ Message types include `idle`, `permission_request/response`, `plan_approval_*`,
 `shutdown_request`. This account is now **superseded** by the direct internals
 finding in §2 — the reverse-engineering got the on-disk shape right but couldn't
 see that those files are a persistence layer only, not a delivery path.
+
+Superseded again 2026-08-18 (§6): team state on disk is real and readable
+(`~/.claude/teams/<team>/config.json` plus `~/.claude/tasks/`), and current docs
+describe teammate mailbox entries as validated and delivered. "Persistence only"
+was right about the 2026-07 build and is not a safe present-tense claim.
 
 ### ██████████████ (█████████████████) — the heavyweight, ~██ stars
 
@@ -128,8 +135,11 @@ Files for debuggability (every serious file-based effort cites `cat`/`grep`/
 treated as a trust boundary rather than a security boundary; and **notification
 is the hard problem nobody has solved cleanly** — hooks are cwd-fragile, polling
 (`claude -p`) costs real money, terminal injection (`███ wake`/TIOCSTI) is a
-flagged security risk. claudebus's Monitor-tail delivery (see §3) is the field's
-only turn-native answer with no hooks, no polling, and no injection.
+flagged security risk. claudebus's Monitor-tail delivery (see §3) was the field's
+only turn-native answer with no hooks, no polling, and no injection. As of
+2026-08-18 Claude Code hands hooks and Bash children a session inbox socket
+(§6), which is turn-native too — but it reaches only the session owning the
+hook, so it does not solve waking an arbitrary peer.
 
 ### Where claudebus stands out, and what's worth borrowing
 
@@ -318,3 +328,71 @@ failure mode. This is a direct application of the ███ gap identified in §
   ███████ ███ ██████████ ███ ██████████ █████ ████ ███████ ██ ███ ██████████
   █████████ ███ ██████ ███████ ██████████ ██████ ███████ ███████ ████ ██████
   ██████ █████ ██████
+
+---
+
+## 6. The boundary opened (2026-08-18)
+
+Claude Code shipped cross-session messaging in 2.1.224+, which retires the premise
+§1 and §2 were built on. Measured on 2.1.234/2.1.235, macOS + iTerm2, by this
+session plus two independent peer sessions on the bus, one of which was briefed
+to refute rather than confirm. Tags: **[M]** measured here, **[D]** from official
+docs and not run, **[1]** single-source.
+
+**Cross-session messaging.** Sessions register an inbox socket at
+`/tmp/cc-socks/<pid>.sock`. `ListAgents` enumerates peers; `SendMessage` addresses
+them by name. Inbound messages arrive wrapped as
+`<cross-session-message from="uds:..." from-name="..." from-mode="...">` and render
+as `@ <name>` plus a pointer glyph. **[M]**
+
+Hooks and Bash children receive `CLAUDE_CODE_MESSAGING_SOCKET` and
+`CLAUDE_CODE_MESSAGING_TOKEN` and may post into their own session, so external
+processes are not shut out — only the *tool call* is model-mediated. **[M]**
+
+`cbus spawn --name X` launches `claude --name X` (`spawn.go`), so a spawned peer's
+bus alias is also its harness session name. A session that joins after launch does
+not match. **[M]**
+
+**Agent Teams.** Teammates are separate OS processes despite the internal task kind
+reading `in_process_teammate`; argv carries `--agent-id`, `--agent-name`,
+`--team-name`, `--parent-session-id`. Under `teammateMode: tmux` with iTerm2
+present each gets a real pane (tmux is the fallback backend); the product default
+is in-process, so pane behaviour is configuration-specific. Ancestry runs to the
+terminal, not to the lead's process. **[M / [D] for the default]**
+
+Lifetime is lead-driven, not supervised: a clean lead shutdown (`/exit` and
+SIGTERM both measured) tears the teammate down and closes its pane, while a
+SIGKILLed lead leaves it running and holding the pane, still alive at t+120s.
+**[M, SIGKILL half [1]]**
+
+Teammates are excluded from `ListAgents` but addressable through the team roster —
+the send result reads "sent to X's inbox" with routing sender `team-lead`, versus
+"another Claude session on this machine" for a cross-session peer. One tool, two
+delivery systems. The roster is flat: *"Teammates cannot spawn other teammates —
+the team roster is flat. To spawn a subagent instead, omit the `name` parameter."*
+Teammates may still spawn foreground subagents. **[M]**
+
+Teammate-to-lead reply latency was observed at roughly 24 minutes to a busy lead.
+Teammate silence is not evidence of failure to execute. **[M, [1]]**
+
+**Delivery size.** A 3613-character payload arrived complete over `SendMessage`,
+confirmed twice independently. The same payload over cbus is stored complete in
+`inbox.jsonl` but the Monitor event renders it clipped near 3000 characters with a
+`(truncated)` marker, consistent with the ~440 bytes/line and ~2800 chars/
+notification bounds already recorded in
+[how-it-works.md](how-it-works.md). **[M]**
+
+**What this changes.** Nothing about the transport decisions in §3 and §4, which
+were sound when made and still work. What it changes is the argument: cbus is no
+longer the only thing that crosses a session boundary. Its case rests on the
+boundary being *open* — a file and a CLI usable with no socket handshake or token,
+non-Claude peers (Codex today, protocol harness-open), a relay you own and can
+inspect, and a mailbox and ledger readable with `cat` — plus peers that are
+independent sessions rather than a team scoped to one lead.
+
+**What this does not change.** cbus durability is narrower than "the inbox is a
+file" suggests, and that predates this: a send to an armed-then-dead listener is
+refused unless `--force`; forced mail replays on re-arm within the same peer epoch
+via the durable cursor; a full restart re-joins, and join truncates the inbox by
+design. The relay spools for a dark remote peer outside the ~90–120 s silent
+WebSocket drop window recorded in `CHEATSHEET.md`. **[M / [D] for the drop window]**

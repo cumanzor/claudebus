@@ -65,8 +65,20 @@ Design pillars, stated up front in the README and held throughout:
 
 ### Why not the built-in teammate mailbox?
 
-This was empirically probed across three live sessions before building anything (see
-[prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md)):
+**Superseded 2026-08-18** — see [how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox)
+for the current picture. Claude Code has cross-session messaging (2.1.224+): `ListAgents`
+enumerates independent sessions and `SendMessage` addresses them by name over a per-session
+socket, and hooks and Bash children get that socket too. Teammates are separate Claude Code
+instances with their own pane under `teammateMode: tmux`. The vertical/horizontal split below
+no longer describes the product.
+
+What the split correctly captured, and still does: a teammate is reached through a
+session-scoped team roster, that roster is flat, and every peer is a Claude Code session.
+claudebus's distinction is now openness rather than reach — a file and a CLI with no socket
+handshake or token, non-Claude peers, a relay you own, and a readable mailbox and ledger.
+
+The original probe, across three live sessions before building anything (see
+[prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md)), accurate when made:
 
 - **`SendMessage`'s addressable universe is one session's spawn tree, full stop.** There is no
   cross-session namespace.
@@ -75,16 +87,21 @@ This was empirically probed across three live sessions before building anything 
 - A hand-launched `claude` with fully matching flags comes up alive but unreachable — membership
   requires the in-process backend that only a real Agent-tool spawn creates.
 
-Summary: the built-in mailbox is closed **by design**, not merely unarmed. `SendMessage` is
-*vertical* (within one spawn tree); claudebus is *horizontal* (between independent
-sessions/windows/profiles/machines). Complementary, not competing.
+Summary as written then: the built-in mailbox is closed **by design**, not merely unarmed.
+`SendMessage` is *vertical* (within one spawn tree); claudebus is *horizontal* (between
+independent sessions/windows/profiles/machines).
 
 ### Why not hooks, polling, or terminal injection?
 
 The field survey found notification to be "the hard problem nobody has solved cleanly": hooks are
 cwd-fragile, a `claude -p` polling watcher costs real money (a sibling project abandoned theirs),
 and terminal keystroke injection (`amq wake`'s TIOCSTI) is a flagged security risk. The
-Monitor-tail is the only turn-native answer with no hooks, no polling, and no injection.
+Monitor-tail was the only turn-native answer with no hooks, no polling, and no injection.
+
+Qualified 2026-08-18: Claude Code now exports `CLAUDE_CODE_MESSAGING_SOCKET` and
+`CLAUDE_CODE_MESSAGING_TOKEN` to hooks and Bash children, so a hook posting into its own
+session is a supported turn-native path today. It reaches only the session that owns the
+hook, which is why the Monitor-tail is still what cbus uses to wake an arbitrary peer.
 
 ---
 
@@ -330,12 +347,20 @@ blocks the session forever and delivers nothing. This warning is repeated at eve
 model reads — join/rename/branch output, the usage text, the bootstrap prompt, and the slash
 commands.
 
-### 5.2 The closed mailbox (why this project exists)
+### 5.2 The closed mailbox (why this project was built)
 
 The empirical probes of Claude Code's teammate mailbox (§1) are the load-bearing research: the
 on-disk inbox files are persistence-only, the delivery backend is in-process and created only by a
-real Agent-tool spawn. Since the native mailbox is closed by design and vertical-only, horizontal
+real Agent-tool spawn. Since the native mailbox was closed by design and vertical-only, horizontal
 session-to-session messaging needed its own transport built from supported primitives.
+
+That premise expired on 2026-08-18: cross-session `ListAgents`/`SendMessage` shipped in
+2.1.224+, so the harness now addresses independent sessions on its own. The transport
+decisions below are unaffected — they were sound then and the mechanism still works — but
+the *reason to keep* cbus is no longer the absence of an alternative. It is an open
+boundary any process can use without a token, non-Claude peers, a relay you own, and a
+mailbox you can read with `cat`. See §1 and
+[how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox).
 
 ### 5.3 Session-scoped bridge identity
 
