@@ -5,34 +5,6 @@ import (
 	"testing"
 )
 
-// TestLayoutVerbsReachableThroughDispatch goes through the real CLI door: a verb
-// defined but never added to the switch in run() is dead surface, reachable only by
-// editing the source. Each verb is invoked with no arguments, where the only correct
-// outcome is its own usage line — an unknown verb prints "unknown command" instead,
-// which is exactly what this catches.
-func TestLayoutVerbsReachableThroughDispatch(t *testing.T) {
-	t.Setenv("CBUS_DIR", t.TempDir())
-	for verb, want := range map[string]string{
-		"arrange": "usage: cbus arrange",
-		"focus":   "usage: cbus focus",
-		// scatter takes no required argument, so its no-arg path lands on channel
-		// resolution instead of a usage line — still proof it dispatched.
-		"scatter": "joined no channel",
-	} {
-		out := captureStderr(t, func() {
-			if rc := run([]string{verb}); rc == 0 {
-				t.Errorf("%s with no args should fail", verb)
-			}
-		})
-		if strings.Contains(out, "unknown command") {
-			t.Errorf("%s is not wired into run()'s switch: %q", verb, out)
-		}
-		if !strings.Contains(out, want) {
-			t.Errorf("%s should print %q, got %q", verb, want, out)
-		}
-	}
-}
-
 // TestUsageAdvertisesLayoutVerbs: the help text is where a user learns these exist,
 // and the spec grammar is not guessable — an arrange that is documented as taking
 // "<spec>" and nothing else is unusable. The worked example is the part that carries

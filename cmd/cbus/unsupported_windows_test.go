@@ -21,6 +21,9 @@ var refusedVerbs = []struct {
 	{"codex", []string{"codex"}, []string{"codex", "--channel", "ch", "--alias", "cx"}},
 	{"codex-bridge", []string{"codex-bridge"}, []string{"codex-bridge", "ch/al", "--sock", `\\.\pipe\x`}},
 	{"codex-stop-hook", []string{"codex-stop-hook"}, []string{"codex-stop-hook", "--wait", "1s"}},
+	{"arrange", []string{"arrange"}, []string{"arrange", "orchestrator | coder", "--dry-run"}},
+	{"scatter", []string{"scatter"}, []string{"scatter", "dev", "--dry-run"}},
+	{"focus", []string{"focus"}, []string{"focus", "dev/coder"}},
 }
 
 func TestWindowsExcludedVerbsRefuseHonestly(t *testing.T) {
