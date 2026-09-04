@@ -1,5 +1,382 @@
 # Changelog (detailed)
 
+## [2026-09-04 00:04:59 UTC] [Client/Windows] cbus-que.17: sandbox the test home on windows, and stop hiding System32 from the liveProc seam
+
+[Attempt #1] `6746ec1` (full `6746ec11f89aae8b72ca065a45bcc7a73e195d09`). 9 files
+changed: 44 insertions / 22 deletions, every path a test file. Reviewer approved,
+class-C (code-side polish only, no findings that block). Commit held; rides the next
+Carlos-gated batch. Tracked to `cbus-que.17`.
+
+[Motivating problem]
+`os.UserHomeDir` reads `HOME` on unix and `USERPROFILE` on windows. Seventeen call
+sites across the suite set only `HOME` to sandbox a test's home directory, which
+sandboxes nothing on windows: the resolver stays pointed at the real profile. This
+had two distinct consequences, not one. First, transcript and resume-profile lookups
+missed their fixture entirely and read as red on logos -- the earlier staged reading
+of these as a windows PRODUCT defect was retracted from source once this was found;
+`os.UserHomeDir`'s own documented behavior explains the reds without any bug in the
+resolution code itself. Second, and more serious: `TestUpdateCheckCacheRoundTrip` and
+`TestUpdateCheckHint` (via `writeFreshCache`, `cmd/cbus/update_check.go`) wrote their
+cache into the REAL windows profile directory, the same directory that holds
+production credentials, and read it back successfully -- a green result produced by
+writing outside the sandbox rather than inside it. A third update-check test,
+`TestUpdateCheckSubcmdDispatch`, does not write (no slug, refresh no-ops, it only
+stats the HOME tmpdir), so exactly two tests were the writers, not all three in that
+file.
+
+[Files Changed]
+- `internal/client/formation_mode_test.go`, `formation_read_test.go`,
+  `formation_resume_test.go`, `transcript_test.go` -- route through the extended
+  `setHome` helper.
+- `cmd/cbus/testhome_test.go` (new) -- `testHome`, the `cmd/cbus`-side equivalent,
+  sets both `HOME` and `USERPROFILE` to the temp root in one call.
+- `cmd/cbus/formation_apply_unix_test.go`, `formation_mode_test.go`,
+  `formation_test.go`, `update_check_test.go` -- route through `testHome`.
+  `update_check_test.go` additionally gains a pin on `TestUpdateCheckCacheRoundTrip`
+  asserting the cache path resolves under the temp home, so a future HOME-only
+  regression reds directly instead of silently escaping the sandbox on windows the
+  way this one did.
+- `cmd/cbus/formation_mode_test.go` -- separately, `TestModeOverrideLeavesPresentPeers`
+  had replaced PATH with a unix literal (`/usr/bin:/bin`), which hides `System32` and
+  so the windows liveProc seam could not resolve `waitfor.exe` when this test ran
+  there. That override is now unix-only. Its PATH-literal siblings
+  (`TestModeOverrideComposesWithOnly`, `TestModeOverrideDryRun` in the same file, and
+  `formation_apply_test.go`'s `TestApplyPerModeArgv`) are left unguarded: they drive a
+  mock forker with no armed peer, never reach the liveProc seam, and were already
+  green on windows for an unrelated reason.
+
+No production change: every touched path is a test file, and the set is disjoint
+from the concurrent main-integration work landing on this branch.
+
+[Possible Ripple Effects]
+- All 17 raw `t.Setenv("HOME")` sites are now behind one helper per package; a new
+  test that sets `HOME` directly instead of calling the helper reopens exactly this
+  gap on windows, silently.
+- The residue this leak actually wrote on logos was located and removed: one 69-byte
+  cache file plus the empty directory T4 had created around it, with zero credential
+  files found beside it. Recorded on `cbus-que.18`, not this bead.
+
+[Testing Notes]
+- Reviewer approved, class-C (code-side polish only, non-blocking).
+- Not independently re-run by documenter; verified by reading the diff and commit
+  message against the tree, and by the tester's source read correcting the writer
+  count from three to two before this entry was written.
+
+## [2026-09-03 23:55:26 UTC] [Client/Cred] cbus-que.4: the windows skip reason names its real evidence, not a placeholder
+
+[Attempt #1] `b8e84a1` (full `b8e84a1f7edaabde6c2e1fb384434ff21151ddb2`). 1 file,
+`internal/client/cred_test.go` (2 insertions / 1 deletion). Reviewer approved, no
+findings. Commit held; rides the next Carlos-gated batch. Tracked to `cbus-que.4`.
+
+The split was already correct and needed no code change: `TestFileBackendPermissions`
+is the unix-only mode-bit check with a visible windows skip, `TestFileBackend` round-
+trips cross-platform, and the credential-store env guard runs first. This commit only
+rewords the windows skip reason to cite the evidence that will actually back it -- the
+live NTFS ACL inventory of the production credential store, recorded on `cbus-que.4`
+and run with P5 -- rather than a bare bead reference or an inventory the skip text
+implied was already done. Unix mode bits are Go's own emulation on NTFS (the measured
+777/666), not a windows-meaningful permission; the ACL is the actual truth on that
+platform, and the skip text now says so. Skip-table baseline unchanged: darwin 1,
+windows 2.
+
+## [2026-09-03 23:51:00 UTC] [Client/Ledger] cbus-que.2 Gate 4: the mint lock's two-process cases run for the first time
+
+[Attempt #1] `1157ecb` (full `1157ecb75963a51ca633f727884ca2d5a729048b`) +
+`927a80f` (full `927a80fde4edadce247e257aae1ee98c1ead7396`), a fix landing shortly
+after. 1 file: new `internal/client/mintlock_gate4_test.go` (181 insertions), then
+19 lines changed in the follow-up (13 insertions / 6 deletions). Reviewer approved
+both, all four mutant classes killed. Commit held; rides the next Carlos-gated
+batch. Tracked to `cbus-que.2` Gate 4, open since the mint lock's original July
+approval.
+
+[Motivating problem]
+The M2 mint lock (`tryLockExclusive`/`unlockFile`, flock on unix / LockFileEx on
+windows) was approved in July with its two-process cases never run: exclusion
+between two real processes, and crash-release when the holder dies without
+unlocking. One process cannot prove crash-release against itself -- there is
+nothing to observe dying -- so this gate needed a real second process, which the
+suite did not yet have a way to spin up.
+
+[Files Changed]
+- `internal/client/mintlock_gate4_test.go` (new, `1157ecb`) -- the holder is a real
+  second process: a self-re-exec of the test binary (D39), mirroring
+  `TestReclaimLockDiesWithItsHolder`'s pattern. The child's `-test.run` is anchored
+  so it can never accidentally match a driver name and fork recursively. Two cases:
+  Exclusion (parent calls `tryLockExclusive` while the child holds it, asserts
+  contended-not-acquired, returns under 50ms, never blocks) and HolderDies (the
+  child is hard-killed, parent proves the kernel released the lock with no cleanup
+  code having run). The subject is the primitive `tryLockExclusive` itself, not
+  `acquireMintLock` (which spin-retries for ~4s), because only the primitive
+  surfaces the immediate contended signal the exclusion case needs. The
+  contended-while-alive check inside HolderDies is an AIMED assertion, not a setup
+  precondition: without it, a lock that never actually excludes would trivially
+  "acquire after death" and the crash-release claim would be vacuous. The holder
+  pins its lock's closure so the `os.File` finalizer cannot close the fd and drop
+  the lock before the kill lands. Zero production change; cross-platform with no
+  build tag, since the same test exercises flock on darwin and LockFileEx on
+  windows through the identical seam.
+- `internal/client/mintlock_gate4_test.go` (`927a80f`, follow-up) -- under a
+  blocking-lock mutation, the contender's `tryLockExclusive` call never returns, so
+  `tryLockBounded` times out with the goroutine still blocked inside the syscall; a
+  deferred `f.Close` then waits on that in-flight call and wedges the test's OWN
+  teardown, so Exclusion's FAIL line never prints and HolderDies never runs at all,
+  collapsing the two-signal attribution into a single hang. Fix: skip the `Close` on
+  the timed-out branch (leak the fd deliberately; a blocked lock pins it regardless,
+  and the failing test process exits anyway) and defer it only on the path where the
+  attempt actually returned. Also corrects the 50ms bound's own rationale comment:
+  it separates an immediate return from a block and does not depend on the
+  platform's timer tick granularity -- the prior comment's "2ms default tick" claim
+  was wrong specifically for windows.
+
+[Possible Ripple Effects]
+- This is a test-only change to how a REGRESSION manifests, not to what is being
+  tested: before the fix, a blocking-lock mutation wedged the test binary in
+  teardown (an opaque hang); after, it reds Exclusion cleanly at its 50ms timer
+  line, and HolderDies keeps its own independent wedge signal for a different
+  failure shape. A future reader diagnosing a mint-lock regression should expect a
+  clean red now, not a hang.
+- The self-re-exec pattern (D39) now has a second user beside
+  `TestReclaimLockDiesWithItsHolder`; any change to how the test binary detects
+  "am I the re-exec'd child" needs to keep both call sites' anchoring intact.
+
+[Testing Notes]
+- Reviewer approved both commits; all four mutant classes killed (exclusion absent,
+  timing window narrowed, crash-release absent, the leaked-fd regression itself).
+- Fleet relevance, stated for the record: the M2 mint lock's design was sound and
+  approved in July, but these two halves sat unrun since then. They are run now, on
+  every platform the module supports, not only windows -- this gate was never
+  windows-specific, it was simply never exercised anywhere.
+- Not independently re-run by documenter; verified by reading both diffs and commit
+  messages against the tree.
+
+## [2026-09-03 23:47:36 UTC] [Client/Windows] cbus-que.11 C1(3) commit B: the refusal-shadowed CLI tests move to unix, per test
+
+[Attempt #1] `8a74de3` (full `8a74de3c9a5704b1edef69cfe25ee097dee491c5`). 13 files
+changed: 327 insertions / 212 deletions. Reviewer approved, no findings. Commit held;
+rides the next Carlos-gated batch. Tracked to `cbus-que.11`, commit B of C1(3); with
+commit A (`167e178`), `cbus-que.11` is code-complete.
+
+[Motivating problem]
+spawn, branch, formation apply, codex and codex-bridge are phase-1 windows-excluded
+verbs: their `run*` functions refuse in `unsupported_windows.go` ahead of any argument
+parsing. Every test that drives one of them to check parsing, a usage string,
+name/channel handling, or unjoined behavior therefore either reds on windows (the
+refusal fires where the test expected its own logic to run) or passes there only by
+the accident of hitting the refusal first. 8 such tests were red on logos; 4 were
+green only by that accident (both codex arg-error tests, formation apply's
+refuses-unjoined case, branch's refuses-role case) -- so no windows green in this
+family was actually exercising what it claimed to.
+
+[Files Changed]
+- `cmd/cbus/name_tighten_unix_test.go`, `pane_unix_test.go`,
+  `branch_role_unix_test.go`, `formation_apply_unix_test.go` (all new) -- the
+  extracted spawn/branch/apply cases, per D55: extraction happens PER TEST, never by
+  tagging a whole file that also holds a platform-neutral test, so a test like
+  join/rename/save/usage/pane-not-verb (which does not touch a refused verb) stays
+  cross-platform in its original file.
+- `cmd/cbus/codex_bridge_test.go`, `codex_wrap_test.go` -- single-purpose files, so a
+  file-level build tag is the correct-shaped extraction here (no neutral test to
+  strand).
+- `cmd/cbus/formation_mode_test.go` -- both its tests are apply tests, so the whole
+  file is tagged.
+- `cmd/cbus/formation_test.go` -- `TestFormationVerbErrors` splits at ROW level: its
+  seven apply rows move to a new unix-only `TestFormationVerbErrorsApply` in
+  `formation_apply_unix_test.go`; the bootstrap/save/show/rm/list rows, none of them
+  refusal-shadowed, stay in the original cross-platform test.
+- `cmd/cbus/buildcbus_test.go` -- folds in the C1(3)-commit-A reviewer class-C
+  follow-up: `buildCbus` now suffixes the built binary with `.exe` on windows, the
+  same asset-naming reasoning que.5 already established (an extensionless windows
+  binary cannot be exec'd).
+- `cmd/cbus/main_test.go`, `name_tighten_test.go`, `pane_test.go` -- lose the cases
+  that moved out; `selfupdate_test.go` gains the build-tag line for its codex-adjacent
+  case.
+
+`TestVerifyDownloadedGate` is deliberately NOT extracted: it is not a refusal shadow,
+its good-path fixture is a shell script that cannot run on windows at all, so it
+takes a `runtime.GOOS` skip instead, keeping its name in the windows RUN set rather
+than disappearing from it the way an extraction would.
+
+[Possible Ripple Effects]
+- The windows test binary now exports none of the 13 extracted names. Windows
+  coverage of every extracted verb is exactly its row in `unsupported_windows_test.go`
+  `refusedVerbs` -- that table is now the single source of truth for what "covered on
+  windows" means for these five verbs.
+- Darwin's RUN count moves to 196 (the row split creates `TestFormationVerbErrorsApply`
+  as a new parent test, adding to the set) while the windows expectation stays 156 --
+  a name-set difference by design, not a regression to reconcile away.
+- Any future refusal-shadowed test must follow the per-test extraction pattern here
+  (own file if none exists, existing unix file if one does) rather than reaching for
+  a whole-file tag on a file that also holds cross-platform cases.
+
+[Testing Notes]
+- Reviewer approved, no findings.
+- With this commit and C1(3) commit A together, `cbus-que.11` is code-complete: the
+  cmd/cbus windows suite is hang-free for the first time in this epic, and every red
+  in the T4 baseline is now accounted for by class. The bead itself closes on the
+  candidate logos run, not on this commit.
+- Not independently re-run by documenter; verified by reading the diff and commit
+  message against the tree.
+
+## [2026-09-03 23:32:55 UTC] [Client/Windows] cbus-que.11 C1(3) commit A: one toolchain-skip helper for the runtime go-build tests
+
+[Attempt #1] `167e178` (full `167e178e65d925e5224cfd5b282458152f7ec348`). 6 files
+changed: new `cmd/cbus/buildcbus_test.go` (+31), and `hook_compact_test.go`,
+`install_assets_test.go`, `jsonout_test.go`, `list_golden_test.go`,
+`tail_inprocess_test.go` each trimmed to call it (43 insertions / 27 deletions
+total). Reviewer approved, class-C (see below). Commit held; rides the next
+Carlos-gated batch. Tracked to `cbus-que.11`, commit A of C1(3); commit B carries
+the refused-verb extractions separately.
+
+[Motivating problem]
+Six tests build the real cbus binary at runtime and go red on the logos gate host,
+which has no go toolchain (D8: windows-tagged tests must be writable-to-run without
+one). Each test carried its own copy of the same build-and-skip-or-fail logic, so the
+disposition on a missing toolchain was five separate places to get right rather than
+one.
+
+[Files Changed]
+- `cmd/cbus/buildcbus_test.go` (new) -- `buildCbus(t) string` is now the one place
+  the suite shells out to the toolchain. `exec.LookPath("go")` failing is a
+  `t.Skipf` naming D8 and the hostname/GOOS/GOARCH explicitly; a toolchain that
+  resolves but fails to build the binary is `t.Fatalf`, never a skip -- a broken
+  build must fail loudly, not disappear into the same bucket as no-toolchain.
+- `hook_compact_test.go`, `install_assets_test.go`, `jsonout_test.go`,
+  `list_golden_test.go`, `tail_inprocess_test.go` -- each swaps its own build block
+  for a call to `buildCbus(t)`. All six callers now skip uniformly and still print
+  their RUN line, so the windows name-set denominator does not shrink relative to
+  darwin's.
+- `install_assets_test.go` additionally fixes `TestInstallDefaultRolesDir`: a
+  test-side path defect, not a product one. `defaultRolesDir` already joins with
+  `filepath.Join`; the test asserted a slash literal that only holds on unix. The
+  product function needed no change.
+
+[Design]
+Reviewer verdict is class-C: one follow-up named, a future windows host that DOES
+have a toolchain would need the built binary's expected filename to carry `.exe`,
+which `buildCbus` does not yet handle. Folded silently into commit B rather than
+reopening this commit, since no gate host in the current matrix exercises that path.
+
+[Possible Ripple Effects]
+- By mechanism, not coincidence: the six skips on the toolchain-less logos host
+  account for exactly five never-reached subtests of `TestListRenderingGolden` (one
+  test, five subtests, all gated behind the same build), which reconciles the
+  windows RUN count (182) against the darwin RUN count (187) -- a five-count gap
+  that would otherwise read as unexplained.
+- Any future test added to this build-at-runtime family must call `buildCbus(t)`
+  rather than inlining its own build block, or it silently falls outside the D8
+  disposition this commit centralizes.
+
+[Testing Notes]
+- Reviewer approved with the one class-C follow-up noted above, not blocking.
+- Not independently re-run by documenter; verified by reading the diff and commit
+  message against the tree.
+
+## [2026-09-03 22:55:34 UTC] [Client/Windows] cbus-que.11 C1(2): the close behavioral matrix is unix-only, by ruling D55
+
+[Attempt #1] `bef598a` (full `bef598a8cd4f9a36c25b057bbcadd0f39b29945b`). 2 files
+changed: `cmd/cbus/close_test.go` (-262 net inside a larger diff) and new
+`cmd/cbus/close_unix_test.go` (+273); 276 insertions / 259 deletions total. Reviewer
+approved, no findings. Commit held; rides the next Carlos-gated batch. Tracked to
+`cbus-que.11`, second of two close-matrix fixes (C1(2) of C1); closes the 8 close reds
+left open after C1(1).
+
+[Motivating problem]
+close is a phase-1 windows-excluded verb: `runClose` refuses at main.go:878 before it
+resolves anything, on the windows build. Every resolution/refusal/reporting assertion
+in the close behavioral matrix therefore either fails outright on windows, or passes
+there only by the accident of hitting the refusal before the assertion's own logic
+runs. 8 of the matrix's members were red on windows (7 previously seen, plus
+`TestCloseVerbIsDispatched` -- the eighth failure, masked until now by the capture-
+helper pipe hang C1(1) just fixed); the remaining 3 were green, but for the wrong
+reason.
+
+[Files Changed]
+- `cmd/cbus/close_unix_test.go` (new) -- the 11-test behavioral matrix plus its two
+  helpers, `closePeer` and `storeFingerprint`, moved here by PURE MOVE (byte-identical
+  bodies) under `//go:build darwin || linux`. This is cmd/cbus's first go:build-tagged
+  test file; per ruling D55 the tag goes on the file the cases live in, not expressed
+  as a `_unix` filename suffix. Includes `TestCloseVerbIsDispatched`.
+- `cmd/cbus/close_test.go` -- keeps only `TestUsageAdvertisesClose`, left untagged: close
+  stays registered on windows so `--help` must still advertise it there, making this
+  one case genuinely cross-platform where the other eleven are not. The two relocated
+  tests whose comments referenced windows dispatch gained a one-line note; otherwise
+  no behavior changed anywhere in the move.
+- `seedPeer` was not moved -- it stays in its current home since `flags_test.go` and
+  `main_test.go` also call it, and moving it would have tagged it out of their
+  (untagged) build.
+
+Windows close coverage after this split is the refusal matrix already living in
+`unsupported_windows_test.go`, which is the honest shape: a windows build asserts
+close refuses, not that its internals behave, since its internals are unreachable
+there.
+
+[Possible Ripple Effects]
+- Any future close-matrix case added without checking which file it belongs in will
+  silently either run nowhere on windows (if added to close_unix_test.go, correct) or
+  re-introduce a windows-refusal-masked assertion (if added to close_test.go,
+  incorrect) -- the split is now the thing to remember, not enforced by anything
+  beyond the file boundary.
+- `TestCloseVerbIsDispatched` moving here, tagged unix-only, means it is not exercised
+  in any windows-tagged run; its statement (close dispatches to ITS OWN refusal on
+  windows, not to the usage line) is instead covered by the unsupported_windows_test.go
+  refusal matrix asserting the refusal fires at all -- the two are complementary, not
+  duplicate coverage.
+
+[Testing Notes]
+- Reviewer approved, no findings.
+- Verified by symbol diff: the windows test binary for cmd/cbus exports only
+  `TestUsageAdvertisesClose`; the darwin one exports all twelve (the eleven moved
+  cases plus the one that stayed). This directly confirms the split, not merely the
+  build tag's presence.
+- Not covered by this entry: whether the 11 moved tests still pass on darwin/linux
+  post-move (a pure move implies yes; not independently re-run by documenter).
+
+## [2026-09-03 22:51:07 UTC] [Client/Windows] cbus-que.11 C1(1): concurrent drain fixes the capture-helper self-deadlock
+
+[Attempt #1] `f60c22a` (full `f60c22a8e5a4550788808e9d78a99caf5caaca02`). 3 files
+changed: `cmd/cbus/main_test.go` + `cmd/cbus/update_check_test.go` (+30/-8 combined)
+plus new `cmd/cbus/capture_drain_test.go` (+30). Reviewer approved, class-C
+record-only notes. Commit held; rides the next Carlos-gated batch. Tracked to
+`cbus-que.11`, first of two close-matrix fixes (C1(1) of C1); 8 close reds remain
+until C1(2).
+
+[Motivating problem]
+`captureStdout`/`captureStderr` swapped the target stream, ran the callback, and only
+THEN called `io.ReadAll` on the pipe's read end. On windows the default pipe buffer is
+4KB; the callback under test (`--help` usage text, ~11.6KB) writes past that buffer
+and blocks on the write, with nothing draining the read side until the callback
+already returned -- a self-deadlock. This hung `TestUsageAdvertisesClose` and its two
+siblings and wedged the whole cmd/cbus windows test binary, masking an eighth failure
+(`TestCloseVerbIsDispatched`) behind the hang.
+
+[Files Changed]
+- `cmd/cbus/main_test.go` (`captureStdout`) and `cmd/cbus/update_check_test.go`
+  (`captureStderr`) -- both start the `io.ReadAll` reader in a goroutine BEFORE the
+  callback runs, sending the result over a buffered channel; the write end still
+  closes after the callback returns, but the read end (previously left open) is now
+  closed too, fixing a pre-existing fd leak in passing. Fix is at the two shared
+  helpers only; all call sites (103 across 17 files, per the bead's corrected count --
+  supersedes a stale 2026-08-02 "96/13" count) are unchanged.
+- `cmd/cbus/capture_drain_test.go` (new) -- two self-tests, one per helper, each
+  capturing 1 MiB: returns in milliseconds under the concurrent drain, wedges under
+  the pre-fix (callback-then-read) shape. Reproducible and killable on darwin/linux
+  under `go test -timeout`, not gated on the 4KB windows pipe size -- the trigger is
+  output size, not platform. Reviewer killed both mutants locally against this test.
+
+[Possible Ripple Effects]
+- Any other test relying on `captureStdout`/`captureStderr` for output over roughly
+  4KB was silently untestable on windows before this fix; none is known to exist yet,
+  but the ceiling is gone.
+- `TestCloseVerbIsDispatched` (the eighth close-matrix failure, previously masked by
+  the hang) is now reachable and asserts close dispatches to its refusal on windows
+  rather than to the usage line -- separate from this fix, tracked at C1(2).
+
+[Testing Notes]
+- Reviewer-run: both mutants (removing the goroutine drain; removing the read-end
+  close) killed locally on their aimed assertions, class-C record-only verdict.
+- Not run on logos as part of this entry -- C1(1) fixes the mechanism; the close
+  matrix's own logos pass belongs to C1(2)'s report.
+
 ## [2026-08-12 00:24:05 UTC] [Merge/Windows] windows-port reconciled with main (v0.9.0-v0.9.3)
 
 [Attempt #1] `d64b038` (full `d64b038` merge commit, second parent `b5dab23` = main tip).
