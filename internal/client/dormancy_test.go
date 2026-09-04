@@ -161,6 +161,23 @@ func setMetaFields(t *testing.T, path, fields string) {
 	}
 }
 
+// removeAllWithRetry deletes path under a bounded deadline: on windows the orphaned
+// follower still holds transient stdlib handles on the inbox and meta.json (its identity
+// check) and its cursor write lands a temp+rename in this dir, so a single RemoveAll can
+// hit a sharing violation. unix removes on the first call.
+func removeAllWithRetry(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := os.RemoveAll(path); err == nil {
+			return
+		} else if time.Now().After(deadline) {
+			t.Fatalf("RemoveAll(%s) never succeeded (follower handles never released): %v", path, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestForeignReopenIsNotStreamed is cbus-0r8, and it is a CONFIDENTIALITY assertion
 // rather than a correctness one: the failure it guards is a stranger's messages
 // appearing in someone else's terminal.
@@ -179,10 +196,11 @@ func TestForeignReopenIsNotStreamed(t *testing.T) {
 	appendLine(t, inbox, "mine", "me", "my-own-message")
 	waitFor(t, func() bool { return strings.Contains(buf.String(), "my-own-message") }, "own message")
 
-	// prune reaps the peer, then a STRANGER claims the alias and gets mail
-	if err := os.RemoveAll(peer); err != nil {
-		t.Fatal(err)
-	}
+	// prune reaps the peer, then a STRANGER claims the alias and gets mail. On windows the
+	// orphaned follower still holds transient stdlib handles on the inbox and meta.json and
+	// its cursor write lands a temp+rename in this dir, so RemoveAll retries (bounded) until
+	// they are released; unix succeeds on the first call.
+	removeAllWithRetry(t, peer)
 	if err := os.MkdirAll(peer, 0o755); err != nil {
 		t.Fatal(err)
 	}
