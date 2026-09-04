@@ -1,5 +1,154 @@
 # Changelog (detailed)
 
+## [2026-09-04 04:10:25 UTC] [Client/Windows] fix(layout): split the tmux/tty boundary so windows refuses arrange/scatter/focus honestly
+
+[Attempt #1] `0a96d11` (full `0a96d110513a2defdf20ed2ca327b45dfb560cad`). 14 files
+changed: 444 insertions / 330 deletions. Tree `fe7e6b683f0bde12e05be2cffdcfe4b762654778`
+(supersedes an interim `8d432e7`, message-only correction, same tree). Reviewer
+approved. Commit held; rides the next Carlos-gated batch. Tracked to `cbus-que`
+R7-L1, with C4 p1 = `cbus-que.17`; long-form record on `cbus-que.19`.
+
+[Motivating problem]
+The merge just landed brought in main's layout feature (`arrange`/`scatter`/`focus`)
+untagged for platform. Both cmd/cbus and internal/client's layout code call into
+tmux directly and resolve a peer through its controlling tty -- neither exists on
+windows in phase 1 -- so the merge's tree compiled clean on darwin/linux but left
+exactly one known windows compile red at `layout.go:259`, recorded as the reason M
+was a non-candidate checkpoint rather than a shippable tree.
+
+[Files Changed]
+- `internal/client/layout.go` -- trimmed to the platform-neutral half: parser,
+  planner, pane-table, `selfPane`, `RunLayoutOps`, and the `tmuxRun` seam variable
+  itself.
+- `internal/client/layout_unix.go` (new, `darwin || linux`) -- `defaultTmuxRun`,
+  `TmuxPanesByTTY`, `PeerPane`, `ResolvePeerPanes`, `TmuxPaneWindows`: everything that
+  actually shells to tmux or reads a tty.
+- `internal/client/layout_windows.go` (new) -- `defaultTmuxRun` returns a loud "not
+  available on windows" error rather than a stub, so the seam still resolves and
+  `RunLayoutOps` fails HARD if a windows caller ever reaches it, rather than
+  succeeding on a no-op. Pinned by `TestLayoutRunOpsFailsLoudlyOnWindows`.
+- `cmd/cbus/layout.go` -- trimmed to arg parsing, usage, and dispatch.
+- `cmd/cbus/layout_unix.go` (new) -- the `runArrange`/`runScatter`/`runFocus` bodies.
+- `cmd/cbus/layout_windows.go` (new) -- shims all three through `refuseLayout`, which
+  returns `phase1Refusal` and never an empty die.
+- `cmd/cbus/unsupported_windows.go` -- three new `phase1Refusal` keys for the three
+  verbs.
+- `cmd/cbus/unsupported_windows_test.go` -- three new `refusedVerbs` rows, bare and
+  args-satisfied, moving the excluded-verb set from seven members to TEN.
+- `internal/client/transcript_test.go` -- collapses a duplicated `setHome` doc
+  comment left over from `cbus-que.17`'s C4 (a phase-1 fold, not new behavior).
+
+[Design]
+Split is at the mechanism boundary (tmux/tty), not the file boundary: internal/client
+keeps its platform-neutral half (parsing, planning, pane bookkeeping) in the original
+file and only the tmux/tty-touching functions move out, matching the pattern already
+used elsewhere in this port (close.go, codexwrap.go). The windows shim fails LOUD by
+design -- an unreachable no-op there would look like windows silently supporting
+layout ops with no peers ever placed, the exact silent-failure class this epic
+refuses throughout.
+
+[Possible Ripple Effects]
+- Windows-excluded verb count is now ten (codex/bridge/stop-hook, branch, spawn,
+  formation apply, close, arrange, scatter, focus). Any future release-notes or
+  docs text still citing seven is stale as of this commit.
+- `TestLayoutRunOpsFailsLoudlyOnWindows` is the only windows-tagged coverage of the
+  internal/client layout seam; any future windows-reachable caller of `RunLayoutOps`
+  needs its own reachability check, since this test only proves the seam itself
+  fails loud, not that nothing upstream masks the failure.
+
+[Testing Notes]
+- Test dispositions (D55, per test, two-counters): `cmd/cbus` 4 stay / 1 extracted
+  (`TestLayoutVerbsReachableThroughDispatch` -> `layout_unix_test.go`, windows
+  coverage is the new `refusedVerbs` rows); `internal/client` 15 stay / 2 extracted
+  (`TestPeerPaneNeverArmedIsNotReportedAsDead`, `TestPeerPaneResolvesSelfBeforeMeta`
+  -> `layout_unix_test.go`). Zero skips; one new windows-only test name.
+- Reviewer approved.
+- Not independently re-run by documenter; verified by reading the diff and commit
+  message against the tree.
+
+## [2026-09-04 04:10:06 UTC] [Merge/Windows] M: origin/main (v0.10.0..v0.10.1, the layout verbs) reconciled into windows-port
+
+[Attempt #1] `b526b29` (full `b526b29a52570434361bbbed2ceac5412a46d88c`), a merge
+commit. Parents `054bc25d91f3af24d8089dd73f891280ef167e02` (windows-port tip) and
+`28b46418a88931259456846a64e6e8aaa2fc9931` (origin/main). Tree
+`4ac9820b27a1d885392274a1eb276541c0e0a931`. Supersedes `6bd90e5`, a message-only
+correction (stale subject line, a leftover relay label plus a wrong parent
+reference) -- same tree, so the union proof closed against `6bd90e5` transfers to
+this SHA unchanged. Reviewer approved. Commit held; rides the next Carlos-gated
+batch.
+
+[Motivating problem]
+windows-port had drifted behind main by the v0.10.0/v0.10.1 releases: the
+`arrange`/`scatter`/`focus` layout verb family (post-spawn tmux pane rearrangement,
+`2518155` on main, released as v0.10.0) plus two field-found fixes to it
+(`11b97fa` the self-pane / unarmed-is-not-dead fix, `89ee4ab` the self-pane-at-the-
+right-layer + scatter exit-code fix, both v0.10.1), the embedded `/bus-layout`
+skill, a README motivation section, and the closed-boundary-rationale docs retirement
+(`cbus-kda`). None of it had reached this branch.
+
+[Files Changed]
+Standard merge; no manual file resolution outside the changelog pair (git resolved
+everything else -- `cmd/cbus/layout.go`, `internal/client/layout.go`, docs, README,
+CHEATSHEET -- as clean adds/merges with no conflicting hunks). The changelog pair
+was the one conflict, resolved by hand per the process below.
+
+[Design]
+- Changelog resolution: timestamp-ordered union, newest first, both files. The two
+  parents' conflicting regions did not simply concatenate -- main's `08-13` through
+  `08-21` entries interleave BETWEEN this branch's `08-18` (`cbus-6ij.8`) and `08-12`
+  (`d64b038`) entries by timestamp, not before or after the whole block. Verified
+  mechanically with a purpose-built union-inventory tool (parses blocks by
+  `[timestamp]`/`## [timestamp]`, keys on timestamp+category+sha) rather than by eye:
+  simple_changelog.md resolves to 139 keys (20 windows-port-only, 6 main-only, 113
+  shared), detailed_changelog.md to 123 (20/6/97) -- both exactly the predicted
+  union computed BEFORE the merge landed, against the actual parent blobs. Every
+  windows-port-only block verified byte-identical to its source in `054bc25`. Zero
+  conflict markers, zero duplicate keys, descending order holds end to end. A second,
+  independent instrument (reviewer, line-level: non-blank unique lines across the
+  same three blobs) reached the same non-loss conclusion by a different method.
+- The 29e3abd-vs-`6920262` dedupe (both record the same opus-model-token pin, ruled a
+  duplicate) needed no resolution logic: windows-port's `29e3abd` entry was already
+  dropped from both changelogs by an earlier orchestrator ruling (administrative
+  record, main-authored, verdict-exempt), so main's `6920262` entry lands as an
+  ordinary main-only addition with nothing to collide against.
+- M itself is recorded as a NON-CANDIDATE checkpoint, not a shippable tree: the merge
+  brought in main's layout code untagged for platform, leaving one known windows
+  compile red at `layout.go:259`. The fix is the immediately following delta commit,
+  documented separately above.
+
+[Possible Ripple Effects]
+- The union-inventory tool surfaced one pre-existing, unrelated finding while
+  validating this merge: simple_changelog.md and detailed_changelog.md have never
+  had a 1:1 matching key set across their full history (older detailed entries
+  predate the `[Attempt #N]` sha convention). Confirmed harmless to THIS merge --
+  the new-region key sets agree exactly between the two files in both directions --
+  but it remains true of the older shared history and isn't something this merge
+  fixes or needs to.
+
+[Testing Notes]
+- Reviewer approved, with an independent line-level cross-check reaching the same
+  result as the block-level tool.
+- Not independently re-run by documenter beyond the union-inventory verification
+  described above; no suite run reported as part of this entry (the compile red at
+  `layout.go:259` is exactly why M is a checkpoint, not a candidate -- see the delta
+  commit for the fix and its own test disposition).
+
+## [2026-09-04 00:24:22 UTC] [Style/Test] gofmt fold: the repo-wide gate catches what package-scoped validation misses
+
+[Attempt #1] `20512c5` (full `20512c57d5f2f1ffc6ca752c85d9774205011e98`). 2 files,
+1 insertion / 2 deletions. Not pushed; commit rides the next Carlos-gated batch.
+
+The repo-wide gofmt gate (`internal/core/golden_test.go`) flagged two files from the
+windows-port test work: a trailing blank line left in `cmd/cbus/main_test.go` when
+`TestBranchRefusesRole` was extracted (`cbus-que.11` C1(3)), and a one-space
+alignment miss on the `mintPath` one-line func in
+`internal/client/mintlock_gate4_test.go` (`cbus-que.2` Gate 4). Package-scoped test
+runs did not surface either, since the golden gofmt gate lives in `internal/core`, a
+sibling package to both files it was catching. `gofmt -w`, zero behavior change.
+Process lesson worth keeping: validate repo-wide with `go test ./...` before calling
+a milestone clean, never package-scoped alone, because a repo-wide gate can live
+anywhere in the tree and a scoped run has no way to know it exists.
+
 ## [2026-09-04 00:04:59 UTC] [Client/Windows] cbus-que.17: sandbox the test home on windows, and stop hiding System32 from the liveProc seam
 
 [Attempt #1] `6746ec1` (full `6746ec11f89aae8b72ca065a45bcc7a73e195d09`). 9 files
