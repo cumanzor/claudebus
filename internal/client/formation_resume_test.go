@@ -396,7 +396,7 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".ccs", "instances", "personal")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	visible := "aaaaaaaa-1111-2222-3333-444444444444"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", visible)
 	anchorSid := "bbbbbbbb-1111-2222-3333-444444444444"
@@ -467,7 +467,7 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 func TestResumeAnchorInfersProfileFromSweep(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".ccs", "instances", "personal"))
 	f := resumeFixture()
 	f.Peers[0].Profile = ""
@@ -560,7 +560,7 @@ func TestResumeAnchorRecordedProfileNeverSweeps(t *testing.T) {
 func TestResumeAnchorSweepEndToEnd(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	sid := "34ecd2f2-0000-1111-2222-333333333333"
 	writeTranscript(t, filepath.Join(home, ".ccs", "instances", "work"), "-Users-dev-work-repo", sid)

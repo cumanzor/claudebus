@@ -3,7 +3,6 @@ package client
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -11,13 +10,13 @@ import (
 // setHome points os.UserHomeDir at dir. The variable it reads is platform-specific —
 // USERPROFILE on windows, HOME elsewhere — so setting only HOME leaves the resolver
 // pointed at the real profile and every lookup misses the fixture entirely.
+// setHome points os.UserHomeDir at dir on either OS: HOME is read on unix, USERPROFILE on
+// windows. Both are set so a callee, child env, or direct os.Getenv that consults the other
+// still lands in the sandbox. It is the internal/client twin of cmd/cbus testHome.
 func setHome(t *testing.T, dir string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Setenv("USERPROFILE", dir)
-		return
-	}
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 }
 
 func writeTranscript(t *testing.T, cfg, project, sid string) string {
@@ -157,7 +156,7 @@ func TestTranscriptRootsBareShellFindsProfiled(t *testing.T) {
 	// and the profile root must resolve from HOME + the recorded profile anyway —
 	// the envelope is the authority, the env is a hint
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	sid := "bare-shell-sid"
 	want := writeTranscript(t, filepath.Join(home, ".ccs", "instances", "work"), "-Users-dev-proj", sid)
@@ -179,7 +178,7 @@ func TestTranscriptRootsBareShellFindsProfiled(t *testing.T) {
 // transcriptRoots, so a bare shell (no CLAUDE_CONFIG_DIR) can still sweep.
 func TestInstanceProfilesSweep(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	work := filepath.Join(home, ".ccs", "instances", "work")
 	personal := filepath.Join(home, ".ccs", "instances", "personal")

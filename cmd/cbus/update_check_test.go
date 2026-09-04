@@ -34,10 +34,16 @@ func captureStderr(t *testing.T, f func()) string {
 }
 
 func TestUpdateCheckCacheRoundTrip(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	testHome(t, home)
 	path := updateCheckCachePath()
 	if path == "" {
 		t.Fatal("no cache path")
+	}
+	// sandbox pin: updateCheckCachePath resolves through os.UserHomeDir (USERPROFILE on
+	// windows), so a HOME-only override would write the cache into the real profile there.
+	if !strings.HasPrefix(path, home) {
+		t.Fatalf("cache path %q must be under the temp home %q", path, home)
 	}
 	want := updateCheckCache{CheckedAt: time.Now().UTC().Truncate(time.Second), LatestKnown: "v0.3.0"}
 	if err := writeUpdateCheckCache(path, want); err != nil {
@@ -56,7 +62,7 @@ func TestUpdateCheckCacheRoundTrip(t *testing.T) {
 // so the stale-branch never spawns a detached poll during the test.
 func TestUpdateCheckHint(t *testing.T) {
 	writeFreshCache := func(t *testing.T, latest string) {
-		t.Setenv("HOME", t.TempDir())
+		testHome(t, t.TempDir())
 		p := updateCheckCachePath()
 		if err := writeUpdateCheckCache(p, updateCheckCache{CheckedAt: time.Now().UTC(), LatestKnown: latest}); err != nil {
 			t.Fatal(err)
@@ -149,7 +155,7 @@ func TestHasJSONFlag(t *testing.T) {
 
 // TestUpdateCheckSubcmdDispatch: the hidden refresh verb returns 0 and never recurses.
 func TestUpdateCheckSubcmdDispatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	t.Setenv("CBUS_REPO", "") // no slug -> refresh no-ops without touching gh
 	if rc := run([]string{updateCheckSubcmd}); rc != 0 {
 		t.Errorf("hidden refresh must return 0, got %d", rc)

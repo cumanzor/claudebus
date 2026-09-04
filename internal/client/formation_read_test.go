@@ -18,7 +18,7 @@ func TestPeerSidState(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".ccs", "instances", "personal")
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	live := "a26d120e-4d73-4d91-8550-498ab65a5107"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", live)
 	here := ShortHostname()

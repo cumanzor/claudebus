@@ -1,6 +1,7 @@
 package client
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -218,7 +219,11 @@ func TestModeOverrideRefusesDuplicateSid(t *testing.T) {
 func TestModeOverrideLeavesPresentPeers(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "/Users/x/.ccs/instances/personal")
-	t.Setenv("PATH", "/usr/bin:/bin")
+	// unix literal only: on windows keep the real PATH so the liveProc seam (the armed
+	// peer below) can resolve waitfor.exe from System32.
+	if runtime.GOOS != "windows" {
+		t.Setenv("PATH", "/usr/bin:/bin")
+	}
 	applierOn(t, "ch", "applier")
 	plantPeer(t, "ch", "coder", "sid-coder")
 	armPeer(t, "ch", "coder")

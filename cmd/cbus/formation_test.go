@@ -85,7 +85,7 @@ func TestFormationShowVerb(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	saveFixture(t, dir, "roles", fixtureRoles())
 
 	out := captureStdout(t, func() {
@@ -130,7 +130,7 @@ func TestFormationShowAnchorlessDefect(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	saveFixture(t, dir, "roles", strings.Replace(fixtureRoles(),
 		`"anchorAlias": "orchestrator"`, `"anchorAlias": ""`, 1))
 
@@ -158,7 +158,7 @@ func TestFormationShowUncheckedNotStale(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	// the name field must match the filename (a formation's identity is stated in
 	// both places and they have to agree)
 	body := strings.Replace(fixtureRoles(), `"name": "roles",`, `"name": "far",`, 1)
