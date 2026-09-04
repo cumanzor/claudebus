@@ -80,6 +80,13 @@ func run(args []string) int {
 	case "close":
 		return runClose(args[1:])
 
+	case "arrange": // tmux-only: rearrange live peers into a pane tree
+		return runArrange(args[1:])
+	case "scatter": // arrange's inverse: every peer back to its own window
+		return runScatter(args[1:])
+	case "focus":
+		return runFocus(args[1:])
+
 	case "hook-exit": // SessionEnd hook: announce departure (never fails the session)
 		return runHookExit()
 	case "hook-compact": // PreCompact/PostCompact hooks: announce compaction (never fails the session)
