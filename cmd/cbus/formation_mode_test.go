@@ -64,7 +64,7 @@ func TestFormationApplyModeThroughCLI(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "cfg")
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantMeta(t, dir, "modes", "orchestrator", "sid-orch") // the applier, present
 	saveFixture(t, dir, "modes", fixtureModes())
@@ -122,7 +122,7 @@ func TestFormationApplyModeVerbErrors(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "cfg"))
-	t.Setenv("HOME", t.TempDir())
+	testHome(t, t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantMeta(t, dir, "modes", "orchestrator", "sid-orch")
 	saveFixture(t, dir, "modes", fixtureModes())
