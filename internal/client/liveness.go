@@ -26,6 +26,7 @@ type PeerMeta struct {
 	Origin        string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
 	Model         string
 	Profile       string // the CCS instance the session stamped at join; "" pre-profile or non-CCS
+	Harness       string // owning harness stamped at join; "" pre-harness, or no harness ancestor
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -50,6 +51,7 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		Origin:        rawStr(raw["origin"]),
 		Model:         rawStr(raw["model"]),
 		Profile:       rawStr(raw["profile"]),
+		Harness:       rawStr(raw["harness"]),
 	}, true
 }
 

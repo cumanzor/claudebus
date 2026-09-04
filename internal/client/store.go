@@ -45,9 +45,23 @@ type peerMeta struct {
 	// and formation save captures it so a restore can relaunch the same profile.
 	// omitempty: pre-profile metas rewrite byte-identically, absent reads unknown.
 	Profile string `json:"profile,omitempty"`
+	// Harness names the coding harness that owns this peer (claude, codex, grok,
+	// opencode), from the same ancestor walk the ledger already records. Stamped at
+	// JOIN only, never at reservation: HarnessName() reads the CALLER's ancestry, so a
+	// reserving parent would stamp its own harness onto a child that has not booted —
+	// the same reason Profile is absent from a reservation. Per-peer, because a mixed
+	// channel is the point: one delivery decision cannot be a process-wide setting.
+	// omitempty: pre-harness metas rewrite byte-identically, absent reads unknown.
+	Harness string `json:"harness,omitempty"`
 }
 
 var jsonNull = json.RawMessage("null")
+
+// harnessNameFn is the join-time harness probe, indirected only so a test can supply
+// an ancestry it cannot otherwise have: a test binary's parent is `go test`, so the
+// real walk returns "" and an assertion against it would pass whether or not join
+// stamps anything at all. harnessWalk itself is tested directly on fixtures.
+var harnessNameFn = HarnessName
 
 // writeMeta writes meta.json atomically: a sibling temp file renamed over the
 // target, so a concurrent reader sees old-or-new, never torn (protocol.md §2.2
@@ -217,7 +231,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: ShortHostname(), TS: now, LastActivity: now,
-		Origin: origin, Model: model, Profile: currentProfile(),
+		Origin: origin, Model: model, Profile: currentProfile(), Harness: harnessNameFn(),
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
