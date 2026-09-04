@@ -39,6 +39,8 @@ func phase1Refusal(verb string) string {
 	case "codex-stop-hook":
 		return "codex-stop-hook is not available on windows in phase 1: it is the delivery fallback for a codex " +
 			"exec worker, and the whole codex subsystem is excluded from this build"
+	case "arrange", "scatter", "focus":
+		return verb + " is not available on windows in phase 1: it rearranges live peers across tmux panes, and tmux is unix-only"
 	}
 	return ""
 }

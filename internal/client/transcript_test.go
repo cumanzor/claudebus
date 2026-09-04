@@ -6,19 +6,17 @@ import (
 	"testing"
 )
 
-// writeTranscript plants a transcript at <cfg>/projects/<project>/<sid>.jsonl.
-// setHome points os.UserHomeDir at dir. The variable it reads is platform-specific —
-// USERPROFILE on windows, HOME elsewhere — so setting only HOME leaves the resolver
-// pointed at the real profile and every lookup misses the fixture entirely.
 // setHome points os.UserHomeDir at dir on either OS: HOME is read on unix, USERPROFILE on
 // windows. Both are set so a callee, child env, or direct os.Getenv that consults the other
-// still lands in the sandbox. It is the internal/client twin of cmd/cbus testHome.
+// still lands in the sandbox; setting only one would leave the resolver pointed at the real
+// profile and every lookup missing the fixture. Twin of cmd/cbus testHome.
 func setHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 }
 
+// writeTranscript plants a transcript at <cfg>/projects/<project>/<sid>.jsonl.
 func writeTranscript(t *testing.T, cfg, project, sid string) string {
 	t.Helper()
 	dir := filepath.Join(cfg, "projects", project)
