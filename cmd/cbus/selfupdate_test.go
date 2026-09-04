@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,11 +11,11 @@ import (
 	"testing"
 )
 
-// TestAssetNameMatchesMakefile is S5: the asset name selfupdate hands gh as --pattern
-// must equal the Makefile's dist output for every matrix platform. If either side
-// changes format, this fails — the names cannot silently diverge into a download that
-// matches nothing.
-func TestAssetNameMatchesMakefile(t *testing.T) {
+// TestAssetNameMatrix pins the asset name selfupdate hands gh as --pattern against a
+// literal matrix for every build platform, including the windows .exe. Pure and
+// dependency-free, so it runs everywhere, the D8 gate host included. The Makefile/get.sh
+// cross-check is TestAssetNameMatchesBuildScripts.
+func TestAssetNameMatrix(t *testing.T) {
 	// wants are literal on purpose: recomputing them the way assetNameFor does would
 	// pass under any rule, including a dropped .exe.
 	matrix := []struct{ os, arch, want string }{
@@ -28,12 +30,17 @@ func TestAssetNameMatchesMakefile(t *testing.T) {
 			t.Errorf("assetNameFor(%s,%s) = %q, want %q", m.os, m.arch, got, m.want)
 		}
 	}
+}
+
+// TestAssetNameMatchesBuildScripts cross-checks the pinned names against the two OTHER
+// places they live -- the Makefile and get.sh -- so a format change in either cannot
+// silently diverge from selfupdate's --pattern. It needs the source tree, so on a host
+// that runs only the built test binary with no repo checked out (the D8 gate) it SKIPS
+// with a reason rather than reds; the names are covered everywhere by TestAssetNameMatrix.
+func TestAssetNameMatchesBuildScripts(t *testing.T) {
 	// cross-check the Makefile still builds names as cbus-<os>-<arch><ext> (BINARY=cbus,
 	// out=$(DIST)/$(BINARY)-$$os-$$arch$$ext), so this pin tracks the real source.
-	mk, err := os.ReadFile("../../Makefile")
-	if err != nil {
-		t.Fatalf("read Makefile: %v", err)
-	}
+	mk := readRepoFile(t, "Makefile")
 	if !regexp.MustCompile(`BINARY\s*:=\s*cbus\b`).Match(mk) {
 		t.Error("Makefile BINARY is no longer 'cbus' — the asset-name pin is stale")
 	}
@@ -50,13 +57,40 @@ func TestAssetNameMatchesMakefile(t *testing.T) {
 	}
 	// the bootstrap script is the THIRD place the asset name lives (c8); pin it too so
 	// a format change cannot silently break get.sh's download.
-	gs, err := os.ReadFile("../../get.sh")
-	if err != nil {
-		t.Fatalf("read get.sh: %v", err)
-	}
+	gs := readRepoFile(t, "get.sh")
 	if !strings.Contains(string(gs), `BIN="cbus-${OS}-${ARCH}"`) {
 		t.Error("get.sh no longer builds names as cbus-${OS}-${ARCH} — the asset-name pin is stale")
 	}
+}
+
+// readRepoFile returns the contents of a repo-root file (Makefile, get.sh), or SKIPS the
+// test only when the file is genuinely not present. It resolves the path from THIS test
+// file's ABSOLUTE location (module root is two dirs above cmd/cbus); under -trimpath the
+// recorded caller path is module-relative, so that branch is skipped -- joining a relative
+// "claudebus/Makefile" could otherwise resolve into a neighbouring clone -- leaving only
+// the CWD-relative ../../ fallback, which resolves when go test runs from the package dir.
+// A present-but-unreadable file is a broken checkout and FAILS; only a not-found on every
+// candidate (a binary run on a host with no source tree, e.g. the D8 gate) is the
+// reason-carrying skip, since the names are pinned everywhere by TestAssetNameMatrix.
+func readRepoFile(t *testing.T, name string) []byte {
+	t.Helper()
+	var tried []string
+	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
+		root := filepath.Dir(filepath.Dir(filepath.Dir(file))) // cmd/cbus -> cmd -> root
+		tried = append(tried, filepath.Join(root, name))
+	}
+	tried = append(tried, filepath.Join("..", "..", name))
+	for _, p := range tried {
+		b, err := os.ReadFile(p)
+		if err == nil {
+			return b
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("read %s: %v (present but unreadable is a broken checkout, not a skip)", p, err)
+		}
+	}
+	t.Skipf("%s not found (looked in %v): this cross-check needs the source tree; the asset names are pinned everywhere by TestAssetNameMatrix", name, tried)
+	return nil
 }
 
 // fixtureBinary writes an executable that prints the given --version line, standing in
