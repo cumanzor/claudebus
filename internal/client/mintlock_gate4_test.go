@@ -22,7 +22,7 @@ import (
 // drop the lock before the parent's kill, making crash-release vacuous.
 var gate4Held func()
 
-func mintPath(ch string) string       { return filepath.Join(ledgerRoot(), "."+ch+".mint") }
+func mintPath(ch string) string        { return filepath.Join(ledgerRoot(), "."+ch+".mint") }
 func mintReadyMarker(ch string) string { return mintPath(ch) + ".held" }
 
 // TestMintLockGate4Child is the holder half, env-guarded so it is inert in a normal run

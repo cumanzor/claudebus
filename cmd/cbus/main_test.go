@@ -259,4 +259,3 @@ func TestRenderRemoteList(t *testing.T) {
 		t.Errorf("empty render = %q", empty)
 	}
 }
-
