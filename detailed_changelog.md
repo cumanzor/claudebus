@@ -1,5 +1,113 @@
 # Changelog (detailed)
 
+## [2026-09-05 00:45:00 UTC] [Release/Windows] v0.10.2 SHIPPED: native Windows cbus, phase 1, released and installed on logos end to end
+
+[Attempt #1] Release, not a single commit: tag `v0.10.2` (annotated) on
+`6775c9eef8ca9391b337ac8a988228650cf13212`. This entry is left UNCOMMITTED on
+main; Carlos commits and pushes it together with the queued follow-up patches
+(`cbus-que.21`, `cbus-que.16`/`.12`). Tracked to the `cbus-que` epic, phase 1;
+closes `cbus-que.4`, `cbus-que.5`, `cbus-que.6`; orchestration log on
+`cbus-que.18`/`.19`/`.20`/`.22`.
+
+[Motivating problem]
+Windows-native Claude Code sessions (logos) had no way to join the fleet: cbus
+did not build for windows at all at epic start. Phase 1 scopes this to intercom
+and relay membership only, with everything else refusing honestly rather than
+building broken or silently degrading.
+
+[What shipped]
+- Ten verbs refuse on Windows with a message naming the platform and the phase,
+  exiting non-zero whether called bare or with arguments: `codex` (wrapper,
+  bridge, stop-hook), `branch`, `spawn`, `formation apply` (including
+  `--dry-run`), `close`, `arrange`, `scatter`, `focus`. The last three were
+  added this cycle: main's untagged layout verb family landed by the merge
+  (`b526b29`) and was split at the tmux/tty mechanism boundary, not the file,
+  in the immediately following commit (`0a96d11`), matching the pattern already
+  used for `close.go`/`codexwrap.go` elsewhere in this port.
+- Per-peer `harness` field in meta.json (`cbus-6ij.8`, `054bc25`), stamped at
+  join only, so a peer record can say which harness (claude/codex/grok/
+  opencode) owns it.
+- Fleet-wide fixes riding along, none windows-specific in their defect: the
+  cursor-write latch (a failed write no longer stalls a follower's replay
+  forever), the dirty-tree release guard (`make release` refuses a dirty
+  working tree and halts before publish on a failed platform build), and the
+  capture-helper concurrent drain (fixes a real deadlock risk in any test
+  capturing output past a small pipe buffer, on any platform).
+
+[Acceptance methodology]
+Three disciplines ran throughout, not just at the end:
+- REPRODUCIBLE BUILD: the release's five binary digests plus SHA256SUMS were
+  independently reproduced from three separate fresh clones (tester, reviewer,
+  advisor), not merely computed once and trusted.
+- TWO-VERIFIER CORROBORATION: no single-instrument result stood alone. The
+  changelog merge's union proof ran at two independent layers (a purpose-built
+  block-level inventory tool keyed on timestamp+category+sha, and the
+  reviewer's line-level non-blank-line count) and agreed. The on-box acceptance
+  run was independently read raw by both the reviewer and the advisor before
+  teardown.
+- IDENTITY-BOUND HARNESS: the hardest acceptance case, D5b (a hard-killed
+  listener's channel getting reaped correctly), required a REAL `claude.exe`
+  process ancestry, not a synthetic one -- the harness enforced that the
+  victim's listener chain reached an image named exactly `claude.exe`, that the
+  banked owner pid's start time matched its own CIM-queried start time, and
+  rejected any parent born after its child (a pid-reuse guard). A readiness
+  check confirmed the observer's follower actually consumed a run-unique nonce
+  before any kill was attempted, and two aggregate gates (pre-kill and
+  pre-prune) held the box un-mutated on any invalid or failed leg.
+
+[On-box acceptance, cbus-que.6]
+Rows 0-6 all green on logos itself: windows test binaries pass by name (cmd
+160+1, client 632); all ten refusals plus negative controls; the D0-D4 store
+containment and identity re-pin; D5b listener-kill-and-reap (above); the
+update-check non-recurrence gate (G7) run twice, confirming `update-check.json`
+is never recreated or modified by the suite; net-zero footprint on every named
+root before and after. Two pre-existing reds were adjudicated non-blocking with
+a named mechanism rather than waived: `cbus-que.21` (a test reads
+`../../Makefile` relative to CWD, fails when staged without a checkout --
+fixture/D8 class, patch ready, lands post-release) and `cbus-que.16`
+(a transient `os.ReadFile` on Windows races a concurrent `RemoveAll` at a
+microsecond identity-poll window -- same class as the already-deferred
+`cbus-que.12`, rare and self-correcting, not fixed here).
+
+[Post-publish verification]
+Release published and verified end to end: `origin/main` at the tag, the tag
+peeled to the shipped commit, six assets present (five platform binaries plus
+`SHA256SUMS`), `gh release view` reports `latest == v0.10.2`. Manually
+installed on logos at `%USERPROFILE%\.local\bin\cbus.exe`; `--version` reports
+`cbus-go v0.10.2`. `cbus selfupdate --force` proven end to end: exactly one
+displaced `.old.<pid>` file remained, byte-identical to the pre-swap binary,
+confirming the windows vacate-then-place swap mechanism (`swap_windows.go`)
+works against a real installed binary, not only in its unit tests. Installed
+commands (6) and roles (4) files verified byte-identical to the shipped
+commit's `go:embed` copies, by both hash and name.
+
+[New finding, non-blocking]
+`cbus-que.23`: on Windows, cbus sets unix 0700/0600 mode bits on the credential
+directory and files, which are no-ops for NTFS ACLs -- the actual protection is
+whatever the parent `.config` directory's ACL happens to inherit. In a normal
+profile that resolves to owner + SYSTEM + Administrators with no broad ACE, so
+nothing is exposed today, but the protection is extrinsic rather than enforced
+by cbus. Proposed hardening (a future release): set an explicit owner-only DACL
+and break inheritance on Windows, matching the intent of the unix mode bits.
+Found during the credential ACL inventory on logos with a throwaway token;
+credential values were never read.
+
+[Known upstream limitation, carried forward]
+Claude Code 2.1.232 on Windows does not dispatch SessionEnd or UserPromptSubmit
+hooks at all, on any settings source, confirmed with self-proving marker
+commands that depend on nothing but native `cmd`. cbus is fully exonerated: the
+leave code path this would trigger is simply never reached. A Windows session
+that exits cleanly will not send the immediate "departed" announcement the
+SessionEnd hook normally provides; cbus's lazy-prune backstop reaps the stale
+peer instead, just not instantly. Carlos will file the upstream report; not yet
+filed as of this entry.
+
+[Testing Notes]
+This entry summarizes a release, not a single gated commit; no single suite run
+stands behind it. Every claim above traces to a specific on-box row, a specific
+independent verification, or a specific bead (`cbus-que.4`/`.6`/`.18`/`.21`/`.23`),
+named inline rather than asserted from summary.
+
 ## [2026-09-04 04:10:25 UTC] [Client/Windows] fix(layout): split the tmux/tty boundary so windows refuses arrange/scatter/focus honestly
 
 [Attempt #1] `0a96d11` (full `0a96d110513a2defdf20ed2ca327b45dfb560cad`). 14 files
