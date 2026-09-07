@@ -1,5 +1,41 @@
 # Changelog (detailed)
 
+## [2026-09-07 17:42:34 UTC] [Release/Commands] v0.11.1 SHIPPED: /bus-codex reaches the fleet
+
+[Attempt #1] Release of `f340caa`, annotated tag `v0.11.1`. A skill file changes
+nothing for a running harness until it is installed, and `cbus selfupdate` is
+what installs commands, so the release IS the delivery mechanism for this one.
+
+[What shipped]
+`/bus-codex` (the 7th command), the `/bus-spawn` cross-reference, the docs and
+README entries, and the `profiles/codex.md` resumed-peer note. No client code
+changed since v0.11.0.
+
+[Release procedure]
+Same as v0.11.0: push, annotated tag, fresh clone of the remote at the tag (the
+working tree still carries unrelated uncommitted `roles/*.md` edits that the
+dirty-tree guard would refuse and go:embed would snapshot), suite green in the
+clone, `make release CBUS_REPO=cumanzor/claudebus`, then SHA256SUMS generated
+from dist and uploaded after.
+
+[Verification]
+- Six assets, draft false, prerelease false, `latest` resolves to v0.11.1.
+- Reproducibility: a second independent fresh clone at the tag rebuilt all five
+  binaries to an identical digest list.
+- Mac: v0.11.0 -> v0.11.1, commands 6 -> 7 files,
+  `~/.claude/commands/bus-codex.md` present.
+- NUC: v0.11.0 -> v0.11.1 over ssh, `~/.local/bin/cbus` hashes to the published
+  `cbus-linux-amd64` (dcd1814b...), `bus-codex.md` present in its command set.
+- A live codex peer (`maestro-mcp-test/advisor`, itself a resumed session on the
+  new feature) was running across the Mac swap and kept listening, which is what
+  the vacate-then-place rename is for.
+
+[Possible Ripple Effects]
+- The installed surface is now 11 files by name (7 commands + 4 roles), up from
+  10; the windows acceptance list moves with it.
+- logos stays on v0.10.2 until Carlos updates it, so a harness there will not
+  find `/bus-codex` yet.
+
 ## [2026-09-07 17:37:12 UTC] [Commands/Docs] /bus-codex: the skill surface for codex peers, fresh or resumed
 
 [Attempt #1] Follow-on documentation for `cbus-6ij.9` (the v0.11.0 resume
