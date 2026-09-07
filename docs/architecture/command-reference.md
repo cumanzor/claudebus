@@ -1959,6 +1959,25 @@ its own, and reports both addresses. The model asks for a target via
 AskUserQuestion only if none was passed. The skill's argument hint surfaces
 `--model`/`--name`; `--role` is a `cbus spawn` flag used directly (§9).
 
+### `/bus-codex [channel] [--alias A] [resume <session-id>|resume --last]`
+
+`allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion`
+
+Wrapper over `cbus codex` (§ Codex integration) that wires both sides, same
+shape as `/bus-spawn`: derive the channel, join and arm this session, then launch
+the codex peer. The load-bearing difference from every other launcher skill is
+that the model must NOT run the launch itself as a Bash call — `cbus codex` is an
+interactive TUI that blocks and, given no terminal, dies on stdin EOF without
+joining. The skill launches it through `tmux new-window -c "$PWD"` (or
+`new-session -d` outside tmux), and with no tmux hands the command to the user.
+`-c` is not cosmetic: the window's cwd decides what `resume --last` resolves to.
+Carries the resume forms (id, `--last`, picker, `--thread` for a session name),
+names where an id comes from (a codex peer's own `sessionId` in `cbus list
+--json` IS its codex session id, so a dead codex peer resumes itself), and the
+two traps: never kill the window or `pkill` the wrapper (the app-server orphans
+and keeps the thread's writer lock, so later resumes are refused), and never tell
+a codex peer to arm its own listener.
+
 ### `/bus-formation <verb> ...`
 
 `allowed-tools: Bash(cbus:*), Monitor`
