@@ -127,14 +127,17 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
-  cbus codex [--channel CH] [--alias AL] [codex args...]
+  cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]
                                    launch a codex --remote TUI as a bus peer: a
                                    per-peer app-server, the wrapper learns the
                                    TUI's thread and joins as it, and a bridge
                                    delivers bus messages into that thread (steer
                                    if busy, else a new turn). --channel auto-
                                    derives from the git repo; --alias defaults to
-                                   codex
+                                   codex. args pass through, so a trailing
+                                   "resume <session-id>" brings an existing codex
+                                   session onto the bus; --thread pins it for a
+                                   resume by session NAME or --last
   cbus hook-join                   SessionStart hook: auto-join $CBUS_CHANNEL
                                    (alias $CBUS_ALIAS or auto) under the stdin
                                    session id; harness-neutral, silent, exit 0
@@ -144,12 +147,14 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    injects as a continuation turn; no traffic
                                    before D (default 550s, under the codex
                                    timeout) allows the stop. never fails
-  cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]
+  cbus codex-bridge <ch>/<al> --sock PATH [--thread ID] [--no-resume]
                                    bridge a codex app-server thread to this
                                    alias's inbox: each bus message becomes a
                                    codex turn (steer if a turn is active, else
                                    start one). join the alias first; --thread
-                                   adopts an existing thread, else one is made
+                                   adopts an existing thread, else one is made.
+                                   --no-resume attaches to a thread a TUI already
+                                   drives, leaving it the writer role
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
   cbus leave [channel]             leave channel(s) this session joined

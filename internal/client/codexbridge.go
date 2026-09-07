@@ -41,22 +41,23 @@ type codexBridge struct {
 	conn     *codexConn
 	threadID string
 	opener   string
+	noResume bool // another connection drives this thread; never call thread/resume
 
 	mu         sync.Mutex
 	activeTurn string // the currently-active turnId, "" when the thread is idle
 }
 
-// RunCodexBridge is the `cbus codex-bridge CH/AL --sock PATH [--thread ID]` entry point. It
-// dials the app-server, attaches (adopt-or-open), tracks turn state, and blocks in the
-// follower loop until the listener goes dormant. thread "" makes the bridge create and own
-// a fresh thread.
-func RunCodexBridge(target, sock, thread string) error {
+// RunCodexBridge is the `cbus codex-bridge CH/AL --sock PATH [--thread ID] [--no-resume]` entry
+// point. It dials the app-server, attaches (adopt-or-open), tracks turn state, and blocks in
+// the follower loop until the listener goes dormant. thread "" makes the bridge create and own
+// a fresh thread; noResume attaches to a thread another connection already drives.
+func RunCodexBridge(target, sock, thread string, noResume bool) error {
 	conn, err := dialCodex(sock)
 	if err != nil {
 		return fmt.Errorf("dial codex app-server %q: %w", sock, err)
 	}
 	defer conn.close()
-	b := &codexBridge{conn: conn, threadID: thread, opener: defaultOpener}
+	b := &codexBridge{conn: conn, threadID: thread, opener: defaultOpener, noResume: noResume}
 	if err := b.attach(); err != nil {
 		return fmt.Errorf("attach codex thread: %w", err)
 	}
@@ -81,6 +82,18 @@ func (b *codexBridge) attach() error {
 	}); err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
+	// noResume is the RESUME topology: a TUI has already resumed this thread and holds the
+	// writer role, which the app-server grants to ONE connection. A thread/resume here would
+	// either be refused or, worse, win the race and leave the human's TUI to exit with
+	// "already has an active writer" (measured, both directions). The bridge does not need the
+	// role: the writer's resume already loaded the rollout, and notifications reach every
+	// connection on the server, so an initialized connection is an attached one.
+	if b.noResume {
+		if b.threadID == "" {
+			return errors.New("no thread to attach to: --no-resume bridges a thread someone else drives, so it needs --thread ID")
+		}
+		return nil
+	}
 	if b.threadID == "" {
 		r, err := b.conn.call("thread/start", map[string]any{"approvalPolicy": "never", "sandbox": "read-only"})
 		if err != nil {
@@ -94,6 +107,9 @@ func (b *codexBridge) attach() error {
 	_, err := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID})
 	if err == nil {
 		return nil // thread had a rollout; resume subscribed us
+	}
+	if isWriterHeld(err) {
+		return nil // the resume topology: someone else drives this thread, see isWriterHeld
 	}
 	if !isRPCCode(err, -32600, "rollout") {
 		return fmt.Errorf("resume: %w", err) // a real failure, not the zero-turn no-rollout case
@@ -218,8 +234,8 @@ func (b *codexBridge) steerWithRetry(turn, text string) error {
 func (b *codexBridge) startTurn(text string) error {
 	r, err := b.conn.call("turn/start", turnParams(b.threadID, text))
 	if err != nil && isRPCCode(err, -32600, "thread not found") {
-		if _, rerr := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID}); rerr != nil {
-			return rerr
+		if _, rerr := b.conn.call("thread/resume", map[string]any{"threadId": b.threadID}); rerr != nil && !isWriterHeld(rerr) {
+			return rerr // writer-held means the thread is live after all, so the retry stands
 		}
 		r, err = b.conn.call("turn/start", turnParams(b.threadID, text))
 	}
@@ -265,6 +281,12 @@ func turnParams(threadID, text string) map[string]any {
 func steerParams(threadID, turnID, text string) map[string]any {
 	return map[string]any{"threadId": threadID, "expectedTurnId": turnID, "input": textInput(text)}
 }
+
+// isWriterHeld reports the app-server refusing a second connection the writer role on a thread
+// another connection already drives. That is the wrapper's RESUME topology rather than a
+// failure: the TUI resumed the thread first, so it holds the writer AND has already loaded the
+// rollout, which is everything the bridge would have called resume for.
+func isWriterHeld(err error) bool { return isRPCCode(err, -32600, "active writer") }
 
 func isRPCCode(err error, code int, substr string) bool {
 	var re *rpcError

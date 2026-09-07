@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,14 @@ func bridgeOn(t *testing.T, f *fakeCodex, thread string) *codexBridge {
 	c := mustDial(t, f.sock)
 	t.Cleanup(func() { c.close() })
 	return &codexBridge{conn: c, threadID: thread, opener: "OPENER"}
+}
+
+// bridgeNoResumeOn is bridgeOn for the resume topology: a thread another connection drives.
+func bridgeNoResumeOn(t *testing.T, f *fakeCodex, thread string) *codexBridge {
+	t.Helper()
+	b := bridgeOn(t, f, thread)
+	b.noResume = true
+	return b
 }
 
 func waitActive(b *codexBridge, want string, d time.Duration) bool {
@@ -337,4 +346,63 @@ func inputText(req map[string]any) string {
 	item, _ := arr[0].(map[string]any)
 	s, _ := item["text"].(string)
 	return s
+}
+
+// ---- resume topology ----
+
+// TestBridgeNoResumeNeverResumes: the app-server hands the thread's writer role to ONE
+// connection, so a bridge riding alongside a `codex resume` TUI must not call thread/resume at
+// all. Winning that race is not a harmless retry: it leaves the human's TUI to exit 1 with
+// "already has an active writer" (measured in both directions during the live smoke).
+func TestBridgeNoResumeNeverResumes(t *testing.T) {
+	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+	})
+	b := bridgeNoResumeOn(t, f, "TUITHREAD")
+	if err := b.attach(); err != nil {
+		t.Fatalf("attach alongside a driving TUI must succeed: %v", err)
+	}
+	if got := f.recorded(); !reflect.DeepEqual(got, []string{"initialize"}) {
+		t.Errorf("no-resume attach calls = %v, want [initialize] only", got)
+	}
+}
+
+// TestBridgeNoResumeNeedsThread: without a thread id there is nothing to attach to, and
+// creating one would silently bridge a thread the TUI is not showing.
+func TestBridgeNoResumeNeedsThread(t *testing.T) {
+	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+	})
+	b := bridgeNoResumeOn(t, f, "")
+	err := b.attach()
+	if err == nil {
+		t.Fatal("no-resume without --thread must refuse, not open a thread of its own")
+	}
+	if !strings.Contains(err.Error(), "--thread") {
+		t.Errorf("refusal must name the missing flag: %v", err)
+	}
+	if slices.Contains(f.recorded(), "thread/start") {
+		t.Errorf("no-resume must never start a thread: %v", f.recorded())
+	}
+}
+
+// TestBridgeAttachToleratesWriterHeld: a resume refused because another connection already
+// holds the writer means the thread is LIVE and its rollout loaded, which is everything the
+// resume was for. The bridge treats it as attached instead of tearing the TUI down (the first
+// live failure of the resume path).
+func TestBridgeAttachToleratesWriterHeld(t *testing.T) {
+	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		if req["method"] == "thread/resume" {
+			s.replyErr(req["id"], -32600, "thread T1 already has an active writer")
+			return
+		}
+		s.reply(req["id"], map[string]any{})
+	})
+	b := bridgeOn(t, f, "T1")
+	if err := b.attach(); err != nil {
+		t.Fatalf("writer-held resume must read as attached: %v", err)
+	}
+	if slices.Contains(f.recorded(), "turn/start") {
+		t.Errorf("a live thread must not get an opener turn: %v", f.recorded())
+	}
 }

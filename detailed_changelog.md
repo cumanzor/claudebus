@@ -1,5 +1,95 @@
 # Changelog (detailed)
 
+## [2026-09-07 00:14:26 UTC] [Client/Codex] cbus codex resume: an existing codex session as a bus peer
+
+[Attempt #1] `cbus-6ij.9`, under the multi-harness epic `cbus-6ij`. Built after a
+question about whether `cbus codex --channel X --alias Y resume <id>` was
+supported. It was not, and the way it failed was misleading.
+
+[Motivating problem]
+`cbus codex` passes unrecognised args through to codex, and codex accepts
+`--remote` alongside its `resume` subcommand, so the command launched the right
+TUI. The wrapper then killed it 45s later with "codex --remote never started a
+thread within 45s: the TUI did not attach to the app-server". The TUI had
+attached and was healthy. A control launch with no resume arg joined in about
+two seconds, so the break was specific to resume.
+
+[Findings, all measured against codex-cli 0.153.4]
+- F1: a resumed thread never emits `thread/started`. A passive app-server
+  connection sees `thread/status/changed` and `thread/goal/cleared`, both
+  carrying `threadId`. `discoverThread` only accepted `thread/started`, so it
+  sat out the window on a thread the server had already named.
+- F2: a fresh launch emits `thread/started` and nothing else in the same 25s
+  window. That is what makes the wider acceptance safe to scope to resume: the
+  fresh path's cwd hard-check cannot be sidestepped by a notification that
+  carries no cwd.
+- F3 (found by the live smoke, not by any test): the app-server grants a
+  thread's writer role to ONE connection. First live run, the TUI resumed first
+  and the bridge's `thread/resume` was refused with "already has an active
+  writer", so the bridge failed and tore the TUI down. Second run, with the id
+  pinned and discovery skipped, the bridge won the race instead and the human's
+  TUI exited 1 with the same error. The wait is therefore ordering, not just
+  discovery.
+- F4: a non-writer connection can still drive the thread. `turn/start` from the
+  bridge landed in the resumed session and the model answered on the bus, which
+  is what makes the no-resume attach viable at all.
+- F5: an app-server that outlives its wrapper keeps the writer lock
+  (`~/.codex/thread-writer-locks/<id>.lock`) and every later resume of that
+  session is refused until it dies. Self-inflicted here by `pkill` on the
+  wrapper, which skips the deferred group teardown; worth knowing, not a defect.
+
+[Files Changed]
+- `internal/client/codexwrap.go` — `threadNoteID`, `uuidLike`, `resumeLaunch`
+  (reads `resume <uuid>` out of the passthrough), and a `rendezvous` struct that
+  carries wantCwd/wantID/resume/timeout. `discoverThread` now takes that struct
+  plus a `tuiExit` channel: it accepts any thread-bearing notification on a
+  resume, applies the wantID check in place of the cwd check there, ends the
+  wait the moment the TUI dies, and uses a 5 minute window when the picker is
+  in play (a human is choosing).
+- `internal/client/codexwrap_unix.go` — `RunCodexWrap` gains a `thread` param;
+  `tui.Wait` moved into a goroutine feeding `tuiExit` (step 6 reads the same
+  channel, Wait must not run twice); the bridge is started with noResume on a
+  resume launch.
+- `internal/client/codexbridge.go` — `noResume` field: attach initializes and
+  stops, refusing when no `--thread` was given. `isWriterHeld` treats a
+  -32600 "active writer" resume as already attached, in `attach` and in the
+  `startTurn` recovery ladder.
+- `internal/client/codexwrap_windows.go` — signature parity.
+- `cmd/cbus/main.go` — `--thread` on `codex`, `--no-resume` on `codex-bridge`,
+  plus an `extractBool` helper.
+- `cmd/cbus/usage.go`, `CHEATSHEET.md`, `docs/codex.md`,
+  `docs/architecture/behavior-spec.md`, `docs/architecture/command-reference.md`
+  — the verb surface and the two claims the change invalidates.
+- Tests: `resumeLaunch`/`uuidLike`/`threadNoteID` tables, resume adopts a
+  status notification, fresh does NOT (the guard-preservation pin), resume
+  skips the cwd check, wantID mismatch refused, TUI-exit ends the wait, bridge
+  no-resume calls only initialize, no-resume without a thread refuses, and a
+  writer-held resume reads as attached.
+
+[Possible Ripple Effects]
+- The fresh path is deliberately untouched in behaviour: still `thread/started`
+  only, still the cwd hard-check. The one shared change is `tui.Wait` moving to
+  a goroutine, which also means a TUI that dies during a fresh discovery now
+  reports its own exit instead of "did not attach" after the full 45s.
+- `RunCodexWrap` and `RunCodexBridge` both changed signature. Callers are the
+  two CLI verbs and the windows stub.
+- Skipping `thread/resume` on the resume path means the bridge never reloads a
+  rollout there. If the app-server ever unloads a thread its TUI still holds,
+  the `startTurn` recovery resume is the only path back, and it now tolerates
+  the writer-held answer.
+
+[Testing Notes]
+- `go test ./...` green; `go vet` clean; compile gate on linux/amd64,
+  linux/arm64, windows/amd64, darwin/arm64.
+- Live smoke (the gate that actually found F3), all with an isolated CBUS_DIR:
+  resume by id joins under the resumed session id, arms as listener, and a
+  `cbus send` became a real turn answered "ack" in that session's rollout;
+  `resume --last` joined under the same id through the notification rendezvous;
+  the fresh path round-tripped a message and the peer replied on the bus.
+  Quitting the TUI tore down cleanly with no orphaned app-server.
+- Not exercised by hand: the interactive picker (needs keystrokes in the TUI).
+  It is the same rendezvous as `--last` with the longer window.
+
 ## [2026-09-05 00:45:00 UTC] [Release/Windows] v0.10.2 SHIPPED: native Windows cbus, phase 1, released and installed on logos end to end
 
 [Attempt #1] Release, not a single commit: tag `v0.10.2` (annotated) on

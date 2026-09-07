@@ -14,6 +14,7 @@ func TestCodexWrapArgErrors(t *testing.T) {
 	for name, args := range map[string][]string{
 		"channel no value": {"--channel"},
 		"alias no value":   {"--alias"},
+		"thread no value":  {"--thread"},
 	} {
 		if rc := runCodexWrap(args); rc == 0 {
 			t.Errorf("%s: expected non-zero exit", name)

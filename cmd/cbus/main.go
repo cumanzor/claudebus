@@ -330,17 +330,19 @@ func runCodexStopHook(args []string) int {
 	return 0
 }
 
-// runCodexWrap wires `cbus codex [--channel CH] [--alias AL] [codex args...]`: it launches a
-// codex --remote TUI as a bus peer and blocks until it exits. --channel defaults to the git
-// repo name; --alias defaults to "codex" (the wrapper must know the alias to bridge it).
-// Remaining args pass through to codex.
+// runCodexWrap wires `cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]`: it
+// launches a codex --remote TUI as a bus peer and blocks until it exits. --channel defaults to
+// the git repo name; --alias defaults to "codex" (the wrapper must know the alias to bridge it).
+// Remaining args pass through to codex, so `cbus codex ... resume <session-id>` resumes an
+// existing codex session as the peer. --thread pins the thread for the resume forms that do not
+// name a session id on the command line (a session NAME, or --last).
 func runCodexWrap(args []string) int {
 	// client.RunCodexWrap refuses too, and stays the library answer; this guard is what
 	// the CLI user actually reaches, since a bad --channel dies on the flag first.
 	if m := phase1Refusal("codex"); m != "" {
 		return die("%s", m)
 	}
-	const use = "usage: cbus codex [--channel CH] [--alias AL] [codex args...]"
+	const use = "usage: cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]"
 	channel, args, err := extractFlag(args, "--channel")
 	if err != nil {
 		return die("%v (%s)", err, use)
@@ -349,23 +351,29 @@ func runCodexWrap(args []string) int {
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
+	thread, args, err := extractFlag(args, "--thread")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
 	if alias == "" {
 		alias = "codex"
 	}
-	if err := client.RunCodexWrap(channel, alias, args); err != nil {
+	if err := client.RunCodexWrap(channel, alias, thread, args); err != nil {
 		return die("%v", err)
 	}
 	return 0
 }
 
-// runCodexBridge wires `cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]`. The peer
-// must already be joined (the bridge arms as its listener); --thread adopts an existing
-// codex thread, and its absence makes the bridge create one. Blocks in the follower loop.
+// runCodexBridge wires `cbus codex-bridge <ch>/<al> --sock PATH [--thread ID] [--no-resume]`.
+// The peer must already be joined (the bridge arms as its listener); --thread adopts an
+// existing codex thread, and its absence makes the bridge create one. --no-resume attaches to a
+// thread a TUI already drives (a `codex resume` window), leaving it the writer role. Blocks in
+// the follower loop.
 func runCodexBridge(args []string) int {
 	if m := phase1Refusal("codex-bridge"); m != "" {
 		return die("%s", m)
 	}
-	const use = "usage: cbus codex-bridge <channel>/<alias> --sock PATH [--thread ID]"
+	const use = "usage: cbus codex-bridge <channel>/<alias> --sock PATH [--thread ID] [--no-resume]"
 	sock, args, err := extractFlag(args, "--sock")
 	if err != nil {
 		return die("%v (%s)", err, use)
@@ -374,6 +382,7 @@ func runCodexBridge(args []string) int {
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
+	noResume, args := extractBool(args, "--no-resume")
 	if len(args) == 0 {
 		return die("%s", use)
 	}
@@ -387,7 +396,7 @@ func runCodexBridge(args []string) int {
 		return die("codex-bridge is local-only (a codex app-server is a local UDS)")
 	}
 	warnIfSessionless()
-	if err := client.RunCodexBridge(args[0], sock, thread); err != nil {
+	if err := client.RunCodexBridge(args[0], sock, thread, noResume); err != nil {
 		return die("%v", err)
 	}
 	return 0
@@ -425,6 +434,20 @@ func runBootstrap(args []string) int {
 
 // extractFlag pulls a `<flag> <value>` pair out of args wherever it appears
 // (branch/spawn take flags trailing or leading), returning the remaining positionals.
+// extractBool pulls a valueless flag out of args, reporting whether it was present.
+func extractBool(args []string, flag string) (bool, []string) {
+	found := false
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == flag {
+			found = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return found, rest
+}
+
 func extractFlag(args []string, flag string) (val string, rest []string, err error) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == flag {

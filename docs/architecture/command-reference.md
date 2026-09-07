@@ -1167,19 +1167,29 @@ dropped args, different reason underneath (point 1 above).
 
 Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex mode:
 
-- **`cbus codex [--channel CH] [--alias AL] [codex args...]`** — the interactive
-  path. Stands up a per-peer `codex app-server` on a short unix socket
+- **`cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]`** — the
+  interactive path. Stands up a per-peer `codex app-server` on a short unix socket
   (`$CBUS_DIR/.sock/<n>.sock`, TempDir fallback), launches `codex --remote` against
   it, learns the TUI's thread id from a passive server connection (its
   `thread/started`), joins the bus as that thread (via the `--session-id` identity
-  mechanism), and runs `codex-bridge` to inject each bus message as a turn. Both
+  mechanism), and runs `codex-bridge` to inject each bus message as a turn. Args
+  pass through, so `... resume <session-id>` (or `--last`, or the picker) brings an
+  **existing codex session** onto the bus under its own id; there the rendezvous is
+  `thread/status/changed` rather than `thread/started`, the id on the command line
+  is checked against the thread that appears, and the bridge attaches without
+  resuming so the TUI keeps the writer role. `--thread ID` pins the thread for a
+  resume by session name. Both
   child processes get the launcher session-ids scrubbed and `CBUS_ALIAS`/
   `CBUS_CHANNEL` set, so codex's own `cbus` commands self-identify as the peer, not
   the launcher. A bridge that dies kills the TUI (fail-whole-unit).
-- **`cbus codex-bridge <ch>/<al> --sock PATH [--thread ID]`** — the bridge alone,
-  for a thread you already have. Attaches with `thread/resume` (opening a zero-turn
-  thread and riding out the async rollout flush first), then delivers each framed
-  inbox message: steer an in-flight turn if one is active, else a new turn.
+- **`cbus codex-bridge <ch>/<al> --sock PATH [--thread ID] [--no-resume]`** — the
+  bridge alone, for a thread you already have. Attaches with `thread/resume`
+  (opening a zero-turn thread and riding out the async rollout flush first), then
+  delivers each framed inbox message: steer an in-flight turn if one is active,
+  else a new turn. `--no-resume` attaches to a thread a TUI already drives (needs
+  `--thread`): it initializes and nothing more, leaving that connection the writer
+  role. A `thread/resume` refused with "already has an active writer" is likewise
+  read as attached rather than as a failure.
 - **`cbus hook-join`** — a harness-neutral **SessionStart** hook: auto-join
   `$CBUS_CHANNEL` (alias `$CBUS_ALIAS` or auto) under the stdin session id, silent,
   exit 0. Serves any harness that fires a SessionStart-shaped hook.
