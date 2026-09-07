@@ -159,6 +159,7 @@ window, with no other file and no channel history.
     findings: (F1) <file:line> <defect> — <repro> — <what would fix it>
     micro-notes (record only, no action): (n1) ...
     reproduced: <what you re-ran yourself, and the result>
+    relayed: <coder claims you accepted without re-running, or none>
 
 ## Escalation
 
