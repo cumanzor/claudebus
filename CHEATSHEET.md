@@ -139,6 +139,8 @@ cbus formation apply myeffort --mode resume --only coder  # late-bound per-peer 
 
 # codex as a peer (harness-neutral bus; codex never runs `cbus tail`)
 cbus codex --channel myrepo                          # codex --remote TUI joined as a bus peer, bridged
+cbus codex --channel myrepo --alias advisor resume <session-id>   # bring an existing codex session onto the bus
+cbus codex --channel myrepo --alias advisor resume --last         # same, most recent session in this cwd
 cbus codex-stop-hook                                 # Stop-hook delivery for plain codex exec workers
 cbus formation list                                 # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                          # delete (starters: use git rm instead)
@@ -219,6 +221,7 @@ cbus hook-exit                   # SessionEnd hook target (announces departure)
 cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus hook-join                   # SessionStart hook target (auto-joins $CBUS_CHANNEL)
 cbus codex-bridge <ch>/<al> --sock PATH  # bridge a codex app-server thread (docs/codex.md)
+cbus codex-bridge <ch>/<al> --sock PATH --thread ID --no-resume  # bridge a thread a TUI already drives
 cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ```

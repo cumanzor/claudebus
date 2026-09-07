@@ -16,6 +16,6 @@ import "errors"
 //
 // The CLI refuses at runCodexWrap ahead of this, so what a `cbus codex` user reads is
 // that guard's string; this is the library answer.
-func RunCodexWrap(channel, alias string, passthrough []string) error {
+func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 	return errors.New("cbus codex is not available on windows in phase 1: the wrapper rendezvouses with the codex app-server over a unix domain socket and tears it down by process group")
 }

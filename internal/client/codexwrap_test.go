@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -175,7 +176,7 @@ func TestDiscoverThreadReturnsID(t *testing.T) {
 	if _, err := c.call("initialize", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := discoverThread(c, "/work", 2*time.Second)
+	got, err := discoverThread(c, rendezvous{wantCwd: "/work", timeout: 2 * time.Second}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +199,7 @@ func TestDiscoverThreadRefusesCwdMismatch(t *testing.T) {
 	if _, err := c.call("initialize", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := discoverThread(c, "/work", 2*time.Second)
+	_, err := discoverThread(c, rendezvous{wantCwd: "/work", timeout: 2 * time.Second}, nil)
 	if err == nil {
 		t.Fatal("cwd mismatch must be refused, not adopted")
 	}
@@ -239,8 +240,186 @@ func TestDiscoverThreadTimeout(t *testing.T) {
 	if _, err := c.call("initialize", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := discoverThread(c, "/work", 60*time.Millisecond)
+	_, err := discoverThread(c, rendezvous{wantCwd: "/work", timeout: 60 * time.Millisecond}, nil)
 	if err == nil || !strings.Contains(err.Error(), "did not attach") {
 		t.Errorf("timeout must diagnose the missing attach, got: %v", err)
+	}
+}
+
+// TestUuidLike: only the 8-4-4-4-12 hex shape passes, so a session NAME is never mistaken for
+// a thread id.
+func TestUuidLike(t *testing.T) {
+	for _, ok := range []string{"01a06968-3620-7a63-a5ba-1b25c394ccbd", "AAAAAAAA-bbbb-CCCC-dddd-000000000000"} {
+		if !uuidLike(ok) {
+			t.Errorf("uuidLike(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", "--last", "my-session", "not-a-uuid-at-all-here-nope", "01a06968-3620-7a63-a5ba-1b25c394ccbdd", "01a06968_3620_7a63_a5ba_1b25c394ccbd", "01a06968-3620-7a63-a5ba-1b25c394ccbg"} {
+		if uuidLike(bad) {
+			t.Errorf("uuidLike(%q) = true, want false", bad)
+		}
+	}
+}
+
+// TestResumeLaunch: a resume is recognised wherever the subcommand sits, and the session id is
+// read out only when the args actually name one — --last and a session name leave it empty, so
+// the wrapper rendezvouses instead of joining under something the server never heard of.
+func TestResumeLaunch(t *testing.T) {
+	const sid = "01a06968-3620-7a63-a5ba-1b25c394ccbd"
+	for name, tc := range map[string]struct {
+		args       []string
+		wantResume bool
+		wantSID    string
+	}{
+		"fresh":            {nil, false, ""},
+		"fresh with flags": {[]string{"--search", "-c", "model=o3"}, false, ""},
+		"resume by id":     {[]string{"resume", sid}, true, sid},
+		"resume last":      {[]string{"resume", "--last"}, true, ""},
+		"resume by name":   {[]string{"resume", "my-session"}, true, ""},
+		"resume picker":    {[]string{"resume"}, true, ""},
+		"opts before sub":  {[]string{"-c", "model=o3", "resume", sid}, true, sid},
+		"id with prompt":   {[]string{"resume", sid, "carry on"}, true, sid},
+		"flag before id":   {[]string{"resume", "--all", sid}, true, sid},
+	} {
+		gotResume, gotSID := resumeLaunch(tc.args)
+		if gotResume != tc.wantResume || gotSID != tc.wantSID {
+			t.Errorf("%s: resumeLaunch(%v) = %v,%q want %v,%q", name, tc.args, gotResume, gotSID, tc.wantResume, tc.wantSID)
+		}
+	}
+}
+
+// TestThreadNoteID: the flat threadId a resumed thread's notifications carry is read, as is the
+// nested thread.id of thread/started; anything else yields "".
+func TestThreadNoteID(t *testing.T) {
+	for name, tc := range map[string]struct{ params, want string }{
+		"flat":    {`{"threadId":"T1","status":{"type":"idle"}}`, "T1"},
+		"nested":  {`{"thread":{"id":"T2","cwd":"/work"}}`, "T2"},
+		"neither": {`{"status":"disabled","serverName":"h"}`, ""},
+	} {
+		if got := threadNoteID([]byte(tc.params)); got != tc.want {
+			t.Errorf("%s: threadNoteID = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestDiscoverThreadResumeAdoptsStatusNotification: a RESUMED thread is announced by
+// thread/status/changed, never thread/started (measured, codex-cli 0.153.4), so the resume
+// rendezvous adopts the id that notification names.
+func TestDiscoverThreadResumeAdoptsStatusNotification(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+		if req["method"] == "initialize" {
+			s.notify("thread/status/changed", map[string]any{"threadId": "RESUMED", "status": map[string]any{"type": "idle"}})
+		}
+	})
+	c := mustDial(t, f.sock)
+	defer c.close()
+	if _, err := c.call("initialize", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := discoverThread(c, rendezvous{wantCwd: "/work", resume: true, timeout: 2 * time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "RESUMED" {
+		t.Errorf("resumed thread = %q, want RESUMED", got)
+	}
+}
+
+// TestDiscoverThreadFreshIgnoresStatusNotification: the wider acceptance is scoped to resume.
+// A fresh launch still waits for thread/started, so the cwd hard-check cannot be sidestepped by
+// a notification that carries no cwd to check.
+func TestDiscoverThreadFreshIgnoresStatusNotification(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+		if req["method"] == "initialize" {
+			s.notify("thread/status/changed", map[string]any{"threadId": "STRANGER", "status": map[string]any{"type": "idle"}})
+		}
+	})
+	c := mustDial(t, f.sock)
+	defer c.close()
+	if _, err := c.call("initialize", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := discoverThread(c, rendezvous{wantCwd: "/work", timeout: 150 * time.Millisecond}, nil)
+	if err == nil {
+		t.Fatalf("fresh launch adopted %q from a thread/status/changed; only thread/started is cwd-checked", got)
+	}
+	if !strings.Contains(err.Error(), "did not attach") {
+		t.Errorf("want the fresh-path timeout diagnosis, got: %v", err)
+	}
+}
+
+// TestDiscoverThreadResumeSkipsCwdCheck: a resumed session carries the cwd it was RECORDED in,
+// which legitimately differs from the wrapper's, so cwd is not an identity check there.
+func TestDiscoverThreadResumeSkipsCwdCheck(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+		if req["method"] == "initialize" {
+			s.notify("thread/started", map[string]any{"thread": map[string]any{"id": "ELSEWHERE", "cwd": "/somewhere/else"}})
+		}
+	})
+	c := mustDial(t, f.sock)
+	defer c.close()
+	if _, err := c.call("initialize", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := discoverThread(c, rendezvous{wantCwd: "/work", resume: true, timeout: 2 * time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ELSEWHERE" {
+		t.Errorf("resumed thread = %q, want ELSEWHERE", got)
+	}
+}
+
+// TestDiscoverThreadAbortsOnTUIExit: a dead TUI ends the wait immediately with what actually
+// happened, instead of sitting out a timer (five minutes on the picker path) and then blaming
+// an attach that did happen.
+func TestDiscoverThreadAbortsOnTUIExit(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) { s.reply(req["id"], map[string]any{}) })
+	c := mustDial(t, f.sock)
+	defer c.close()
+	if _, err := c.call("initialize", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	tuiExit := make(chan error, 1)
+	tuiExit <- errors.New("exit status 1")
+	start := time.Now()
+	_, err := discoverThread(c, rendezvous{resume: true, timeout: time.Minute}, tuiExit)
+	if err == nil || !strings.Contains(err.Error(), "exited before its thread was known") {
+		t.Fatalf("want the TUI-exit cause, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "exit status 1") {
+		t.Errorf("cause must carry the TUI's own error: %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("waited %s for a dead TUI; the exit must end the wait, not the timer", d)
+	}
+}
+
+// TestDiscoverThreadRefusesWrongThread: when the launch named a session id, a thread that is
+// not that one is refused loudly (both ids named) rather than bridged, so the bridge can never
+// deliver into a thread the TUI is not showing.
+func TestDiscoverThreadRefusesWrongThread(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{})
+		if req["method"] == "initialize" {
+			s.notify("thread/status/changed", map[string]any{"threadId": "OTHER", "status": map[string]any{"type": "idle"}})
+		}
+	})
+	c := mustDial(t, f.sock)
+	defer c.close()
+	if _, err := c.call("initialize", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverThread(c, rendezvous{resume: true, wantID: "ASKED", timeout: 2 * time.Second}, nil)
+	if err == nil {
+		t.Fatal("a thread other than the one asked for must be refused")
+	}
+	for _, want := range []string{"OTHER", "ASKED"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal must name both ids; missing %q in: %v", want, err)
+		}
 	}
 }

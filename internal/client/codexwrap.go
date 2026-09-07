@@ -32,6 +32,10 @@ const (
 	sunPathMax    = 103
 	codexServerUp = 10 * time.Second
 	discoverWait  = 45 * time.Second // the TUI attaches and starts its thread well within this
+	// resumeWait is the picker's window: `codex resume` with no id puts a HUMAN in front of a
+	// session list, so the thread is not named until they choose. A TUI that dies first ends
+	// the wait early (tuiExit), so the long timer only ever costs a real deliberation.
+	resumeWait = 5 * time.Minute
 )
 
 // allocCodexSocket picks a per-launch socket path short enough for SUN_LEN. It prefers
@@ -119,31 +123,140 @@ func threadStartedInfo(params json.RawMessage) (id, cwd string) {
 	return p.Thread.ID, p.Thread.Cwd
 }
 
-// discoverThread blocks until the app-server pushes a thread/started for the TUI's thread (a
-// passive connection receives it, F1 probe), returning that thread id. The cwd is a HARD
-// check: a per-peer app-server must serve exactly this wrapper's TUI, so a thread/started whose
-// cwd disagrees with the wrapper's is refused loudly (both paths named) rather than adopted —
-// same loudness as the rejected exactly-one-thread contract. On expiry it names the likely
-// cause rather than hanging: the --remote session never reached the app-server.
-func discoverThread(conn *codexConn, wantCwd string, timeout time.Duration) (string, error) {
-	timer := time.NewTimer(timeout)
+// threadNoteID pulls a thread id out of any notification that names one. thread/started nests
+// it under "thread"; the notifications a RESUMED thread produces instead — thread/status/changed
+// and thread/goal/cleared, both measured on codex-cli 0.153.4 — carry a flat threadId.
+func threadNoteID(params json.RawMessage) string {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Thread   struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if p.ThreadID != "" {
+		return p.ThreadID
+	}
+	return p.Thread.ID
+}
+
+// uuidLike reports whether s has the 8-4-4-4-12 hex shape of a codex session id. It is the
+// guard on reading a thread id out of the passthrough: a `resume` arg that is not a session id
+// is a session NAME (codex resolves those itself), and adopting one as a thread id would join
+// the bus under something the app-server never heard of.
+func uuidLike(s string) bool {
+	groups := []int{8, 4, 4, 4, 12}
+	parts := strings.Split(s, "-")
+	if len(parts) != len(groups) {
+		return false
+	}
+	for i, want := range groups {
+		if len(parts[i]) != want {
+			return false
+		}
+		for _, c := range parts[i] {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// resumeLaunch reports whether the passthrough runs codex's `resume` subcommand, and returns
+// the session id when the args already name one (`resume <uuid>`, the id form). A resumed
+// thread never emits thread/started, so this is what tells the wrapper to rendezvous
+// differently; the id, when present, means no rendezvous is needed at all.
+//
+// The scan is for a bare `resume` token anywhere in the passthrough rather than at position 0,
+// so global options in front of the subcommand (`cbus codex -c model=o3 resume ...`) still
+// read as a resume. A codex PROMPT of exactly "resume" would also match, which costs nothing:
+// `codex resume` with no id is the picker either way.
+func resumeLaunch(passthrough []string) (resume bool, sid string) {
+	for i, a := range passthrough {
+		if a != "resume" {
+			continue
+		}
+		for _, rest := range passthrough[i+1:] {
+			if uuidLike(rest) {
+				return true, rest
+			}
+		}
+		return true, ""
+	}
+	return false, ""
+}
+
+// rendezvous is how the wrapper expects to meet the thread its TUI is driving.
+//
+//   - fresh launch: wait for thread/started and hard-check its cwd (unchanged behaviour).
+//   - resume: accept ANY notification that names a threadId. A resumed thread is announced by
+//     thread/status/changed, not thread/started, and a fresh launch emits nothing else in the
+//     same window (probed), so the wider acceptance cannot loosen the fresh path's cwd check.
+//
+// The wait is ORDERING, not just discovery, which is why a resume waits even when the operator
+// already typed the session id. The app-server grants the thread's writer role to ONE
+// connection: the TUI must be the one that claims it, or it exits with "already has an active
+// writer" and the human loses the window they asked for. Waiting for the server to name the
+// thread is what puts the TUI first; wantID then only CHECKS that the thread which showed up is
+// the one that was asked for.
+//
+// cwd is NOT an identity check on the resume path: a resumed session legitimately carries the
+// cwd it was recorded in, so a mismatch there is normal rather than a stranger thread. wantID
+// is the identity check that replaces it whenever the launch names an id.
+type rendezvous struct {
+	wantCwd string
+	wantID  string
+	resume  bool
+	timeout time.Duration
+}
+
+// accept applies the wantID check to a thread id the server named.
+func (rz rendezvous) accept(id string) (string, error) {
+	if rz.wantID != "" && id != rz.wantID {
+		return "", fmt.Errorf("codex named thread %q but this launch asked for %q — refusing (the bridge would deliver into a thread the TUI is not showing)", id, rz.wantID)
+	}
+	return id, nil
+}
+
+// discoverThread blocks until the app-server names the TUI's thread on the passive connection
+// (F1 probe), returning that thread id. The cwd is a HARD check on the fresh path: a per-peer
+// app-server must serve exactly this wrapper's TUI, so a thread/started whose cwd disagrees
+// with the wrapper's is refused loudly (both paths named) rather than adopted — same loudness
+// as the rejected exactly-one-thread contract.
+//
+// tuiExit ends the wait the moment the TUI is gone, so a dead TUI reports what actually
+// happened instead of the operator reading "did not attach" after sitting out the whole timer.
+// On expiry it names the likely cause rather than hanging.
+func discoverThread(conn *codexConn, rz rendezvous, tuiExit <-chan error) (string, error) {
+	timer := time.NewTimer(rz.timeout)
 	defer timer.Stop()
 	for {
 		select {
 		case note := <-conn.notifications():
-			if note.Method != "thread/started" {
+			if note.Method == "thread/started" {
+				id, cwd := threadStartedInfo(note.Params)
+				if id == "" {
+					continue // malformed notification; the timer still bounds the wait
+				}
+				if !rz.resume && rz.wantCwd != "" && cwd != "" && cwd != rz.wantCwd {
+					return "", fmt.Errorf("codex started a thread in %q but this wrapper runs in %q — refusing (a per-peer app-server must serve exactly this TUI)", cwd, rz.wantCwd)
+				}
+				return rz.accept(id)
+			}
+			if !rz.resume {
 				continue
 			}
-			id, cwd := threadStartedInfo(note.Params)
-			if id == "" {
-				continue // malformed notification; the timer still bounds the wait
+			if id := threadNoteID(note.Params); id != "" {
+				return rz.accept(id)
 			}
-			if wantCwd != "" && cwd != "" && cwd != wantCwd {
-				return "", fmt.Errorf("codex started a thread in %q but this wrapper runs in %q — refusing (a per-peer app-server must serve exactly this TUI)", cwd, wantCwd)
-			}
-			return id, nil
+		case werr := <-tuiExit:
+			return "", fmt.Errorf("codex --remote exited before its thread was known (%v): nothing to join", werr)
 		case <-timer.C:
-			return "", fmt.Errorf("codex --remote never started a thread within %s: the TUI did not attach to the app-server", timeout)
+			if rz.resume {
+				return "", fmt.Errorf("codex --remote never named a resumed thread within %s: the TUI did not reach the app-server, or it is still sitting on the session picker", rz.timeout)
+			}
+			return "", fmt.Errorf("codex --remote never started a thread within %s: the TUI did not attach to the app-server", rz.timeout)
 		}
 	}
 }

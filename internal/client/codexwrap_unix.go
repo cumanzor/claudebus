@@ -13,7 +13,10 @@ import (
 
 // RunCodexWrap is `cbus codex`. It blocks until the TUI exits, then tears down the app-server
 // (and its native child — the npm codex runs one under a node shim, A2) via a group kill.
-func RunCodexWrap(channel, alias string, passthrough []string) error {
+//
+// thread pins the thread to bridge instead of discovering one. The caller passes it for a
+// resume-by-name (`--thread ID`); a `resume <uuid>` passthrough pins itself.
+func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 	if channel == "" {
 		channel = branchChannelFromGit()
 	}
@@ -84,14 +87,29 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 	}
 
 	// 3. the TUI, attached to the app-server; it takes over the terminal. Its env is already the
-	//    scrubbed one (codexCommands); it takes the terminal streams here.
+	//    scrubbed one (codexCommands); it takes the terminal streams here. Wait runs in a
+	//    goroutine from here on, so discovery can end the instant the TUI dies and step 6 reads
+	//    the same result off the channel (Wait must not be called twice).
 	tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := tui.Start(); err != nil {
 		return fmt.Errorf("start codex --remote: %w", err)
 	}
+	tuiExit := make(chan error, 1)
+	go func() { tuiExit <- tui.Wait() }()
 
-	// 4. learn the TUI thread id from the discovery connection, then join the bus as it.
-	threadID, err := discoverThread(disc, cwd(), discoverWait)
+	// 4. learn the TUI thread id, then join the bus as it. A resume that already names its
+	//    session id skips discovery outright; every other launch rendezvouses on the passive
+	//    connection (a resumed thread names itself through a different notification than a
+	//    fresh one, so the shape of the wait depends on which this is).
+	resume, sid := resumeLaunch(passthrough)
+	if thread == "" {
+		thread = sid
+	}
+	rz := rendezvous{wantCwd: cwd(), resume: resume, wantID: thread, timeout: discoverWait}
+	if resume && thread == "" {
+		rz.timeout = resumeWait // the picker is human-paced
+	}
+	threadID, err := discoverThread(disc, rz, tuiExit)
 	if err != nil {
 		_ = tui.Process.Kill()
 		return err
@@ -111,12 +129,12 @@ func RunCodexWrap(channel, alias string, passthrough []string) error {
 	//    kill, so a bridge-driven teardown has it ready the instant tui.Wait returns.
 	bridgeExit := make(chan error, 1)
 	go func() {
-		berr := RunCodexBridge(channel+"/"+alias, sock, threadID)
+		berr := RunCodexBridge(channel+"/"+alias, sock, threadID, resume)
 		bridgeExit <- berr
 		_ = tui.Process.Kill()
 	}()
 
 	// 6. the human drives the TUI; when it exits, resolve the cause and print it LAST.
-	werr := tui.Wait()
+	werr := <-tuiExit
 	return teardownOutcome(werr, bridgeExit, killServer, os.Stderr, bridgeCauseGrace)
 }

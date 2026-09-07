@@ -750,6 +750,17 @@ The load-bearing rules, beyond the verb surface (command-reference has that):
   learns the TUI's thread from a passive initialize-only connection receiving
   `thread/started` — which also rules out `thread/list` (it returns the user's
   whole history; "the one live thread" is not knowable from it).
+- **A resumed thread is announced differently, and the wait is ordering.** A
+  `codex resume` TUI never emits `thread/started`; it emits
+  `thread/status/changed`, so on a resume launch discovery accepts any
+  notification that names a `threadId` (a fresh launch emits nothing else in
+  that window, so the cwd hard-check is untouched). cwd is not an identity
+  check there — a resumed session carries the cwd it was recorded in — so a
+  session id on the command line takes its place and a mismatch is refused.
+  The wait happens even when the id is already known, because the app-server
+  grants a thread's **writer role to one connection, first come**: the TUI must
+  win it, and the bridge attaches afterwards without resuming. Losing that race
+  exits the human's TUI with "already has an active writer".
 - **The bridge is the peer's listener.** It arms with its own pid as the
   liveness signal and tails the inbox with the shared follower loop; a codex
   peer therefore has real structural liveness like any other, and must never
