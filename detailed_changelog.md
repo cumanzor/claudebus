@@ -52,9 +52,14 @@ Full mechanism in the previous entry.
   `cbus list` still reports no phantom peer, which is the cbus-vjo regression
   this check exists for. The update also exercised selfupdate's
   cross-filesystem copy leg, since /tmp is tmpfs on that box.
-- The two reviewer-cleared v0.10.2 follow-up patches (`cbus-que.21` d4bb7556,
-  `cbus-que.16` be787974) are still unapplied on main and are not in this
-  release.
+- CORRECTION (same day): the two reviewer-cleared v0.10.2 follow-up patches are
+  NOT pending. Both landed on main 2026-09-05, `cbus-que.21` (d4bb7556) as
+  commit `36c8908` and `cbus-que.16`'s test-side half (be787974) as commit
+  `affbaaf`, and both are ancestors of v0.11.0, so they shipped in it. que.21 is
+  closed; que.16 stays open for its PRODUCT-side half only (whether the
+  identity-check meta read should open with FILE_SHARE_DELETE, or a hot-path
+  readSharedFile at ReadPeerMeta / listenerIdentityHolds / armMeta), which is
+  still deferred and gated on a logos narrow-scope 8-run.
 
 ## [2026-09-07 00:14:26 UTC] [Client/Codex] cbus codex resume: an existing codex session as a bus peer
 
