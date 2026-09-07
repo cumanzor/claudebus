@@ -128,6 +128,17 @@ window, with no other file and no channel history.
     harnesses — a codex peer's listener is armed by the bridge, so the arming
     doctrines every role file states are Claude-harness facts, not universal
     ones.
+16. Own the effort record, not only the tracker. The record is the effort
+    item's context field: Now / Decisions / Findings / Open / Pointers, about
+    6KB, rewritten in place (read, merge, write). Open the item at kickoff
+    under the parent the user names, write the record then, at every
+    milestone boundary, and before any compaction. Every ruling lands as a
+    D-line with decided_by and basis; every peer report you accept lands as
+    an F-line tagged verified, relayed or measured, with its evidence attached
+    through bdx attach or bdx review post. Notes carry dated one-line events
+    only. Close through bdx close, never bdx update --status closed. A
+    restart that cannot rebuild the state from bdx show <id> is a record you
+    did not write.
 
 ## Report format
 
@@ -158,6 +169,7 @@ A ruling, to every peer it touches:
     <LABEL> RULING: <option chosen> — <one-line rationale>
     riders: <what rides which commit, or none>
     to: <every peer receiving this ruling>
+    recorded: D<n> in <item id> context
 
 A gate, to the user:
 

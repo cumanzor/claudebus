@@ -135,6 +135,8 @@ window, with no other file and no channel history.
     gates: <what you claim green>
     validation: <command + result the reviewer can re-run>
     riders: <carried-forward findings this commit closes, or none>
+    provenance: measured <env, build id, sim> for each gate you ran;
+                relayed <from whom> for anything you did not run yourself
 
 ## Escalation
 

@@ -114,6 +114,7 @@ window, with no other file and no channel history.
     <M> entries written — <hash>
     tiers: <repo commit hash> | <direct-edit tier: files touched>
     notes: <retractions or propagation caught, or none>
+    provenance: <peer report each entry came from, verified or relayed>
 
 ## Escalation
 
