@@ -1,5 +1,54 @@
 # Changelog (detailed)
 
+## [2026-09-07 17:04:51 UTC] [Release/Codex] v0.11.0 SHIPPED: codex resume as a bus peer
+
+[Attempt #1] Release of `b8edb48` (`cbus-6ij.9`), annotated tag `v0.11.0`. Cut
+immediately after the feature landed, at Carlos's request.
+
+[What shipped]
+`cbus codex ... resume <session-id>` (and `resume --last`, and the picker) brings
+an existing codex session onto the bus as a peer under its own session id.
+`--thread ID` on `cbus codex` pins the thread for a resume by session name;
+`--no-resume` on `cbus codex-bridge` attaches to a thread a TUI already drives.
+Full mechanism in the previous entry.
+
+[Release procedure]
+- `git push origin main`, annotated tag `v0.11.0`, tag pushed.
+- Fresh clone of the remote at the tag (NOT the working tree, which carries
+  unrelated uncommitted `roles/*.md` edits that go:embed would have snapshotted
+  and the dirty-tree guard would have refused). Suite green in that clone.
+- `make release CBUS_REPO=cumanzor/claudebus` published five binaries;
+  SHA256SUMS generated from dist and uploaded after, matching the v0.10.2
+  six-asset convention (`make release` does not generate it).
+- Reproducibility: a SECOND independent fresh clone at the tag rebuilt all five
+  binaries to byte-identical digests.
+
+[Verification]
+- Release metadata: six assets, draft false, prerelease false, `latest` resolves
+  to v0.11.0.
+- `cbus selfupdate` on the mac: v0.10.2 -> v0.11.0, commands and roles refreshed
+  in place.
+- Field smoke on the REAL store (`~/.claude-bus`), not a fixture: `cbus list`
+  reads every channel correctly, no phantom channel appeared, and the running
+  listeners (unified-mobile-client, cbus-winport/orchestrator) stayed live
+  across the binary swap.
+- Released-binary feature check: `cbus codex --channel reltest --alias advisor
+  resume 01a06968-...` joined under the resumed session id and armed as
+  listener; quitting the TUI tore down with zero orphaned app-servers and the
+  thread writer lock released.
+
+[Possible Ripple Effects]
+- `cbus selfupdate` rewrites the installed roles at `~/.claude-bus/roles` from
+  the binary's embedded copies. The uncommitted `provenance:` lines in the
+  repo's `roles/*.md` are therefore NOT in the installed set; committing them
+  and cutting a release (or `cbus install-roles` from a dev build) is what makes
+  them live.
+- Fleet is now mixed: mac on v0.11.0, NUC and logos still on v0.10.2 until each
+  runs `cbus selfupdate`.
+- The two reviewer-cleared v0.10.2 follow-up patches (`cbus-que.21` d4bb7556,
+  `cbus-que.16` be787974) are still unapplied on main and are not in this
+  release.
+
 ## [2026-09-07 00:14:26 UTC] [Client/Codex] cbus codex resume: an existing codex session as a bus peer
 
 [Attempt #1] `cbus-6ij.9`, under the multi-harness epic `cbus-6ij`. Built after a
