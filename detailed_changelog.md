@@ -1,5 +1,40 @@
 # Changelog (detailed)
 
+## [2026-09-07 17:54:50 UTC] [Release/Codex] v0.11.2 SHIPPED: signal teardown on the fleet
+
+[Attempt #1] Release of `ab99c55` (`cbus-6ij.10`), annotated tag `v0.11.2`. Third
+release of the day, same sequence as v0.11.0 and v0.11.1.
+
+[What shipped]
+`cbus codex` catches SIGTERM and SIGHUP and tears down its app-server group
+before exiting, so `pkill`, a closed window and `tmux kill-session` no longer
+orphan an app-server holding a resumed thread's writer lock. SIGINT stays the
+TUI's, armed only until the TUI takes the terminal. Docs and the `/bus-codex`
+trap updated to name `kill -9` as the case nothing can catch.
+
+[Release procedure]
+Push, annotated tag, fresh clone of the remote at the tag (the working tree still
+carries the unrelated uncommitted `roles/*.md` edits), suite green in the clone,
+`make release CBUS_REPO=cumanzor/claudebus`, SHA256SUMS generated from dist and
+uploaded after.
+
+[Verification]
+- Six assets, draft false, prerelease false, `latest` resolves to v0.11.2.
+- Reproducibility: a second independent fresh clone at the tag rebuilt all five
+  binaries to an identical digest list.
+- Mac: 0.11.1 -> 0.11.2. NUC: same over ssh, `~/.local/bin/cbus` hashing to the
+  published `cbus-linux-amd64` (714464f7...).
+- The FIX re-verified through the released binary rather than trusting the dev
+  build that was tested pre-commit: a real resumed peer launched with the
+  installed `cbus` read `listen`, then `kill -TERM` on its wrapper left zero
+  survivors and a released writer lock.
+
+[Possible Ripple Effects]
+- logos stays on v0.10.2 until Carlos updates it, so a codex peer there (if the
+  verb were reachable, which it is not in phase 1) would still orphan.
+- Three releases in a day means three `.old` binaries rotated on each machine;
+  selfupdate keeps exactly one, so nothing accumulates.
+
 ## [2026-09-07 17:50:49 UTC] [Client/Codex] Signal teardown: an app-server never outlives its wrapper
 
 [Attempt #1] `cbus-6ij.10`, filed this morning out of the cbus-6ij.9 build after
