@@ -9,6 +9,10 @@ in a new terminal, prompted to join a `cbus` channel and arm its own listener â€
 and join THIS session to the same channel first, so parent and child can
 message each other immediately.
 
+For a **codex** peer rather than a Claude one, use `/bus-codex`: `cbus spawn`
+launches Claude Code only, and a codex peer is wired differently (an app-server,
+a TUI, and a bridge that listens on the peer's behalf).
+
 The user passed: "$ARGUMENTS" â€” first word is the target (window | tab | tmux |
 pane; ask via AskUserQuestion ONLY if empty), optional second word is the channel: a
 local name, or `<channel>@<host>` for a relay-backed cross-machine channel

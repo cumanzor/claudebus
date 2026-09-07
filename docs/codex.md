@@ -53,8 +53,30 @@ wire up yourself). Get that order wrong and the failure is loud in the wrong pla
 window exits 1 with "already has an active writer".
 
 One consequence worth knowing: an app-server that outlives its wrapper keeps that lock, and the
-next resume of the same session is refused until it dies. `pkill` on the wrapper leaves exactly
-that orphan, because the group teardown never runs. Quit the TUI instead.
+next resume of the same session is refused until it dies. `pkill` on the wrapper, or killing
+its window or tmux session, leaves exactly that orphan, because the group teardown never runs.
+Quit the TUI instead.
+
+## Launching one from inside a session
+
+`cbus codex` is an interactive TUI: it takes over the terminal it is called from and blocks
+until that TUI exits. A model driving a harness must not run it as a tool call, where the TUI
+gets no terminal, exits on stdin EOF, and the wrapper dies without ever joining. It needs a
+window of its own:
+
+```sh
+tmux new-window -c "$PWD" 'cbus codex --channel <ch> --alias <al> resume <session-id>'
+tmux new-session -d -s codexpeer -c "$PWD" 'cbus codex --channel <ch> --alias <al>'
+```
+
+`-c` is load-bearing, not cosmetic: the window's cwd is the peer's cwd, and it is what `resume
+--last` filters on. With no tmux the command goes to a human to run in a new terminal. The
+`/bus-codex` skill carries this whole flow, including joining and arming the launching session
+first so the two can talk immediately. `cbus spawn` does NOT launch codex peers, only Claude
+Code sessions; harness-aware spawn is cbus-6ij.5 and still open.
+
+A dead codex peer comes back with its history by resuming its own recorded id: a codex peer's
+`sessionId` in `cbus list --json` IS its codex session id.
 
 `cbus hook-join` rounds it out: a harness-neutral SessionStart hook that
 auto-joins `$CBUS_CHANNEL`, so any harness with hooks can arrive on the bus

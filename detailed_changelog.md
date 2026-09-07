@@ -1,5 +1,61 @@
 # Changelog (detailed)
 
+## [2026-09-07 17:37:12 UTC] [Commands/Docs] /bus-codex: the skill surface for codex peers, fresh or resumed
+
+[Attempt #1] Follow-on documentation for `cbus-6ij.9` (the v0.11.0 resume
+feature), so harnesses know how to invoke a codex session rather than only
+humans.
+
+[Motivating problem]
+The resume feature shipped with docs but no skill. Every other launcher has one
+(`/bus-branch`, `/bus-spawn`, `/bus-join`), and a model asked to "bring codex on
+as an advisor" had nothing to read. Worse, the obvious guess is wrong in a way
+that fails quietly: `cbus codex` is an interactive TUI that takes the caller's
+terminal and blocks, so a model running it as a Bash tool call gets a TUI with no
+terminal, which exits on stdin EOF, after which the wrapper tears down without
+ever joining. That is exactly the failure mode observed in the first probe of
+this feature.
+
+[Files Changed]
+- `commands/bus-codex.md` (new) — the 7th shipped skill. Frontmatter matches the
+  house shape (description / argument-hint / allowed-tools) and it ends in the
+  mandatory "Do nothing else.". Content: derive channel and alias, join and arm
+  THIS session first (same both-sides wiring as `/bus-spawn`), then launch the
+  peer in a window of its own; the resume forms (id, `--last`, picker,
+  `--thread` for a session name); where an id comes from; and the two traps.
+- `commands/bus-spawn.md` — one cross-reference: `cbus spawn` launches Claude
+  Code only, a codex peer is wired differently.
+- `assets_test.go` — the embed-count guard expectation moves to seven commands.
+  This is the guard working as designed: adding a command without updating it
+  fails the build.
+- `docs/codex.md` — new "Launching one from inside a session" section with the
+  two verified tmux invocations, why `-c` is load-bearing, and the
+  dead-peer-resumes-itself trick. The orphan warning now names window and tmux
+  kills, not just `pkill`.
+- `docs/architecture/command-reference.md` — section 12 entry for the skill.
+- `README.md` — the harness-neutral bullet names `/bus-codex` and "fresh or
+  resumed with its history".
+- `profiles/codex.md` — peer-side note: if you were resumed onto the bus, the
+  transcript above is your own earlier work, and `cbus whoami` is the authority
+  on the seat you now hold, which may not be the seat you held before.
+
+[Possible Ripple Effects]
+- The installed command surface goes 6 -> 7 files, so the windows acceptance
+  count for commands+roles moves 10 -> 11 by name.
+- Fleet machines get the skill only after `cbus selfupdate` from a release that
+  contains it; the repo copy alone changes nothing for a running harness.
+
+[Testing Notes]
+- `go test ./...` green, including the tightened embed-count guard.
+- `cbus install-commands --path <tmp>` from a dev build writes all seven files.
+- Both documented launch shapes verified live with a real codex resume, each
+  producing a peer that reads `listen`: `tmux new-session -d -s <n> '<cmd>'` and
+  `tmux new-window '<cmd>'`. The `-c` start-directory flag was verified
+  separately.
+- The orphan trap was confirmed twice, not assumed: killing the tmux session
+  left an app-server alive holding the thread's writer lock, and the next resume
+  of that session failed until it was killed by pid.
+
 ## [2026-09-07 17:04:51 UTC] [Release/Codex] v0.11.0 SHIPPED: codex resume as a bus peer
 
 [Attempt #1] Release of `b8edb48` (`cbus-6ij.9`), annotated tag `v0.11.0`. Cut

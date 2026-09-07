@@ -21,6 +21,15 @@ the other direction.
 If messages stop arriving, that is a bridge or wrapper problem to report, not a
 listener for you to re-arm.
 
+## You may have been resumed onto the bus
+
+An operator can put an EXISTING codex session on a channel (`cbus codex ...
+resume <session-id>`). If that is you, the transcript above this point is your
+own earlier work, not context someone pasted in, and your bus alias may be new
+even though your history is not. `cbus whoami` is the authority on which
+channel and alias you now answer as; do not assume the seat you held before the
+resume is the seat you hold now.
+
 ## One frame is one turn
 
 Each bus message becomes one injection, and an injection forces a full model

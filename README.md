@@ -73,8 +73,9 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
   fresh fleets from starter templates; there's a three-peer fleet demo at the
   top of the doc — [docs/formations.md](docs/formations.md)
 - **Harness-neutral peers** — a Codex CLI session can hold a channel alias
-  today; cbus does the listening for it. Grok Build and OpenCode are planned
-  next — [docs/codex.md](docs/codex.md)
+  today, fresh or resumed with its history (`/bus-codex`); cbus does the
+  listening for it. Grok Build and OpenCode are planned next —
+  [docs/codex.md](docs/codex.md)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
