@@ -43,8 +43,15 @@ Full mechanism in the previous entry.
   repo's `roles/*.md` are therefore NOT in the installed set; committing them
   and cutting a release (or `cbus install-roles` from a dev build) is what makes
   them live.
-- Fleet is now mixed: mac on v0.11.0, NUC and logos still on v0.10.2 until each
-  runs `cbus selfupdate`.
+- Fleet after propagation: mac and NUC on v0.11.0, logos still on v0.10.2 until
+  it runs `cbus selfupdate`. The NUC came from v0.10.1, not v0.10.2 (it never
+  took that tag), so its jump carried 49 commits; v0.10.2 is an ancestor of
+  v0.11.0, so nothing was skipped in content. Its `~/.local/bin/cbus` hashes to
+  the published `cbus-linux-amd64` digest, and the real-store smoke there is
+  clean: `~/.claude-bus` holds a `roles` install dir alongside a real channel and
+  `cbus list` still reports no phantom peer, which is the cbus-vjo regression
+  this check exists for. The update also exercised selfupdate's
+  cross-filesystem copy leg, since /tmp is tmpfs on that box.
 - The two reviewer-cleared v0.10.2 follow-up patches (`cbus-que.21` d4bb7556,
   `cbus-que.16` be787974) are still unapplied on main and are not in this
   release.
