@@ -5,6 +5,7 @@ package client
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
 	"syscall"
 
@@ -69,6 +70,33 @@ func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 		})
 	}
 	defer killServer()
+
+	// 1b. from here the wrapper OWNS a process group that outlives it if it dies without
+	//     running its defers, so catch the signals whose default action is exactly that. The
+	//     handler kills the TUI, tears the app-server down through the same killServer, and
+	//     exits: a termination signal means die now, and the teardown is what must not be
+	//     skipped on the way. SIGINT is armed only until the TUI takes the terminal (below).
+	sigTerm := make(chan os.Signal, 1)
+	signal.Notify(sigTerm, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigTerm)
+	sigInt := make(chan os.Signal, 1)
+	signal.Notify(sigInt, syscall.SIGINT)
+	defer signal.Stop(sigInt)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		s := awaitTeardownSignal(sigTerm, sigInt, done)
+		if s == nil {
+			return // normal exit; the deferred teardown is running
+		}
+		if p := tui.Process; p != nil {
+			_ = p.Kill()
+		}
+		killServer() // group SIGTERM -> SIGKILL, reaped, socket removed
+		fmt.Fprintf(os.Stderr, "cbus: %s received: codex app-server and TUI torn down\n", s)
+		os.Exit(1)
+	}()
+
 	if err := waitForSocket(sock, codexServerUp); err != nil {
 		return err
 	}
@@ -96,6 +124,9 @@ func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 	}
 	tuiExit := make(chan error, 1)
 	go func() { tuiExit <- tui.Wait() }()
+	// the TUI owns the terminal now: a Ctrl-C is its keystroke to read, not a signal for the
+	// wrapper to act on (awaitTeardownSignal explains the measurement).
+	signal.Stop(sigInt)
 
 	// 4. learn the TUI thread id, then join the bus as it. A resume that already names its
 	//    session id skips discovery outright; every other launch rendezvouses on the passive

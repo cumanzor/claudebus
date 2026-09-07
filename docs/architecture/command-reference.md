@@ -1974,9 +1974,10 @@ joining. The skill launches it through `tmux new-window -c "$PWD"` (or
 Carries the resume forms (id, `--last`, picker, `--thread` for a session name),
 names where an id comes from (a codex peer's own `sessionId` in `cbus list
 --json` IS its codex session id, so a dead codex peer resumes itself), and the
-two traps: never kill the window or `pkill` the wrapper (the app-server orphans
-and keeps the thread's writer lock, so later resumes are refused), and never tell
-a codex peer to arm its own listener.
+two traps: never `kill -9` the wrapper (SIGTERM/SIGHUP are handled and tear the
+app-server down, but a SIGKILLed wrapper orphans it and it keeps the thread's
+writer lock, so later resumes are refused), and never tell a codex peer to arm
+its own listener.
 
 ### `/bus-formation <verb> ...`
 

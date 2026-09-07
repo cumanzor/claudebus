@@ -329,6 +329,31 @@ var (
 	serverReapWait   = 2 * time.Second
 )
 
+// awaitTeardownSignal blocks until a termination signal arrives or the wrapper finishes,
+// returning the signal that arrived (nil when the wrapper finished first).
+//
+// term carries SIGTERM and SIGHUP for the wrapper's whole life: those are how a wrapper is
+// killed from outside (`pkill`, a closed window, `tmux kill-session`), and the default action
+// for both is immediate death, which skips the deferred app-server teardown and leaves an
+// app-server holding the resumed thread's writer lock (measured twice: every later resume of
+// that session is then refused).
+//
+// intr carries SIGINT and is the caller's to STOP once the TUI is up. Before that the wrapper
+// owns the terminal and a Ctrl-C is a real signal to catch; after it, Ctrl-C is the TUI's own
+// keystroke, read as a byte in raw mode with no signal generated at all (measured: a ^C to a
+// live TUI quits it through the normal path, and the wrapper's ordinary teardown runs). Nothing
+// catches SIGKILL, so `kill -9` still orphans the app-server.
+func awaitTeardownSignal(term, intr <-chan os.Signal, done <-chan struct{}) os.Signal {
+	select {
+	case s := <-term:
+		return s
+	case s := <-intr:
+		return s
+	case <-done:
+		return nil
+	}
+}
+
 // reapWithin waits for reaped to close, up to d, returning whether the reap completed. On
 // expiry it returns false rather than blocking, so a wedged (D-state) app-server that will not
 // reap even on SIGKILL can never suppress the teardown cause forever — printing outranks

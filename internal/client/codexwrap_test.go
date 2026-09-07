@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -421,5 +422,24 @@ func TestDiscoverThreadRefusesWrongThread(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal must name both ids; missing %q in: %v", want, err)
 		}
+	}
+}
+
+// TestAwaitTeardownSignal: each armed source wins its case, and a normal finish returns nil so
+// the handler goroutine leaves the teardown to the deferred path instead of racing it.
+func TestAwaitTeardownSignal(t *testing.T) {
+	term, intr := make(chan os.Signal, 1), make(chan os.Signal, 1)
+	term <- syscall.SIGTERM
+	if got := awaitTeardownSignal(term, intr, make(chan struct{})); got != syscall.SIGTERM {
+		t.Errorf("term signal = %v, want SIGTERM", got)
+	}
+	intr <- syscall.SIGINT
+	if got := awaitTeardownSignal(make(chan os.Signal), intr, make(chan struct{})); got != syscall.SIGINT {
+		t.Errorf("intr signal = %v, want SIGINT", got)
+	}
+	done := make(chan struct{})
+	close(done)
+	if got := awaitTeardownSignal(make(chan os.Signal), make(chan os.Signal), done); got != nil {
+		t.Errorf("normal finish = %v, want nil (no teardown from the handler)", got)
 	}
 }
