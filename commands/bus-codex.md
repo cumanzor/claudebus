@@ -70,11 +70,12 @@ alias, and whether it is fresh or resumed from which id.
 
 ## Two traps
 
-- **Do not kill the window or `pkill` the wrapper** to stop a codex peer. The
-  app-server is a child that only dies through the wrapper's own teardown; kill
-  the wrapper abruptly and it orphans, keeps that thread's writer lock, and
-  every later resume of that session is refused with "already has an active
-  writer". Quit the TUI instead.
+- **Never `kill -9` the wrapper** to stop a codex peer. The app-server is a
+  process group the wrapper owns, and only the wrapper's teardown reaps it; an
+  orphaned one keeps that thread's writer lock, so every later resume of the
+  session is refused with "already has an active writer". SIGTERM and SIGHUP are
+  handled (`pkill`, a closed window, `tmux kill-session` all tear down cleanly),
+  but SIGKILL cannot be. Quitting the TUI is still the clean way.
 - **Never tell a codex peer to arm its own listener.** Its profile forbids `cbus
   tail`; the bridge is its listener, and a peer that tries costs a model turn to
   learn it was wrong.

@@ -761,6 +761,13 @@ The load-bearing rules, beyond the verb surface (command-reference has that):
   grants a thread's **writer role to one connection, first come**: the TUI must
   win it, and the bridge attaches afterwards without resuming. Losing that race
   exits the human's TUI with "already has an active writer".
+- **A termination signal must not skip the teardown.** The wrapper owns the
+  app-server as a process GROUP, and an orphaned app-server holds the resumed
+  thread's writer lock, which refuses every later resume of that session. So
+  SIGTERM and SIGHUP are caught and run the same `killServer` the normal exit
+  path uses, then exit; SIGINT is caught only until the TUI takes the terminal,
+  after which Ctrl-C is a keystroke the TUI reads in raw mode and no signal is
+  generated. SIGKILL is uncatchable and still orphans.
 - **The bridge is the peer's listener.** It arms with its own pid as the
   liveness signal and tails the inbox with the shared follower loop; a codex
   peer therefore has real structural liveness like any other, and must never

@@ -53,9 +53,10 @@ wire up yourself). Get that order wrong and the failure is loud in the wrong pla
 window exits 1 with "already has an active writer".
 
 One consequence worth knowing: an app-server that outlives its wrapper keeps that lock, and the
-next resume of the same session is refused until it dies. `pkill` on the wrapper, or killing
-its window or tmux session, leaves exactly that orphan, because the group teardown never runs.
-Quit the TUI instead.
+next resume of the same session is refused until it dies. The wrapper catches SIGTERM and
+SIGHUP and tears the group down before exiting, so `pkill`, a closed window and `tmux
+kill-session` are all safe (measured: zero survivors, lock released). `kill -9` is not, and
+nothing can make it so.
 
 ## Launching one from inside a session
 

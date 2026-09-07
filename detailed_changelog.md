@@ -1,5 +1,69 @@
 # Changelog (detailed)
 
+## [2026-09-07 17:50:49 UTC] [Client/Codex] Signal teardown: an app-server never outlives its wrapper
+
+[Attempt #1] `cbus-6ij.10`, filed this morning out of the cbus-6ij.9 build after
+inflicting the bug twice by hand.
+
+[Motivating problem]
+`RunCodexWrap` tore down the per-peer app-server from a DEFERRED call, so it ran
+on a clean TUI exit and on error returns, and not at all when the wrapper was
+killed. SIGTERM (`pkill`) and SIGHUP (a closed window, `tmux kill-session`) both
+have immediate-death defaults, so both left the app-server alive. That is not a
+tidy leak: a live app-server keeps the resumed thread's WRITER LOCK, so the next
+`cbus codex ... resume <same-id>` fails at the TUI with "already has an active
+writer" while the wrapper reports "exited before its thread was known", which
+reads like a cbus defect rather than a stale process.
+
+[Findings]
+- F1 measured (both directions, this morning): `pkill` on the wrapper and
+  `tmux kill-session` on its window each left an orphaned app-server, and the
+  next resume of that session was refused until the orphan was killed by pid.
+- F2 measured (before writing any code): Ctrl-C is NOT one of these paths. A ^C
+  sent to a live TUI is read as a byte in raw mode, the TUI quits, and the
+  wrapper's ordinary teardown runs, leaving nothing behind. No signal is
+  generated at all, which is why SIGINT is not treated like SIGTERM here.
+
+[Files Changed]
+- `internal/client/codexwrap.go` — `awaitTeardownSignal(term, intr, done)`: one
+  blocking select returning the signal that arrived, or nil when the wrapper
+  finished first. Split into its own function so the choice is unit-testable
+  without sending real signals, with the measurement recorded in its comment.
+- `internal/client/codexwrap_unix.go` — arms SIGTERM/SIGHUP for the wrapper's
+  whole life (step 1b, right after the app-server starts, so the pre-TUI window
+  is covered too) and SIGINT only until `tui.Start()` succeeds, then stops that
+  channel. The handler kills the TUI, calls the SAME `killServer` (sync.Once,
+  group-directed, reaping, socket removal) the normal path uses, prints a
+  one-line cause naming the signal, and exits non-zero. A `done` channel closed
+  on return keeps the goroutine from outliving a normal exit or racing the
+  deferred teardown.
+- `docs/codex.md`, `commands/bus-codex.md`,
+  `docs/architecture/behavior-spec.md` (section 15),
+  `docs/architecture/command-reference.md` — the trap they all carried ("do not
+  pkill / do not kill the window") is now wrong, and says `kill -9` instead.
+
+[Possible Ripple Effects]
+- Two channels rather than one avoid a disarm gap: dropping SIGINT with
+  `signal.Stop` on a shared channel would need a Stop+Notify pair, and a signal
+  arriving between them would be missed.
+- The handler exits the process rather than unwinding into `teardownOutcome`.
+  That is deliberate for a termination signal, and it is why the teardown runs
+  BEFORE the exit rather than being left to a defer that will not fire.
+- Windows is unaffected: the verb refuses there in phase 1.
+- Worth a look later: any other verb that owns a child process group has the
+  same shape of exposure.
+
+[Testing Notes]
+- `go test ./...` green; vet clean; compile gate on linux/amd64, linux/arm64,
+  windows/amd64, darwin/arm64, plus `GOOS=windows go vet`.
+- Unit: `TestAwaitTeardownSignal` pins each source winning its case and the
+  nil-on-normal-finish contract.
+- Live, the gate that matters, each with an isolated CBUS_DIR and a real resumed
+  peer reading `listen` first: `kill -TERM` on the wrapper leaves zero
+  survivors, an empty socket dir and a released writer lock; `tmux kill-session`
+  likewise; and the normal path (quit the TUI) still tears down cleanly with the
+  handler goroutine standing down instead of racing it.
+
 ## [2026-09-07 17:42:34 UTC] [Release/Commands] v0.11.1 SHIPPED: /bus-codex reaches the fleet
 
 [Attempt #1] Release of `f340caa`, annotated tag `v0.11.1`. A skill file changes
