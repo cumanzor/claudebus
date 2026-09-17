@@ -127,6 +127,7 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 		Argv:   freshLaunchArgv(model, title, prompt),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
+		Title:  title,
 	}
 	if _, err := forker.Fork(spec); err != nil {
 		if childAlias != "" && !IsRemote(addr) {

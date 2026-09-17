@@ -320,6 +320,7 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 		Argv:        peerLaunchArgv(pp, prompt, model),
 		Env:         peerEnv(p.Profile),
 		Dir:         launchDir(p.Cwd),
+		Title:       p.Alias,
 		Anchor:      anchor,
 		Split:       p.Split,
 		NoNormalize: noNormalize,

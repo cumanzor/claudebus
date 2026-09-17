@@ -1,5 +1,65 @@
 # Changelog (detailed)
 
+## [2026-09-15 16:33:40 UTC] [Client/Harness] tmux target names its window after the child
+
+[Attempt #1] Carlos asked for the bus-spawn skill to name the new session in
+Claude and also in the tmux window when the target is tmux. The Claude half
+already existed (`--name` rides every child launch as the session title); the
+tmux half did not: `OSAForker` hardcoded `tmux new-window -n "cc-branch"`, so
+every spawned or branched tmux window carried the same name regardless of alias.
+
+[Files Changed]
+- `internal/client/harness.go`: `ForkSpec` gains `Title` (the child's alias, or
+  the address for a self-picking remote child). The tmux case now runs
+  `tmuxNewWindowArgv(spec)`, a pure builder next to `terminalCommand`: `-n
+  <Title>`, falling back to `cc-branch` only when Title is empty. `Branch` sets
+  `Title: childAlias`.
+- `internal/client/spawn.go`: `Spawn` sets `Title: title` (same value that
+  already went to `--name`).
+- `internal/client/formation_apply.go`, `formation_resume.go`: `Title: p.Alias`
+  on the peer launch specs, so formation windows are named per peer too.
+- Tests: `TestTmuxNewWindowArgv` (pane_test.go) pins the argv shape and the
+  fallback; Title assertions added to `TestBranchReplicatesEnvCCS`,
+  `TestSpawnNameFixesAlias` (local + remote), the remote no-name spawn test
+  (Title = address), the formation apply template/resume specs, and
+  `TestResumeAnchorLaunchShape`.
+- `docs/architecture/command-reference.md`: fork mechanics line, the `branch`
+  and `spawn` `--name` contracts, and the remote fallback sentence now name the
+  tmux window. `commands/bus-spawn.md` and `commands/bus-branch.md`: the
+  `--name` sentence mentions the tmux window name (these are the go:embed
+  copies the binary serves; the installed `~/.claude/commands` copies refresh on
+  `cbus selfupdate`).
+
+[Why -n also pins the name]
+tmux's `automatic-rename` is on by default and renames a window to its running
+command; `new-window -n` sets `automatic-rename off` for that window, so the
+alias sticks instead of turning into `claude` or `node` a second later. This is
+the same reason the old fixed name held.
+
+[Possible Ripple Effects]
+- Anyone keying on the literal `cc-branch` window name (a tmux config, a script
+  selecting windows by name) will no longer match spawned/branched windows. No
+  such consumer exists in this repo; the string survives only as the empty-Title
+  fallback and in historical changelog/decision text.
+- Panes are untouched: a tmux `pane` target has no window name of its own, and
+  Claude Code already sets the pane title through the terminal-title escape.
+- Output text of `spawn`/`branch` is unchanged (`alias fixed + session titled`).
+
+[Testing Notes]
+- `gofmt -l` clean, `go vet ./...` clean, `go test -race -count=1 ./...` green
+  across all packages.
+- Compile gate: linux/amd64, linux/arm64, windows/amd64, darwin/arm64 all build.
+- Live, through the CLI door: built the binary to the scratchpad, started a
+  detached tmux server (`tmux -L cbusnamecheck`), put a stand-in `claude` first
+  on PATH that logs its argv and sleeps, pointed `CBUS_DIR` at a scratch store,
+  unset `CLAUDE_CONFIG_DIR`, and ran `cbus spawn tmux devchan --name winname7`
+  then `cbus spawn tmux devchan` from inside the session. `list-windows`
+  reported `1 winname7 auto-rename=0` and `2 main auto-rename=0`; the stand-in
+  received `--name winname7` and `--name main`; the scratch store held both
+  reservations. Server killed afterwards, nothing touched the real store.
+- Not exercised: a real Claude boot in the named window (the stand-in replaced
+  it), and formation apply/resume live (covered by the forker tests only).
+
 ## [2026-09-07 17:54:50 UTC] [Release/Codex] v0.11.2 SHIPPED: signal teardown on the fleet
 
 [Attempt #1] Release of `ab99c55` (`cbus-6ij.10`), annotated tag `v0.11.2`. Third

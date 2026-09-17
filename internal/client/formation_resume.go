@@ -126,6 +126,7 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 		Argv:   argv,
 		Env:    peerEnv(launchProfile),
 		Dir:    launchDir(p.Cwd),
+		Title:  p.Alias,
 	}
 	created, err = forker.Fork(spec)
 	if err != nil {

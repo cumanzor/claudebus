@@ -630,6 +630,9 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 	if i := slices.Index(f.spec.Argv, "--name"); i < 0 || f.spec.Argv[i+1] != child {
 		t.Errorf("--name must carry the reserved child alias: %v", f.spec.Argv)
 	}
+	if f.spec.Title != child {
+		t.Errorf("Title (the tmux window name) must be the reserved child alias: %q", f.spec.Title)
+	}
 }
 
 // TestBranchNonCCSUsesClaude: without a CCS config dir, the launch is a bare `claude`.

@@ -27,8 +27,8 @@ If the user mentions a model anywhere (e.g. "spawn a sonnet worker",
 claude-opus-4-8. "opus" is temporarily pinned to Opus 4.8: pass
 `claude-opus-4-8` verbatim, never bare `opus` (which now resolves to Opus 5).
 If the user names the child (e.g. "name it worker3"), append `--name <n>` —
-it becomes the child's bus alias AND session title (alias charset:
-[A-Za-z0-9._-]). Omitted: a local channel auto-reserves an alias (main/fork-N)
+it becomes the child's bus alias, its session title, and (tmux target) the
+tmux window name (alias charset: [A-Za-z0-9._-]). Omitted: a local channel auto-reserves an alias (main/fork-N)
 and titles the child with it; a remote channel leaves the child to pick its
 own alias, titling it with the address.
 
