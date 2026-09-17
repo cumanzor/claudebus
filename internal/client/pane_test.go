@@ -188,6 +188,22 @@ func TestTmuxSplitArgv(t *testing.T) {
 	}
 }
 
+// TestTmuxNewWindowArgv: the tmux target names its window after the spec's Title
+// (the child's alias), falling back to the historical cc-branch only when no title
+// was set, and the /bin/sh one-liner rides last exactly as terminalCommand renders it.
+func TestTmuxNewWindowArgv(t *testing.T) {
+	spec := ForkSpec{Target: "tmux", Argv: []string{"claude", "--name", "worker3"}, Dir: "/tmp", Title: "worker3"}
+	got := tmuxNewWindowArgv(spec)
+	want := []string{"new-window", "-n", "worker3", terminalCommand(spec)}
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+	spec.Title = ""
+	if got := tmuxNewWindowArgv(spec); got[2] != "cc-branch" {
+		t.Fatalf("empty Title should fall back to cc-branch, got %q", got)
+	}
+}
+
 // TestTmuxSplitArgvCommandIsLast: the shell command must stay the final element.
 // tmux treats the first non-flag operand as the command, so an argv that grew a
 // trailing flag would run the wrong thing (or nothing) with no error from Go.

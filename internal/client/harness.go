@@ -163,6 +163,7 @@ type ForkSpec struct {
 	Argv   []string          // launch command, e.g. ["ccs","alpha","--resume",sid,"--fork-session",prompt]
 	Env    map[string]string // env vars to replicate (PATH always; CLAUDE_CONFIG_DIR when set)
 	Dir    string            // working directory to replicate
+	Title  string            // child's alias/title; names the tmux window (iTerm2 titles from the session itself)
 	Anchor string            // pane only: surface to split (iTerm2 session UUID / tmux pane id); "" = the caller
 	Split  string            // pane only: "auto"/"" (geometry heuristic), "right" (side-by-side), "down" (stacked)
 	// NoNormalize suppresses tmux's auto main-vertical reflow for THIS fork. Apply
@@ -234,6 +235,7 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 		Argv:   forkLaunchArgv(SessionID(), model, childAlias, BootstrapPromptAliased(ch, alias, childAlias)),
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
+		Title:  childAlias,
 	}
 	if _, err := forker.Fork(spec); err != nil {
 		Unreserve(ch, childAlias)
@@ -353,7 +355,7 @@ func (OSAForker) Fork(spec ForkSpec) (string, error) {
 		}
 		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
 		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
-		return "", exec.Command("tmux", "new-window", "-n", "cc-branch", terminalCommand(spec)).Run()
+		return "", exec.Command("tmux", tmuxNewWindowArgv(spec)...).Run()
 	default:
 		return "", fmt.Errorf("unknown target %q", spec.Target)
 	}
@@ -431,6 +433,18 @@ func launcherScript(spec ForkSpec, scriptPath string) string {
 }
 
 func runOsascript(script string) error { return exec.Command("osascript", "-e", script).Run() }
+
+// tmuxNewWindowArgv is the pure argv builder for the tmux target (testable without
+// tmux). -n names the window after the child's title so a spawned or branched peer
+// is findable by its alias in the window list; -n also pins the name, where tmux's
+// automatic-rename would otherwise overwrite it with the running command.
+func tmuxNewWindowArgv(spec ForkSpec) []string {
+	name := spec.Title
+	if name == "" {
+		name = "cc-branch"
+	}
+	return []string{"new-window", "-n", name, terminalCommand(spec)}
+}
 
 // terminalCommand renders a ForkSpec into one /bin/sh command line — used for tmux,
 // which execs through a POSIX shell. window/tab CANNOT use this (iTerm2 mis-tokenizes

@@ -17,7 +17,8 @@ Two steps, no more:
    channel (idempotent; channel auto-derives from the git repo name if omitted),
    reserves the child's alias, forks the conversation with the canonical
    bootstrap prompt, and prints BOTH addresses (parent + reserved child). The
-   child's session title is its alias (picker + terminal title). If the user
+   child's session title is its alias (picker + terminal title, and the tmux
+   window name when the target is tmux). If the user
    mentions a model (e.g. "fork with sonnet"), append `--model <m>` — valid
    values today: sonnet, fable, claude-opus-4-8. "opus" is temporarily pinned
    to Opus 4.8: pass `claude-opus-4-8` verbatim, never bare `opus` (which now

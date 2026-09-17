@@ -1292,7 +1292,9 @@ parent's conversation (`--resume <sid> --fork-session`). `spawn` opens a
 **fresh**, blank session. Both are Go-native (`internal/client/harness.go`,
 `spawn.go`); the retired bash `cc-branch.sh` helper (§13) is no longer consulted.
 The terminal launch is shared (`TerminalForker` / `OSAForker`): iTerm2 window/tab
-via osascript, tmux via `tmux new-window`, `pane` via a split of the **caller's
+via osascript, tmux via `tmux new-window -n <title>` (the window is named after
+the child's alias, or the address for a self-picking remote child, so the window
+list reads like `cbus list`), `pane` via a split of the **caller's
 own** surface (tmux-first, else iTerm2, else a hard error — mechanics below).
 
 ### `cbus branch [window|tab|tmux|pane] [channel] [--model M] [--name N]`
@@ -1317,8 +1319,9 @@ turns into one command. Handler `runBranch` (main.go:450); mechanics
   `fable`, …), passed through verbatim to the child launch. Pre-screened: a
   flag-shaped or invalid token fails with `cbus: bad model "<M>"` before any
   fork (a leading `-` would be read as a CLI flag and instant-close the window).
-- `--name N` fixes the child's alias **and** its session title (default: the
-  auto-pick — `main`, else lowest free `fork-N`). Validated `cbus: bad name
+- `--name N` fixes the child's alias, its session title, **and** (target `tmux`)
+  the tmux window name (default: the auto-pick — `main`, else lowest free
+  `fork-N`). Validated `cbus: bad name
   "<N>"`. Both flags may appear **leading or trailing** — `extractForkFlags`
   scans the whole arg list, unusual vs the leading-only parsing everywhere else;
   a flag with no value → `cbus: --model: missing value (<usage>)`.
@@ -1399,8 +1402,8 @@ blank transcript.
 
 **Flags:**
 
-- `--model M` / `--name N` — same contract as `branch` (alias + session title,
-  leading or trailing, `bad model` / `bad name` validation).
+- `--model M` / `--name N` — same contract as `branch` (alias + session title +
+  tmux window name, leading or trailing, `bad model` / `bad name` validation).
 - `--role R` reads a committed role prompt from `roles/<R>.md` — the spawn cwd's
   git repo first, then `$CBUS_DIR/roles` as the machine-global fallback (the
   `install-roles` destination, §11) — and appends its body to the child's first
@@ -1420,7 +1423,8 @@ blank transcript.
 - **Remote (`<ch>@<host>`)** must be explicit (`bad channel` / `bad host`
   validation). The relay has no reservation step: **with** `--name` spawn
   pre-assigns the relay alias (title = the name); **without** `--name` the child
-  picks its own alias and the session title falls back to the address. A local
+  picks its own alias and the session title (and tmux window name) falls back
+  to the address. A local
   reservation is undone on fork failure; a remote pre-assignment is not (there is
   nothing to unreserve).
 

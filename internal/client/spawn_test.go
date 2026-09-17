@@ -76,6 +76,9 @@ func TestSpawnRemoteAddress(t *testing.T) {
 	if i := slices.Index(f.spec.Argv, "--name"); i < 0 || f.spec.Argv[i+1] != "dev@server" {
 		t.Fatalf("remote default title should be the address: %v", f.spec.Argv)
 	}
+	if f.spec.Title != "dev@server" {
+		t.Fatalf("remote default Title (tmux window name) should be the address: %q", f.spec.Title)
+	}
 }
 
 func TestSpawnPromptLocalContent(t *testing.T) {
@@ -202,6 +205,9 @@ func TestSpawnNameFixesAlias(t *testing.T) {
 	if i := slices.Index(argv, "--name"); i < 0 || argv[i+1] != "runner" {
 		t.Fatalf("argv = %v", argv)
 	}
+	if f.spec.Title != "runner" {
+		t.Fatalf("Title (tmux window name) = %q, want runner", f.spec.Title)
+	}
 	if !fileExists(filepath.Join(CBUSDir(), "dev", "runner", "meta.json")) {
 		t.Fatal("explicit --name must reserve the alias")
 	}
@@ -216,6 +222,9 @@ func TestSpawnNameFixesAlias(t *testing.T) {
 	}
 	if got := f.spec.Argv[len(f.spec.Argv)-1]; got != SpawnPromptAliased("dev@server", "laptop2") {
 		t.Fatalf("remote prompt = %q", got)
+	}
+	if f.spec.Title != "laptop2" {
+		t.Fatalf("remote --name Title (tmux window name) = %q, want laptop2", f.spec.Title)
 	}
 	if dirExists(filepath.Join(CBUSDir(), "dev@server")) {
 		t.Fatal("remote spawn must not create local state")

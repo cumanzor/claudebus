@@ -39,6 +39,9 @@ func TestResumeAnchorLaunchShape(t *testing.T) {
 	if created != "surface-1" || len(fk.specs) != 1 {
 		t.Fatalf("created=%q specs=%d", created, len(fk.specs))
 	}
+	if fk.specs[0].Title != "orchestrator" {
+		t.Errorf("anchor Title (tmux window name) = %q, want orchestrator", fk.specs[0].Title)
+	}
 	argv := fk.specs[0].Argv
 	// the recorded profile must win even from a bare shell: ccs <profile>, never a
 	// bare claude that would resume against the wrong config dir

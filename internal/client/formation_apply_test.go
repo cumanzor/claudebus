@@ -158,6 +158,9 @@ func TestApplyPerModeArgv(t *testing.T) {
 	if !strings.HasPrefix(strings.Join(tmpl.Argv, " "), "ccs alpha --model fable --name orchestrator") {
 		t.Errorf("template argv = %v", tmpl.Argv)
 	}
+	if tmpl.Title != "orchestrator" {
+		t.Errorf("template Title (tmux window name) = %q, want orchestrator", tmpl.Title)
+	}
 
 	res, ok := fk.specFor("coder")
 	if !ok {
@@ -169,6 +172,9 @@ func TestApplyPerModeArgv(t *testing.T) {
 	}
 	if strings.Contains(joined, "--fork-session") {
 		t.Errorf("resume must NOT fork — the peer continues as itself: %v", res.Argv)
+	}
+	if res.Title != "coder" {
+		t.Errorf("resume Title (tmux window name) = %q, want coder", res.Title)
 	}
 
 	frk, ok := fk.specFor("clone")
