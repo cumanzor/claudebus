@@ -1,5 +1,65 @@
 # Changelog (detailed)
 
+## [2026-09-17 05:09:37 UTC] [Release/Harness] v0.11.4 SHIPPED: named tmux windows on the fleet
+
+[Attempt #1] Release of `19956e2`, annotated tag `v0.11.4`. Same sequence as v0.11.2
+and v0.11.3, with a live gate in front of the tag.
+
+[What shipped]
+`cbus spawn tmux`, `cbus branch tmux` and formation apply/resume for a tmux-target
+peer open the window as `tmux new-window -n <alias>` instead of the fixed
+`cc-branch`. A self-picking remote child gets the address. The `/bus-spawn` and
+`/bus-branch` skill text says so.
+
+[Live gate, before the tag]
+- Detached tmux session on Carlos's real tmux server (his config: `allow-rename
+  off`, `automatic-rename on`), real Fable children, real store, throwaway channel
+  `relcheck`.
+- First attempt measured the wrong binary. The session was created with the
+  scratch build first on PATH, but zsh startup put `~/.local/bin` back in front,
+  so the installed v0.11.3 did the spawning and both windows came up `cc-branch`.
+  The pane's own `cbus --version` line showed it. Children closed, rerun with the
+  scratch binary's absolute path.
+- Rerun (`cbus-go dev` at 19956e2): `--name winprobe` and a bare spawn both reached
+  `listen`, windows `1 winprobe auto=0` and `2 main auto=0`, names held after
+  Claude finished booting. Peers closed, session killed, no channel left.
+
+[Release procedure]
+Tag pushed, fresh clone at the tag (`git describe --exact-match` = v0.11.4, clean
+porcelain), `go vet` + `go test ./...` green in the clone (7 ok, 2 no test files),
+`make release CBUS_REPO=cumanzor/claudebus`, SHA256SUMS generated from dist and
+uploaded after.
+
+[Verification]
+- Six assets, draft false, prerelease false, `releases/latest` = v0.11.4.
+- Provenance: `cbus-linux-amd64` buildinfo carries `mod claudebus v0.11.4`,
+  `vcs.revision=19956e2...`, `vcs.modified=false`, `-trimpath=true`.
+- Reproducibility: a second independent fresh clone at the tag rebuilt all five
+  binaries to an identical SHA256SUMS.
+- Mac: 0.11.3 -> 0.11.4, `~/.local/bin/cbus` hashes to `cbus-darwin-arm64`
+  (bc6216a4...). Server: same over ssh, hashes to `cbus-linux-amd64` (a32c243a...).
+- Selfupdate refreshed the skills: installed `bus-spawn.md` and `bus-branch.md`
+  are byte-identical to the repo copies on both machines.
+- Post-release, through the installed binary: `cbus spawn tmux relcheck2 --name
+  postrel --model fable` from a detached session came up as `1 postrel auto=0`
+  and reached `listen`. The first try at this check was void: the wait loop
+  grepped `listen`, which also matches the empty-channel message `no active
+  listeners`, so it exited on the first poll and killed the session before zsh
+  ran the spawn. No process or channel was left; rerun matched `^listen ` only.
+
+[Possible Ripple Effects]
+- winbox stays on its current version until Carlos updates it; spawned tmux windows
+  there keep the `cc-branch` name (tmux is not a Windows target in practice).
+- Anything matching tmux windows by the literal `cc-branch` stops matching new
+  windows on both updated machines.
+
+[Not exercised]
+- `cbus branch tmux` live (it forks the calling conversation, which a detached
+  shell does not have); covered by `TestBranchReplicatesEnvCCS` and the shared
+  `tmuxNewWindowArgv` builder.
+- Formation apply/resume with a tmux-target peer live; formations default to
+  `tab`, and the change there is the `Title` field on the spec.
+
 ## [2026-09-15 16:33:40 UTC] [Client/Harness] tmux target names its window after the child
 
 [Attempt #1] Carlos asked for the bus-spawn skill to name the new session in
