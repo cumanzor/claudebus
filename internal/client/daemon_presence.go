@@ -54,6 +54,9 @@ func clonePresenceFields(next, c *ConnectionState) {
 }
 
 func (d *busDaemon) consumerProbe(c *ConnectionState) (consumerProbe, error) {
+	if err := requireCodexConnection(c); err != nil {
+		return consumerProbe{State: "unknown"}, err
+	}
 	if d.probeConsumer != nil {
 		return d.probeConsumer(d.ctx, c)
 	}
