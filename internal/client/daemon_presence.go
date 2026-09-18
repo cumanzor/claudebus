@@ -338,10 +338,17 @@ func appendManagedPresence(channel, from string, p presenceTransition, r presenc
 	return f.Sync()
 }
 
+const codexMembershipNotice = "Briefly tell the user which peer joined, left, departed or was renamed, using the event and full peer address. Update your known channel roster and retain explicitly known role assignments; do not infer roles from aliases. Treat the event timestamp as the observation time, not proof of current availability."
+
 func nativeBusPayload(line []byte, msg core.Message) string {
 	frame := string(core.LocalEmit(line))
 	if msg.Kind == "presence" {
-		return frame + "\nThis is a cbus presence notification. Update your peer awareness; do not reply or send an acknowledgment solely for this event. No follow-up or monitor re-arming is needed."
+		guidance := "Update peer context without announcing a membership change. No user-facing response is needed solely for this event."
+		switch msg.Event {
+		case "join", "leave", "departed", "rename":
+			guidance = codexMembershipNotice
+		}
+		return frame + fmt.Sprintf("\nThis is a cbus presence notification (event=%q). %s Do not send a bus reply or acknowledgment solely for this event. No polling or monitor re-arming is needed.", msg.Event, guidance)
 	}
 	return frame
 }

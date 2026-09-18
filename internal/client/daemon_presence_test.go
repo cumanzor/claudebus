@@ -385,12 +385,34 @@ func TestManagedPresenceRemoteOutboxNeverUsesLocalChannel(t *testing.T) {
 	}
 }
 
-func TestManagedPresencePayloadAndSnapshotIsolation(t *testing.T) {
-	msg := core.Message{Kind: "presence", Event: "join", Text: "hello", EventID: "presence-1"}
-	line, _ := json.Marshal(msg)
-	if !strings.Contains(nativeBusPayload(line, msg), "do not reply") {
-		t.Fatal("presence lacks no-reply instruction")
+func TestManagedPresencePayloadDistinguishesMembershipFromCompaction(t *testing.T) {
+	for _, event := range []string{"join", "leave", "departed", "rename", "compact-post", "future-event"} {
+		t.Run(event, func(t *testing.T) {
+			// The generic framer omits Event. The native payload must retain it,
+			// even when the body does not explain the transition.
+			msg := core.Message{From: "dev@relay/reviewer", To: "dev@relay/worker", TS: "2026-09-18T12:00:00Z", Kind: "presence", Event: event, Text: "observation", EventID: "presence-1"}
+			line, _ := json.Marshal(msg)
+			payload := nativeBusPayload(line, msg)
+			if !strings.HasPrefix(payload, string(core.LocalEmit(line))) || !strings.Contains(payload, "event=\""+event+"\"") {
+				t.Fatal("lost original frame, remote identity or event type")
+			}
+			membership := event == "join" || event == "leave" || event == "departed" || event == "rename"
+			if strings.Contains(payload, "Briefly tell the user") != membership {
+				t.Fatal("membership notification guidance applied to the wrong event")
+			}
+			if !strings.Contains(payload, "Do not send a bus reply or acknowledgment") || !strings.Contains(payload, "No polling") {
+				t.Fatal("presence lost its bus-loop and idle-work restrictions")
+			}
+			msg.Kind = ""
+			line, _ = json.Marshal(msg)
+			if nativeBusPayload(line, msg) != string(core.LocalEmit(line)) {
+				t.Fatal("ordinary peer message gained presence instructions")
+			}
+		})
 	}
+}
+
+func TestManagedPresenceSnapshotIsolation(t *testing.T) {
 	c := &ConnectionState{Consumer: &consumerObservation{State: "online"}, PresenceOutbox: []presenceTransition{{Recipients: []presenceRecipient{{Alias: "other"}}}}}
 	next := cloneConnection(c)
 	next.Consumer.State = "exited"
