@@ -1,7 +1,7 @@
 # claudebus
 
-A tiny **file-based message bus that lets two (or more) live Claude Code sessions
-talk to each other** — an orchestrator and the worker sessions it spawned, two
+A **file-based message bus for Claude Code and Codex CLI sessions** — an
+orchestrator and the worker sessions it spawned, two
 windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
@@ -19,9 +19,12 @@ loop entirely over the bus:
 
 ![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict](docs/demo-fleet.gif)
 
-Built entirely from **supported primitives** — the `Monitor` tool plus plain
-files — so it depends on no undocumented internals and works across terminal
-windows, tabs, tmux, and CCS profiles. The client is a single static Go binary.
+Claude Code uses the `Monitor` tool and plain files. Codex CLI can connect its
+existing conversation through a local daemon and Codex's experimental native
+queue API, tested against CLI 0.154.0. Idle connections require no model polling
+or Monitor re-arming. Delivery is independent of the terminal: iTerm2, tmux, and
+manually launched terminals share the same bus. The client is a Go binary; the
+Codex adapter also requires a compatible installed Codex CLI.
 
 > **Scope — bespoke by design.** A personal, single-operator tool wired to one
 > specific setup (a homelab NUC reachable over a Cloudflare tunnel). It's here to
@@ -34,7 +37,7 @@ windows, tabs, tmux, and CCS profiles. The client is a single static Go binary.
 ```sh
 # from source
 go build -o ~/.local/bin/cbus ./cmd/cbus
-cbus install-commands && cbus install-roles
+cbus install-commands && cbus install-roles && cbus install-codex-skills
 
 # or bootstrap from a release (see docs/install.md), then stay current with
 cbus selfupdate
@@ -51,6 +54,12 @@ cbus tail demo/main                cbus send main "build's green — merging"
 Inside Claude Code the tail runs under the persistent **Monitor** tool (the
 `/bus-join` skill wires it), so an incoming message lands in the receiving
 session's conversation as a live event — an idle session wakes and answers.
+
+Inside an ordinary Codex CLI conversation, invoke `$cbus-connect` or run
+`cbus connect demo advisor --json`. It joins the current thread without restarting
+or launching through cbus. See [Codex setup](docs/codex.md) for exact-command
+permissions, presence notifications, lifecycle status and delivery recovery.
+Desktop harness clients are outside v1.
 
 Bring a whole fleet back after a reboot:
 
@@ -72,9 +81,9 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
   fresh fleets from starter templates; there's a three-peer fleet demo at the
   top of the doc — [docs/formations.md](docs/formations.md)
-- **Harness-neutral peers** — a Codex CLI session can hold a channel alias
-  today, fresh or resumed with its history (`/bus-codex`); cbus does the
-  listening for it. Grok Build and OpenCode are planned next —
+- **Harness-neutral peers** — ordinary Codex CLI sessions connect from inside
+  their conversation; existing `cbus codex` launches remain supported. Codex is
+  the first daemon adapter, with Claude Code and OpenCode next —
   [docs/codex.md](docs/codex.md)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
@@ -124,12 +133,14 @@ What's left for cbus is an **open** boundary rather than a wider one: a file and
 CLI usable by anything that can write a line, peers that aren't Claude Code, a relay
 you own and can inspect, and a mailbox and ledger you can read with `cat`.
 
-One honest limit, since the file makes it tempting to assume otherwise. A send to a
-peer whose listener died is refused unless you pass `--force`; forced mail replays
-when that peer re-arms, but a peer that fully restarts re-joins, and a join truncates
-the inbox by design. Queued mail survives a dropped listener, not a restart. The
-relay spools for a dark remote peer, outside the ~90–120 s window it takes to notice
-a silent WebSocket drop.
+A send to a peer whose listener died is refused unless you pass `--force`.
+Legacy join/tail registrations have their existing restart and inbox-reset
+semantics. Managed Codex connections retain their inbox, delivery cursor and
+uncertain attempts across daemon and exact-thread CLI restarts. Queue acceptance
+is distinct from recipient history receipt and a completed reply; inspect
+`cbus connection status` and use on-demand `reconcile` for evidence. Native relay
+subscriptions require the acknowledged-delivery endpoint in the matching relay
+release; the old Monitor WebSocket endpoint keeps its legacy semantics.
 
 ## Docs
 

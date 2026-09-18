@@ -48,30 +48,81 @@ func installAssets(fsys fs.FS, subdir, dstDir string, force bool) ([]assetResult
 			out = append(out, res)
 			continue
 		}
-		dst := filepath.Join(dstDir, e.Name())
-		if existing, err := os.ReadFile(dst); err == nil {
-			if shaHex(existing) == shaHex(content) {
-				res.outcome = "up-to-date"
-				out = append(out, res)
-				continue
-			}
-			if !force {
-				res.outcome, res.reason = "skipped", "differs from shipped (locally edited?) — pass --force to overwrite"
+		out = append(out, installAsset(filepath.Join(dstDir, e.Name()), e.Name(), content, force))
+	}
+	return out, nil
+}
+
+func installAsset(dst, name string, content []byte, force bool) assetResult {
+	res := assetResult{name: name}
+	if existing, err := os.ReadFile(dst); err == nil {
+		if shaHex(existing) == shaHex(content) {
+			res.outcome = "up-to-date"
+			return res
+		}
+		if !force {
+			res.outcome, res.reason = "skipped", "differs from shipped (locally edited?) — pass --force to overwrite"
+			return res
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		res.outcome, res.reason = "failed", "read dest: "+err.Error()
+		return res
+	}
+	if err := writeFileAtomic(dst, content); err != nil {
+		res.outcome, res.reason = "failed", err.Error()
+		return res
+	}
+	res.outcome = "installed"
+	return res
+}
+
+// installCodexSkills installs each immediate skill directory's SKILL.md and a
+// receipt for safe upgrades. Other embedded files/deeper assets are not installed.
+func installCodexSkills(fsys fs.FS, dstDir string, force bool) ([]assetResult, error) {
+	const subdir = "skills/codex"
+	entries, err := fs.ReadDir(fsys, subdir)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded %s: %w", subdir, err)
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", dstDir, err)
+	}
+	var out []assetResult
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		res := assetResult{name: name + "/SKILL.md", outcome: "failed"}
+		if name == "." || !fs.ValidPath(name) || !filepath.IsLocal(name) || strings.ContainsAny(name, `/\`) {
+			res.reason = "invalid embedded skill directory name"
+			out = append(out, res)
+			continue
+		}
+		content, err := fs.ReadFile(fsys, subdir+"/"+name+"/SKILL.md")
+		if err != nil {
+			res.reason = "read embed: " + err.Error()
+			out = append(out, res)
+			continue
+		}
+		skillDir := filepath.Join(dstDir, name)
+		if info, err := os.Lstat(skillDir); err == nil {
+			if !info.IsDir() {
+				res.reason = "destination skill path is not a directory (symlinks are not followed)"
 				out = append(out, res)
 				continue
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			res.outcome, res.reason = "failed", "read dest: "+err.Error()
+			res.reason = "stat dest: " + err.Error()
 			out = append(out, res)
 			continue
 		}
-		if werr := writeFileAtomic(dst, content); werr != nil {
-			res.outcome, res.reason = "failed", werr.Error()
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			res.reason = "mkdir dest: " + err.Error()
 			out = append(out, res)
 			continue
 		}
-		res.outcome = "installed"
-		out = append(out, res)
+		out = append(out, installCodexSkill(skillDir, res.name, content, force))
 	}
 	return out, nil
 }
@@ -129,6 +180,17 @@ func defaultCommandsDir() (string, error) {
 	return filepath.Join(home, ".claude", "commands"), nil
 }
 
+func defaultCodexSkillsDir() (string, error) {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "skills"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex", "skills"), nil
+}
+
 // defaultRolesDir is $CBUS_DIR/roles — the LoadRole fallback searched when a spawn
 // runs outside the repo.
 func defaultRolesDir() string {
@@ -167,6 +229,24 @@ func runInstallRoles(args []string) int {
 		return die("%v", err)
 	}
 	return reportAssets("roles", dir, results)
+}
+
+func runInstallCodexSkills(args []string) int {
+	const use = "usage: cbus install-codex-skills [--path DIR] [--force]"
+	dir, force, err := parseInstallArgs(args, use)
+	if err != nil {
+		return die("%v", err)
+	}
+	if dir == "" {
+		if dir, err = defaultCodexSkillsDir(); err != nil {
+			return die("resolve Codex skills dir: %v", err)
+		}
+	}
+	results, err := installCodexSkills(claudebus.CodexSkills, dir, force)
+	if err != nil {
+		return die("%v", err)
+	}
+	return reportAssets("Codex skills", dir, results)
 }
 
 // parseInstallArgs handles the shared [--path DIR] [--force].

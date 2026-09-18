@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"claudebus/internal/core"
 )
@@ -53,6 +55,9 @@ type peerMeta struct {
 	// channel is the point: one delivery decision cannot be a process-wide setting.
 	// omitempty: pre-harness metas rewrite byte-identically, absent reads unknown.
 	Harness string `json:"harness,omitempty"`
+	// ConnectionID identifies a daemon-managed registration epoch. Its inbox survives
+	// listener downtime and only the connection lifecycle may replace its binding.
+	ConnectionID string `json:"connectionId,omitempty"`
 }
 
 var jsonNull = json.RawMessage("null")
@@ -101,23 +106,45 @@ func pickAlias(ch string, exclude map[string]bool) string {
 // 8 concurrent joins losing 3). The Class-B contract is a unique alias per joiner;
 // exact fork-N numbering under concurrency was never deterministic.
 func claimAlias(ch string) (alias, dir string, err error) {
+	alias, dir, unlock, err := claimAliasLocked(ch)
+	if unlock != nil {
+		unlock()
+	}
+	return alias, dir, err
+}
+
+// claimAliasLocked retains the alias lock through the caller's inbox/meta initialization.
+// Atomic mkdir alone does not protect that window from an explicit alias reclaim.
+func claimAliasLocked(ch string) (alias, dir string, unlock func(), err error) {
+	return claimAliasLockedContext(context.Background(), ch)
+}
+
+func claimAliasLockedContext(ctx context.Context, ch string) (alias, dir string, unlock func(), err error) {
 	root := CBUSDir()
 	if err := os.MkdirAll(filepath.Join(root, ch), 0o755); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	exclude := map[string]bool{}
 	for tries := 0; tries < 50; tries++ {
+		if err := ctx.Err(); err != nil {
+			return "", "", nil, err
+		}
 		alias = pickAlias(ch, exclude)
 		dir = filepath.Join(root, ch, alias)
+		unlock, err = lockPeerForContext(ctx, ch, alias, 5*time.Second)
+		if err != nil {
+			return "", "", nil, err
+		}
 		e := os.Mkdir(dir, 0o755)
 		if e == nil {
-			return alias, dir, nil
+			return alias, dir, unlock, nil
 		}
+		unlock()
 		if errors.Is(e, fs.ErrExist) {
 			exclude[alias] = true
 		}
 	}
-	return "", "", fmt.Errorf("cannot claim an alias in %q", ch)
+	return "", "", nil, fmt.Errorf("cannot claim an alias in %q", ch)
 }
 
 func cwd() string {
@@ -150,6 +177,27 @@ func checkStoreName(kind, s string) error {
 		return fmt.Errorf("%s %q %s", kind, s, why)
 	}
 	return nil
+}
+
+// reclaimConnectionID distinguishes an absent meta (legacy empty reservation) from
+// one whose contents cannot be trusted. A failed read or malformed JSON must never
+// turn a potentially managed inbox into a dead name available for reclamation.
+func reclaimConnectionID(metaPath string) (string, error) {
+	b, err := os.ReadFile(metaPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return "", fmt.Errorf("invalid peer metadata: %w", err)
+	}
+	if raw == nil {
+		return "", errors.New("invalid peer metadata: expected an object")
+	}
+	return rawStr(raw["connectionId"]), nil
 }
 
 // Join joins ch, auto-picking or claiming alias. Returns the resolved alias and
@@ -192,16 +240,29 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	}
 	root := CBUSDir()
 	var dir string
+	var unlock func()
 	if alias == "" {
-		if alias, dir, err = claimAlias(ch); err != nil {
+		if alias, dir, unlock, err = claimAliasLocked(ch); err != nil {
 			return "", false, err
 		}
+		defer unlock()
 	} else {
 		if err := checkStoreName("alias", alias); err != nil {
 			return "", false, err
 		}
+		if unlock, err = lockPeer(ch, alias); err != nil {
+			return "", false, err
+		}
+		defer unlock()
 		dir = filepath.Join(root, ch, alias)
 		metaPath := filepath.Join(dir, "meta.json")
+		connectionID, readErr := reclaimConnectionID(metaPath)
+		if readErr != nil {
+			return "", false, fmt.Errorf("cannot inspect existing peer %s/%s: %w", ch, alias, readErr)
+		}
+		if connectionID != "" {
+			return "", false, fmt.Errorf("%q is daemon-managed — use cbus connect instead of replacing it with join", ch+"/"+alias)
+		}
 		if fileExists(metaPath) && MetaListenerAlive(metaPath) {
 			return "", false, fmt.Errorf("%q is taken by a live listener", ch+"/"+alias)
 		}
@@ -313,10 +374,12 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 	PruneChannel(ch)
 	root := CBUSDir()
 	var dir string
+	var unlock func()
 	if want == "" {
-		if alias, dir, err = claimAlias(ch); err != nil {
+		if alias, dir, unlock, err = claimAliasLocked(ch); err != nil {
 			return "", err
 		}
+		defer unlock()
 	} else {
 		if err := checkStoreName("alias", want); err != nil {
 			return "", err
@@ -327,8 +390,19 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 			}
 		}
 		alias = want
+		if unlock, err = lockPeer(ch, alias); err != nil {
+			return "", err
+		}
+		defer unlock()
 		dir = filepath.Join(root, ch, alias)
 		metaPath := filepath.Join(dir, "meta.json")
+		connectionID, readErr := reclaimConnectionID(metaPath)
+		if readErr != nil {
+			return "", fmt.Errorf("cannot inspect existing peer %s/%s: %w", ch, alias, readErr)
+		}
+		if connectionID != "" {
+			return "", fmt.Errorf("%q is daemon-managed — choose another alias or explicitly unregister this peer before reserving its alias", ch+"/"+alias)
+		}
 		if fileExists(metaPath) && MetaListenerAlive(metaPath) {
 			return "", fmt.Errorf("%q is taken by a live listener", ch+"/"+alias)
 		}
@@ -367,6 +441,14 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 
 // Unreserve drops a reservation (fork failed after the claim) — best-effort.
 func Unreserve(ch, alias string) {
+	unlock, err := lockPeer(ch, alias)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), ch, alias, "meta.json")); !ok || m.SessionID != "reserved" || m.ConnectionID != "" {
+		return // the child or a replacement has already answered this reservation
+	}
 	// discard KEPT (D66): nothing reports success from here, so a failure leaves a stale
 	// reservation rather than a false statement. The next join reclaims that name through
 	// the surfaced path in ReserveAlias, which is where the failure becomes visible.
@@ -382,6 +464,17 @@ func Leave(ch string) (left []string, err error) {
 		if ch != "" && reg.Channel != ch {
 			continue
 		}
+		unlock, lockErr := lockPeer(reg.Channel, reg.Alias)
+		if lockErr != nil {
+			err = lockErr
+			continue
+		}
+		// ResolveSelf is a snapshot: never remove a replacement that arrived while
+		// waiting for an in-flight daemon delivery or another lifecycle operation.
+		if metaSessionID(filepath.Join(root, reg.Channel, reg.Alias, "meta.json")) != SessionID() {
+			unlock()
+			continue
+		}
 		BroadcastPresence(reg.Channel, reg.Alias, "leave", "left "+reg.Channel, reg.Alias)
 		// capture every subject fact BEFORE the dir goes: after RemoveAll the
 		// alias-to-session binding and the run claim exist nowhere, which is precisely
@@ -394,11 +487,13 @@ func Leave(ch string) (left []string, err error) {
 		// one as left, which is what the discarded error did.
 		if rerr := os.RemoveAll(peerDir); rerr != nil {
 			err = fmt.Errorf("left %s but could not remove its dir: %w", reg.Channel+"/"+reg.Alias, rerr)
+			unlock()
 			continue
 		}
 		_ = os.Remove(filepath.Join(root, reg.Channel)) // rmdir if empty
 		RecordEventForSubject(LedgerLeave, reg.Channel, reg.Alias, subj)
 		left = append(left, reg.Channel+"/"+reg.Alias)
+		unlock()
 	}
 	if len(left) == 0 && err == nil {
 		return nil, fmt.Errorf("not joined%s", chSuffix(ch))
@@ -408,6 +503,11 @@ func Leave(ch string) (left []string, err error) {
 
 // Unregister force-removes any peer and broadcasts departed (bin/cbus:691-699).
 func Unregister(ch, al string) error {
+	unlock, err := lockPeer(ch, al)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	root := CBUSDir()
 	dir := filepath.Join(root, ch, al)
 	if !dirExists(dir) {
@@ -459,12 +559,30 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 		return "", "", false, fmt.Errorf("joined to %d channels — pass one: cbus rename %s <channel>", count, newAlias)
 	}
 	ch, old, _ = strings.Cut(match, "/")
+	unlock, err := lockPeers(ch, old, newAlias)
+	if err != nil {
+		return "", "", false, err
+	}
+	defer unlock()
+	root := CBUSDir()
+	if metaSessionID(filepath.Join(root, ch, old, "meta.json")) != SessionID() {
+		return "", "", false, errors.New("registration changed while waiting to rename")
+	}
+	if m, ok := ReadPeerMeta(filepath.Join(root, ch, old, "meta.json")); ok && m.ConnectionID != "" {
+		return "", "", false, fmt.Errorf("%q is daemon-managed and rename is not supported — use cbus connection disconnect and cbus connect to manage its connection", match)
+	}
 	if old == newAlias {
 		return ch, old, true, nil
 	}
-	root := CBUSDir()
 	newDir := filepath.Join(root, ch, newAlias)
 	if _, statErr := os.Lstat(newDir); statErr == nil {
+		connectionID, readErr := reclaimConnectionID(filepath.Join(newDir, "meta.json"))
+		if readErr != nil {
+			return "", "", false, fmt.Errorf("cannot inspect existing peer %s/%s: %w", ch, newAlias, readErr)
+		}
+		if connectionID != "" {
+			return "", "", false, fmt.Errorf("%q is daemon-managed — choose another alias or explicitly unregister this peer before replacing its alias", ch+"/"+newAlias)
+		}
 		if MetaListenerAlive(filepath.Join(newDir, "meta.json")) {
 			return "", "", false, fmt.Errorf("%q is taken by a live listener", ch+"/"+newAlias)
 		}
@@ -539,6 +657,9 @@ func PruneChannel(ch string) []string {
 	}
 	// legacy v1: a meta.json directly at the channel level
 	if fileExists(filepath.Join(chDir, "meta.json")) {
+		if _, err := reclaimConnectionID(filepath.Join(chDir, "meta.json")); err != nil {
+			return nil
+		}
 		if PeerDead(filepath.Join(chDir, "meta.json")) {
 			if err := os.RemoveAll(chDir); err != nil {
 				msgs = append(msgs, "could NOT prune legacy peer "+ch+": "+err.Error())
@@ -559,54 +680,68 @@ func PruneChannel(ch string) []string {
 		if !fileExists(metaPath) || !PeerDead(metaPath) {
 			continue
 		}
-		// dot-prefixed same-parent temp: glob-invisible, EXDEV-proof rename claim.
-		tmp := filepath.Join(chDir, ".reap."+strconv.Itoa(os.Getpid())+"."+peer)
-		if err := os.Rename(peerDir, tmp); err != nil {
-			// EIGHTH surfaced site (D67), and on windows it is the FIRST thing a held
-			// handle blocks: renaming a directory fails while anything inside it is open,
-			// so the removal below is never even reached. The old bare `continue`
-			// swallowed that and PruneChannel returned no message at all — a dead peer
-			// skipped in silence, which an operator reads as a clean channel.
-			//
-			// It also covers the ordinary case the old comment named, losing the claim to
-			// a concurrent reaper. Both are reported, because the error text is what
-			// separates them and neither should be invisible.
-			msgs = append(msgs, "could NOT prune "+ch+"/"+peer+", claim failed: "+err.Error())
-			continue
-		}
-		switch {
-		case PeerDead(filepath.Join(tmp, "meta.json")):
-			// A crashed peer never emits its own leave, so its departure would exist
-			// only as a presence line in inboxes that join truncates — the run would
-			// have no terminal event and its end would be invisible to the ledger.
-			// Every subject fact (sid, run claim, host, cwd, origin, ownerPid) must be
-			// read HERE from the DEAD peer's own dir: one line later RemoveAll destroys
-			// the last place any of it exists. subj.self stays false, so the reaper's
-			// own harness is not misattributed to the departed peer.
-			subj := readSubject(tmp)
-			// the ledger event and the broadcast below both ASSERT this peer is gone, and
-			// this removal is the only thing that makes that true. Discarding its error
-			// announced a departure to every listener while the directory survived — and
-			// survived under the dot-prefixed reap name, which the entry loop above skips
-			// and every glob ignores, so it becomes an orphan nothing lists again.
-			if err := os.RemoveAll(tmp); err != nil {
-				msgs = append(msgs, "could NOT prune "+ch+"/"+peer+", left at "+tmp+": "+err.Error())
-				continue
+		func() {
+			unlock, err := lockPeer(ch, peer)
+			if err != nil {
+				msgs = append(msgs, "could NOT prune "+ch+"/"+peer+": "+err.Error())
+				return
 			}
-			msgs = append(msgs, "pruned "+ch+"/"+peer)
-			RecordEventForSubject(LedgerLeave, ch, peer, subj)
-			BroadcastPresence(ch, peer, "departed", "departed (listener gone)", peer)
-		case dirExists(peerDir):
-			// discards KEPT for both of these (D66): the live peer dir is already back in
-			// place, so a failure here leaves our dot-prefixed copy as litter and asserts
-			// nothing about it. Litter is not a lie, and no message, ledger event or
-			// broadcast rides either line.
-			_ = os.RemoveAll(tmp) // a fresh join reclaimed the slot — drop our copy
-		default:
-			if os.Rename(tmp, peerDir) != nil { // false claim — restore
-				_ = os.RemoveAll(tmp)
+			defer unlock()
+			if _, err := reclaimConnectionID(metaPath); err != nil {
+				return // unreadable metadata is not evidence that an inbox is reclaimable
 			}
-		}
+			if !fileExists(metaPath) || !PeerDead(metaPath) {
+				return // a replacement became live while this reaper waited
+			}
+			// dot-prefixed same-parent temp: glob-invisible, EXDEV-proof rename claim.
+			tmp := filepath.Join(chDir, ".reap."+strconv.Itoa(os.Getpid())+"."+peer)
+			if err := os.Rename(peerDir, tmp); err != nil {
+				// EIGHTH surfaced site (D67), and on windows it is the FIRST thing a held
+				// handle blocks: renaming a directory fails while anything inside it is open,
+				// so the removal below is never even reached. The old bare `continue`
+				// swallowed that and PruneChannel returned no message at all — a dead peer
+				// skipped in silence, which an operator reads as a clean channel.
+				//
+				// It also covers the ordinary case the old comment named, losing the claim to
+				// a concurrent reaper. Both are reported, because the error text is what
+				// separates them and neither should be invisible.
+				msgs = append(msgs, "could NOT prune "+ch+"/"+peer+", claim failed: "+err.Error())
+				return
+			}
+			switch {
+			case PeerDead(filepath.Join(tmp, "meta.json")):
+				// A crashed peer never emits its own leave, so its departure would exist
+				// only as a presence line in inboxes that join truncates — the run would
+				// have no terminal event and its end would be invisible to the ledger.
+				// Every subject fact (sid, run claim, host, cwd, origin, ownerPid) must be
+				// read HERE from the DEAD peer's own dir: one line later RemoveAll destroys
+				// the last place any of it exists. subj.self stays false, so the reaper's
+				// own harness is not misattributed to the departed peer.
+				subj := readSubject(tmp)
+				// the ledger event and the broadcast below both ASSERT this peer is gone, and
+				// this removal is the only thing that makes that true. Discarding its error
+				// announced a departure to every listener while the directory survived — and
+				// survived under the dot-prefixed reap name, which the entry loop above skips
+				// and every glob ignores, so it becomes an orphan nothing lists again.
+				if err := os.RemoveAll(tmp); err != nil {
+					msgs = append(msgs, "could NOT prune "+ch+"/"+peer+", left at "+tmp+": "+err.Error())
+					return
+				}
+				msgs = append(msgs, "pruned "+ch+"/"+peer)
+				RecordEventForSubject(LedgerLeave, ch, peer, subj)
+				BroadcastPresence(ch, peer, "departed", "departed (listener gone)", peer)
+			case dirExists(peerDir):
+				// discards KEPT for both of these (D66): the live peer dir is already back in
+				// place, so a failure here leaves our dot-prefixed copy as litter and asserts
+				// nothing about it. Litter is not a lie, and no message, ledger event or
+				// broadcast rides either line.
+				_ = os.RemoveAll(tmp) // a fresh join reclaimed the slot — drop our copy
+			default:
+				if os.Rename(tmp, peerDir) != nil { // false claim — restore
+					_ = os.RemoveAll(tmp)
+				}
+			}
+		}()
 	}
 	_ = os.Remove(chDir) // rmdir if empty
 	return msgs

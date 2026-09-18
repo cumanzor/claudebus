@@ -8,7 +8,7 @@ package main
 // Self-id stays `cbus` (Option X): cutover was a pure binary swap. Post-cutover
 // additions with no bash counterpart: the `spawn` block (cbus-ijx.2), the
 // `--model`/`--name` flags on branch/spawn, and the `formation` block.
-const usage = `cbus — message bus between live Claude Code sessions, in named channels
+const usage = `cbus — message bus between coding sessions, in named channels
 
   cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
                                    prunes dead peers in the channel first)
@@ -51,6 +51,9 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    channel auto-derives — child alias reserved +
                                    titled like branch; channel@host must be
                                    explicit)
+       --harness claude|codex      choose the CLI independently of the terminal;
+                                   native Codex callers default to codex
+       --profile <p>              select a Codex config profile explicitly
        --model <m>                 launch the child on a specific model
        --name <n>                  fix the child's alias AND session title
                                    (remote: pre-assigns the relay alias; omitted
@@ -127,6 +130,26 @@ const usage = `cbus — message bus between live Claude Code sessions, in named 
                                    overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
+  cbus install-codex-skills [--path DIR] [--force]
+                                   install session-side skills to $CODEX_HOME/skills
+                                   (safe shipped-version upgrades; protects edits)
+  cbus codex-permissions [--binary PATH] [--install [--path FILE] [--force]]
+                                   preview optional exact-binary reply permission;
+                                   --install writes it explicitly, never automatic
+  cbus connect <channel> [alias] [--codex-sqlite-home ABS_PATH] [--json]
+                                   connect this Codex CLI thread via its native
+                                   queue, without restarting (experimental pilot)
+  cbus connection status [channel/alias] [--json]
+                                   inspect saved acceptance/receipt observations
+  cbus connection reconcile <channel/alias> [--json]
+                                   refresh queue/history evidence; never enqueue
+  cbus connection abandon <channel/alias> --pending <client-id> --reason <text>
+                                   release one uncertain local attempt; original
+                                   delivery remains unknown, may still occur
+  cbus connection disconnect <channel/alias>
+                                   stop future injection; retain inbox/history
+  cbus daemon start|restart|status|stop|serve [--json]
+                                   local supervisor; connect starts it as needed
   cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]
                                    launch a codex --remote TUI as a bus peer: a
                                    per-peer app-server, the wrapper learns the

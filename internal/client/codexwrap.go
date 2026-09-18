@@ -84,6 +84,7 @@ func codexRemoteEnv(channel, alias string) []string {
 		"CLAUDE_CODE_SESSION_ID": true,
 		"CBUS_SESSION_ID":        true,
 		"GROK_SESSION_ID":        true,
+		"CODEX_THREAD_ID":        true,
 		"CBUS_ALIAS":             true, // set below; drop any inherited value first
 		"CBUS_CHANNEL":           true,
 	}
@@ -304,7 +305,15 @@ func joinAs(sid, channel, alias string) error {
 // claim-then-attach-failure leaves the wrapper's real pid recorded; when the wrapper exits,
 // that pid is dead and MetaListenerAlive reads it dead, so liveness handles it structurally.
 func claimListenerAtJoin(channel, alias string) {
+	unlock, err := lockPeer(channel, alias)
+	if err != nil {
+		return
+	}
+	defer unlock()
 	peerDir := filepath.Join(CBUSDir(), channel, alias)
+	if m, ok := ReadPeerMeta(filepath.Join(peerDir, "meta.json")); ok && m.ConnectionID != "" {
+		return // the daemon owns this binding and its delivery cursor
+	}
 	start, err := procStartTime(os.Getpid())
 	if err != nil {
 		return // no witness: a claim would read dead anyway
@@ -317,7 +326,7 @@ func claimListenerAtJoin(channel, alias string) {
 	if cd, ci, co, state := readCursor(peerDir); state != cursorValid || cd != dev || ci != ino || co != 0 {
 		return // seed did not round-trip: skip the claim rather than risk seek-END mail loss
 	}
-	armMeta(filepath.Join(peerDir, "meta.json"), start)
+	armMetaLocked(filepath.Join(peerDir, "meta.json"), start)
 }
 
 var (

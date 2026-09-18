@@ -1,6 +1,7 @@
 # Profile: codex peer
 
-Source: this repo — `internal/client/codexbridge.go`, `internal/client/codexwrap.go`.
+Source: this repo — `internal/client/daemon.go`, `internal/client/codexqueue.go`,
+`internal/client/codexbridge.go`, `internal/client/codexwrap.go`.
 
 Appended after your role file. Your role file's mandate holds: what your seat
 gates, how you report, what you may not authorize. What does **not** hold is the
@@ -12,14 +13,28 @@ Your role file opens with two doctrines about arming a listener through the
 Monitor tool and re-arming it on drop. Both describe a harness you are not
 running in.
 
-You have no Monitor tool. **Do not run `cbus tail`.** The bridge arms as your
-alias's local listener and tails your inbox for you, turning each framed bus
-message into one injection into your thread. Arming is not your job and
-attempting it is the failure those doctrines exist to prevent, arrived at from
-the other direction.
+You have no Monitor tool. **Do not run `cbus tail`.** For a native connection,
+`cbus connect CHANNEL [ALIAS]` registers this conversation and the daemon submits
+messages to its native queue. The compatibility wrapper uses a bridge. Both own
+the listening; neither requires a periodic model turn to re-arm.
 
-If messages stop arriving, that is a bridge or wrapper problem to report, not a
-listener for you to re-arm.
+If messages stop arriving, inspect `cbus connection status CHANNEL/ALIAS --json`
+for a native connection, or report the bridge/wrapper problem. Do not start a
+second listener.
+
+Busy native sessions consume queued input after their current turn completes.
+Explicit interruption pauses that consumption. Rejoining or resuming alone may
+leave it paused even when status says `idle`; let a subsequent user turn complete
+before expecting pending input to drain. Do not add a periodic turn to clear it.
+These lifecycle semantics passed ordinary CLI clean and interrupted resume
+tests on 0.154.0 with a local fake provider. The 65-minute ordinary CLI idle test
+passed with zero recorded maintenance activity and a subsequent exact reply.
+
+If a cbus command reports a sandbox permission error, request approval for that
+exact command using the session's existing approval mechanism. Unix socket
+access can require approval even with a writable bus directory; default-home
+replies can also require write approval. Do not change sandbox or approval
+settings to connect, and do not treat a permission error as a restart signal.
 
 ## You may have been resumed onto the bus
 
@@ -30,14 +45,14 @@ even though your history is not. `cbus whoami` is the authority on which
 channel and alias you now answer as; do not assume the seat you held before the
 resume is the seat you hold now.
 
-## One frame is one turn
+## Messages can cause model work
 
-Each bus message becomes one injection, and an injection forces a full model
-turn. Presence frames (join, leave, and the rest of the ceremony) are skipped
-deliberately because a turn each is too expensive; the cursor still advances over
-them, so you are not missing state, you are being spared the ceremony.
+Each bus message becomes queued input on the native path. The compatibility
+bridge may steer an active turn or start a new one. Native connections deliver
+real join/leave and completed-compaction notices, which can cause a recipient
+turn. Do not reply to presence notices. Idle liveness checks do not invoke the
+model. The compatibility bridge skips incoming presence frames.
 
-Practical consequence: a peer that sends you six short messages costs six turns.
 When you send, prefer one complete message over a stream of fragments, within the
 size ceiling your role file names.
 

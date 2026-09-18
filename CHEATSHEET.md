@@ -138,6 +138,15 @@ cbus formation resume myeffort                       # after a reboot: relaunch 
 cbus formation apply myeffort --mode resume --only coder  # late-bound per-peer resume (this run only)
 
 # codex as a peer (harness-neutral bus; codex never runs `cbus tail`)
+cbus install-codex-skills                            # install $cbus-connect for ordinary CLI sessions
+cbus connect myrepo advisor --json                   # run INSIDE the existing Codex CLI; no restart
+cbus connect dev@nuc advisor --json                  # remote bus; requires durable-v1 relay
+cbus connection status myrepo/advisor --json         # consumer, queue and historical receipt separately
+cbus connection reconcile myrepo/advisor --json      # on-demand receipt evidence; no model turn
+cbus connection disconnect myrepo/advisor            # keep inbox/journal; stop future submissions
+cbus daemon restart                                 # explicitly load an upgraded cbus binary
+cbus codex-permissions --binary /absolute/path/cbus   # preview optional exact-path send rule
+cbus spawn pane myrepo --harness codex --name worker  # ordinary CLI in iTerm2/tmux
 cbus codex --channel myrepo                          # codex --remote TUI joined as a bus peer, bridged
 cbus codex --channel myrepo --alias advisor resume <session-id>   # bring an existing codex session onto the bus
 cbus codex --channel myrepo --alias advisor resume --last         # same, most recent session in this cwd

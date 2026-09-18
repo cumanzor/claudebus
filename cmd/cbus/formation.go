@@ -435,6 +435,16 @@ func renderFormation(f *client.Formation) {
 		fmt.Printf("  %s%s\n", p.Alias, anchor)
 		fmt.Printf("    model=%s mode=%s origin=%s profile=%s target=%s machine=%s\n",
 			orQ(p.Model), orQ(p.Mode), orQ(p.Origin), orQ(p.Profile), orQ(p.Target), orQ(p.Machine))
+		if p.Harness != "" || p.CodexBackend != nil {
+			harness := p.Harness
+			if harness == "" && p.CodexBackend != nil {
+				harness = "codex"
+			}
+			fmt.Printf("    harness=%s\n", harness)
+		}
+		if b := p.CodexBackend; b != nil {
+			fmt.Printf("    Codex backend: home=%s sqliteHome=%s binary=%s\n", orQ(b.Home), orQ(b.SQLiteHome), orQ(b.Binary))
+		}
 		switch {
 		case p.Rolefile != "":
 			fmt.Printf("    role:     %s\n", p.Rolefile)

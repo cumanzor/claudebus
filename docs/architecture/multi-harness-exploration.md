@@ -1,5 +1,13 @@
 # Multi-harness exploration: Codex CLI, Grok Build, OpenCode as cbus peers
 
+> **Current scope, 2026-09-17 (cbus-rtt D3-D4):** the cross-harness design targets
+> **Claude Code, Codex CLI, and OpenCode** as first-class peers. Harness desktop
+> clients are deferred to v2. Terminal independence is required: preserve iTerm2
+> and tmux, with room for future hosts such as Herdr. See
+> [the current scope and adapter proposal](cross-harness-daemon-scope.md).
+> The July exploration below is retained as historical research; its capability
+> tables and proposed work are not the current implementation status or scope.
+
 *Exploration, 2026-07-18. Not a commitment — a map of what each harness offers and what
 cbus would need. Simplicity rule in force: file-based / relay-based approaches only, no
 new daemons unless a harness leaves no alternative.*

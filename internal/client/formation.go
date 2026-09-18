@@ -81,20 +81,22 @@ type Formation struct {
 // verbatim, including its mixed drift_anchors/anchorAlias casing — the spec is the
 // contract; normalizing it here would fork the schema from the document.
 type FormationPeer struct {
-	Alias     string   `json:"alias"`
-	Model     string   `json:"model"`
-	Rolefile  string   `json:"rolefile"` // committed prompt pinned at a commit: roles/coder.md@b3a806e
-	Role      *string  `json:"role"`     // freeform fallback for formations without committed roles
-	Origin    string   `json:"origin"`
-	Mode      string   `json:"mode"`
-	SessionID string   `json:"sessionId"`
-	OnStale   string   `json:"onStale"`
-	Profile   string   `json:"profile"`
-	Cwd       string   `json:"cwd"`
-	Target    string   `json:"target"`
-	Split     string   `json:"split"` // pane layout: ""/auto (largest-area chain) | right | down; hand-maintained, save never records it
-	Machine   string   `json:"machine"`
-	Addresses []string `json:"addresses"` // reserved: v1 apply prints these as manual joins
+	Alias        string                 `json:"alias"`
+	Harness      string                 `json:"harness"`
+	CodexBackend *FormationCodexBackend `json:"codexBackend"`
+	Model        string                 `json:"model"`
+	Rolefile     string                 `json:"rolefile"` // committed prompt pinned at a commit: roles/coder.md@b3a806e
+	Role         *string                `json:"role"`     // freeform fallback for formations without committed roles
+	Origin       string                 `json:"origin"`
+	Mode         string                 `json:"mode"`
+	SessionID    string                 `json:"sessionId"`
+	OnStale      string                 `json:"onStale"`
+	Profile      string                 `json:"profile"`
+	Cwd          string                 `json:"cwd"`
+	Target       string                 `json:"target"`
+	Split        string                 `json:"split"` // pane layout: ""/auto (largest-area chain) | right | down; hand-maintained, save never records it
+	Machine      string                 `json:"machine"`
+	Addresses    []string               `json:"addresses"` // reserved: v1 apply prints these as manual joins
 	// the run this peer's sessionId belongs to; blank when the snapshot predates the
 	// ledger or the run is genuinely unknown, never inferred
 	FormationRunID string `json:"formationRunId"`
@@ -132,6 +134,8 @@ func (p *FormationPeer) fields() []jsonField {
 	}
 	return []jsonField{
 		{"alias", p.Alias},
+		{"harness", p.Harness},
+		{"codexBackend", p.CodexBackend},
 		{"model", p.Model},
 		{"rolefile", p.Rolefile},
 		{"role", p.Role},
@@ -287,6 +291,12 @@ const (
 // that host's transcripts, so calling the sid stale would dress a guess as a
 // finding. "reserved" is the ReserveAlias placeholder, not a session.
 func (p *FormationPeer) SidState() (state SidState, detail string) {
+	if formationHarness(p) != "claude" || p.CodexBackend != nil {
+		if p.SessionID == "" || p.SessionID == "reserved" {
+			return SidNone, ""
+		}
+		return SidUnchecked, "harness=" + formationHarness(p) + " transcript is not checked by the Claude Formation launcher"
+	}
 	if p.SessionID == "" || p.SessionID == "reserved" {
 		return SidNone, ""
 	}
@@ -562,6 +572,12 @@ func (f *Formation) AnchorWarning() string {
 }
 
 func (p *FormationPeer) validate() error {
+	if p.Harness != "" && !core.ValidName(p.Harness) {
+		return fmt.Errorf("invalid harness %q", p.Harness)
+	}
+	if p.CodexBackend != nil && p.Harness != "" && strings.ToLower(p.Harness) != "codex" {
+		return fmt.Errorf("codexBackend conflicts with harness %q", p.Harness)
+	}
 	if !core.ValidName(p.Alias) {
 		return fmt.Errorf("alias must be [A-Za-z0-9._-], got %q", p.Alias)
 	}

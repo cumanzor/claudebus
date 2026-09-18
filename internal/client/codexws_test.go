@@ -108,9 +108,10 @@ func startFakeCodexAdopt(t *testing.T, flushAfter int) *fakeCodex {
 			}
 		case "turn/start":
 			openerStarted = true
+			threadID := req["params"].(map[string]any)["threadId"]
 			s.reply(req["id"], map[string]any{"turn": map[string]any{"id": "OPENER"}})
-			s.notify("thread/status/changed", map[string]any{"status": map[string]any{"type": "active"}})
-			s.notify("thread/status/changed", map[string]any{"status": map[string]any{"type": "idle"}})
+			s.notify("thread/status/changed", map[string]any{"threadId": threadID, "status": map[string]any{"type": "active", "activeFlags": []string{}}})
+			s.notify("thread/status/changed", map[string]any{"threadId": threadID, "status": map[string]any{"type": "idle"}})
 		default:
 			s.reply(req["id"], map[string]any{})
 		}

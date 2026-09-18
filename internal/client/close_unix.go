@@ -39,6 +39,9 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 	if !ok {
 		return CloseReport{target, false, "no such peer"}
 	}
+	if m.ConnectionID != "" {
+		return CloseReport{target, false, "daemon-managed peer — use cbus connection disconnect " + target + "; close must not signal its shared daemon or terminal"}
+	}
 	if sid := SessionID(); sid != "" && m.SessionID == sid {
 		return CloseReport{target, false, "that peer is THIS session — refusing (exit it normally)"}
 	}

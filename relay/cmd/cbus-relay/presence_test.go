@@ -103,7 +103,7 @@ func TestFanoutPresence(t *testing.T) {
 // End-to-end: a join by a second peer is delivered through the drainer to a listener.
 func TestJoinDeliveredViaDrainer(t *testing.T) {
 	s := presenceServer(t)
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	s.hub.attach("c/listener") // no other peers yet -> its own join fans to nobody
 	s.hub.attach("c/joiner")   // fans a join to listener
@@ -121,7 +121,7 @@ func TestJoinDeliveredViaDrainer(t *testing.T) {
 func TestDepartedAfterGrace(t *testing.T) {
 	s := presenceServer(t)
 	s.hub.grace = 30 * time.Millisecond
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	s.hub.attach("c/listener")
 	tw, _ := s.hub.attach("c/worker")
@@ -148,7 +148,7 @@ func TestDepartedAfterGrace(t *testing.T) {
 func TestDepartedCancelledByReconnect(t *testing.T) {
 	s := presenceServer(t)
 	s.hub.grace = 80 * time.Millisecond
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	s.hub.attach("c/listener")
 	tw, _ := s.hub.attach("c/worker")
@@ -168,7 +168,7 @@ func TestDepartedCancelledByReconnect(t *testing.T) {
 func TestDisplacementNoDepart(t *testing.T) {
 	s := presenceServer(t)
 	s.hub.grace = 20 * time.Millisecond
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	s.hub.attach("c/listener")
 	t1, _ := s.hub.attach("c/worker")
@@ -189,7 +189,7 @@ func TestDisplacementNoDepart(t *testing.T) {
 func TestJoinAfterDeparted(t *testing.T) {
 	s := presenceServer(t)
 	s.hub.grace = 20 * time.Millisecond
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	t1, j1 := s.hub.attach("c/worker")
 	if !j1 {
@@ -210,7 +210,7 @@ func TestJoinAfterDeparted(t *testing.T) {
 // assert the delivered order matches (last == join).
 func TestPresenceOrderingDepartedBeforeJoin(t *testing.T) {
 	s := presenceServer(t)
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 	s.hub.attach("c/listener") // recipient
 
 	s.hub.mu.Lock()
@@ -252,7 +252,7 @@ func TestPresenceReframeEndToEnd(t *testing.T) {
 func TestConcurrentHubStress(t *testing.T) {
 	s := presenceServer(t)
 	s.hub.grace = time.Millisecond
-	go s.presenceDrainer()
+	startPresenceDrainer(t, s)
 
 	const workers, iters = 8, 400
 	keys := []string{"c/w0", "c/w1", "c/w2", "c/w3"}
@@ -279,4 +279,11 @@ func TestConcurrentHubStress(t *testing.T) {
 		t.Fatal("hub stress deadlocked")
 	}
 	time.Sleep(10 * time.Millisecond) // let straggler grace timers fire harmlessly
+}
+
+func startPresenceDrainer(t *testing.T, s *server) {
+	t.Helper()
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() { defer close(done); s.presenceDrainerUntil(stop) }()
+	t.Cleanup(func() { close(stop); <-done })
 }

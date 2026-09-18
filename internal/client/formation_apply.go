@@ -290,6 +290,9 @@ func fileDeclaresSplit(f *Formation) bool {
 // the fork for a fresh spawn (the child reclaims it on join), exactly as spawn does.
 func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker TerminalForker, anchor string, noNormalize bool) (string, error) {
 	p := pp.Peer
+	if err := formationHarnessRefusal(p); err != nil {
+		return "", err
+	}
 	// A template and a fork both launch a NOT-YET-EXISTENT session, so claim the alias
 	// before it boots — the title and alias agree, and two applies cannot race for it —
 	// and stamp the birth-record the reclaim will carry (cbus-m9l, D19). A template is
@@ -374,6 +377,9 @@ func peerModel(p *FormationPeer) string {
 // controls identity (spawn time); model is the resolved peerModel, never a guess.
 func peerLaunchArgv(pp PeerPlan, prompt, model string) []string {
 	p := pp.Peer
+	if formationHarnessRefusal(p) != nil {
+		return nil
+	}
 	argv := launchPrefix(p.Profile)
 	switch pp.Action {
 	case ActionResume:
