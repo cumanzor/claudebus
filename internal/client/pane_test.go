@@ -118,30 +118,28 @@ func TestTabInOwningWindowScriptByteExact(t *testing.T) {
 		"      end repeat\n" +
 		"    end repeat\n" +
 		"  end repeat\n" +
-		"  tell current window to create tab with default profile command \"/bin/bash /tmp/cc-branch.1.sh\"\n" +
+		"  error \"session \" & \"UU-ID\" & \" not found in any iTerm2 window\"\n" +
 		"end tell"
 	if got != want {
 		t.Fatalf("tabInOwningWindowScript:\n got  %q\n want %q", got, want)
 	}
 }
 
-// TestTabFallbackIsPositionedAfterTheLoops guards the ORDER the byte-exact test
-// above would also catch, but states the invariant on its own terms: the
-// owning-window placement lives INSIDE the loop and the current-window fallback
-// only after the final `end repeat`. If a refactor ever hoists the fallback above
-// the loop, tab silently reverts to frontmost-window placement — a behavioral
-// regression with no crash and no failing build to announce it.
-func TestTabFallbackIsPositionedAfterTheLoops(t *testing.T) {
+// A stale exact caller must never fall back to whichever window has focus.
+func TestTabStaleAnchorRefusesAfterSearch(t *testing.T) {
 	got := tabInOwningWindowScript("UU-ID", "RUN")
 	tellW := strings.Index(got, "tell w to create tab")
 	lastEnd := strings.LastIndex(got, "end repeat")
-	fallback := strings.Index(got, "tell current window")
+	fallback := strings.Index(got, "error \"session \"")
 	if tellW < 0 || lastEnd < 0 || fallback < 0 {
 		t.Fatalf("missing an expected clause:\n%s", got)
 	}
 	if !(tellW < lastEnd && lastEnd < fallback) {
 		t.Errorf("expected owning-window placement inside the loop and the fallback after it; got offsets tellW=%d lastEnd=%d fallback=%d:\n%s",
 			tellW, lastEnd, fallback, got)
+	}
+	if strings.Contains(got, "tell current window") {
+		t.Fatal("stale anchor can redirect launch to the frontmost window")
 	}
 }
 

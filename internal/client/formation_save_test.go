@@ -531,6 +531,22 @@ func TestSaveEndToEndBirth(t *testing.T) {
 	if _, _, err := Join("roles", "coder"); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate the child harness explicitly: this test process may itself run
+	// beneath Codex, whereas the spawned (fake-terminal) child is Claude.
+	metaPath := filepath.Join(CBUSDir(), "roles", "coder", "meta.json")
+	metaBytes, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var childMeta map[string]any
+	if err := json.Unmarshal(metaBytes, &childMeta); err != nil {
+		t.Fatal(err)
+	}
+	childMeta["harness"] = "claude"
+	metaBytes, _ = json.Marshal(childMeta)
+	if err := os.WriteFile(metaPath, metaBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
 	// the saver captures the channel.
 	f, _, err := SaveFormation("roles", "roles", nil)
 	if err != nil {

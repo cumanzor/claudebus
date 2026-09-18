@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+func TestMain(m *testing.M) {
+	// Running the suite inside Codex inherits its native thread id. Session fixtures
+	// must opt into that identity explicitly instead of accidentally joining the runner.
+	_ = os.Unsetenv("CODEX_THREAD_ID")
+	os.Exit(m.Run())
+}
+
 func seedMeta(t *testing.T, root, ch, al, sid string) {
 	t.Helper()
 	dir := filepath.Join(root, ch, al)
@@ -56,9 +63,7 @@ func TestResolveSelfAndFindPeerChannel(t *testing.T) {
 func TestResolveSelfNoSession(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	t.Setenv("CBUS_SESSION_ID", "")
-	t.Setenv("GROK_SESSION_ID", "")
+	clearSessionEnv(t)
 	seedMeta(t, root, "alpha", "me", "SID")
 	if self := ResolveSelf(); self != nil {
 		t.Errorf("ResolveSelf() with no session id = %+v, want nil", self)
@@ -69,19 +74,21 @@ const (
 	envCbus   = "CBUS_SESSION_ID"
 	envClaude = "CLAUDE_CODE_SESSION_ID"
 	envGrok   = "GROK_SESSION_ID"
+	envCodex  = "CODEX_THREAD_ID"
 )
 
 // clearSessionEnv blanks the whole $*_SESSION_ID chain so a test drives SessionID()
 // through exactly the vars it sets (no ambient session leaks in from the dev/CI shell).
 func clearSessionEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{envCbus, envClaude, envGrok} {
+	for _, k := range []string{envCbus, envClaude, envGrok, envCodex} {
 		t.Setenv(k, "")
 	}
 }
 
 // TestSessionIDLookup pins the ordered env lookup: CBUS_SESSION_ID > CLAUDE_CODE_SESSION_ID
-// > GROK_SESSION_ID, each alone and in every precedence pair, all-empty yielding "".
+// > GROK_SESSION_ID > CODEX_THREAD_ID, each alone and in every precedence pair,
+// all-empty yielding "".
 func TestSessionIDLookup(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -91,10 +98,15 @@ func TestSessionIDLookup(t *testing.T) {
 		{"cbus alone", map[string]string{envCbus: "C"}, "C"},
 		{"claude alone", map[string]string{envClaude: "K"}, "K"},
 		{"grok alone", map[string]string{envGrok: "G"}, "G"},
+		{"codex alone", map[string]string{envCodex: "X"}, "X"},
 		{"cbus beats claude", map[string]string{envCbus: "C", envClaude: "K"}, "C"},
 		{"cbus beats grok", map[string]string{envCbus: "C", envGrok: "G"}, "C"},
 		{"claude beats grok", map[string]string{envClaude: "K", envGrok: "G"}, "K"},
+		{"cbus beats codex", map[string]string{envCbus: "C", envCodex: "X"}, "C"},
+		{"claude beats codex", map[string]string{envClaude: "K", envCodex: "X"}, "K"},
+		{"grok beats codex", map[string]string{envGrok: "G", envCodex: "X"}, "G"},
 		{"all three -> cbus", map[string]string{envCbus: "C", envClaude: "K", envGrok: "G"}, "C"},
+		{"all four -> cbus", map[string]string{envCbus: "C", envClaude: "K", envGrok: "G", envCodex: "X"}, "C"},
 		{"all empty", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,6 +128,7 @@ func TestOverrideSessionIDBeatsEnv(t *testing.T) {
 	t.Setenv(envCbus, "C")
 	t.Setenv(envClaude, "K")
 	t.Setenv(envGrok, "G")
+	t.Setenv(envCodex, "X")
 	restore := OverrideSessionID("OVERRIDE")
 	if got := SessionID(); got != "OVERRIDE" {
 		t.Errorf("SessionID() under override = %q, want OVERRIDE", got)

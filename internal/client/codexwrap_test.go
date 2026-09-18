@@ -99,6 +99,7 @@ func TestCodexRemoteEnvScrubsLauncherIds(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "LAUNCHER")
 	t.Setenv("CBUS_SESSION_ID", "LAUNCHER2")
 	t.Setenv("GROK_SESSION_ID", "LAUNCHER3")
+	t.Setenv("CODEX_THREAD_ID", "LAUNCHER4")
 	t.Setenv("CBUS_ALIAS", "stale-inherited") // a stale inherited value must be replaced, not kept
 	t.Setenv("CBXWRAP_KEEP", "survivor")
 
@@ -107,7 +108,7 @@ func TestCodexRemoteEnvScrubsLauncherIds(t *testing.T) {
 		k, v, _ := strings.Cut(kv, "=")
 		m[k] = v
 	}
-	for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID"} {
+	for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID", "CODEX_THREAD_ID"} {
 		if _, present := m[leaked]; present {
 			t.Errorf("%s leaked into the codex TUI env (must be scrubbed)", leaked)
 		}
@@ -130,6 +131,7 @@ func TestCodexCommandsScrubBothProcesses(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "LAUNCHER")
 	t.Setenv("CBUS_SESSION_ID", "LAUNCHER2")
 	t.Setenv("GROK_SESSION_ID", "LAUNCHER3")
+	t.Setenv("CODEX_THREAD_ID", "LAUNCHER4")
 
 	srv, tui := codexCommands("cxch", "cxpeer", "/tmp/x.sock", nil)
 	for name, cmd := range map[string]*exec.Cmd{"app-server": srv, "tui": tui} {
@@ -141,7 +143,7 @@ func TestCodexCommandsScrubBothProcesses(t *testing.T) {
 			k, v, _ := strings.Cut(kv, "=")
 			m[k] = v
 		}
-		for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID"} {
+		for _, leaked := range []string{"CLAUDE_CODE_SESSION_ID", "CBUS_SESSION_ID", "GROK_SESSION_ID", "CODEX_THREAD_ID"} {
 			if _, present := m[leaked]; present {
 				t.Errorf("%s: %s leaked (both processes must scrub — tool shells run in the app-server tree)", name, leaked)
 			}

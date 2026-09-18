@@ -355,7 +355,7 @@ func (OSAForker) Fork(spec ForkSpec) (string, error) {
 		}
 		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
 		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
-		return "", exec.Command("tmux", tmuxNewWindowArgv(spec)...).Run()
+		return "", forkTmuxWindow(spec)
 	default:
 		return "", fmt.Errorf("unknown target %q", spec.Target)
 	}
@@ -422,7 +422,7 @@ func launcherScript(spec ForkSpec, scriptPath string) string {
 	for _, k := range sortedKeys(spec.Env) {
 		b.WriteString("export " + k + "=" + shQuote(spec.Env[k]) + "\n")
 	}
-	b.WriteString("cd " + shQuote(spec.Dir) + "\n")
+	b.WriteString("cd " + shQuote(spec.Dir) + " || exit\n")
 	b.WriteString("rm -f " + shQuote(scriptPath) + "\n")
 	b.WriteString("exec")
 	for _, a := range spec.Argv {
@@ -443,7 +443,31 @@ func tmuxNewWindowArgv(spec ForkSpec) []string {
 	if name == "" {
 		name = "cc-branch"
 	}
-	return []string{"new-window", "-n", name, terminalCommand(spec)}
+	args := []string{"new-window", "-n", name}
+	if spec.Anchor != "" {
+		args = append(args, "-t", spec.Anchor+":")
+	}
+	return append(args, terminalCommand(spec))
+}
+
+func forkTmuxWindow(spec ForkSpec) error {
+	caller := os.Getenv("TMUX_PANE")
+	if !validTmuxPaneID(caller) {
+		return fmt.Errorf("tmux window requires the caller's valid TMUX_PANE; no active-window fallback")
+	}
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", caller, "#{session_id}").Output()
+	if err != nil {
+		return fmt.Errorf("locate caller's tmux session: %v%s", err, cmdStderr(err))
+	}
+	session := strings.TrimSpace(string(out))
+	if len(session) < 2 || session[0] != '$' || strings.Trim(session[1:], "0123456789") != "" {
+		return fmt.Errorf("tmux returned invalid caller session %q", session)
+	}
+	spec.Anchor = session
+	if out, err := exec.Command("tmux", tmuxNewWindowArgv(spec)...).CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux new-window: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // terminalCommand renders a ForkSpec into one /bin/sh command line — used for tmux,

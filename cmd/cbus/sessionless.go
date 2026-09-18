@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"claudebus/internal/client"
+	"claudebus/internal/core"
 )
 
 // warnIfSessionless prints one stderr line when the harness gave us no session id.
@@ -26,7 +27,11 @@ func warnIfSessionless() {
 	if client.SessionID() != "" {
 		return
 	}
-	fmt.Fprintln(os.Stderr,
-		"cbus: no CLAUDE_CODE_SESSION_ID — running sessionless; this session cannot be "+
-			"resolved by list/leave/rename and replies to it may be unroutable")
+	message := "cbus: no harness session ID — running sessionless; this session cannot be resolved by list/leave/rename"
+	if core.ValidStoreName(os.Getenv("CBUS_CHANNEL")) && core.ValidStoreName(os.Getenv("CBUS_ALIAS")) {
+		message += "; send uses CBUS_CHANNEL/CBUS_ALIAS for replies"
+	} else {
+		message += " and replies to it may be unroutable"
+	}
+	fmt.Fprintln(os.Stderr, message)
 }

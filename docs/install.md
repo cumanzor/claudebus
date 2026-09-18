@@ -11,9 +11,14 @@ curl -fsSL <raw get.sh> | CBUS_REPO=owner/repo sh   # downloads cbus + installs 
 cbus selfupdate                                     # thereafter, update in place
 ```
 
-`get.sh` writes `cbus` to `~/.local/bin` and runs `install-commands` + `install-roles`.
+`get.sh` writes `cbus` to `~/.local/bin` and installs Claude commands, role prompts,
+and the Codex `cbus-connect` skill.
 `cbus selfupdate` downloads the latest release, verifies the download reports the tag
-it fetched before swapping the running binary, and refreshes the commands and roles.
+it fetched before swapping the running binary, and refreshes commands, roles and
+Codex skills. Codex skill receipts permit upgrades of unchanged shipped content
+while preserving local edits; `--force` is an explicit overwrite. Updaters from
+before the Codex integration only refresh their known assets: run
+`cbus install-codex-skills` once after that first upgrade.
 `cbus selfupdate --check` reports without applying. Set `CBUS_UPDATE_CHECK=1` for an
 opt-in once-a-day "update available" hint. Release binaries carry the repo slug baked
 in, so `CBUS_REPO` is only needed for a dev build. Release engineering (tags, `make
@@ -27,9 +32,10 @@ go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
   -o ~/.local/bin/cbus ./cmd/cbus
 cbus install-commands   # the /bus-* skills -> ~/.claude/commands
 cbus install-roles      # role prompts -> $CBUS_DIR/roles (the spawn-outside-repo fallback)
+cbus install-codex-skills # $CODEX_HOME/skills, default ~/.codex/skills
 ```
 
-Both install verbs are sha-guarded: an unchanged file is left alone, a locally-edited
+The install verbs are content-guarded: an unchanged file is left alone, a locally-edited
 one is skipped (with a reason) unless `--force`. The commands placed are:
 
 | file | destination | purpose |
@@ -54,3 +60,29 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 > split-window` when `$TMUX` is set, else an iTerm2 session split located by
 > `$ITERM_SESSION_ID`) and relaunches through `ccs <profile>` when it detects a CCS
 > config dir. The old `bin/cc-branch.sh` helper is no longer consulted.
+
+## Codex CLI permission and daemon setup
+
+Use `$cbus-connect` from an existing ordinary Codex CLI session. No special cbus
+launcher is required. The native adapter is currently macOS/Linux only and is
+tested against Codex CLI 0.154.0; the app-server queue surface is experimental.
+Windows retains its existing cbus functionality and explicitly refuses native
+`connect`/`daemon` in this release. Desktop harness clients are v2.
+
+Connection setup may need the session's exact-command approval for the local
+socket. Optional unattended reply permission is separate and explicit:
+
+```sh
+cbus codex-permissions --binary /absolute/path/to/cbus           # preview
+cbus codex-permissions --binary /absolute/path/to/cbus --install # deliberate opt-in
+```
+
+Only that literal executable's `send` prefix is allowed outside the command
+sandbox. Use that same path in replies. No installer changes general Codex
+permissions; edited rule files are protected. See [Codex setup](codex.md).
+
+After updating a running installation, `cbus daemon restart` loads the new binary
+while retaining pending mail. The daemon is started on demand, not installed as
+a login service. A stale version/protocol is refused instead of silently reused.
+Native cross-machine subscriptions also require the matching relay's
+`/tail/durable-v1` endpoint; deploying that relay is a separate release action.

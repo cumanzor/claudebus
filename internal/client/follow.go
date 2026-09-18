@@ -58,11 +58,19 @@ func armLocalTailTo(target string, steal bool, sink frameSink) error {
 		}
 		ch = rc
 	}
+	unlock, err := lockPeer(ch, al)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	inbox := InboxPath(ch, al)
 	if !fileExists(inbox) {
 		return fmt.Errorf("no such peer %q — join first", ch+"/"+al)
 	}
 	metaPath := filepath.Join(CBUSDir(), ch, al, "meta.json")
+	if m, ok := ReadPeerMeta(metaPath); ok && m.ConnectionID != "" {
+		return fmt.Errorf("%s is daemon-managed — use cbus connect; tail cannot replace its delivery sink, even with --steal", ch+"/"+al)
+	}
 	// P4: establish the witness BEFORE anything else. The witness is now the ONLY thing
 	// that can prove which listener this is, so arming without one would produce a tail
 	// that is instantly and invisibly not the listener — armed, streaming, and read dead
@@ -93,11 +101,9 @@ func armLocalTailTo(target string, steal bool, sink frameSink) error {
 	// listener — and this exemption removes it, so the invariant now rests entirely on the
 	// caller.
 	//
-	// The gate is NOT atomic and deliberately takes no lock (R-B): two arms can both
-	// pass it before either writes meta. That race self-corrects, because the loser's
-	// identity check finds it is not the recorded listener and it goes dormant within
-	// one interval. A lock would buy atomicity at the price of a wedged-alias recovery
-	// path, which is the worse failure.
+	// The daemon lifecycle now shares a bounded kernel lock with this arming step.
+	// It fences alias replacement; it is released before following and on process
+	// exit, so the long-running listener never holds the lifecycle lock.
 	if !steal {
 		if m, ok := ReadPeerMeta(metaPath); ok && MetaListenerAlive(metaPath) &&
 			!(m.ListenerPid == os.Getpid() && m.ListenerStart == start) {
@@ -108,7 +114,8 @@ func armLocalTailTo(target string, steal bool, sink frameSink) error {
 	// the replay decision, resolved BEFORE armMeta overwrites listenerPid — the
 	// migration rule reads the PREVIOUS value to tell an upgraded peer from a fresh one.
 	resume := resolveResume(inbox, metaPath)
-	armMeta(metaPath, start) // listenerPid=own pid, listenerStart, ownerPid, lastActivity
+	armMetaLocked(metaPath, start) // listenerPid=own pid, listenerStart, ownerPid, lastActivity
+	unlock()
 	follow(inbox, resume, &listenerIdentity{pid: os.Getpid(), start: start, metaPath: metaPath}, sink, followPoll, nil)
 	return nil // the follower ended: displaced, renamed, re-joined or unregistered
 }
@@ -153,6 +160,17 @@ func frameKind(line []byte) string {
 // torn meta is left untouched (bash `jset || true` no-ops when meta.json is absent),
 // and every other field round-trips verbatim (raw pids, byte-for-byte).
 func armMeta(metaPath, start string) {
+	peerDir := filepath.Dir(metaPath)
+	unlock, err := lockPeer(filepath.Base(filepath.Dir(peerDir)), filepath.Base(peerDir))
+	if err != nil {
+		return
+	}
+	defer unlock()
+	armMetaLocked(metaPath, start)
+}
+
+// armMetaLocked requires the caller to hold this alias's lifecycle lock.
+func armMetaLocked(metaPath, start string) {
 	b, err := os.ReadFile(metaPath)
 	if err != nil {
 		return
@@ -160,6 +178,9 @@ func armMeta(metaPath, start string) {
 	var m peerMeta
 	if json.Unmarshal(b, &m) != nil {
 		return
+	}
+	if m.ConnectionID != "" {
+		return // direct legacy callers must not claim a daemon-managed listener
 	}
 	m.ListenerPid = json.RawMessage(strconv.Itoa(os.Getpid()))
 	m.ListenerStart = start // the caller established it; arming without one is refused

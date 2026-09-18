@@ -57,21 +57,24 @@ type hub struct {
 	departSeq  uint64            // global-monotonic timer generation
 	grace      time.Duration
 	pending    []presenceEvent // ordered emit queue, drained by (*server).presenceDrainer
-	wake       chan struct{}   // cap-1 drainer nudge (lost-wakeup-proof, like poke)
+	tailLocks  map[string]*sync.Mutex
+	wake       chan struct{} // cap-1 drainer nudge (lost-wakeup-proof, like poke)
 }
 
 type presenceEvent struct{ channel, actor, event string }
 
 type tail struct {
-	notify chan struct{}
-	done   chan struct{}
+	consumer string
+	durable  bool
+	notify   chan struct{}
+	done     chan struct{}
 }
 
 func newHub() *hub {
 	return &hub{
 		tails: map[string]*tail{}, seen: map[string]time.Time{},
 		present: map[string]bool{}, departWait: map[string]uint64{},
-		grace: presenceGrace, wake: make(chan struct{}, 1),
+		tailLocks: map[string]*sync.Mutex{}, grace: presenceGrace, wake: make(chan struct{}, 1),
 	}
 }
 
@@ -90,21 +93,7 @@ func (h *hub) enqueue(channel, actor, event string) {
 // pending departed (delete departWait) and is not a new join; a displacement keeps
 // present=true so it is not a join either. Returns joined for the caller's logging/tests.
 func (h *hub) attach(key string) (t *tail, joined bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if old, ok := h.tails[key]; ok {
-		close(old.done)
-	}
-	t = &tail{notify: make(chan struct{}, 1), done: make(chan struct{})}
-	h.tails[key] = t
-	h.seen[key] = time.Now()
-	delete(h.departWait, key) // reconnect: invalidate any pending departed
-	joined = !h.present[key]
-	h.present[key] = true
-	if joined {
-		c, a, _ := strings.Cut(key, "/")
-		h.enqueue(c, a, "join")
-	}
+	t, joined, _ = h.attachTail(key, "", false)
 	return t, joined
 }
 
@@ -178,9 +167,11 @@ func (h *hub) snapshot() (connected map[string]bool, seen map[string]time.Time) 
 }
 
 type server struct {
-	store spool.Store
-	hub   *hub
-	token string
+	presenceMu          sync.Mutex
+	savePresenceJournal func(string, durablePresenceJournal) error
+	store               spool.Store
+	hub                 *hub
+	token               string
 }
 
 func (s *server) bearerOK(r *http.Request) bool {
@@ -246,7 +237,10 @@ func (s *server) handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	gate := s.hub.tailGate(req.Channel + "/" + req.Alias)
+	gate.Lock()
 	name, err := s.store.Write(req.Channel, req.Alias, append(line, '\n'))
+	gate.Unlock()
 	if err != nil {
 		http.Error(w, "spool: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -283,7 +277,11 @@ func (s *server) fanoutPresence(channel, actor, event, text string) {
 		if err != nil {
 			continue
 		}
-		if _, err := s.store.Write(channel, a, append(line, '\n')); err == nil {
+		gate := s.hub.tailGate(key)
+		gate.Lock()
+		_, err = s.store.Write(channel, a, append(line, '\n'))
+		gate.Unlock()
+		if err == nil {
 			s.hub.poke(key)
 		}
 	}
@@ -292,8 +290,15 @@ func (s *server) fanoutPresence(channel, actor, event, text string) {
 // presenceDrainer emits queued presence events in decision order, one at a time and OFF
 // the hub lock. It grabs the whole pending batch under a brief lock then resets it (keeps
 // enqueue order == emit order, and drops the consumed backing array). Started once in main.
-func (s *server) presenceDrainer() {
-	for range s.hub.wake {
+func (s *server) presenceDrainer() { s.presenceDrainerUntil(nil) }
+
+func (s *server) presenceDrainerUntil(stop <-chan struct{}) {
+	for {
+		select {
+		case <-stop:
+			return
+		case <-s.hub.wake:
+		}
 		s.hub.mu.Lock()
 		batch := s.hub.pending
 		s.hub.pending = nil
@@ -325,19 +330,22 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	conn, err := wire.Upgrade(w, r, proto)
-	if err != nil {
-		log.Printf("tail %s/%s: upgrade: %v", channel, alias, err)
+	if !validTailUpgrade(r) {
+		http.Error(w, "valid WebSocket GET required", http.StatusBadRequest)
 		return
 	}
-	conn.WriteTimeout = 10 * time.Second // a wedged client can't stall the loop
 	key := channel + "/" + alias
-	t, _ := s.hub.attach(key) // attach enqueues the join; the drainer emits it in order
+	conn, t, err := s.upgradeOwnedTail(w, r, key, "", false, proto)
+	if err != nil {
+		log.Printf("tail %s: upgrade: %v", key, err)
+		return
+	}
 	defer func() {
-		if !s.hub.detach(key, t) { // a real disconnect (not a takeover) may become departed
+		if !s.hub.detach(key, t) {
 			s.hub.scheduleDepart(key)
 		}
 	}()
+	conn.WriteTimeout = 10 * time.Second // a wedged client can't stall the loop
 	log.Printf("tail %s: connected", key)
 
 	lastPong := time.Now()
@@ -384,6 +392,12 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 				return
 			default:
 			}
+			if !presenceSpoolMatchesTail(name, t) {
+				if err := s.markDelivered(key, t, channel, alias, name); err != nil {
+					return
+				}
+				continue
+			}
 			payload, err := s.store.Read(channel, alias, name)
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
@@ -397,7 +411,7 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 				log.Printf("tail %s: write: %v (message stays queued)", key, err)
 				return
 			}
-			if err := s.store.MarkDelivered(channel, alias, name); err != nil {
+			if err := s.markDelivered(key, t, channel, alias, name); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					continue // lost the mark race to a displacing tail; benign
 				}
@@ -488,9 +502,17 @@ func (s *server) handlePrune(w http.ResponseWriter, r *http.Request) {
 		if n > 0 || connected[key] {
 			continue // pending mail or a live listener — keep it
 		}
-		if ok, _ := s.store.Remove(c, a); ok {
-			pruned = append(pruned, key)
+		gate := s.hub.tailGate(key)
+		gate.Lock()
+		s.hub.mu.Lock()
+		active := s.hub.tails[key] != nil
+		s.hub.mu.Unlock()
+		if !active && !s.hasUnfinishedPresenceRecipient(c, a) {
+			if ok, _ := s.store.Remove(c, a); ok {
+				pruned = append(pruned, key)
+			}
 		}
+		gate.Unlock()
 	}
 	sort.Strings(pruned)
 	w.Header().Set("Content-Type", "application/json")
@@ -525,6 +547,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/send", s.handleSend)
 	mux.HandleFunc("/tail", s.handleTail)
+	mux.HandleFunc("/tail/durable-v1", s.handleDurableTail)
 	mux.HandleFunc("/peers", s.handlePeers)
 	mux.HandleFunc("/prune", s.handlePrune)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })

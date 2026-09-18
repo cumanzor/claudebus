@@ -38,10 +38,11 @@ var (
 const defaultOpener = "Connected to a cbus channel as a codex peer. Bus messages will arrive as turns; reply on the bus."
 
 type codexBridge struct {
-	conn     *codexConn
-	threadID string
-	opener   string
-	noResume bool // another connection drives this thread; never call thread/resume
+	conn           *codexConn
+	threadID       string
+	opener         string
+	noResume       bool // another connection drives this thread; never call thread/resume
+	presenceTarget string
 
 	mu         sync.Mutex
 	activeTurn string // the currently-active turnId, "" when the thread is idle
@@ -57,10 +58,11 @@ func RunCodexBridge(target, sock, thread string, noResume bool) error {
 		return fmt.Errorf("dial codex app-server %q: %w", sock, err)
 	}
 	defer conn.close()
-	b := &codexBridge{conn: conn, threadID: thread, opener: defaultOpener, noResume: noResume}
+	b := &codexBridge{conn: conn, threadID: thread, opener: defaultOpener, noResume: noResume, presenceTarget: target}
 	if err := b.attach(); err != nil {
 		return fmt.Errorf("attach codex thread: %w", err)
 	}
+	go b.watchCompactions()
 	go b.trackTurns()
 	return armLocalTailTo(target, false, codexSink{b})
 }
@@ -95,7 +97,7 @@ func (b *codexBridge) attach() error {
 		return nil
 	}
 	if b.threadID == "" {
-		r, err := b.conn.call("thread/start", map[string]any{"approvalPolicy": "never", "sandbox": "read-only"})
+		r, err := b.conn.call("thread/start", map[string]any{})
 		if err != nil {
 			return err
 		}
@@ -133,7 +135,7 @@ func (b *codexBridge) waitOpenerIdle(timeout time.Duration) {
 	for {
 		select {
 		case note := <-b.conn.notifications():
-			if note.Method == "thread/status/changed" && statusIsIdle(note.Params) {
+			if note.Method == "thread/status/changed" && b.ownsNotification(note.Params) && statusIsIdle(note.Params) {
 				return
 			}
 		case <-timer.C:
@@ -172,8 +174,13 @@ func statusIsIdle(params json.RawMessage) bool {
 
 // trackTurns keeps activeTurn current from the subscribed stream: a turn/started makes the
 // thread busy (and names the steerable turn), a turn/completed for that turn makes it idle.
+// A shared app-server also broadcasts other threads' events; those must never change which
+// turn this bridge steers or make its own thread appear idle.
 func (b *codexBridge) trackTurns() {
 	for note := range b.conn.notifications() {
+		if !b.ownsNotification(note.Params) {
+			continue
+		}
 		switch note.Method {
 		case "turn/started":
 			if id := turnIDFromNote(note.Params); id != "" {
@@ -190,6 +197,16 @@ func (b *codexBridge) trackTurns() {
 			b.mu.Unlock()
 		}
 	}
+}
+
+// ownsNotification checks the required, top-level threadId carried by turn/started,
+// turn/completed and thread/status/changed. Missing or malformed identity is not evidence
+// that an event belongs to this bridge, even if it happens to name the same turn.
+func (b *codexBridge) ownsNotification(params json.RawMessage) bool {
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	return b.threadID != "" && json.Unmarshal(params, &p) == nil && p.ThreadID == b.threadID
 }
 
 // inject delivers one bus message. It steers the active turn when there is one, falling back

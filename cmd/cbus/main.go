@@ -107,10 +107,20 @@ func run(args []string) int {
 		return runCodexBridge(args[1:])
 	case "codex": // cbus-6ij.4: launch a codex --remote TUI as a first-class cbus peer
 		return runCodexWrap(args[1:])
+	case "connect":
+		return runConnect(args[1:])
+	case "connection":
+		return runConnection(args[1:])
+	case "daemon":
+		return runDaemon(args[1:])
 	case "install-commands": // cbus-7sg: write the embedded /bus-* skills to ~/.claude/commands
 		return runInstallCommands(args[1:])
 	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
 		return runInstallRoles(args[1:])
+	case "install-codex-skills":
+		return runInstallCodexSkills(args[1:])
+	case "codex-permissions":
+		return runCodexPermissions(args[1:])
 	case "selfupdate": // cbus-7sg: gh-driven in-place update of the running binary
 		return runSelfupdate(args[1:])
 
@@ -534,7 +544,18 @@ func runSpawn(args []string) int {
 	if m := phase1Refusal("spawn"); m != "" { // see runBranch: before parsing, before ReserveAlias
 		return die("%s", m)
 	}
-	const use = "usage: cbus spawn [window|tab|tmux|pane] [channel|<ch>@<host>] [--model m] [--name n] [--role r]"
+	const use = "usage: cbus spawn [window|tab|tmux|pane] [channel|<ch>@<host>] [--harness claude|codex] [--profile p] [--model m] [--name n] [--role r]"
+	harness, args, err := extractFlag(args, "--harness")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	profile, args, err := extractFlag(args, "--profile")
+	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if harness == "" && os.Getenv("CODEX_THREAD_ID") != "" && os.Getenv("CLAUDE_CODE_SESSION_ID") == "" && os.Getenv("GROK_SESSION_ID") == "" {
+		harness = "codex"
+	}
 	model, name, args, merr := extractForkFlags(args)
 	if merr != nil {
 		return die("%v (%s)", merr, use)
@@ -554,7 +575,7 @@ func runSpawn(args []string) int {
 	if len(args) > 1 {
 		addr = args[1]
 	}
-	rAddr, child, err := client.Spawn(target, addr, model, name, role, client.OSAForker{})
+	rAddr, child, err := client.SpawnWithOptions(target, addr, model, name, role, client.SpawnOptions{Harness: harness, Profile: profile}, client.OSAForker{})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -563,7 +584,7 @@ func runSpawn(args []string) int {
 		if role != "" {
 			brief = " + role brief"
 		}
-		fmt.Printf("spawned: fresh session -> %s/%s (%s, alias fixed + session titled%s); it joins and arms itself\n", rAddr, child, target, brief)
+		fmt.Printf("spawned: fresh session -> %s/%s (%s, alias reserved%s); it connects from its opening turn\n", rAddr, child, target, brief)
 	} else {
 		fmt.Printf("spawned: fresh session -> %s (%s); it joins and arms itself (picks its own alias)\n", rAddr, target)
 	}
