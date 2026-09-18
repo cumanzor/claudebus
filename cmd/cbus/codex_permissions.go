@@ -7,13 +7,12 @@ import (
 	"path/filepath"
 )
 
-const codexPermissionsUsage = "usage: cbus codex-permissions [--binary PATH] [--install [--path FILE] [--force]]"
+const codexPermissionsUsage = "usage: cbus codex-permissions [--scope send|bus] [--binary PATH] [--install [--path FILE] [--force]]"
 
-// Preview by default. Neither skill installation nor selfupdate installs rules.
-// Only replies need unattended shell execution; connection setup, recovery and
-// lifecycle changes retain the session's normal exact-command approval path.
+// Preview by default. Ordinary skill installation and selfupdate leave rules alone.
+// Send remains the narrow default; bus is an explicit namespace-wide opt-in.
 func runCodexPermissions(args []string) int {
-	p, err := splitVerbArgs(args, map[string]bool{"--binary": true, "--path": true}, map[string]bool{"--install": true, "--force": true}, true)
+	p, err := splitVerbArgs(args, map[string]bool{"--binary": true, "--path": true, "--scope": true}, map[string]bool{"--install": true, "--force": true}, true)
 	if err != nil {
 		return die("%v (%s)", err, codexPermissionsUsage)
 	}
@@ -22,6 +21,13 @@ func runCodexPermissions(args []string) int {
 	}
 	if !p.flags["--install"] && (p.flags["--force"] || p.opts["--path"] != "") {
 		return die("--path and --force require --install; without it this command only previews a rule")
+	}
+	scope := "send"
+	if value, present := p.has("--scope"); present {
+		scope = value
+	}
+	if scope != "send" && scope != "bus" {
+		return die("--scope must be send or bus")
 	}
 	binary := p.opts["--binary"]
 	if binary == "" {
@@ -41,9 +47,16 @@ func runCodexPermissions(args []string) int {
 		return die("--binary must identify the installed cbus executable")
 	}
 	content := codexReplyRule(binary)
+	label := "Codex reply rule"
+	permission := fmt.Sprintf("Allows only %s send outside the command sandbox.", binary)
+	if scope == "bus" {
+		content = codexBusRule(binary)
+		label = "Codex bus rules"
+		permission = fmt.Sprintf("Trusts all subcommands of PATH-resolved cbus and %s outside the command sandbox, including connect, spawn, updates and administration.", binary)
+	}
 	if !p.flags["--install"] {
 		fmt.Print(string(content))
-		fmt.Fprintln(os.Stderr, "Preview only. This allows the exact executable's send command outside the Codex sandbox. Use --install to write the rule deliberately.")
+		fmt.Fprintln(os.Stderr, "Preview only. "+permission+" Use --install to write the rule deliberately.")
 		return 0
 	}
 	dst := p.opts["--path"]
@@ -62,11 +75,22 @@ func runCodexPermissions(args []string) int {
 		return die("create rules directory: %v", err)
 	}
 	res := installTrackedCodexAsset(dst, dst+".cbus-sha256", filepath.Base(dst), content, p.flags["--force"])
-	code := reportAssets("Codex reply rule", filepath.Dir(dst), []assetResult{res})
+	code := reportAssets(label, filepath.Dir(dst), []assetResult{res})
 	if code == 0 {
-		fmt.Printf("Allows only %s send outside the command sandbox. New CLI sessions load the rule; existing sessions can use their normal exact-command approval.\n", binary)
+		fmt.Println(permission)
+		fmt.Println("New CLI sessions load these rules. Restart/resume existing Codex sessions once after setup; other shell commands keep their normal approval policy.")
 	}
 	return code
+}
+
+func codexBusRule(binary string) []byte {
+	program, _ := json.Marshal(binary)
+	return []byte(fmt.Sprintf(`# cbus: explicit trust for the complete cbus command namespace.
+# Bare cbus trusts the executable resolved through PATH; the absolute form is literal.
+# Covers all subcommands, including connect, spawn, updates and administration.
+prefix_rule(pattern = ["cbus"], decision = "allow")
+prefix_rule(pattern = [%s], decision = "allow")
+`, program))
 }
 
 func codexReplyRule(binary string) []byte {

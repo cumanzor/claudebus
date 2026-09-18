@@ -6,6 +6,8 @@ A local fake Responses provider requests one real shell tool execution; no paid
 inference is used. The ordinary CLI retains workspace-write/on-request settings.
 The explicit cbus reply rule alone permits a send outside the writable workspace.
 Observer-side connect is separate: this does not prove model selection of a skill.
+With --bus-scope, the fresh CLI instead connects itself and performs routine bus
+operations using bare and absolute commands after explicit trusted-bus setup.
 """
 import argparse
 import json
@@ -25,8 +27,20 @@ class PermissionsCanary(ResumeCanary):
         self.marker = "CBUS-PERMISSIONS-" + uuid.uuid4().hex
         self.reply_requested = False
         self.without_rule = args.without_rule
+        self.bus_scope = args.bus_scope
+        self.bus_step = 0
+        self.bus_commands = [
+            ("connect", ["cbus", "connect", "cli-permissions", "advisor", "--json"]),
+            ("list", [self.cbus, "list", "cli-permissions", "--json"]),
+            ("status", ["cbus", "connection", "status", self.target, "--json"]),
+            ("daemon", [self.cbus, "daemon", "status", "--json"]),
+            ("send", [self.cbus, "send", "cli-permissions/verifier", "--force", "--from", self.target, self.marker]),
+            ("disconnect", ["cbus", "connection", "disconnect", self.target, "--json"]),
+        ]
         self.result.update(proofLayer="ordinary CLI actual shell tool with fresh exact-path reply rule; local fake provider",
                            script="scripts/codex_permissions_canary.py")
+        if self.bus_scope:
+            self.result["proofLayer"] = "ordinary CLI self-connect and routine bare/absolute commands with trusted-bus setup; local fake provider"
 
     def prepare(self):
         super().prepare()
@@ -44,17 +58,24 @@ class PermissionsCanary(ResumeCanary):
         # Default bus placement is outside the scratch workspace.
         self.bus = self.root / "user-home" / ".claude-bus"
         self.env.pop("CBUS_DIR", None)
-        self.command(["install-codex-skills"])
+        self.env["CBUS_UPDATE_CHECK"] = "0"
+        if self.bus_scope:
+            (self.root / "bin" / "cbus").symlink_to(self.cbus)
+        self.command(["install-codex-skills", *(["--with-permissions"] if self.bus_scope else [])])
         self.check("fresh_skill_installed", (self.home / "skills" / "cbus-connect" / "SKILL.md").is_file())
         if not self.without_rule:
-            self.command(["codex-permissions", "--binary", self.cbus, "--install"])
+            if not self.bus_scope:
+                self.command(["codex-permissions", "--binary", self.cbus, "--install"])
             rules = self.home / "rules" / "cbus.rules"
-            self.check("only_explicit_reply_rule_installed", list((self.home / "rules").glob("*.rules")) == [rules])
+            self.check("only_explicit_bus_rule_installed" if self.bus_scope else "only_explicit_reply_rule_installed",
+                       list((self.home / "rules").glob("*.rules")) == [rules])
         else:
             self.check("negative_control_has_no_rules", not (self.home / "rules").exists())
         self.check("general_config_unchanged_by_install", (self.home / "config.toml").read_text() == config)
 
     def provider_output(self, number, body):
+        if self.bus_scope:
+            return self.bus_provider_output(number, body)
         if body.get("client_metadata", {}).get("thread_id") != self.thread or self.reply_requested:
             return []
         self.reply_requested = True
@@ -70,6 +91,53 @@ class PermissionsCanary(ResumeCanary):
         return [{"type": "function_call", "id": f"cbus-item-{number}", "call_id": f"cbus-call-{number}",
                  "name": name, "arguments": json.dumps(arguments)}]
 
+    def bus_provider_output(self, number, body):
+        if body.get("client_metadata", {}).get("thread_id") != self.thread or self.bus_step >= len(self.bus_commands):
+            return []
+        label, argv = self.bus_commands[self.bus_step]
+        self.bus_step += 1
+        command = shlex.join(argv)
+        names = {tool.get("name") for tool in body.get("tools", [])}
+        if "exec_command" in names:
+            name, arguments = "exec_command", {"cmd": command, "login": False, "yield_time_ms": 10000, "max_output_tokens": 5000}
+        elif "shell_command" in names:
+            name, arguments = "shell_command", {"command": command}
+        else:
+            raise AssertionError("ordinary CLI shell tool unavailable")
+        self.result.setdefault("requestedTools", []).append({"step": label, "name": name, "arguments": arguments})
+        return [{"type": "function_call", "id": f"bus-item-{number}", "call_id": f"bus-call-{label}",
+                 "name": name, "arguments": json.dumps(arguments)}]
+
+    def run_bus_tools(self):
+        # The provider emits one command at a time. No PTY approval responses or
+        # observer-side connection are supplied; an approval prompt times out.
+        for index, (label, _) in enumerate(self.bus_commands):
+            self.wait(lambda: len(self.provider_turns()) > index, label + " tool request")
+            self.provider.release(self.provider_turns()[index]["number"])
+            self.wait(lambda: len(self.provider_turns()) > index + 1, label + " unattended tool completion", 40)
+            followup = self.provider_turns()[index + 1]
+            outputs = [item for item in followup["body"].get("input", [])
+                       if item.get("type") == "function_call_output" and item.get("call_id") == "bus-call-" + label]
+            self.check(label + "_returned_without_approval_interaction", len(outputs) == 1)
+            output = str(outputs[0].get("output", ""))
+            self.result.setdefault("busToolOutputs", {})[label] = output
+            self.check(label + "_shell_exited_successfully", "Process exited with code 0" in output or '"exit_code":0' in output.replace(" ", ""))
+            if label == "connect":
+                state = self.status()
+                self.check("cli_connected_its_exact_thread", state["threadId"] == self.thread)
+                self.check("cli_connect_used_runtime_witness", state["config"]["BindingSource"] == "runtime-open-queue"
+                           and state["config"]["RuntimePID"] > 0 and state["config"]["SQLiteHome"] == str(self.home))
+            elif label in ("list", "status"):
+                self.check(label + "_returned_advisor", "advisor" in output)
+            elif label == "send":
+                self.check("actual_cli_tool_returned_success", "sent to cli-permissions/verifier" in output)
+            elif label == "disconnect":
+                self.check("cli_disconnected_its_connection", self.status()["state"] == "disconnected")
+        self.provider.release(self.provider_turns()[-1]["number"])
+        self.wait(lambda: self.completed_count() >= 1, "trusted-bus turn completion")
+        self.check("bare_and_installed_absolute_invocations_exercised", {argv[0] for _, argv in self.bus_commands} == {"cbus", self.cbus})
+        self.check("no_observer_connection_bootstrap", not any(row["args"][0] == "connect" for row in self.result["commands"]))
+
     def run(self):
         self.prepare()
         self.command(["join", "cli-permissions", "verifier", "--session-id", "isolated-permissions-verifier"])
@@ -81,21 +149,24 @@ class PermissionsCanary(ResumeCanary):
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"), codexVersion=meta.get("cli_version"))
         self.check("ordinary_cli_source", meta.get("source") == "cli")
-        state = json.loads(self.command(["connect", "cli-permissions", "advisor", "--codex-sqlite-home", str(self.home), "--json"], recipient=True).stdout)
-        self.check("exact_thread_connected", state["threadId"] == self.thread)
-        self.wait(lambda: len(self.provider_turns()) >= 1, "initial fake provider request")
-        self.provider.release(self.provider_turns()[0]["number"])
-        self.wait(lambda: len(self.provider_turns()) >= 2, "shell tool result follow-up", 30)
-        followup = self.provider_turns()[1]
-        outputs = [item for item in followup["body"].get("input", []) if item.get("type") == "function_call_output"]
-        if self.without_rule:
-            self.check("no_rule_tool_denied_by_filesystem", any(any(reason in str(item.get("output", "")).lower()
-                       for reason in ("operation not permitted", "permission denied")) for item in outputs))
-            self.check("no_rule_tool_did_not_claim_success", not any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
+        if self.bus_scope:
+            self.run_bus_tools()
         else:
-            self.check("actual_cli_tool_returned_success", any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
-        self.provider.release(followup["number"])
-        self.wait(lambda: self.completed_count() >= 1, "reply turn completion")
+            state = json.loads(self.command(["connect", "cli-permissions", "advisor", "--codex-sqlite-home", str(self.home), "--json"], recipient=True).stdout)
+            self.check("exact_thread_connected", state["threadId"] == self.thread)
+            self.wait(lambda: len(self.provider_turns()) >= 1, "initial fake provider request")
+            self.provider.release(self.provider_turns()[0]["number"])
+            self.wait(lambda: len(self.provider_turns()) >= 2, "shell tool result follow-up", 30)
+            followup = self.provider_turns()[1]
+            outputs = [item for item in followup["body"].get("input", []) if item.get("type") == "function_call_output"]
+            if self.without_rule:
+                self.check("no_rule_tool_denied_by_filesystem", any(any(reason in str(item.get("output", "")).lower()
+                           for reason in ("operation not permitted", "permission denied")) for item in outputs))
+                self.check("no_rule_tool_did_not_claim_success", not any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
+            else:
+                self.check("actual_cli_tool_returned_success", any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
+            self.provider.release(followup["number"])
+            self.wait(lambda: self.completed_count() >= 1, "reply turn completion")
         inbox = self.bus / "cli-permissions" / "verifier" / "inbox.jsonl"
         messages = [json.loads(line) for line in inbox.read_text().splitlines()]
         replies = [message for message in messages if message.get("text") == self.marker]
@@ -122,7 +193,9 @@ def main():
     parser.add_argument("--cbus", default=os.getenv("CBUS_TEST_BINARY"), required=not os.getenv("CBUS_TEST_BINARY"))
     parser.add_argument("--codex", default=os.getenv("CODEX_TEST_BINARY", "codex"))
     parser.add_argument("--temp-root", default="/tmp")
-    parser.add_argument("--without-rule", action="store_true", help="negative control: expect actual shell permission denial and no reply")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--without-rule", action="store_true", help="negative control: expect actual shell permission denial and no reply")
+    scope.add_argument("--bus-scope", action="store_true", help="trusted setup: actual CLI self-connect, list, status, send and disconnect")
     args = parser.parse_args()
     args.watcher_window = 11
     canary = PermissionsCanary(args)
