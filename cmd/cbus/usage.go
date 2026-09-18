@@ -141,6 +141,9 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus connect <channel> [alias] [--codex-sqlite-home ABS_PATH] [--json]
                                    connect this Codex CLI thread via its native
                                    queue, without restarting (experimental pilot)
+                                   <channel> is a name, never a subcommand:
+                                   "cbus connect status" joins a channel called
+                                   status. To inspect, use cbus connection status
   cbus connection status [channel/alias] [--json]
                                    inspect saved acceptance/receipt observations
   cbus connection reconcile <channel/alias> [--json]
