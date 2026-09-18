@@ -573,7 +573,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 				return nil, fmt.Errorf("this thread is already connected as %s/%s", c.Channel, c.Alias)
 			}
 			if req.Harness == daemonHarnessClaude {
-				return nil, errors.New("Claude session is already managed; this admission path cannot replace its binding")
+				return d.reconnectClaude(c, req, claude, token)
 			}
 			if c.Config.SQLiteHome != "" && c.Config.SQLiteHome != req.Config.SQLiteHome {
 				return nil, errors.New("Codex queue store changed; refusing to redirect an existing connection or its pending deliveries")
@@ -786,6 +786,9 @@ func (d *busDaemon) armLocked(c *ConnectionState) error {
 	m.ListenerPid = json.RawMessage(fmt.Sprint(os.Getpid()))
 	m.ListenerStart = d.start
 	m.OwnerPid = jsonNull
+	if c.Claude != nil && daemonHarness(c.Harness) == daemonHarnessClaude {
+		m.Cwd = c.Claude.Binding.Cwd
+	}
 	if err := writeDaemonMeta(d.peerDir(c), m); err != nil {
 		return err
 	}
