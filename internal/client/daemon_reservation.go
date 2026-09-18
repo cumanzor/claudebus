@@ -17,9 +17,9 @@ func daemonReservation(dir, channel, alias string) (*peerMeta, error) {
 		return nil, err
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
 	var m peerMeta
-	if err != nil || json.Unmarshal(b, &m) != nil || m.SessionID != "reserved" ||
+	if err != nil || len(b) > 1<<20 || json.Unmarshal(b, &m) != nil || m.SessionID != "reserved" ||
 		m.Channel != channel || m.Alias != alias || m.ConnectionID != "" ||
 		m.ListenerStart != "" || m.Harness != "" || m.Profile != "" ||
 		!bytes.Equal(bytes.TrimSpace(m.ListenerPid), jsonNull) || !bytes.Equal(bytes.TrimSpace(m.OwnerPid), jsonNull) {
