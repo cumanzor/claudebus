@@ -1,7 +1,7 @@
 ---
 description: Save, inspect, or relaunch a cbus formation — a channel's saved peer topology
 argument-hint: "save <name> | show <name> | apply <name> [--channel ch] [--dry-run] | bootstrap <name> <alias> | list | rm <name>"
-allowed-tools: Bash(cbus:*), Monitor
+allowed-tools: Bash(cbus:*)
 ---
 
 A **formation** is a saved snapshot of a channel's shape: its peers, their roles
@@ -25,8 +25,8 @@ gone) and TODO roles. Read this before applying anything.
 **apply `<name>`** — relaunch the peers that are MISSING, sequentially, anchor
 first. Preconditions worth checking before you run it:
 - This session must be joined to the formation's channel: peers are briefed to
-  answer THIS address, so `cbus join <channel> <alias>` first, and arm your
-  Monitor **before** applying — a peer can answer before apply returns.
+  answer THIS address, so `cbus connect <channel> <alias> --json` first.
+  Keep its native connection before applying; a peer can answer immediately.
 - **Prefer `--dry-run` first** and show the user the plan. It launches nothing and
   builds the plan exactly as a real apply does.
 - `--only a,b` narrows it; `--wait <dur>` sets how long to wait for each peer to
