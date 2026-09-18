@@ -22,7 +22,10 @@ func TestConsumerRolloutRequiresExactRecordedUUID(t *testing.T) {
 		if err := os.WriteFile(path, []byte(tc.input), 0600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := validateConsumerRollout(path, daemonTestThread)
+		f, err := openConsumerRollout(path, daemonTestThread)
+		if f != nil {
+			f.Close()
+		}
 		if (err == nil) != tc.ok {
 			t.Fatalf("input=%s error=%v", tc.input, err)
 		}
