@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Offline capability probes for waking an ordinary idle Claude Code PTY.
+"""Local fake-provider probes for waking an ordinary Claude Code PTY.
 
 --transport background checks Bash completion and its output-file read.
 --transport socket checks the native per-session messaging socket. A permitted
 Bash command exports its socket capability privately to this test process; the
 token remains in memory and is never written into the retained evidence.
+
+Run: python3 scripts/claude_interactive_wake_canary.py --transport socket
+Select --socket-case accepted|busy|session-mismatch|hold|refuse. Use
+CLAUDE_TEST_BINARY for an exact installed binary; evidence stays in /tmp.
+The scratch profile suppresses marketplace auto-install and OS URL registration.
+Inherited credentials are discarded, Git SSH is denied, and HTTP proxies reject
+non-local traffic. These controls do not claim an OS-enforced network sandbox.
 """
 
 import argparse
@@ -20,11 +27,13 @@ import select
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
 import tempfile
 import termios
+import textwrap
 import threading
 import time
 import uuid
@@ -34,7 +43,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--idle-seconds", type=float, default=12)
     parser.add_argument("--transport", choices=("background", "socket"), default="background")
-    parser.add_argument("--socket-case", choices=("accepted", "session-mismatch", "hold", "refuse"), default="accepted")
+    parser.add_argument("--socket-case", choices=("accepted", "busy", "session-mismatch", "hold", "refuse"), default="accepted")
     parser.add_argument("--message-uuid", type=lambda value: str(uuid.UUID(value)))
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -52,7 +61,7 @@ def main():
     session = str(uuid.uuid4())
     message_uuid = args.message_uuid or str(uuid.uuid4())
     send_session = str(uuid.uuid4()) if args.socket_case == "session-mismatch" else session
-    expects_wake = args.socket_case == "accepted"
+    expects_wake = args.socket_case in ("accepted", "busy")
     seed, marker = "CBUS_WAKE_SEED_" + uuid.uuid4().hex, "CBUS_WAKE_SIGNAL_" + uuid.uuid4().hex
     trigger = work / "signal"
     waiter = work / "wait_for_signal.py"
@@ -61,6 +70,7 @@ def main():
     requests, timeline = [], []
     state = {"mainRequests": 0}
     capability = {}
+    response_release = threading.Event()
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -98,6 +108,8 @@ def main():
             if main_request:
                 state["mainRequests"] += 1
             n = state["mainRequests"]
+            if main_request and n == 2 and args.socket_case == "busy":
+                response_release.wait(45)
             if main_request and n == 1:
                 content = [{"type": "tool_use", "id": "toolu_cbus_wake", "name": "Bash", "input": {"command": command, "description": "Prepare isolated canary capability", "run_in_background": args.transport == "background"}}]
                 stop = "tool_use"
@@ -140,17 +152,52 @@ def main():
     conf = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "2.1.277", "theme": "dark", "customApiKeyResponses": {"approved": [key[-20:]], "rejected": []}, "projects": {str(work): {"hasTrustDialogAccepted": True, "allowedTools": [], "hasCompletedProjectOnboarding": True}}}
     (config / ".claude.json").write_text(json.dumps(conf))
     (home / ".claude.json").write_text(json.dumps(conf))
-    settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable"}
+    settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if args.socket_case in ("hold", "refuse"):
         settings["crossSessionInbound"] = args.socket_case
     (config / "settings.json").write_text(json.dumps(settings))
     base = f"http://127.0.0.1:{server.server_port}"
     if args.transport == "socket":
-        waiter.write_text("import json, os, urllib.request\n"
-                          "body=json.dumps({'socket':os.environ.get('CLAUDE_CODE_MESSAGING_SOCKET'),'token':os.environ.get('CLAUDE_CODE_MESSAGING_TOKEN')}).encode()\n"
-                          f"urllib.request.urlopen(urllib.request.Request({base + '/private-capability'!r}, data=body, headers={{'Content-Type':'application/json'}})).close()\n"
-                          "print('Messaging capability exported privately; token not printed')\n")
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "SHELL": "/bin/zsh", "TERM": "xterm-256color", "TMPDIR": str(root / "tmp"), "CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_API_KEY": key, "ANTHROPIC_BASE_URL": base, "DISABLE_AUTOUPDATER": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_TELEMETRY": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "HTTP_PROXY": base, "HTTPS_PROXY": base, "ALL_PROXY": base, "NO_PROXY": "127.0.0.1,localhost"}
+        waiter.write_text(textwrap.dedent(f"""\
+            import ctypes, json, os, pathlib, struct, subprocess, sys, urllib.request
+            ancestry, pid = [], os.getpid()
+            for _ in range(8):
+                row = subprocess.check_output(['ps', '-p', str(pid), '-o', 'pid=,ppid=,comm='], text=True).strip().split(None, 2)
+                if len(row) != 3: break
+                ancestry.append({{'pid':int(row[0]), 'ppid':int(row[1]), 'comm':row[2]}})
+                if str(pid) == os.environ.get('CLAUDE_PID') or int(row[1]) <= 1: break
+                pid = int(row[1])
+            native_pid = int(os.environ['CLAUDE_PID'])
+            if sys.platform == 'darwin':
+                libc = ctypes.CDLL(None, use_errno=True)
+                mib, size = (ctypes.c_int * 3)(1, 49, native_pid), ctypes.c_size_t()
+                if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0): raise OSError(ctypes.get_errno())
+                buf = ctypes.create_string_buffer(size.value)
+                if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0): raise OSError(ctypes.get_errno())
+                raw = buf.raw[:size.value]
+                pos = raw.index(b'\\0', 4) + 1
+                while raw[pos] == 0: pos += 1
+                argv0 = raw[pos:raw.index(b'\\0', pos)].decode()
+            else:
+                argv0 = pathlib.Path(f'/proc/{{native_pid}}/cmdline').read_bytes().split(b'\\0', 1)[0].decode()
+            data = {{
+                'socket':os.environ.get('CLAUDE_CODE_MESSAGING_SOCKET'),
+                'token':os.environ.get('CLAUDE_CODE_MESSAGING_TOKEN'),
+                'safeEnvironment':{{k:os.environ.get(k) for k in [
+                    'CLAUDE_CODE_SESSION_ID','CLAUDE_SESSION_ID','CLAUDE_PID',
+                    'CBUS_SESSION_ID','CLAUDE_CONFIG_DIR','CLAUDE_CODE_SESSION_LOG','HOME']}},
+                'transcriptEnvironmentKeys':[k for k in os.environ if 'TRANSCRIPT' in k.upper()],
+                'childPID':os.getpid(), 'childPPID':os.getppid(), 'ancestry':ancestry,
+                'nativeArgv0':argv0,
+            }}
+            request = urllib.request.Request({base + '/private-capability'!r}, data=json.dumps(data).encode(), headers={{'Content-Type':'application/json'}})
+            urllib.request.urlopen(request).close()
+            print('Messaging capability exported privately; token not printed')
+            """))
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "SHELL": "/bin/sh", "TERM": "xterm-256color", "TMPDIR": str(root / "tmp"), "CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_API_KEY": key, "ANTHROPIC_BASE_URL": base, "DISABLE_AUTOUPDATER": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_TELEMETRY": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "HTTP_PROXY": base, "HTTPS_PROXY": base, "ALL_PROXY": base, "NO_PROXY": "127.0.0.1,localhost"}
+    env.update(http_proxy=base, https_proxy=base, all_proxy=base, no_proxy="127.0.0.1,localhost",
+               GIT_SSH_COMMAND="/usr/bin/false", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null",
+               GIT_TERMINAL_PROMPT="0", CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL="1")
     argv = [binary, "--session-id", session, "--model", "claude-sonnet-4-6", "--permission-mode", "default", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--debug-file", str(root / "debug.log"), seed]
     result = {
         "root": str(root), "transport": args.transport, "socketCase": args.socket_case, "binary": binary,
@@ -191,25 +238,48 @@ def main():
             if process.poll() is not None:
                 raise RuntimeError("CC exited: " + str(process.returncode))
             pump(.1)
+    def transcript_rows():
+        records = []
+        for path in config.glob("projects/**/*.jsonl"):
+            for line in path.read_text().splitlines(keepends=True):
+                if line.endswith("\n"):
+                    records.append(json.loads(line))
+        return records
+
+    def receipts():
+        return [r for r in transcript_rows()
+                if r.get("type") == "user" and r.get("sessionId") == session
+                and marker in json.dumps(r)]
     try:
         process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
         slave = None
         result["pid"] = process.pid
-        wait(lambda: state["mainRequests"] >= 2 and b"CBUS_WAKE_IDLE" in output and ((work / "waiter.pid").exists() if args.transport == "background" else bool(capability.get("socket"))), "initial capability export and idle response", 45)
+        wait(lambda: state["mainRequests"] >= 2 and (args.socket_case == "busy" or b"CBUS_WAKE_IDLE" in output) and ((work / "waiter.pid").exists() if args.transport == "background" else bool(capability.get("socket"))), "initial capability export and response", 45)
         before = state["mainRequests"]
         before_all = len(requests)
         idle_at = time.time()
         pump(args.idle_seconds)
-        result["checks"]["idle_makes_no_model_requests"] = state["mainRequests"] == before
-        result["checks"]["idle_makes_no_auxiliary_requests"] = len(requests) == before_all
-        result["idleSeconds"] = time.time()-idle_at
+        window = "busy" if args.socket_case == "busy" else "idle"
+        result["checks"][f"{window}_makes_no_additional_model_requests"] = state["mainRequests"] == before
+        result["checks"][f"{window}_makes_no_auxiliary_requests"] = len(requests) == before_all
+        result[window + "Seconds"] = time.time()-idle_at
         timeline.append({"event": "external_signal", "at": time.time()})
         if args.transport == "background":
             trigger.write_text(marker)
             wait(lambda: any("<task-notification>" in json.dumps(r["body"].get("messages", [])) for r in requests), "automatic background completion provider request", 30)
         else:
             result["capability"] = {"socket": capability["socket"], "tokenPresent": bool(capability.get("token"))}
+            result["childContext"] = {key: capability.get(key) for key in (
+                "safeEnvironment", "transcriptEnvironmentKeys", "childPID", "childPPID", "ancestry", "nativeArgv0")}
+            result["checks"]["socket_and_token_exported"] = bool(capability.get("socket")) and bool(capability.get("token"))
+            endpoint = Path(capability["socket"].removeprefix("uds:"))
+            endpoint_stat, directory_stat = endpoint.lstat(), endpoint.parent.resolve().stat()
+            result["capability"].update(socketMode=oct(endpoint_stat.st_mode & 0o777),
+                                        socketUID=endpoint_stat.st_uid, socketDev=endpoint_stat.st_dev,
+                                        socketIno=endpoint_stat.st_ino,
+                                        directoryMode=oct(directory_stat.st_mode & 0o777),
+                                        directoryUID=directory_stat.st_uid)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as inbox:
                 inbox.settimeout(2)
                 inbox.connect(capability["socket"].removeprefix("uds:"))
@@ -220,6 +290,12 @@ def main():
                     result["socketResponse"] = inbox.recv(4096).decode(errors="replace")
                 except TimeoutError:
                     result["socketResponse"] = None
+        if args.socket_case == "busy":
+            pump(2)
+            outstanding = [r for r in requests if r.get("mainRequest") and "responseCompletedAt" not in r]
+            result["checks"]["busy_message_does_not_interrupt_active_request"] = state["mainRequests"] == before and len(outstanding) == 1
+            timeline.append({"event": "release_busy_response", "at": time.time()})
+            response_release.set()
         if expects_wake:
             wait(lambda: any(marker in json.dumps(r["body"].get("messages", [])) for r in requests), "provider receives signal marker", 20)
             wait(lambda: b"CBUS_WAKE_RECEIVED" in output, "wake reply rendered", 15)
@@ -238,17 +314,11 @@ def main():
                 for r in main_requests),
         })
         if expects_wake:
-            wait(lambda: any(marker in p.read_text() for p in config.glob("projects/**/*.jsonl")), "wake persisted to exact-session transcript", 10)
+            wait(lambda: any(args.transport != "socket" or r.get("uuid") == message_uuid for r in receipts()),
+                 "exact user receipt persisted to exact-session transcript", 10)
         transcripts = list(config.glob("projects/**/*.jsonl"))
         result["transcripts"] = [str(path) for path in transcripts]
-        records = []
-        for path in transcripts:
-            for line in path.read_text().splitlines():
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-        receipt = [r for r in records if r.get("type") == "user" and r.get("sessionId") == session and marker in json.dumps(r)]
+        records, receipt = transcript_rows(), receipts()
         result["checks"]["transcript_receipt_matches_expected"] = bool(receipt) == expects_wake
         if args.transport == "socket" and expects_wake:
             result["checks"]["supplied_uuid_persisted_exactly_once"] = len(receipt) == 1 and receipt[0].get("uuid") == message_uuid
@@ -266,6 +336,10 @@ def main():
                 decision in line for line in result["nativeProcessingLines"])
         modes = [r["permissionMode"] for r in records if r.get("type") == "permission-mode"]
         result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
+        debug_text = (root / "debug.log").read_text()
+        result["checks"]["marketplace_autoinstall_disabled"] = "Official marketplace auto-install disabled via env var" in debug_text
+        result["checks"]["no_temporary_url_handler"] = not (home / "Applications/Claude Code URL Handler.app").exists()
+        result["checks"]["no_marketplace_downloaded"] = not (config / "plugins/marketplaces").exists()
         if capability.get("token"):
             result["checks"]["token_not_in_evidence"] = all(
                 capability["token"] not in p.read_text(errors="replace")
@@ -274,10 +348,25 @@ def main():
     except Exception as error:
         result["error"] = repr(error)
     finally:
+        response_release.set()
         if slave is not None:
             os.close(slave)
         waiter_pid = int((work / "waiter.pid").read_text()) if (work / "waiter.pid").exists() else None
-        if process is not None and process.poll() is None and result["passed"]:
+        owned_socket = None
+        # Pin only this launched process's logged socket, including startup failures
+        # before Bash exports its capability. SIGTERM can otherwise leave it stale.
+        if process is not None and (root / "debug.log").exists():
+            for name in re.findall(r"\[uds-messaging\] Listening: ([^\n]+)", (root / "debug.log").read_text()):
+                path = Path(name)
+                if path.name != f"{process.pid}.sock":
+                    continue
+                try:
+                    st = path.lstat()
+                except FileNotFoundError:
+                    continue
+                if stat.S_ISSOCK(st.st_mode) and st.st_uid == os.geteuid():
+                    owned_socket = (path, st.st_dev, st.st_ino)
+        if process is not None and process.poll() is None and (b"CBUS_WAKE_IDLE" in output or b"CBUS_WAKE_RECEIVED" in output):
             os.write(master, b"/exit")
             pump(.4)
             os.write(master, b"\r")
@@ -312,8 +401,16 @@ def main():
         while not gone(waiter_pid) and time.monotonic() < deadline:
             time.sleep(.05)
         result["cleanup"] = {"cliExited": process is None or process.poll() is not None, "serverClosed": server.fileno() == -1, "waiterExited": gone(waiter_pid)}
-        if capability.get("socket"):
-            result["cleanup"]["nativeSocketRemoved"] = not Path(capability["socket"].removeprefix("uds:")).exists()
+        if owned_socket is not None:
+            path, dev, ino = owned_socket
+            try:
+                st = path.lstat()
+                if process.poll() is not None and (st.st_dev, st.st_ino) == (dev, ino):
+                    path.unlink()
+                    result["forcedOwnedSocketCleanup"] = True
+            except FileNotFoundError:
+                pass
+            result["cleanup"]["nativeSocketRemoved"] = not path.exists()
         result["passed"] = result["passed"] and all(result["cleanup"].values())
         result["timeline"] = timeline
         (root / "provider-requests.json").write_text(json.dumps(requests, indent=2))
