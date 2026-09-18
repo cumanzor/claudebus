@@ -3,7 +3,7 @@
 // renamed into new/ (atomic on one filesystem); delivery moves new/ → cur/.
 // Process-crash-safe by construction: a message is either invisible (tmp),
 // queued (new), or delivered (cur) — never truncated, never half-read.
-// NOT power-loss durable (no fsync): acceptable for a session bus. Ordering
+// File data and directory transitions are fsynced before success. Ordering
 // is by wall-clock name; a backwards clock step can reorder across the step.
 //
 // External readers exist: bd-dashboard's formations sweep reads {new,cur} dir
@@ -12,6 +12,9 @@
 package spool
 
 import (
+	"bytes"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,29 +40,149 @@ func (s Store) NewDir(channel, alias string) string {
 func (s Store) ensure(channel, alias string) error {
 	base := s.peerDir(channel, alias)
 	for _, d := range []string{"tmp", "new", "cur"} {
-		if err := os.MkdirAll(filepath.Join(base, d), 0o755); err != nil {
+		if err := mkdirAllDurable(filepath.Join(base, d)); err != nil {
 			return err
 		}
 	}
-	return nil
+	// Persist the directory chain too, including roots created on a prior failed
+	// publication attempt whose parent Sync may not have completed.
+	for path := base; ; path = filepath.Dir(path) {
+		if err := syncDir(path); err != nil {
+			return err
+		}
+		if filepath.Clean(path) == filepath.Clean(s.Root) {
+			break
+		}
+		if filepath.Dir(path) == path {
+			return fmt.Errorf("spool root is not an ancestor")
+		}
+	}
+	return syncDir(filepath.Dir(s.Root))
+}
+
+// EnsureRoot durably creates the spool root for metadata journals that can be
+// accepted before the first peer message exists.
+func (s Store) EnsureRoot() error {
+	if err := mkdirAllDurable(s.Root); err != nil {
+		return err
+	}
+	if err := syncDir(s.Root); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(s.Root))
 }
 
 // Write queues one message line for a peer and returns its filename.
 func (s Store) Write(channel, alias string, line []byte) (string, error) {
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%d.%06d.%x.json", time.Now().UnixNano(), seq.Add(1), random)
+	return name, s.WriteNamed(channel, alias, name, line)
+}
+
+// WriteNamed idempotently publishes immutable bytes under a stable delivery ID.
+// Existing new/cur bytes must agree. The caller must serialize a reused name
+// with pruning; normal Write uses unpredictable unique names.
+func (s Store) WriteNamed(channel, alias, name string, line []byte) error {
+	if name == "" || name == "." || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
+		return errors.New("invalid spool id")
+	}
 	if err := s.ensure(channel, alias); err != nil {
-		return "", err
+		return err
 	}
-	name := fmt.Sprintf("%d.%06d.json", time.Now().UnixNano(), seq.Add(1))
 	base := s.peerDir(channel, alias)
-	tmp := filepath.Join(base, "tmp", name)
-	if err := os.WriteFile(tmp, line, 0o644); err != nil {
-		return "", err
+	for _, dir := range []string{"new", "cur"} {
+		existing, err := os.ReadFile(filepath.Join(base, dir, name))
+		if err == nil {
+			if !bytes.Equal(existing, line) {
+				return errors.New("spool id already names different bytes")
+			}
+			return syncExisting(filepath.Join(base, dir, name))
+		}
+		if !os.IsNotExist(err) {
+			return err
+		}
 	}
-	if err := os.Rename(tmp, filepath.Join(base, "new", name)); err != nil {
-		os.Remove(tmp)
-		return "", err
+	f, err := os.CreateTemp(filepath.Join(base, "tmp"), ".write-")
+	if err != nil {
+		return err
 	}
-	return name, nil
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err = f.Write(line); err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Link(tmp, filepath.Join(base, "new", name)); err != nil {
+		if os.IsExist(err) {
+			existing, readErr := s.Read(channel, alias, name)
+			if readErr == nil && bytes.Equal(existing, line) {
+				return syncExisting(filepath.Join(base, "new", name))
+			}
+		}
+		return err
+	}
+	if err = os.Remove(tmp); err != nil {
+		return err
+	}
+	if err = syncDir(filepath.Join(base, "new")); err != nil {
+		return err
+	}
+	return syncDir(filepath.Join(base, "tmp"))
+}
+
+func syncExisting(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+func syncDir(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}
+
+func mkdirAllDurable(path string) error {
+	if st, err := os.Stat(path); err == nil {
+		if !st.IsDir() {
+			return fmt.Errorf("%s is not a directory", path)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return fmt.Errorf("cannot create spool root %s", path)
+	}
+	if err := mkdirAllDurable(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o755); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return syncDir(parent)
 }
 
 // ListNew returns queued filenames in enqueue order (names sort by time.seq).
@@ -89,7 +212,13 @@ func (s Store) Read(channel, alias, name string) ([]byte, error) {
 // MarkDelivered moves a message new/ → cur/.
 func (s Store) MarkDelivered(channel, alias, name string) error {
 	base := s.peerDir(channel, alias)
-	return os.Rename(filepath.Join(base, "new", name), filepath.Join(base, "cur", name))
+	if err := os.Rename(filepath.Join(base, "new", name), filepath.Join(base, "cur", name)); err != nil {
+		return err
+	}
+	if err := syncDir(filepath.Join(base, "cur")); err != nil {
+		return err
+	}
+	return syncDir(filepath.Join(base, "new"))
 }
 
 // Peers walks the spool tree and returns every channel/alias pair present.
@@ -141,7 +270,11 @@ func (s Store) Remove(channel, alias string) (bool, error) {
 	if err := os.Rename(base, tmp); err != nil {
 		return false, nil
 	}
-	entries, _ := os.ReadDir(filepath.Join(tmp, "new"))
+	entries, err := os.ReadDir(filepath.Join(tmp, "new"))
+	if err != nil {
+		restoreErr := os.Rename(tmp, base)
+		return false, errors.Join(err, restoreErr)
+	}
 	for _, e := range entries {
 		if e.Type().IsRegular() {
 			_ = os.Rename(tmp, base) // mail raced in — restore, keep the peer

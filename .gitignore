@@ -9,3 +9,7 @@
 relay/deploy.local
 /cbus-check
 /cbus-next
+
+# local Python acceptance canary caches
+__pycache__/
+*.pyc

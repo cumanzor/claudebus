@@ -700,7 +700,7 @@ func TestLauncherScriptByteExact(t *testing.T) {
 	want := "#!/bin/bash\n" +
 		"export CLAUDE_CONFIG_DIR='/c'\n" +
 		"export PATH='/a b'\n" +
-		"cd '/work dir'\n" +
+		"cd '/work dir' || exit\n" +
 		"rm -f '/tmp/fixed.sh'\n" +
 		`exec 'ccs' 'personal' '--resume' 'S' '--fork-session' 'hi '\''there'\'''` + "\n"
 	if got != want {

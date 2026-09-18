@@ -9,6 +9,13 @@ its own listener, bus messages delivered into its thread as turns — and join
 THIS session to the same channel first, so the two can message each other
 immediately. A codex peer never runs `cbus tail`; the bridge listens for it.
 
+This command documents the compatibility wrapper. For an existing ordinary
+Codex CLI session, prefer running `$cbus-connect` inside that session; it joins
+without a special launcher or restart. For a fresh native peer, use
+`cbus spawn pane CHANNEL --harness codex --name ALIAS` (iTerm2 or tmux), or start
+`codex` manually in any terminal and connect there. The native adapter also
+supports relay channels; the wrapper below remains local-only.
+
 The user passed: "$ARGUMENTS" — optional channel (a local name; codex peers are
 local-only, there is no `@host` form here), optional `--alias <a>` (defaults to
 `codex`; give it a real seat name like `advisor` when the user names a role), and

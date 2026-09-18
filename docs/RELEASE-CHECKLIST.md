@@ -1,7 +1,39 @@
 # cbus release checklist
 
+## Current release procedure
+
+1. Complete the [Codex v1 readiness gates](architecture/codex-v1-release-readiness.md)
+   against one frozen source revision. Keep raw canary artifacts local and attach
+   aggregate outcomes plus hashes to the tracker. A build hash identifies bytes;
+   a version label alone does not.
+2. Review and commit the complete change, then build from a clean checkout of that
+   exact revision. Run Go tests/vet/race checks, ordinary CLI, native queue,
+   presence, permissions, compaction, resume, terminal and relay acceptance.
+   Document the tested Codex version and any platform exclusions explicitly.
+3. Build **five client binaries**: Darwin amd64/arm64, Linux amd64/arm64 and Windows
+   amd64 (`.exe`). Keep SHA256SUMS alongside them. Verify a second clean build
+   reproduces the assets before publication; preserve the source revision and
+   build-info evidence. Native Codex connect remains macOS/Linux only.
+4. Prepare the tag, release notes and matching relay build/deployment plan for
+   review. Do not publish merely because a local candidate is green. The native
+   daemon requires `/tail/durable-v1`; old relay `/tail` remains compatible with
+   Monitor clients, but does not provide durable client acknowledgment.
+5. After release authorization, tag/publish the exact tested revision. Verify
+   downloaded bytes against the prepared hashes and run install/selfupdate on Mac
+   and NUC. Do not rebuild different bytes under the same tag.
+6. Verify command/role/Codex-skill refresh. Older updater binaries need one manual
+   `cbus install-codex-skills` after upgrading. Preserve modified Codex skills;
+   permission rule installation is always a separate explicit opt-in.
+7. Restart an existing daemon explicitly with the new executable; verify reported
+   version/protocol, retained connection epoch and pending messages. An old pilot
+   without process fencing needs explicit stop, confirmed exit, then start.
+8. Deploy the exact matching relay build only after its separate review/approval;
+   check remote connect/send/reply and reconnect against that running endpoint.
+
+## Historical first-release ledger
+
 > **STATUS: executed.** The quiesce window ran and v0.1.0 shipped 2026-07-17;
-> the repo is public and releases exist through v0.9.2. This file is preserved
+> the following is the historical first-release record. This section is preserved
 > as the pre-release verification ledger — the per-release sequence (tag,
 > `make release`, `cbus selfupdate`) still applies to every new release.
 
@@ -46,7 +78,9 @@ exists; the true gh round-trip is checked here, by hand, once step 3 has run.
 
 ## Not part of this
 
-The relay is a separate binary on `relay/deploy.sh` (build-on-NUC) and is untouched.
+In the historical v0.1 effort, the relay was a separate binary on `relay/deploy.sh`
+and was untouched. Codex v1 now has a coordinated relay compatibility requirement
+under the current procedure above.
 `install.sh` (the bash rollback) and `install-cbus-go.sh` (the transitional installer)
 were retired from the tree after the first release; recover them from git history if
 ever needed.

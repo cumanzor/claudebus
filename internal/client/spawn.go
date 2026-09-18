@@ -58,6 +58,34 @@ func SpawnPromptAliased(address, alias string) string {
 // refuses --role on branch.
 // Returns the resolved address and the fixed child alias ("" = remote self-pick).
 func Spawn(target, address, model, name, role string, forker TerminalForker) (addr, childAlias string, err error) {
+	return SpawnWithOptions(target, address, model, name, role, SpawnOptions{}, forker)
+}
+
+// SpawnOptions selects the harness independently of terminal placement. Empty
+// Harness preserves historical Claude behavior for existing library callers.
+type SpawnOptions struct {
+	Harness string
+	Profile string
+}
+
+func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptions, forker TerminalForker) (addr, childAlias string, err error) {
+	if opts.Harness == "" {
+		opts.Harness = "claude"
+	}
+	if opts.Harness != "claude" && opts.Harness != "codex" {
+		return "", "", fmt.Errorf("unsupported spawn harness %q; use claude or codex", opts.Harness)
+	}
+	if opts.Profile != "" && (opts.Harness != "codex" || !core.ValidName(opts.Profile) || strings.HasPrefix(opts.Profile, "-")) {
+		return "", "", fmt.Errorf("--profile requires a valid Codex profile name and --harness codex")
+	}
+	// Resolve the selected runtime before reserving an alias.
+	var codexLaunch codexSpawnContext
+	if opts.Harness == "codex" {
+		codexLaunch, err = resolveCodexSpawnContext()
+		if err != nil {
+			return "", "", err
+		}
+	}
 	switch target {
 	case "window", "tab", "tmux", "pane":
 	default:
@@ -69,7 +97,7 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 		if roleBody, roleDefault, err = LoadRole(role); err != nil {
 			return "", "", err
 		}
-		if model == "" {
+		if model == "" && opts.Harness == "claude" {
 			model = roleDefault
 		}
 		if name == "" {
@@ -117,6 +145,9 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)
 	}
+	if opts.Harness == "codex" {
+		prompt = CodexSpawnPrompt(codexLaunch.cbus, addr, childAlias)
+	}
 	if roleBody != "" {
 		// role brief rides AFTER the join/arm instructions, matching how briefs
 		// were dispatched manually; the file is designed to be pasted alone.
@@ -128,6 +159,10 @@ func Spawn(target, address, model, name, role string, forker TerminalForker) (ad
 		Env:    forkReplicatedEnv(),
 		Dir:    cwd(),
 		Title:  title,
+	}
+	if opts.Harness == "codex" {
+		spec.Argv = codexLaunch.argv(opts.Profile, model, prompt)
+		spec.Env = codexLaunch.env
 	}
 	if _, err := forker.Fork(spec); err != nil {
 		if childAlias != "" && !IsRemote(addr) {

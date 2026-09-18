@@ -32,6 +32,13 @@ func LocalSend(target, from string, force bool, text string) (resolved, fromOut 
 		}
 		ch = rc
 	}
+	// Resolve the target and append under the same alias epoch as lifecycle changes.
+	// Otherwise unregister/reclaim could redirect a send after its metadata check.
+	unlock, err := lockPeer(ch, al)
+	if err != nil {
+		return "", "", false, err
+	}
+	defer unlock()
 	root := CBUSDir()
 	metaPath := filepath.Join(root, ch, al, "meta.json")
 	if !fileExists(metaPath) {
@@ -60,6 +67,9 @@ func LocalSend(target, from string, force bool, text string) (resolved, fromOut 
 	if from == "" {
 		if a := os.Getenv("CBUS_ALIAS"); a != "" {
 			from = a
+			if channel := os.Getenv("CBUS_CHANNEL"); core.ValidStoreName(channel) && core.ValidStoreName(a) {
+				from = channel + "/" + a
+			}
 		} else {
 			from = fmt.Sprintf("%s-%d", ShortHostname(), os.Getppid())
 		}
@@ -71,6 +81,8 @@ func LocalSend(target, from string, force bool, text string) (resolved, fromOut 
 	if len(line) > core.MaxMessageBytes {
 		return "", "", false, fmt.Errorf("message exceeds %dMiB", core.MaxMessageBytes>>20)
 	}
-	appendInbox(filepath.Join(root, ch, al, "inbox.jsonl"), line)
+	if err := appendInbox(filepath.Join(root, ch, al, "inbox.jsonl"), line); err != nil {
+		return "", "", false, fmt.Errorf("append inbox for %q: %w", ch+"/"+al, err)
+	}
 	return ch + "/" + al, from, warn, nil
 }

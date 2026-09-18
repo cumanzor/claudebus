@@ -20,12 +20,13 @@ import (
 // every string field rather than via Decoder.UseNumber (which only reaches
 // interface{} fields, not typed string fields).
 type Message struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	TS    string `json:"ts"`
-	Text  string `json:"text"`
-	Kind  string `json:"kind,omitempty"`  // presence only ("presence")
-	Event string `json:"event,omitempty"` // presence only (join|leave|rename|departed)
+	From    string `json:"from"`
+	To      string `json:"to"`
+	TS      string `json:"ts"`
+	Text    string `json:"text"`
+	Kind    string `json:"kind,omitempty"`    // presence only ("presence")
+	Event   string `json:"event,omitempty"`   // presence only (join|leave|rename|departed)
+	EventID string `json:"eventId,omitempty"` // durable managed presence identity
 }
 
 // UnmarshalJSON decodes leniently via a flexString shadow, so a number in any
@@ -35,18 +36,20 @@ type Message struct {
 // framer passthrough gate).
 func (m *Message) UnmarshalJSON(b []byte) error {
 	var shadow struct {
-		From  flexString `json:"from"`
-		To    flexString `json:"to"`
-		TS    flexString `json:"ts"`
-		Text  flexString `json:"text"`
-		Kind  flexString `json:"kind"`
-		Event flexString `json:"event"`
+		From    flexString `json:"from"`
+		To      flexString `json:"to"`
+		TS      flexString `json:"ts"`
+		Text    flexString `json:"text"`
+		Kind    flexString `json:"kind"`
+		Event   flexString `json:"event"`
+		EventID flexString `json:"eventId"`
 	}
 	if err := json.Unmarshal(b, &shadow); err != nil {
 		return err
 	}
 	m.From, m.To, m.TS = string(shadow.From), string(shadow.To), string(shadow.TS)
 	m.Text, m.Kind, m.Event = string(shadow.Text), string(shadow.Kind), string(shadow.Event)
+	m.EventID = string(shadow.EventID)
 	return nil
 }
 

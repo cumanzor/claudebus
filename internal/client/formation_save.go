@@ -30,16 +30,18 @@ const roleTODOMarker = "TODO: set rolefile to roles/<alias>.md@<commit>, or repl
 // RosterPeer is one peer as the live store records it. Origin/Model are the m9l
 // birth-record — present only when the launcher stamped them, blank otherwise.
 type RosterPeer struct {
-	Alias     string
-	SessionID string
-	Cwd       string
-	Machine   string // meta.host, which is ShortHostname() on the writing machine
-	Origin    string
-	Model     string
-	Profile   string // the CCS instance the session stamped about itself at join
-	Listening bool
-	RunID     string // the peer's run claim, read from its dir (blank when unclaimed)
-	HasClaim  bool   // whether a claim file was present at all, distinct from RunID==""
+	Alias        string
+	Harness      string
+	CodexBackend *FormationCodexBackend
+	SessionID    string
+	Cwd          string
+	Machine      string // meta.host, which is ShortHostname() on the writing machine
+	Origin       string
+	Model        string
+	Profile      string // the CCS instance the session stamped about itself at join
+	Listening    bool
+	RunID        string // the peer's run claim, read from its dir (blank when unclaimed)
+	HasClaim     bool   // whether a claim file was present at all, distinct from RunID==""
 }
 
 // ChannelRoster reads a channel's peers straight from the store. It deliberately
@@ -77,16 +79,25 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 		if alias == "" {
 			alias = e.Name() // meta is authoritative, the dir name is the fallback
 		}
+		backend, consumerOnline, err := formationManagedBackend(ch, e.Name(), m)
+		if err != nil {
+			return nil, err
+		}
+		listening := MetaListenerAlive(metaPath)
+		if m.ConnectionID != "" {
+			listening = listening && consumerOnline
+		}
 		runID := readClaim(filepath.Join(chDir, e.Name()))
 		out = append(out, RosterPeer{
-			Alias:     alias,
+			Alias:   alias,
+			Harness: m.Harness, CodexBackend: backend,
 			SessionID: m.SessionID,
 			Cwd:       m.Cwd,
 			Machine:   m.Host,
 			Origin:    m.Origin,
 			Model:     m.Model,
 			Profile:   m.Profile,
-			Listening: MetaListenerAlive(metaPath),
+			Listening: listening,
 			RunID:     runID,
 			HasClaim:  runID != "",
 		})
@@ -335,6 +346,18 @@ func setHandAnchors(f *Formation, anchors map[string]string) {
 //     flag-shaped model) is NOT propagated — it is skipped and surfaced in the report,
 //     so a corrupted meta cannot ride a garbage birth-record into the file silently.
 func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
+	// Harness/backend are captured identity facts. A known live harness overrides
+	// an older hand-edit; a legacy blank does not erase a known harness, and a
+	// changed session must never retain its predecessor's backend snapshot.
+	if r.Harness != "" {
+		p.Harness = r.Harness
+	}
+	if r.CodexBackend != nil {
+		v := *r.CodexBackend
+		p.CodexBackend = &v
+	} else if p.SessionID != r.SessionID || (r.Harness != "" && strings.ToLower(r.Harness) != "codex") {
+		p.CodexBackend = nil
+	}
 	p.SessionID = r.SessionID
 	p.Cwd = r.Cwd
 	p.Machine = r.Machine

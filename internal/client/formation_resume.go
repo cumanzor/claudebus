@@ -46,6 +46,9 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	if p == nil {
 		return "", "", fmt.Errorf("anchorAlias %q names no peer in %q (it has: %s)", f.AnchorAlias, f.Name, strings.Join(peerAliases(f), ", "))
 	}
+	if err := formationHarnessRefusal(p); err != nil {
+		return "", "", err
+	}
 	if p.Machine != "" && p.Machine != world.Host {
 		return "", "", fmt.Errorf("anchor %q was recorded on %q, this host is %q — run this there", p.Alias, p.Machine, world.Host)
 	}
@@ -187,6 +190,8 @@ func anchorRoster(f *Formation, anchorAlias string, world *PlanWorld) []anchorRo
 		switch {
 		case p.SessionID == "" || p.SessionID == "reserved":
 			row.Transcript = "none recorded"
+		case formationHarness(p) != "claude" || p.CodexBackend != nil:
+			row.Transcript = "unchecked (harness=" + formationHarness(p) + ")"
 		case world.HasTranscript(p.Profile, p.SessionID):
 			row.Transcript = "present"
 		case p.Machine != "" && p.Machine != world.Host:

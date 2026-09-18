@@ -39,13 +39,16 @@ func OverrideSessionID(sid string) (restore func()) {
 
 // SessionID is this session's id by an ordered lookup: the in-process override
 // (OverrideSessionID / the --session-id flag), then $CBUS_SESSION_ID (harness-neutral),
-// then $CLAUDE_CODE_SESSION_ID (Claude Code), then $GROK_SESSION_ID (grok). Empty when
-// none is set — the sessionless mode, where identity lookups yield nothing.
+// then $CLAUDE_CODE_SESSION_ID (Claude Code), then $GROK_SESSION_ID (grok), then
+// $CODEX_THREAD_ID (Codex). Preserve the established overrides: an inherited Codex
+// thread id must not replace a child harness's own session id. Codex connect separately
+// refuses conflicting inherited identities before it registers the current thread.
+// Empty when none is set — the sessionless mode, where identity lookups yield nothing.
 func SessionID() string {
 	if sessionOverride != "" {
 		return sessionOverride
 	}
-	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} {
+	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID", "CODEX_THREAD_ID"} {
 		if v := os.Getenv(k); v != "" {
 			return v
 		}

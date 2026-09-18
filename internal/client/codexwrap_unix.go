@@ -90,7 +90,7 @@ func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 			return // normal exit; the deferred teardown is running
 		}
 		if p := tui.Process; p != nil {
-			_ = p.Kill()
+			_ = terminateCodexTUI(p)
 		}
 		killServer() // group SIGTERM -> SIGKILL, reaped, socket removed
 		fmt.Fprintf(os.Stderr, "cbus: %s received: codex app-server and TUI torn down\n", s)
@@ -142,12 +142,12 @@ func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 	}
 	threadID, err := discoverThread(disc, rz, tuiExit)
 	if err != nil {
-		_ = tui.Process.Kill()
+		_ = terminateCodexTUI(tui.Process)
 		return err
 	}
 	disc.close()
 	if err := joinAs(threadID, channel, alias); err != nil {
-		_ = tui.Process.Kill()
+		_ = terminateCodexTUI(tui.Process)
 		return fmt.Errorf("join %s/%s as the codex thread: %w", channel, alias, err)
 	}
 	claimListenerAtJoin(channel, alias) // read as a live listener before the bridge arms
@@ -162,10 +162,16 @@ func RunCodexWrap(channel, alias, thread string, passthrough []string) error {
 	go func() {
 		berr := RunCodexBridge(channel+"/"+alias, sock, threadID, resume)
 		bridgeExit <- berr
-		_ = tui.Process.Kill()
+		_ = terminateCodexTUI(tui.Process)
 	}()
 
 	// 6. the human drives the TUI; when it exits, resolve the cause and print it LAST.
 	werr := <-tuiExit
 	return teardownOutcome(werr, bridgeExit, killServer, os.Stderr, bridgeCauseGrace)
+}
+
+// SIGTERM lets the npm launcher forward shutdown to its native child. Killing
+// only the launcher with SIGKILL orphans a live --remote TUI in the user's pane.
+func terminateCodexTUI(process *os.Process) error {
+	return process.Signal(syscall.SIGTERM)
 }

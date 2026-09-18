@@ -76,3 +76,38 @@ func TestPeersSkipsDotDirs(t *testing.T) {
 		t.Fatalf("dot dirs leaked into Peers: %v", peers)
 	}
 }
+
+func TestWriteNamedStableIDAcrossDeliveryAndConflictingReplay(t *testing.T) {
+	s := Store{Root: filepath.Join(t.TempDir(), "nested", "spool")}
+	body := []byte(`{"text":"durable"}`)
+	if err := s.WriteNamed("c", "a", "stable.json", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteNamed("c", "a", "stable.json", body); err != nil {
+		t.Fatal(err)
+	}
+	names, err := s.ListNew("c", "a")
+	if err != nil || len(names) != 1 {
+		t.Fatalf("pending=%v %v", names, err)
+	}
+	if err := s.MarkDelivered("c", "a", "stable.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteNamed("c", "a", "stable.json", body); err != nil {
+		t.Fatal(err)
+	}
+	names, _ = s.ListNew("c", "a")
+	if len(names) != 0 {
+		t.Fatalf("delivered id replayed: %v", names)
+	}
+	if err := s.WriteNamed("c", "a", "stable.json", []byte("changed")); err == nil {
+		t.Fatal("same id changed bytes")
+	}
+	if err := s.WriteNamed("c", "a", "../escape", body); err == nil {
+		t.Fatal("unsafe spool id accepted")
+	}
+	tmp, err := os.ReadDir(filepath.Join(s.Root, "c", "a", "tmp"))
+	if err != nil || len(tmp) != 0 {
+		t.Fatalf("temporary publication remains: %v %v", tmp, err)
+	}
+}

@@ -12,6 +12,12 @@ import "embed"
 //go:embed commands/*.md
 var Commands embed.FS
 
+// CodexSkills holds the native Codex skill entrypoints, installed as
+// <skills-root>/<skill-name>/SKILL.md.
+//
+//go:embed skills/codex/*/SKILL.md
+var CodexSkills embed.FS
+
 // Roles holds roles/*.md, installed to $CBUS_DIR/roles as the LoadRole fallback for
 // spawns outside a repo. The doctrine block is duplicated 4x BY RULING; the embed
 // copies the files verbatim and never DRYs them (cbus-7sg).

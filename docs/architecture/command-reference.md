@@ -1,5 +1,35 @@
 # cbus Command Reference
 
+## Codex CLI v1 additions
+
+The native integration is macOS/Linux only, tested against Codex CLI 0.154.0.
+Desktop harnesses remain v2; terminal choice is independent of harness choice.
+See [Codex operation and recovery](../codex.md) for the complete contract.
+
+| Command | Behavior |
+|---|---|
+| `cbus connect CHANNEL [ALIAS] [--json]` | From an ordinary Codex CLI conversation, bind the exact thread and actual open queue store; start the local supervisor if needed |
+| `cbus connect CHANNEL@HOST ALIAS [--json]` | Same native connection through the additive durable relay endpoint |
+| `--codex-sqlite-home ABS_PATH` on connect | Explicit caller assertion when automatic process/store inspection is unavailable; not independent consumer proof |
+| `cbus connection status [CHANNEL/ALIAS] [--json]` | Saved queue, consumer and receipt observations; does not issue a model probe |
+| `cbus connection reconcile CHANNEL/ALIAS [--json]` | Read-only exact-message lookup in native queue/history |
+| `cbus connection abandon CHANNEL/ALIAS --pending ID --reason TEXT` | Explicitly skip the exact unresolved local attempt; never cancel or retransmit a possibly accepted native item |
+| `cbus connection disconnect CHANNEL/ALIAS` | Stop submissions while preserving the inbox, binding and journal |
+| `cbus daemon start\|status\|stop\|restart [--json]` | Local supervision; restart fences the observed process and preserves pending state |
+| `cbus install-codex-skills [--path DIR] [--force]` | Install the native session skill; content receipts protect local edits during upgrades |
+| `cbus codex-permissions --binary ABS_PATH [--install] [--path FILE] [--force]` | Preview or explicitly install only an exact-executable `send` allow rule; no implicit policy changes |
+| `cbus spawn pane\|tab\|window\|tmux CHANNEL --harness codex [--profile NAME]` | Launch an ordinary CLI through the existing terminal interface; the child connects its own thread |
+
+Native join/exit/resume/disconnect and completed-compaction events reach peers.
+Real events may invoke a recipient model turn; idle supervision does not.
+Compaction notices are local-only and pre-compaction hooks are deferred.
+Formations preserve Codex harness/backend identity but explicitly refuse
+unsupported automated restore/bootstrap with manual resume/connect guidance.
+`cbus codex` remains the compatibility wrapper; its local compaction notices are
+best-effort, while native connections journal their notice outbox.
+
+The reference below retains historical behavior for the older command surface.
+
 The complete behavior reference for the claudebus client surface: every `cbus`
 subcommand, the address grammar, the Monitor-arming contract, the slash
 commands, the `formation` verb family, the distribution and self-update verbs,

@@ -27,6 +27,7 @@ type PeerMeta struct {
 	Model         string
 	Profile       string // the CCS instance the session stamped at join; "" pre-profile or non-CCS
 	Harness       string // owning harness stamped at join; "" pre-harness, or no harness ancestor
+	ConnectionID  string // nonempty for a daemon-managed registration epoch
 }
 
 // ReadPeerMeta reads a peer's meta.json tolerantly (a torn/missing file yields
@@ -52,6 +53,7 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		Model:         rawStr(raw["model"]),
 		Profile:       rawStr(raw["profile"]),
 		Harness:       rawStr(raw["harness"]),
+		ConnectionID:  rawStr(raw["connectionId"]),
 	}, true
 }
 
@@ -139,10 +141,16 @@ func listenerIdentityHolds(m PeerMeta, metaPath string) bool {
 // PeerDead is the prune / broadcast-recipient / send-gate predicate (bin/cbus:316-323):
 // a never-armed peer (null listenerPid, or a torn "field absent" read) is dead only
 // once past the unarmed grace window; an armed-ever peer is dead iff its listener is
-// no longer alive.
+// no longer alive. Daemon-managed peers retain their inbox across listener outages
+// and are removed only by an explicit leave/unregister. Disconnect retains them.
 func PeerDead(metaPath string) bool {
-	if m, ok := ReadPeerMeta(metaPath); ok && m.ListenerPid != 0 {
-		return !MetaListenerAlive(metaPath)
+	if m, ok := ReadPeerMeta(metaPath); ok {
+		if m.ConnectionID != "" {
+			return false
+		}
+		if m.ListenerPid != 0 {
+			return !MetaListenerAlive(metaPath)
+		}
 	}
 	return unarmedGraceElapsed(metaPath)
 }
