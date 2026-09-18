@@ -3,13 +3,23 @@
 ## Connect an existing CLI session without restarting
 
 The experimental Codex-first daemon adapter uses the native durable queue in
-Codex CLI 0.154.0. Install the session-side skill with a build containing this work:
+Codex CLI 0.154.0. For the same trusted-command experience as Claude Code, run
+this one-time setup from the installed cbus binary:
 
 ```sh
-cbus install-codex-skills
+cbus install-codex-skills --with-permissions
 ```
 
-Inside the existing Codex CLI conversation, invoke `$cbus-connect` with a channel
+This explicitly trusts all cbus commands, both bare `cbus` resolved through PATH
+and the installed absolute executable, including spawn, updates and administration.
+It leaves general sandbox and approval settings unchanged. Start a new Codex CLI
+session, or restart/resume an existing one once to load the rules. Subsequent
+channels and aliases need no additional permission rules. Use direct cbus commands;
+unrelated shell wrappers and compound scripts retain their own approval behavior.
+Use plain `cbus install-codex-skills` to install only the skill and retain normal
+command approvals.
+
+Inside the Codex CLI conversation, invoke `$cbus-connect` with a channel
 and optional alias, or have the session run:
 
 ```sh
@@ -97,6 +107,13 @@ workspace sandbox can write the default bus. See the [pilot evidence](architectu
 
 ### Explicit optional reply permissions and upgrades
 
+`cbus codex-permissions --scope bus` previews the complete command-namespace
+trust used by `install-codex-skills --with-permissions`; add `--install` to opt in.
+Rules are installed in the active `$CODEX_HOME/rules` (default `~/.codex/rules`),
+even when skills use a custom `--path`. A skill install's `--force` does not
+overwrite edited permission rules. To replace those deliberately, use the
+permission helper's own `--force`.
+
 `cbus codex-permissions --binary /absolute/path/to/cbus` previews a rule allowing
 only that literal executable path followed by `send`. Add `--install` to write it
 deliberately under the active Codex home's `rules/cbus.rules`; existing local
@@ -107,8 +124,9 @@ rules at startup; existing sessions can use their usual exact-command approval.
 
 Use the printed absolute path for replies when using this optional rule. A bare
 `cbus`, a different symlink path, or a shell wrapper is a different command prefix.
-The skill installer and selfupdate never install permission rules or change the
-session's approval/sandbox settings.
+Ordinary skill installation and selfupdate never grant or broaden permissions;
+selfupdate leaves an existing bus opt-in in place. General approval/sandbox
+settings are unchanged in both scopes.
 
 Codex skill installation stores a content receipt. Upgrades replace an unchanged
 previously shipped skill, preserve edited or untracked skills, and report skips.
