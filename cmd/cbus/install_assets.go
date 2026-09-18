@@ -232,21 +232,36 @@ func runInstallRoles(args []string) int {
 }
 
 func runInstallCodexSkills(args []string) int {
-	const use = "usage: cbus install-codex-skills [--path DIR] [--force]"
-	dir, force, err := parseInstallArgs(args, use)
+	const use = "usage: cbus install-codex-skills [--path DIR] [--force] [--with-permissions]"
+	p, err := splitVerbArgs(args, map[string]bool{"--path": true}, map[string]bool{"--force": true, "--with-permissions": true}, true)
 	if err != nil {
+		return die("%v (%s)", err, use)
+	}
+	if err := noExtra(p.pos, 0, use); err != nil {
 		return die("%v", err)
+	}
+	dir, hasPath := p.has("--path")
+	if hasPath && dir == "" {
+		return die("--path: value must not be empty")
 	}
 	if dir == "" {
 		if dir, err = defaultCodexSkillsDir(); err != nil {
 			return die("resolve Codex skills dir: %v", err)
 		}
 	}
-	results, err := installCodexSkills(claudebus.CodexSkills, dir, force)
+	results, err := installCodexSkills(claudebus.CodexSkills, dir, p.flags["--force"])
 	if err != nil {
 		return die("%v", err)
 	}
-	return reportAssets("Codex skills", dir, results)
+	if code := reportAssets("Codex skills", dir, results); code != 0 {
+		return code
+	}
+	if p.flags["--with-permissions"] {
+		// Rules belong to the active Codex home even with a custom skills path.
+		// Skill --force never authorizes overwriting locally edited permissions.
+		return runCodexPermissions([]string{"--scope", "bus", "--install"})
+	}
+	return 0
 }
 
 // parseInstallArgs handles the shared [--path DIR] [--force].

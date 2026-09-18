@@ -65,6 +65,45 @@ func TestCodexPermissionsInstallIsExplicitAndProtectsEdits(t *testing.T) {
 	}
 }
 
+func TestCodexBusPermissionsRequireExplicitScope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	program := filepath.Join(t.TempDir(), "cbus with spaces")
+	if err := os.WriteFile(program, []byte("binary fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(want int, args ...string) {
+		t.Helper()
+		captureStdout(t, func() {
+			if code := runCodexPermissions(append([]string{"--binary", program}, args...)); code != want {
+				t.Fatalf("%v: exit=%d want=%d", args, code, want)
+			}
+		})
+	}
+	run(1, "--scope", "unknown", "--install")
+	run(1, "--scope", "", "--install")
+	run(0, "--scope", "bus")
+	if _, err := os.Stat(filepath.Join(home, "rules")); !os.IsNotExist(err) {
+		t.Fatal("preview or invalid scope installed permissions")
+	}
+	run(0, "--install")
+	dst := filepath.Join(home, "rules", "cbus.rules")
+	send, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(0, "--scope", "bus")
+	stillSend, _ := os.ReadFile(dst)
+	if string(stillSend) != string(send) {
+		t.Fatal("preview broadened existing send permission")
+	}
+	run(0, "--scope", "bus", "--install")
+	bus, _ := os.ReadFile(dst)
+	if string(bus) == string(send) || !strings.Contains(string(bus), `pattern = ["cbus"]`) {
+		t.Fatal("explicit bus opt-in did not upgrade the tracked send rule")
+	}
+}
+
 func TestConnectArgsExplicitStorageBinding(t *testing.T) {
 	pos, asJSON, opts, err := connectArgs([]string{"dev", "worker", "--codex-sqlite-home", "/state space", "--json"})
 	if err != nil || !asJSON || len(pos) != 2 || opts.SQLiteHome != "/state space" {

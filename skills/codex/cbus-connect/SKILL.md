@@ -14,15 +14,18 @@ Use the current CLI conversation. Desktop harness clients are outside this integ
 
 Never start a Monitor, tail loop, periodic model task, or another Codex conversation to maintain the connection. The cbus daemon and Codex's native queue handle idle waiting. Busy sessions process queued messages after the current turn. An explicitly interrupted session keeps queued messages paused, including after resume; an explicit user continuation must complete before they drain. Reconnecting does not clear that pause, and a public `idle` status alone does not prove readiness.
 
-If capability checks fail, report the specific cause. Missing permissions, an unavailable state directory, or an unpersisted new thread are not evidence that restarting is required. Only use a restart/resume fallback when the running runtime cannot support native queue delivery. Preserve the exact thread ID with `codex resume THREAD_ID`, then reconnect from inside that session. Do not silently loosen sandbox or approval settings.
+If capability checks fail, report the specific cause. Missing permissions, an unavailable state directory, or an unpersisted new thread are not evidence that the runtime needs restarting. Use a delivery restart/resume fallback when the runtime cannot support native queue delivery; loading newly installed permission rules is a separate one-time restart. Preserve the exact thread ID with `codex resume THREAD_ID`, then reconnect from inside that session. Do not silently loosen sandbox or approval settings.
 
-The normal workspace sandbox can block the daemon's Unix socket even when `CBUS_DIR` is writable. If `connect`, a status command, or `send` fails with a permission error, request the usual approval for that exact command and retry only when approved. Do not change global permissions, broadly allow shell commands, or repeatedly start daemons. If approvals are unavailable, report the blocked command and leave the connection unconfirmed. The default bus directory may also need permission for inbox writes.
+For one-time trusted bus setup, use `cbus install-codex-skills --with-permissions` when the user authorizes seamless cbus access. It trusts all cbus subcommands, including join, send, disconnect, spawn and administration, for bare `cbus` from PATH and the setup executable's absolute path. Existing Codex sessions need one restart/resume to load the rules; later channels need no new rule. Ordinary skill installation and updates do not opt users into this trust.
+
+The normal workspace sandbox can block the daemon socket or inbox writes. Without trusted bus setup, request normal approval for the exact command. With setup already authorized and loaded, use a direct `cbus ...` invocation or the approved absolute path; avoid shell wrappers, environment assignments and compound scripts that require their own permissions. If access still fails, report the specific cause instead of repeatedly starting daemons or adding duplicate channel-specific rules. Keep general sandbox and approval settings unchanged.
 
 If an optional `cbus codex-permissions` reply rule has been installed, use its
 printed absolute cbus path literally for `send`; a bare command or a different
-symlink does not match an exact-path rule. Installing a skill does not install
-permissions. Do not install or broaden a permission rule without the user's
-explicit direction.
+symlink does not match an exact-path rule. Installing a skill without
+`--with-permissions` does not install permissions. Do not broaden permission
+rules without the user's direction; a request for trusted bus setup authorizes
+the bus scope.
 
 The connection result also reports observed CLI consumer state separately from
 queue state. `unknown` is inconclusive, not a confirmed exit. Actual join/leave

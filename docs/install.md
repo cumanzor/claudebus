@@ -69,17 +69,32 @@ tested against Codex CLI 0.154.0; the app-server queue surface is experimental.
 Windows retains its existing cbus functionality and explicitly refuses native
 `connect`/`daemon` in this release. Desktop harness clients are v2.
 
-Connection setup may need the session's exact-command approval for the local
-socket. Optional unattended reply permission is separate and explicit:
+For seamless use across channels, opt into trusted cbus setup once:
+
+```sh
+cbus install-codex-skills --with-permissions
+```
+
+This installs the skill and rules trusting all subcommands of bare `cbus` from
+PATH and the installed absolute executable, including connect, spawn, updates
+and administration. Start a new Codex CLI session, or restart/resume once to load
+the rules. Future joins, status checks, sends and disconnects need no new rule.
+General sandbox/approval settings and unrelated commands retain their policy.
+Ordinary installation/selfupdate does not opt users in; an existing bus rule
+survives selfupdate. Rules use the active Codex home even with a custom skill
+`--path`, and skill `--force` does not overwrite edited permission rules.
+
+For send-only permission instead, use the narrower helper scope:
 
 ```sh
 cbus codex-permissions --binary /absolute/path/to/cbus           # preview
 cbus codex-permissions --binary /absolute/path/to/cbus --install # deliberate opt-in
 ```
 
-Only that literal executable's `send` prefix is allowed outside the command
-sandbox. Use that same path in replies. No installer changes general Codex
-permissions; edited rule files are protected. See [Codex setup](codex.md).
+The default `send` scope allows only that literal executable's `send` prefix
+outside the command sandbox. Use that path in replies. `--scope bus` previews
+the complete trust policy used by the seamless setup. Edited rule files are
+protected. See [Codex setup](codex.md).
 
 After updating a running installation, `cbus daemon restart` loads the new binary
 while retaining pending mail. The daemon is started on demand, not installed as

@@ -130,11 +130,13 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
-  cbus install-codex-skills [--path DIR] [--force]
+  cbus install-codex-skills [--path DIR] [--force] [--with-permissions]
                                    install session-side skills to $CODEX_HOME/skills
                                    (safe shipped-version upgrades; protects edits)
-  cbus codex-permissions [--binary PATH] [--install [--path FILE] [--force]]
-                                   preview optional exact-binary reply permission;
+                                   --with-permissions also trusts all cbus commands
+                                   in the active Codex home's rules directory
+  cbus codex-permissions [--scope send|bus] [--binary PATH] [--install [--path FILE] [--force]]
+                                   preview reply permission (default) or bus trust;
                                    --install writes it explicitly, never automatic
   cbus connect <channel> [alias] [--codex-sqlite-home ABS_PATH] [--json]
                                    connect this Codex CLI thread via its native

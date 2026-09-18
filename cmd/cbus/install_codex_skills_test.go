@@ -83,6 +83,50 @@ func TestInstallCodexSkillsDefaults(t *testing.T) {
 	}
 }
 
+func TestCodexTrustedSetupKeepsPermissionOptInAndEdits(t *testing.T) {
+	home, skills := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	run := func(want int, args ...string) {
+		t.Helper()
+		captureStdout(t, func() {
+			if got := runInstallCodexSkills(append([]string{"--path", skills}, args...)); got != want {
+				t.Fatalf("%v: exit=%d want=%d", args, got, want)
+			}
+		})
+	}
+	rules := filepath.Join(home, "rules", "cbus.rules")
+	run(0)
+	if _, err := os.Stat(rules); !os.IsNotExist(err) {
+		t.Fatal("ordinary skill installation granted permissions")
+	}
+	run(0, "--with-permissions")
+	bus, err := os.ReadFile(rules)
+	if err != nil || !strings.Contains(string(bus), `pattern = ["cbus"]`) {
+		t.Fatalf("trusted setup did not install bus permissions in active Codex home: %v", err)
+	}
+	run(0) // The plain refresh used by selfupdate must retain the bus opt-in.
+	retained, _ := os.ReadFile(rules)
+	if string(retained) != string(bus) {
+		t.Fatal("plain skill refresh changed permission scope")
+	}
+	edited := []byte("# locally managed permissions\n")
+	if err := os.WriteFile(rules, edited, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run(1, "--with-permissions", "--force")
+	retained, _ = os.ReadFile(rules)
+	if string(retained) != string(edited) {
+		t.Fatal("skill --force overwrote locally managed permissions")
+	}
+	run(0)
+	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
+		t.Fatal("trusted setup changed general Codex configuration")
+	}
+	if _, err := os.Stat(filepath.Join(skills, "cbus-connect", "SKILL.md")); err != nil {
+		t.Fatal("trusted setup did not honor custom skill destination")
+	}
+}
+
 func TestInstallCodexSkillsOnlyEntrypoints(t *testing.T) {
 	embedded := fstest.MapFS{
 		"skills/codex/one/SKILL.md":          {Data: []byte("skill one")},
