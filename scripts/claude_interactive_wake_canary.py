@@ -34,9 +34,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--idle-seconds", type=float, default=12)
     parser.add_argument("--transport", choices=("background", "socket"), default="background")
+    parser.add_argument("--socket-case", choices=("accepted", "session-mismatch", "hold", "refuse"), default="accepted")
+    parser.add_argument("--message-uuid", type=lambda value: str(uuid.UUID(value)))
     args = parser.parse_args()
     if args.idle_seconds < 10:
         parser.error("--idle-seconds must be at least 10")
+    if args.transport != "socket" and args.socket_case != "accepted":
+        parser.error("--socket-case requires --transport socket")
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -46,6 +50,9 @@ def main():
     for path in (home, config, work, root / "tmp"):
         path.mkdir()
     session = str(uuid.uuid4())
+    message_uuid = args.message_uuid or str(uuid.uuid4())
+    send_session = str(uuid.uuid4()) if args.socket_case == "session-mismatch" else session
+    expects_wake = args.socket_case == "accepted"
     seed, marker = "CBUS_WAKE_SEED_" + uuid.uuid4().hex, "CBUS_WAKE_SIGNAL_" + uuid.uuid4().hex
     trigger = work / "signal"
     waiter = work / "wait_for_signal.py"
@@ -134,6 +141,8 @@ def main():
     (config / ".claude.json").write_text(json.dumps(conf))
     (home / ".claude.json").write_text(json.dumps(conf))
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable"}
+    if args.socket_case in ("hold", "refuse"):
+        settings["crossSessionInbound"] = args.socket_case
     (config / "settings.json").write_text(json.dumps(settings))
     base = f"http://127.0.0.1:{server.server_port}"
     if args.transport == "socket":
@@ -144,11 +153,12 @@ def main():
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "SHELL": "/bin/zsh", "TERM": "xterm-256color", "TMPDIR": str(root / "tmp"), "CLAUDE_CONFIG_DIR": str(config), "ANTHROPIC_API_KEY": key, "ANTHROPIC_BASE_URL": base, "DISABLE_AUTOUPDATER": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_TELEMETRY": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "HTTP_PROXY": base, "HTTPS_PROXY": base, "ALL_PROXY": base, "NO_PROXY": "127.0.0.1,localhost"}
     argv = [binary, "--session-id", session, "--model", "claude-sonnet-4-6", "--permission-mode", "default", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--debug-file", str(root / "debug.log"), seed]
     result = {
-        "root": str(root), "transport": args.transport, "binary": binary,
+        "root": str(root), "transport": args.transport, "socketCase": args.socket_case, "binary": binary,
         "binarySHA256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
         "scriptSHA256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "version": subprocess.check_output([binary, "--version"], env=env, text=True).strip(),
         "sessionId": session, "argv": argv, "command": command,
+        "messageUUID": message_uuid, "sendSessionId": send_session,
         "markers": {"seed": seed, "signal": marker}, "provider": base,
         "passed": False, "checks": {}, "limitations": [
             "Local fake provider and nonessential traffic disabled, not first-party live authentication",
@@ -204,25 +214,31 @@ def main():
                 inbox.settimeout(2)
                 inbox.connect(capability["socket"].removeprefix("uds:"))
                 inbox.sendall((json.dumps({"type": "auth", "token": capability["token"]}) + "\n").encode())
-                inbox.sendall((json.dumps({"type": "user", "message": {"role": "user", "content": marker}}) + "\n").encode())
+                inbox.sendall((json.dumps({"type": "user", "session_id": send_session, "uuid": message_uuid, "message": {"role": "user", "content": marker}}) + "\n").encode())
                 inbox.shutdown(socket.SHUT_WR)
                 try:
                     result["socketResponse"] = inbox.recv(4096).decode(errors="replace")
                 except TimeoutError:
                     result["socketResponse"] = None
-        wait(lambda: any(marker in json.dumps(r["body"].get("messages", [])) for r in requests), "provider receives signal marker", 20)
-        wait(lambda: b"CBUS_WAKE_RECEIVED" in output, "wake reply rendered", 15)
+        if expects_wake:
+            wait(lambda: any(marker in json.dumps(r["body"].get("messages", [])) for r in requests), "provider receives signal marker", 20)
+            wait(lambda: b"CBUS_WAKE_RECEIVED" in output, "wake reply rendered", 15)
+        else:
+            pump(5)
+            result["checks"]["blocked_message_makes_no_model_request"] = state["mainRequests"] == before
+            result["checks"]["blocked_marker_absent_from_provider"] = not any(marker in json.dumps(r["body"]) for r in requests)
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
             "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
             "no_human_input_after_initial_prompt": True,
-            f"{args.transport}_woke_model": True,
+            f"{args.transport}_woke_model_as_expected": (state["mainRequests"] > before) == expects_wake,
             "same_process_alive": process.poll() is None,
             "exact_session_in_all_main_requests": all(
                 json.loads(r["body"].get("metadata", {}).get("user_id", "{}" )).get("session_id") == session
                 for r in main_requests),
         })
-        wait(lambda: any(marker in p.read_text() for p in config.glob("projects/**/*.jsonl")), "wake persisted to exact-session transcript", 10)
+        if expects_wake:
+            wait(lambda: any(marker in p.read_text() for p in config.glob("projects/**/*.jsonl")), "wake persisted to exact-session transcript", 10)
         transcripts = list(config.glob("projects/**/*.jsonl"))
         result["transcripts"] = [str(path) for path in transcripts]
         records = []
@@ -232,7 +248,22 @@ def main():
                     records.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
-        result["checks"]["same_session_transcript_contains_wake"] = any(r.get("sessionId") == session and marker in json.dumps(r) for r in records)
+        receipt = [r for r in records if r.get("type") == "user" and r.get("sessionId") == session and marker in json.dumps(r)]
+        result["checks"]["transcript_receipt_matches_expected"] = bool(receipt) == expects_wake
+        if args.transport == "socket" and expects_wake:
+            result["checks"]["supplied_uuid_persisted_exactly_once"] = len(receipt) == 1 and receipt[0].get("uuid") == message_uuid
+            (root / "inbound-user-row.json").write_text(json.dumps(receipt[0], indent=2)+"\n")
+        if not expects_wake:
+            decision = {
+                "session-mismatch": f'session_id mismatch (got "{send_session}", expected "{session}")',
+                "hold": "held inbound peer message",
+                "refuse": "refused inbound peer message",
+            }[args.socket_case]
+            result["nativeProcessingLines"] = [
+                line for line in (root / "debug.log").read_text().splitlines()
+                if "[cross-session-inbound]" in line or "[uds-messaging]" in line and "Dropping" in line]
+            result["checks"]["native_decision_matches_expected"] = any(
+                decision in line for line in result["nativeProcessingLines"])
         modes = [r["permissionMode"] for r in records if r.get("type") == "permission-mode"]
         result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
         if capability.get("token"):
