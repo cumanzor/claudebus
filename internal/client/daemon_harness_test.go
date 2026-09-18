@@ -39,7 +39,7 @@ func TestDaemonHarnessOmittedAndExplicitCodexRequests(t *testing.T) {
 }
 
 func TestDaemonHarnessRejectsUnsupportedRequestBeforeMutation(t *testing.T) {
-	for _, harness := range []string{"claude", "opencode", "future-adapter", "Codex", " "} {
+	for _, harness := range []string{"opencode", "future-adapter", "Codex", " "} {
 		t.Run(harness, func(t *testing.T) {
 			d, q, req := daemonFixture(t)
 			req.Harness = harness

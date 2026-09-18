@@ -539,9 +539,10 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		}
 	}
 	if !uuidLike(req.ThreadID) {
-		return nil, errors.New("connect requires the exact Codex thread UUID")
+		return nil, errors.New("connect requires the exact CLI session UUID")
 	}
-	if err := validateCodexQueueBinding(req.Config); err != nil {
+	claude, err := prepareConnectBinding(req, token)
+	if err != nil {
 		return nil, err
 	}
 	if err := validateRelayConfig(req.Relay); err != nil {
@@ -552,13 +553,13 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	for _, selected := range d.statusSnapshots() {
 		sameHarness := daemonHarness(selected.Harness) == req.Harness
-		if req.Relay != nil && sameRelay(selected.Relay, req.Relay) && selected.Channel == req.Channel && selected.Alias == req.Alias && selected.State != "detached" && (!sameHarness || selected.ThreadID != req.ThreadID || !sameCodexConnectionHome(selected.Config, req.Config.Home)) {
+		if req.Relay != nil && sameRelay(selected.Relay, req.Relay) && selected.Channel == req.Channel && selected.Alias == req.Alias && selected.State != "detached" && (!sameHarness || selected.ThreadID != req.ThreadID || !sameConnectHome(selected, req)) {
 			return nil, errors.New("remote alias is already managed by another exact thread/store; choose another alias")
 		}
 		if !sameHarness {
 			continue
 		}
-		if selected.Channel == req.Channel && selected.ThreadID == req.ThreadID && sameRelay(selected.Relay, req.Relay) && sameCodexConnectionHome(selected.Config, req.Config.Home) {
+		if selected.Channel == req.Channel && selected.ThreadID == req.ThreadID && sameRelay(selected.Relay, req.Relay) && sameConnectHome(selected, req) {
 			c, finish, err := d.beginOperation(selected.ID)
 			if err != nil {
 				return nil, err
@@ -570,6 +571,9 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			defer finish()
 			if req.Alias != "" && req.Alias != c.Alias {
 				return nil, fmt.Errorf("this thread is already connected as %s/%s", c.Channel, c.Alias)
+			}
+			if req.Harness == daemonHarnessClaude {
+				return nil, errors.New("Claude session is already managed; this admission path cannot replace its binding")
 			}
 			if c.Config.SQLiteHome != "" && c.Config.SQLiteHome != req.Config.SQLiteHome {
 				return nil, errors.New("Codex queue store changed; refusing to redirect an existing connection or its pending deliveries")
@@ -631,7 +635,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if err != nil {
 		return nil, err
 	}
-	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Relay: cloneRelay(req.Relay), State: "queue-ready", Consumer: &consumerObservation{State: "unknown"}}
+	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Claude: claude, Relay: cloneRelay(req.Relay), Consumer: &consumerObservation{State: "unknown"}}
+	c.State = connectionReadyState(c)
 	_, finish, err := d.beginOperation(c.ID)
 	if err != nil {
 		return nil, err
@@ -678,6 +683,12 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		defer unlock()
 	}
 	if err != nil {
+		if c.Claude != nil && os.IsExist(err) {
+			m, ok := ReadPeerMeta(filepath.Join(d.peerDir(c), "meta.json"))
+			if ok && m.ConnectionID == "" && m.SessionID == c.ThreadID {
+				return nil, fmt.Errorf("cannot claim alias %s: this session has an unmanaged registration; stop any Monitor for this exact alias and explicitly leave it before native connect, or choose a fresh alias", ConnectionTarget(c))
+			}
+		}
 		return nil, fmt.Errorf("claim alias (choose another alias or explicitly unregister the existing peer): %w", err)
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "inbox.jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -692,11 +703,16 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if !ok {
 		return nil, errors.New("cannot identify new inbox")
 	}
+	if c.Claude != nil {
+		if err := d.persistClaudeCapability(c.Claude, token); err != nil {
+			return nil, err
+		}
+	}
 	if err = d.save(c); err != nil {
 		return nil, err
 	}
 	now := Now()
-	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: c.Config.Cwd, ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
+	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
 	}
