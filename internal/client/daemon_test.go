@@ -224,12 +224,19 @@ func TestDaemonIdleDoesNotQueryHarnessButRealPresenceIsDelivered(t *testing.T) {
 	if q.opens != opens || q.inspects != inspects || len(q.calls) != 0 {
 		t.Fatal("idle connection queried the harness")
 	}
-	end := appendDaemonMessage(t, c, "presence", "peer joined")
+	line, err := json.Marshal(core.Message{From: "dev/sender", To: "dev/worker", TS: "time", Kind: "presence", Event: "join", Text: "peer joined"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appendInbox(InboxPath(c.Channel, c.Alias), line); err != nil {
+		t.Fatal(err)
+	}
+	end := int64(len(line) + 1)
 	if err := d.deliver(c); err != nil {
 		t.Fatal(err)
 	}
-	if q.opens != opens+1 || q.inspects != inspects+1 || len(q.calls) != 1 || c.Offset != end || c.Accepted != 1 || !strings.Contains(q.calls[0].text, "do not reply") {
-		t.Fatalf("presence was not delivered with no-reply framing: queue=%+v, connection=%+v", q, c)
+	if q.opens != opens+1 || q.inspects != inspects+1 || len(q.calls) != 1 || c.Offset != end || c.Accepted != 1 || !strings.Contains(q.calls[0].text, "Briefly tell the user") || !strings.Contains(q.calls[0].text, "Do not send a bus reply") {
+		t.Fatalf("presence lacks visible notice or bus-loop protection: queue=%+v, connection=%+v", q, c)
 	}
 }
 
