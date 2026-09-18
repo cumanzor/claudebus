@@ -108,15 +108,14 @@ func paneGeometryScript(uuids []string) string {
 }
 
 // tabInOwningWindowScript creates the tab in the window that OWNS the uuid session
-// (`tell w`), fixing the frontmost-window bug. Unlike pane, a stale uuid degrades
-// to the historical behavior (current window) rather than failing the fork — tab
-// never depended on locating the caller.
+// (`tell w`). A stale known UUID is an error; focus changes must not redirect
+// the launch to an unrelated window.
 func tabInOwningWindowScript(uuid, run string) string {
 	r := appleScriptStr(run)
 	body := "          tell w to create tab with default profile command " + r + "\n" +
 		"          return \"ok\"\n"
 	return findSessionScript(uuid, body,
-		"  tell current window to create tab with default profile command "+r+"\n")
+		"  error \"session \" & "+appleScriptStr(uuid)+" & \" not found in any iTerm2 window\"\n")
 }
 
 // osaForkPane splits spec.Anchor (or this session when empty; Fork pre-checks the

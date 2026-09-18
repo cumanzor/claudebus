@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,20 +53,29 @@ func BroadcastPresence(ch, from, event, text, skip string) {
 		if err != nil {
 			continue
 		}
-		appendInbox(filepath.Join(chDir, peer, "inbox.jsonl"), b)
+		// Presence is best-effort; a failed inbox must not stop the broadcast.
+		_ = appendInbox(filepath.Join(chDir, peer, "inbox.jsonl"), b)
 	}
 }
 
 // appendInbox atomically appends one line as a single O_APPEND write — concurrent
-// appenders interleave line-atomically. A vanished target dir is skipped (bash
-// `>> … 2>/dev/null || continue`).
-func appendInbox(path string, line []byte) {
+// appenders interleave line-atomically. Any open, write, or close failure is
+// returned so a message sender cannot report a failed enqueue as successful.
+func appendInbox(path string, line []byte) (err error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return
+		return err
 	}
-	defer f.Close()
-	_, _ = f.Write(append(append([]byte{}, line...), '\n'))
+	defer func() { err = errors.Join(err, f.Close()) }()
+	data := append(append([]byte{}, line...), '\n')
+	n, err := f.Write(data)
+	if err != nil {
+		return err
+	}
+	if n != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // fileExists / dirExists are lightweight stat helpers used across the store.

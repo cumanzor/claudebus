@@ -215,6 +215,21 @@ func decidePeer(p *FormationPeer, f *Formation, w *PlanWorld, live map[string]bo
 	if p.Alias == w.Self {
 		return PeerPlan{Peer: p, Action: ActionPresent, Reason: "this session — it is running apply"}
 	}
+	// A legacy template defaults to Claude, but a known non-Claude registration
+	// at this alias is positive conflicting identity, never a template fallback.
+	for _, r := range w.Roster {
+		if r.Alias != p.Alias {
+			continue
+		}
+		recorded := formationHarness(p)
+		actual := strings.ToLower(r.Harness)
+		if actual == "" && r.CodexBackend != nil {
+			actual = "codex"
+		}
+		if actual != "" && actual != recorded {
+			return PeerPlan{Peer: p, Action: ActionRefuse, Reason: fmt.Sprintf("peer %q records harness=%s but its registration is harness=%s; re-save the formation or resolve the identity mismatch before applying", p.Alias, recorded, actual)}
+		}
+	}
 	// Reconcile only: a peer already on the channel is left alone. This trusts the
 	// listener marker, which is the only cheap signal available before launch — and
 	// the marker has lied in the field, both ways. That is why convergence is proven
@@ -227,6 +242,10 @@ func decidePeer(p *FormationPeer, f *Formation, w *PlanWorld, live map[string]bo
 	if p.Machine != "" && p.Machine != w.Host {
 		return PeerPlan{Peer: p, Action: ActionSkip,
 			Reason: fmt.Sprintf("recorded on %q, this host is %q (cross-machine launch is not in v1)", p.Machine, w.Host)}
+	}
+
+	if err := formationHarnessRefusal(p); err != nil {
+		return PeerPlan{Peer: p, Action: ActionRefuse, Reason: err.Error()}
 	}
 
 	mode := p.Mode

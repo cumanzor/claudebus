@@ -59,7 +59,7 @@ Details that matter:
   with CF Access service-token headers.
 - **Credentials are never in code**: `cbus auth` stores them in the macOS
   Keychain (`security(1)`) or, on Linux, 0600 files under `~/.config/cbus/`.
-- **Receive is Monitor-native**: remote `tail` prints the `Monitor {ws:}` arm
+- **Monitor receive**: remote `tail` prints the `Monitor {ws:}` arm
   spec (URL + `bearer.cbus.<token>` subprotocol) rather than exec'ing a
   process — the session arms it, and messages arrive as turn events exactly
   like local ones.
@@ -86,3 +86,24 @@ Details that matter:
   (or bare `@<host>`) reaps those from the server side: it drops every peer that
   has no live tail **and** no queued mail — a peer with pending mail is always
   kept, so nothing undelivered is lost.
+
+## Native Codex daemon subscriptions
+
+An ordinary Codex CLI session uses `cbus connect CHANNEL@HOST ALIAS` and the
+local daemon, with the same endpoint and credential configuration above.
+It does not arm a Monitor. This requires the new relay `/tail/durable-v1`
+endpoint; an older server is refused before consuming any messages.
+
+The durable stream sends a stable message ID with the raw bus message. The
+daemon acknowledges only after an atomic, synchronized local inbox append;
+the relay moves the message to delivered storage after that acknowledgment.
+Reconnection deduplicates those IDs. Native queue acceptance and observed
+recipient history remain separate states, visible through
+`cbus connection status CHANNEL@HOST/ALIAS --json` and `connection reconcile`.
+
+A mailbox has a consumer identity: the same consumer may reconnect, but a
+different active consumer is refused. Presence uses the actual CLI consumer's
+join/exit/resume transitions; losing and restoring the WebSocket does not create
+false consumer leave/join events. Presence delivery is journaled with recipient
+ownership checks, while ordinary `/tail` behavior remains compatible with
+existing Monitor clients. Compaction notices remain local-only in v1.

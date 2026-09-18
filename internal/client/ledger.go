@@ -93,12 +93,8 @@ func ledgerPath(ch string) string { return filepath.Join(ledgerRoot(), ch+".json
 // AppendLedger appends one event as a single write, so concurrent appenders
 // interleave line-atomically.
 //
-// It deliberately does NOT follow appendInbox, which discards every error including
-// a short write. That is right for an inbox, which join truncates anyway, and wrong
-// for the one file whose entire purpose is durability: a silently dropped line is
-// indistinguishable from an event that never happened, which is the failure this
-// ledger exists to prevent. A short write is an error here, and the caller surfaces
-// it rather than hiding it.
+// Like inbox writes, ledger appends surface write failures and short writes: a
+// silently dropped line is indistinguishable from an event that never happened.
 func AppendLedger(ev LedgerEvent) error {
 	if ev.TS == "" {
 		ev.TS = Now()

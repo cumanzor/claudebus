@@ -115,6 +115,7 @@ func runSelfupdate(args []string) int {
 	// new assets). Best-effort but NEVER silent (D27): the verbs report per file, and
 	// a refresh that cannot run says so.
 	refreshAssets(exePath)
+	fmt.Println("If a cbus daemon is running, use cbus daemon restart to load the updated binary; pending mail is retained.")
 	return 0
 }
 
@@ -133,18 +134,23 @@ func verifyDownloaded(binPath, wantTag string) error {
 	return nil
 }
 
-// refreshAssets execs the (now swapped-in) binary to reinstall commands and roles.
+// refreshAssets execs the new binary. Codex skills use install receipts to update
+// prior shipped content while preserving local edits; no permission rules change.
 func refreshAssets(exePath string) {
-	for _, verb := range []string{"install-commands", "install-roles"} {
-		cmd := exec.Command(exePath, verb, "--force")
+	for _, args := range assetRefreshCommands() {
+		cmd := exec.Command(exePath, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			// non-zero exit here is a per-file skip/fail the verb already printed, or a
 			// real run failure — either way it is surfaced, not swallowed.
-			fmt.Fprintf(os.Stderr, "cbus: note: %s refresh reported problems (see above)\n", verb)
+			fmt.Fprintf(os.Stderr, "cbus: note: %s refresh reported problems (see above)\n", args[0])
 		}
 	}
+}
+
+func assetRefreshCommands() [][]string {
+	return [][]string{{"install-commands", "--force"}, {"install-roles", "--force"}, {"install-codex-skills"}}
 }
 
 // requireGh surfaces actionable hints because the repo is private and selfupdate

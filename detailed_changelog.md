@@ -1,5 +1,33 @@
 # Changelog (detailed)
 
+## Unreleased — Codex CLI daemon integration
+
+- Ordinary CLI current-thread connect uses native queue storage without a second
+  thread writer or model polling. Captures actual runtime/storage binding;
+  acceptance, historical receipt and current consumer state remain separate.
+- Durable attempt/cursor journals fence ambiguous delivery; reconcile only reads
+  evidence, and explicit abandonment records unresolved outcomes without replay.
+- Independent per-peer operations keep health/status/stop responsive. Exact CLI
+  exit/resume drives persisted presence fanout; real events can cause recipient
+  turns, while idle monitoring uses no model calls. Completed compactions produce
+  metadata-only local notices; pre-compaction hooks are deferred.
+- Protected Codex skill upgrades and explicit exact-path send permission setup.
+  Running-daemon version/protocol checks require a controlled restart after an
+  upgrade; unknown shutdown outcomes never start a replacement.
+- Codex spawn remains terminal-independent; tmux windows target the caller's
+  session and stale iTerm anchors fail visibly. Formations retain Codex identity
+  and refuse unsupported automated restore instead of launching Claude.
+- Additive relay durable-v1 protocol acknowledges only saved recipient data,
+  replays unacknowledged IDs safely, and distinguishes native consumer presence
+  from transport reconnects. Existing Monitor transport is retained.
+- Compatibility wrapper keeps exact sender identity, current resume selectors and
+  native-child teardown. Standalone bridge creation respects the server caller's
+  configured permission policy.
+
+Intermediate evidence and final-candidate gates are in
+[the release audit](docs/architecture/codex-v1-release-readiness.md) and cbus-6ij.13.
+No tag, publication, global install or relay deployment has occurred in this work.
+
 ## [2026-09-17 05:09:37 UTC] [Release/Harness] v0.11.4 SHIPPED: named tmux windows on the fleet
 
 [Attempt #1] Release of `19956e2`, annotated tag `v0.11.4`. Same sequence as v0.11.2

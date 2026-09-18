@@ -31,6 +31,9 @@ Your transcript carries your parent's intent up to the checkpoint. Do NOT act on
 // asking a peer what it was born as is what catches a fork wearing the wrong name.
 func KickoffPrompt(f *Formation, pp PeerPlan, self, nonce, brief string) string {
 	p := pp.Peer
+	if err := formationHarnessRefusal(p); err != nil {
+		return err.Error()
+	}
 	addr := f.Channel + "/" + p.Alias
 	r := strings.NewReplacer(
 		"$formation", f.Name,
@@ -190,6 +193,9 @@ func BootstrapPeer(f *Formation, alias, brief string) (string, error) {
 	}
 	if p == nil {
 		return "", fmt.Errorf("formation %q has no peer %q (it has: %s)", f.Name, alias, strings.Join(peerAliases(f), ", "))
+	}
+	if err := formationHarnessRefusal(p); err != nil {
+		return "", err
 	}
 	self, err := bootstrapReplyTo(f)
 	if err != nil {

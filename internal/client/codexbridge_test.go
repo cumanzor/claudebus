@@ -134,7 +134,11 @@ func TestBridgeAttachResumeErrorNoOpener(t *testing.T) {
 }
 
 func TestBridgeAttachCreatesThreadWhenNone(t *testing.T) {
+	params := make(chan map[string]any, 1)
 	f := startFakeCodexStrict(t, func(s *fakeSrv, req map[string]any) {
+		if req["method"] == "thread/start" {
+			params <- req["params"].(map[string]any)
+		}
 		s.reply(req["id"], map[string]any{"thread": map[string]any{"id": "NEW"}})
 	})
 	b := bridgeOn(t, f, "")
@@ -146,6 +150,12 @@ func TestBridgeAttachCreatesThreadWhenNone(t *testing.T) {
 	}
 	if got := f.recorded(); !reflect.DeepEqual(got, []string{"initialize", "thread/start"}) {
 		t.Errorf("create path = %v, want [initialize thread/start]", got)
+	}
+	startParams := <-params
+	for _, key := range []string{"approvalPolicy", "sandbox", "sandboxPolicy", "permissions", "config"} {
+		if value, ok := startParams[key]; ok {
+			t.Errorf("fresh bridge must inherit caller app-server policy, got %s=%v", key, value)
+		}
 	}
 }
 
@@ -233,9 +243,9 @@ func TestBridgeTrackTurns(t *testing.T) {
 		s.reply(req["id"], map[string]any{})
 		switch req["method"] {
 		case "started":
-			s.notify("turn/started", map[string]any{"turn": map[string]any{"id": "T7"}})
+			s.notify("turn/started", map[string]any{"threadId": "T", "turn": map[string]any{"id": "T7"}})
 		case "completed":
-			s.notify("turn/completed", map[string]any{"turn": map[string]any{"id": "T7"}})
+			s.notify("turn/completed", map[string]any{"threadId": "T", "turn": map[string]any{"id": "T7"}})
 		}
 	})
 	b := bridgeOn(t, f, "T")
@@ -251,6 +261,69 @@ func TestBridgeTrackTurns(t *testing.T) {
 	}
 	if !waitActive(b, "", 2*time.Second) {
 		t.Fatal("turn/completed did not clear activeTurn")
+	}
+}
+
+// The server stream can interleave several threads. A foreign start must not replace our
+// steer target, and a foreign completion must not clear it, even with a matching turn id.
+func TestBridgeTrackTurnsIgnoresOtherThreads(t *testing.T) {
+	for name, note := range map[string]codexNote{
+		"foreign start":      {Method: "turn/started", Params: []byte(`{"threadId":"OTHER","turn":{"id":"FOREIGN"}}`)},
+		"foreign completion": {Method: "turn/completed", Params: []byte(`{"threadId":"OTHER","turn":{"id":"OWN"}}`)},
+		"foreign empty turn": {Method: "turn/completed", Params: []byte(`{"threadId":"OTHER","turn":{}}`)},
+		"missing start id":   {Method: "turn/started", Params: []byte(`{"turn":{"id":"FOREIGN"}}`)},
+		"missing finish id":  {Method: "turn/completed", Params: []byte(`{"turn":{"id":"OWN"}}`)},
+		"nested thread id":   {Method: "turn/completed", Params: []byte(`{"thread":{"id":"T"},"turn":{"id":"OWN"}}`)},
+		"malformed identity": {Method: "turn/completed", Params: []byte(`{"threadId":7,"turn":{"id":"OWN"}}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			notes := make(chan codexNote, 2)
+			notes <- codexNote{Method: "turn/started", Params: []byte(`{"threadId":"T","turn":{"id":"OWN"}}`)}
+			notes <- note
+			close(notes)
+			b := &codexBridge{conn: &codexConn{notes: notes}, threadID: "T"}
+			b.trackTurns()
+			if b.activeTurn != "OWN" {
+				t.Fatalf("unrelated event changed steer target to %q, want OWN", b.activeTurn)
+			}
+		})
+	}
+}
+
+// Send on an unbuffered stream so every next event proves the waiter is still receiving.
+// It must survive unrelated idle events and finish only when its own thread becomes idle.
+func TestBridgeWaitOpenerIdleIgnoresOtherThreads(t *testing.T) {
+	notes := make(chan codexNote)
+	b := &codexBridge{conn: &codexConn{notes: notes}, threadID: "T"}
+	done := make(chan struct{})
+	go func() {
+		b.waitOpenerIdle(2 * time.Second)
+		close(done)
+	}()
+	send := func(params string) {
+		t.Helper()
+		select {
+		case notes <- codexNote{Method: "thread/status/changed", Params: []byte(params)}:
+		case <-done:
+			t.Fatal("opener wait ended before its own thread became idle")
+		case <-time.After(3 * time.Second):
+			t.Fatal("opener wait stopped receiving notifications")
+		}
+	}
+	for _, params := range []string{
+		`{"threadId":"OTHER","status":{"type":"idle"}}`,
+		`{"status":{"type":"idle"}}`,
+		`{"thread":{"id":"T"},"status":{"type":"idle"}}`,
+		`{"threadId":7,"status":{"type":"idle"}}`,
+	} {
+		send(params)
+		send(`{"threadId":"T","status":{"type":"active","activeFlags":[]}}`)
+	}
+	send(`{"threadId":"T","status":{"type":"idle"}}`)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("opener wait ignored its own idle notification")
 	}
 }
 
