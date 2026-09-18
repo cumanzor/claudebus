@@ -71,7 +71,7 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	// running, go use it" is the decisive answer. Caught by the first real-store smoke:
 	// the transcript refusal fired for a session that was alive on the channel.
 	if at, ok := world.LiveSids[p.SessionID]; ok {
-		return "", "", fmt.Errorf("the anchor's session %s is live-armed at %s right now — it does not need resuming; run apply from it", p.SessionID, at)
+		return "", "", fmt.Errorf("the anchor's session %s is held at %s (live or availability unresolved) — confirm that session has stopped before resuming, or run apply from it if it is still open", p.SessionID, at)
 	}
 	// The launch profile can outgrow the recorded one: an envelope from before
 	// profile capture records none, and a blank profile resolves no instance roots,
