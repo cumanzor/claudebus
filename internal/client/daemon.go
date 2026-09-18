@@ -705,7 +705,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	if c.Claude != nil {
 		if err := d.persistClaudeCapability(c.Claude, token); err != nil {
-			return nil, err
+			return nil, errors.Join(err, cleanupClaudeUnpublishedClaim(dir, c.Dev, c.Ino))
 		}
 	}
 	if err = d.save(c); err != nil {
