@@ -159,12 +159,39 @@ of a replace, which is an argument from the primitive rather than from an exerci
 the race loop is bounded: it can find a loss, it cannot prove there is none. Neither is a
 claim of immunity under an adversarial writer.
 
-## Acceptance, still open
+## Acceptance: mechanism measured, field proof still open
 
-Nothing here has been measured on 2.1.277. The source reading predicts that an unflagged
-session keeps `persistent`; the running behavior is unverified.
-The acceptance gate is a live proof on this version: one first-party session on a seeded
-config dir whose Monitor result says it runs until TaskStop, against a control session on an
-unseeded dir whose result says it expires. Until someone runs that pair and records it, treat
-this document as a description of a mechanism, not a working remedy. Do not claim the stopgap
-works from the source reading alone.
+Superseded: an earlier revision of this document said nothing here had been measured on
+2.1.277 and that the source only predicted `persistent`. The mechanism has since been measured
+on the running binary.
+
+A two-arm runtime pair was run against the installed 2.1.277 (sha256
+`73d6a2a5...9914b9c`) from one script (sha256 `741d0e8c...78d03e`), in an ordinary interactive
+PTY at default permission mode, with no human input after the initial prompt. Both arms
+requested the same Monitor input, `persistent: true` with `timeout_ms: 2000`, and both held
+`tengu_amber_sentinel` true. The only variable was `tengu_breezy_crescent`:
+
+- Flag true: `Monitor started (task bu151whxw, expires in 2s unless the source ends first...)`.
+  The waiter died at the deadline, the expiry notice arrived, and an external signal twelve
+  seconds later produced no further request. 21 checks, all true.
+- Flag false: `Monitor started (task b1jqqgx3e, persistent, runs until TaskStop or session
+  end)`. The same process was still alive across a twelve-second idle with no main-loop
+  requests in between, the late external signal did wake it, and TaskStop then stopped it.
+  20 checks, all true.
+
+Artifacts: `/tmp/cbus-monitor-runtime-pair-20260918.json`, with per-arm results at
+`/tmp/cbus-cc-wake-zvj2v92m/result.json` (bounded) and `/tmp/cbus-cc-wake-d3mz3foh/result.json`
+(persistent). Canary source under `/tmp/cbus-cc-capability-20260918`.
+
+What that establishes is the mechanism: on this binary, that one flag decides whether the
+Monitor schema keeps `persistent` and whether a monitor outlives its deadline. What it does
+not establish, in the artifacts' own words, is real-account field proof. The run used a
+synthetic two-flag snapshot and a local fake provider on the firstParty code route with a fake
+API key, so it says nothing about seeding a real signed-in config dir. It requested a
+two-second deadline, so it does not measure the default five-minute or thirty-minute
+deadlines. It used environment traffic controls rather than an OS-enforced network sandbox,
+and it did not exercise cbus at all.
+
+So the remaining gate is narrower than it was, and it is still a gate: a first-party session on
+a seeded config dir, doing real work, reporting a monitor that runs until TaskStop. Do not
+describe the stopgap as proven in the field until someone runs that.
