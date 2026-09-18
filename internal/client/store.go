@@ -459,6 +459,12 @@ func Unreserve(ch, alias string) {
 // Leave removes this session's registration(s) — all, or only in ch — broadcasting
 // a leave BEFORE removal (bin/cbus:662-673).
 func Leave(ch string) (left []string, err error) {
+	return leaveSession(ch, false)
+}
+
+// Automatic session exit must retain managed inboxes for pending receipt recovery
+// and resume. Explicit user leave keeps its existing removal semantics.
+func leaveSession(ch string, preserveManaged bool) (left []string, err error) {
 	root := CBUSDir()
 	for _, reg := range ResolveSelf() {
 		if ch != "" && reg.Channel != ch {
@@ -474,6 +480,13 @@ func Leave(ch string) (left []string, err error) {
 		if metaSessionID(filepath.Join(root, reg.Channel, reg.Alias, "meta.json")) != SessionID() {
 			unlock()
 			continue
+		}
+		if preserveManaged {
+			connectionID, readErr := reclaimConnectionID(filepath.Join(root, reg.Channel, reg.Alias, "meta.json"))
+			if readErr != nil || connectionID != "" {
+				unlock()
+				continue
+			}
 		}
 		BroadcastPresence(reg.Channel, reg.Alias, "leave", "left "+reg.Channel, reg.Alias)
 		// capture every subject fact BEFORE the dir goes: after RemoveAll the
