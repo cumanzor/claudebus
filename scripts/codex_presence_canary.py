@@ -83,9 +83,15 @@ class PresenceCanary(ResumeCanary):
         self.command(["join", "cli-resume-canary", "visitor", "--session-id", str(uuid.uuid4())])
         self.finish_provider_turn(2, "joined cli-resume-canary as visitor")
         request = self.provider_turns()[1]
-        self.check("real_presence_event_is_model_visible_with_no_reply_wording",
-                   "kind=presence" in json.dumps(request["body"].get("input", []))
-                   and "do not reply" in json.dumps(request["body"].get("input", [])))
+        visitor_inputs = [part.get("text", "")
+                          for item in request["body"].get("input", []) if item.get("role") == "user"
+                          for part in item.get("content", [])
+                          if "joined cli-resume-canary as visitor" in part.get("text", "")]
+        self.check("real_presence_join_is_model_visible_with_user_notice_and_no_bus_reply",
+                   len(visitor_inputs) == 1 and all(text in visitor_inputs[0] for text in (
+                       "from=cli-resume-canary/visitor", "kind=presence", 'event="join"',
+                       "Briefly tell the user which peer joined, left, departed or was renamed",
+                       "Do not send a bus reply or acknowledgment solely for this event.")))
         accepted_before = self.status()["accepted"]
         daemon_before = json.loads(self.command(["daemon", "status", "--json"]).stdout)
         self.quit_cli()
