@@ -76,7 +76,10 @@ func reloadDaemonFixture(t *testing.T, q *daemonFakeQueue) *busDaemon {
 	t.Helper()
 	d := newBusDaemon()
 	d.start = selfStart(t)
-	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) {
+	d.probeConsumer = func(_ context.Context, c *ConnectionState) (consumerProbe, error) {
+		if c.Consumer == nil {
+			return onlinePresence(nil), nil // Admission proof; presence stays independent.
+		}
 		return consumerProbe{State: "unknown"}, nil
 	}
 	d.openQueue = func(CodexQueueConfig) (nativeQueue, error) { q.opens++; return q, nil }
@@ -130,23 +133,14 @@ func blockDaemonJournal(t *testing.T, d *busDaemon, c *ConnectionState) func() {
 	}
 }
 
-func TestDaemonConnectRequiresExactCLIThread(t *testing.T) {
-	for _, source := range []string{"cli", "vscode", "appServer", ""} {
+func TestDaemonConnectUsesCurrentCLINotThreadOrigin(t *testing.T) {
+	for _, source := range []string{"cli", "vscode", "appServer", "exec", "unknown", ""} {
 		t.Run("source="+source, func(t *testing.T) {
 			d, q, req := daemonFixture(t)
 			q.thread.Source = source
 			c, err := d.connect(req)
-			if source == "cli" {
-				if err != nil || c.RecordedVersion != "test-version" || !d.owns(c) {
-					t.Fatalf("CLI connection failed: %+v, err=%v", c, err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), "exact CLI thread") {
-				t.Fatalf("non-CLI source must fail: %v", err)
-			}
-			if dirExists(filepath.Join(CBUSDir(), req.Channel)) || len(d.connections) != 0 || q.closes != 1 {
-				t.Fatal("failed capability check must close the sidecar without claiming a peer")
+			if err != nil || c.RecordedVersion != "test-version" || !d.owns(c) {
+				t.Fatalf("current CLI rejected because of historical source: %+v, err=%v", c, err)
 			}
 		})
 	}

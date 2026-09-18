@@ -11,7 +11,7 @@ import (
 // CodexConnectIdentity captures the exact current thread and local backend configuration.
 // Native thread identity is required; neither a recent transcript nor a cwd match identifies
 // the caller. This is not proof of CLI origin: the caller must inspect this exact thread's
-// source and queue capability before registering it. Recorded cliVersion is likewise not
+// current CLI writer and queue capability before registering it. Recorded cliVersion is likewise not
 // proof of the version of the process currently serving the thread.
 func CodexConnectIdentity() (CodexQueueConfig, string, error) {
 	return CodexConnectIdentityWithOptions(CodexConnectOptions{})
@@ -116,7 +116,7 @@ func codexConnectIdentity(opts CodexConnectOptions, witness func() (codexRuntime
 // codexDesktopAncestor rejects positive evidence of the macOS desktop frontend,
 // including a CLI-born transcript reopened there. Absence is not proof of CLI origin:
 // process inspection may be unavailable, and a detached backend can lose its frontend
-// ancestry. The adapter must still check the exact thread's source before connecting.
+// ancestry. The adapter must still verify the exact thread's current CLI writer before connecting.
 func codexDesktopAncestor(start int, lookup func(int) (procRecord, bool)) bool {
 	const desktopExecutable = "/Codex.app/Contents/MacOS/Codex"
 	var previous procRecord

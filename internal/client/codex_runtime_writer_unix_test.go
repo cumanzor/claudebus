@@ -53,7 +53,11 @@ func TestCodexWriterProcessHelper(t *testing.T) {
 
 func startCodexWriterFixture(t *testing.T, binary, rollout, queue, mode string) (*exec.Cmd, func()) {
 	t.Helper()
-	cmd := exec.Command(binary, "--", rollout, queue, mode)
+	args := []string{"--", rollout, queue, mode}
+	if mode == "app-server" {
+		args = append([]string{"app-server"}, args...)
+	}
+	cmd := exec.Command(binary, args...)
 	cmd.Env = append(os.Environ(), "CBUS_TEST_ROLLOUT_WRITER=1")
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -139,4 +143,48 @@ func TestConsumerWriterDiscoveryExitResumeAndReadOnlyExclusion(t *testing.T) {
 	}
 	stopDuplicate()
 	stopSecond()
+	_, stopServer := startCodexWriterFixture(t, binary, rollout, queue, "app-server")
+	p, err = observeCodexConsumer(ctx, c)
+	if err != nil || p.State == "online" {
+		t.Fatalf("app-server writer admitted as a CLI: %+v %v", p, err)
+	}
+	stopServer()
+	otherQueue := filepath.Join(t.TempDir(), "queue_1.sqlite")
+	if err := os.WriteFile(otherQueue, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, stopWrongStore := startCodexWriterFixture(t, binary, rollout, otherQueue, "writer")
+	p, err = observeCodexConsumer(ctx, c)
+	if err != nil || p.State == "online" {
+		t.Fatalf("writer using another queue store admitted: %+v %v", p, err)
+	}
+	stopWrongStore()
+}
+
+func TestConsumerRolloutReplacementCannotBorrowValidatedIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"id":"`+daemonTestThread+`"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openConsumerRollout(path, daemonTestThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	identity, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"id":"another-thread"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if sameOpenFile(identity, path) {
+		t.Fatal("replacement borrowed the validated UUID")
+	}
+	if !sameOpenFile(identity, path+".old") {
+		t.Fatal("open validated rollout identity was lost")
+	}
 }
