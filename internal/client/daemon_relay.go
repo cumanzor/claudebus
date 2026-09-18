@@ -97,7 +97,7 @@ func (d *busDaemon) connectRelay(c *ConnectionState, ready ...relaySocket) error
 }
 
 func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
-	if err := requireCodexConnection(c); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
 	dir := filepath.Join(CBUSDir(), ".remote", c.Relay.Host, c.Channel)
@@ -105,6 +105,12 @@ func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
 		return err
 	}
 	owner := c.Config.RuntimePID
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		if c.Claude == nil {
+			return errors.New("Claude connection binding is missing")
+		}
+		owner = c.Claude.Binding.Endpoint.PID
+	}
 	if c.Consumer != nil && c.Consumer.PID > 0 {
 		owner = c.Consumer.PID
 	}

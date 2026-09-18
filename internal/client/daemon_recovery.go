@@ -233,7 +233,7 @@ func (d *busDaemon) abandon(req AbandonRequest) (*ConnectionState, error) {
 	next.Abandoned++
 	next.Error = ""
 	if next.State != "disconnected" {
-		next.State = "queue-ready"
+		next.State = connectionReadyState(c)
 	}
 	if err := d.save(&next); err != nil {
 		return nil, err
