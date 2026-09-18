@@ -45,9 +45,9 @@ proof of consumer ownership. Every join or reconnect requires a verified current
 interactive CLI holding this exact thread's writable rollout and queue store;
 automatically captured process identity must match that writer. Unknown or
 ambiguous ownership is refused with a process-inspection diagnostic. Historical
-thread origin is not the current frontend: a Desktop-origin thread resumed in
-CLI can join. Running desktop clients and spawned subagent threads remain
-unsupported. Already registered peers still retain queued mail while the CLI is
+thread origin is not the current frontend: a thread labeled `source="vscode"`
+can join when it is running in CLI. Running desktop clients and spawned subagent
+threads remain unsupported. Already registered peers still retain queued mail while the CLI is
 offline, including across daemon restart. No terminal is opened or moved. iTerm2 and tmux work the same way; terminal placement is a
 separate integration concern. Desktop harness clients and remote execution
 backends are outside v1. Remote bus channels are supported separately, through
