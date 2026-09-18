@@ -10,6 +10,10 @@ name (e.g. `fork-3` → `discovery`) instead of an auto-picked one.
 The user passed: "$ARGUMENTS" — first word is the new alias (required), optional
 second word is the channel (needed only if this session joined more than one).
 
+Native managed aliases cannot currently be renamed in place. The CLI refuses this
+case; report that refusal and preserve the connection and pending mail. The steps
+below apply only to legacy join/Monitor peers.
+
 1. Run `cbus rename <new-alias> [channel]`. It `mv`s this session's peer dir and
    rewrites `meta.alias`, printing the new `channel/alias` address. It refuses if
    the name is taken by a live listener, if the session isn't joined, or if the

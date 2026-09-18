@@ -1,7 +1,7 @@
 ---
 description: Bring a Codex CLI session onto a cbus channel as a peer, fresh or resumed
 argument-hint: "[channel] [--alias a] [resume <session-id>|resume --last]"
-allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion
+allowed-tools: Bash(cbus:*), AskUserQuestion
 ---
 
 Put a **Codex CLI** session on a `cbus` channel as a real peer — its own alias,
@@ -49,13 +49,9 @@ resuming its own recorded id.
 
 ## Steps
 
-1. **Join this side first** — skip steps 1 and 2 if this session already has a
-   cbus Monitor armed for this channel. Run `cbus join <channel>` (idempotent)
-   and note the `channel/alias` it prints.
-2. **Arm this session's listener** with the **Monitor** tool, persistent:
-   command `cbus tail <channel>/<alias>`, description `cbus:<channel>/<alias>`.
-   ⚠️ Never run a local `cbus tail` in Bash — it execs a follower that never
-   exits.
+1. Connect this Claude session with `cbus connect CHANNEL [ALIAS] --json`.
+   Follow `/bus-join` for capability checks, roster and presence handling.
+2. Keep the native connection; do not start a Monitor or tail loop.
 3. **Launch the codex peer in a window of its own.** With tmux available, do it
    yourself — `-c` pins the cwd, which decides what `resume --last` resolves to
    and where the peer's tools run:
