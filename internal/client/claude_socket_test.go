@@ -116,6 +116,19 @@ func TestClaudeSocketRejectsBeforeSecretLeaves(t *testing.T) {
 	}
 }
 
+func TestClaudeSocketEmptyPayloadRejectedBeforeAuthentication(t *testing.T) {
+	_, endpoint := claudeTestListener(t)
+	validated := false
+	target := claudeSocketTarget{Endpoint: endpoint, SessionID: claudeTestSession, Validate: func(context.Context, *net.UnixConn) error {
+		validated = true
+		return nil
+	}}
+	result, err := submitClaudeSocket(claudeTestContext(t), target, "secret", "attempt", "")
+	if err == nil || result.State != claudeNotSubmitted || validated {
+		t.Fatalf("empty payload reached transport: %+v, %v, validated=%v", result, err, validated)
+	}
+}
+
 type claudeWriterFunc func([]byte) (int, error)
 
 func (f claudeWriterFunc) Write(p []byte) (int, error) { return f(p) }
@@ -191,8 +204,8 @@ func TestClaudeReceiptRequiresExactPersistedUserRow(t *testing.T) {
 				t.Fatalf("%+v, %v", got, err)
 			}
 			if tc.name == "partial" {
-				if got.NextOffset != 0 {
-					t.Fatal("partial row advanced cursor")
+				if got.NextOffset != 0 || got.BudgetExhausted {
+					t.Fatal("partial EOF was mistaken for progress or budget exhaustion")
 				}
 				_, _ = f.WriteString("\n")
 				got, err = observeClaudeReceipt(claudeTestContext(t), f, claudeTestSession, id, got.NextOffset, 1<<20)
@@ -201,6 +214,24 @@ func TestClaudeReceiptRequiresExactPersistedUserRow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClaudeReceiptBudgetDoesNotMasqueradeAsPartialEOF(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "transcript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	id := claudeMessageUUID("attempt")
+	_, _ = f.WriteString(`{"type":"user","sessionId":"` + claudeTestSession + `","uuid":"` + id + `"}` + "\n")
+	got, err := observeClaudeReceipt(claudeTestContext(t), f, claudeTestSession, id, 0, 8)
+	if err != nil || got.Observed || got.NextOffset != 0 || !got.BudgetExhausted {
+		t.Fatalf("budget truncation hidden: %+v, %v", got, err)
+	}
+	got, err = observeClaudeReceipt(claudeTestContext(t), f, claudeTestSession, id, got.NextOffset, 1024)
+	if err != nil || !got.Observed || got.BudgetExhausted {
+		t.Fatalf("larger budget did not recover receipt: %+v, %v", got, err)
 	}
 }
 
@@ -214,7 +245,7 @@ func TestClaudeReceiptBoundsCancellationAndFileFailure(t *testing.T) {
 	_, _ = f.WriteString("{\"type\":\"assistant\"}\n{\"type\":\"user\"")
 	ctx := claudeTestContext(t)
 	got, err := observeClaudeReceipt(ctx, f, claudeTestSession, id, 0, 25)
-	if err != nil || got.Observed || got.NextOffset != 21 {
+	if err != nil || got.Observed || got.NextOffset != 21 || !got.BudgetExhausted {
 		t.Fatalf("bounded scan: %+v, %v", got, err)
 	}
 	canceled, cancel := context.WithCancel(ctx)
