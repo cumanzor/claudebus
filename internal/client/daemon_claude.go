@@ -63,6 +63,12 @@ func observeClaudeConsumer(c *ConnectionState) (consumerProbe, error) {
 	if err := validateClaudeEndpoint(b.Endpoint); err != nil {
 		return unknown, err
 	}
+	if err := validateCurrentClaudeSession(b); err != nil {
+		if errors.Is(err, errClaudeSessionChanged) {
+			return consumerProbe{State: "exited", Detail: err.Error()}, nil
+		}
+		return unknown, err
+	}
 	f, err := openBoundClaudeTranscript(b)
 	if err != nil {
 		return unknown, err

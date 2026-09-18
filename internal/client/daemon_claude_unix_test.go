@@ -30,6 +30,7 @@ func daemonClaudeFixture(t *testing.T) (*busDaemon, *ConnectionState, *claudeQue
 	cfg := q.cfg
 	cfg.CredentialRef = ref
 	cfg.Binding.ConfigHome, cfg.Binding.UserHome = d.root, d.root
+	writeClaudeSessionRegistry(t, cfg.Binding)
 	c.Harness, c.Claude, c.RolloutPath = daemonHarnessClaude, &cfg, cfg.Binding.TranscriptPath
 	d.probeConsumer = nil
 	if err := d.save(c); err != nil {
