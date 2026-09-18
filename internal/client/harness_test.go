@@ -11,6 +11,30 @@ import (
 
 // ---- hook-exit -------------------------------------------------------------------
 
+func TestHookExitPreservesManagedInboxAndLeavesLegacyPeers(t *testing.T) {
+	root := setupStore(t)
+	path := seedManagedPeer(t, root, "managed", "SESSION")
+	unchanged := managedPeerSnapshot(t, path)
+	seedMeta(t, root, "legacy", "worker", "SESSION")
+	seedMeta(t, root, "other", "worker", "OTHER")
+	t.Setenv("CBUS_SESSION_ID", "OTHER")
+	HookExit(strings.NewReader(`{"session_id":"SESSION"}`))
+	unchanged()
+	if dirExists(filepath.Join(root, "legacy", "worker")) {
+		t.Fatal("legacy registration did not leave")
+	}
+	if !dirExists(filepath.Join(root, "other", "worker")) {
+		t.Fatal("hook removed inherited environment session")
+	}
+	defer OverrideSessionID("SESSION")()
+	if _, err := Leave("dev"); err != nil {
+		t.Fatal(err)
+	}
+	if dirExists(filepath.Dir(path)) {
+		t.Fatal("explicit leave no longer removes managed registration")
+	}
+}
+
 // TestHookExitLeavesLocalKeepsRemote: the SessionEnd hook leaves this session's LOCAL
 // registrations (reading the id from stdin JSON) but leaves REMOTE markers untouched —
 // the relay has no leave endpoint; a dead session's markers die via the ownerPid sweep.
