@@ -55,6 +55,9 @@ func TestCodexSpawnIsIndependentOfTerminalAndParentHarness(t *testing.T) {
 		if !strings.Contains(prompt, " connect 'codex-test' '"+alias+"' --json") || !strings.Contains(prompt, "do not start a Monitor") {
 			t.Fatalf("wrong bootstrap: %s", prompt)
 		}
+		if !strings.Contains(prompt, " list 'codex-test' once") || !strings.Contains(prompt, "role unknown") || !strings.Contains(prompt, "Briefly tell the user") {
+			t.Fatalf("spawned peer lacks roster and visible presence guidance: %s", prompt)
+		}
 	}
 }
 
@@ -67,6 +70,19 @@ func TestCodexSpawnFailureReleasesOnlyReservation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(CBUSDir(), "spawn-failed", "worker")); !os.IsNotExist(err) {
 		t.Fatal("failed launch left reservation")
+	}
+}
+
+func TestCodexRemoteSpawnChoosesChildAliasAndScopesRoster(t *testing.T) {
+	for _, alias := range []string{"", "reviewer"} {
+		prompt := CodexSpawnPrompt("/installed/cbus", "team@relay", alias)
+		wantAlias := `'reviewer'`
+		if alias == "" {
+			wantAlias = `"codex-$CODEX_THREAD_ID"`
+		}
+		if !strings.Contains(prompt, `connect 'team@relay' `+wantAlias+` --json`) || !strings.Contains(prompt, `'/installed/cbus' list 'team@relay' once`) {
+			t.Fatalf("remote bootstrap lacks explicit child alias or scoped roster: %s", prompt)
+		}
 	}
 }
 
