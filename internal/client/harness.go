@@ -219,8 +219,18 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	if why := core.StoreNameReason(ch); why != "" {
 		return "", "", "", fmt.Errorf("bad channel %q: %s", ch, why)
 	}
-	if _, _, jerr := Join(ch, ""); jerr != nil {
-		return "", "", "", jerr
+	managed := false
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch {
+			m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), ch, reg.Alias, "meta.json"))
+			managed = ok && m.ConnectionID != ""
+			break
+		}
+	}
+	if !managed {
+		if _, _, jerr := Join(ch, ""); jerr != nil {
+			return "", "", "", jerr
+		}
 	}
 	for _, reg := range ResolveSelf() { // requires this session's id — empty => "failed to join"
 		if reg.Channel == ch {

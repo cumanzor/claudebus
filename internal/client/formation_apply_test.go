@@ -223,7 +223,7 @@ func TestApplyRequiresAJoinedApplier(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not on") {
 		t.Fatalf("want a refusal naming the join, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "cbus join ch") {
+	if !strings.Contains(err.Error(), "cbus connect ch") {
 		t.Errorf("the error must name the fix: %v", err)
 	}
 }
@@ -741,7 +741,7 @@ func TestApplyChannelOverride(t *testing.T) {
 		t.Fatal("coder not launched")
 	}
 	prompt := spec.Argv[len(spec.Argv)-1]
-	if !strings.Contains(prompt, "cbus join real-chan coder") {
+	if !strings.Contains(prompt, "cbus connect real-chan coder") {
 		t.Errorf("kickoff join line did not follow the override:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "cbus send real-chan/orchestrator") {

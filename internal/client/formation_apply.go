@@ -270,7 +270,7 @@ func applierAddress(ch string) (string, error) {
 			return reg.Channel + "/" + reg.Alias, nil
 		}
 	}
-	return "", fmt.Errorf("this session is not on %q — apply briefs peers to answer IT, so it must be a peer first: cbus join %s <alias>", ch, ch)
+	return "", fmt.Errorf("this session is not on %q — apply briefs peers to answer IT, so it must be a peer first: cbus connect %s <alias> --json", ch, ch)
 }
 
 // fileDeclaresSplit reports whether ANY peer in the envelope declares an explicit
