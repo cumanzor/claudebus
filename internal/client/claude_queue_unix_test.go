@@ -27,7 +27,8 @@ func claudeQueueFixture(t *testing.T) (*claudeQueue, *net.UnixListener) {
 	if !ok {
 		t.Fatal("transcript identity missing")
 	}
-	cfg := ClaudeConnectionConfig{Binding: ClaudeConnectBinding{SessionID: claudeTestSession, Cwd: filepath.Dir(path), TranscriptPath: path, TranscriptDev: dev, TranscriptIno: ino, TranscriptSize: size, TranscriptOffset: size, Endpoint: endpoint}, CredentialRef: ref, ReceiptOffset: size}
+	cfg := ClaudeConnectionConfig{Binding: ClaudeConnectBinding{SessionID: claudeTestSession, ConfigHome: root, Cwd: filepath.Dir(path), TranscriptPath: path, TranscriptDev: dev, TranscriptIno: ino, TranscriptSize: size, TranscriptOffset: size, Endpoint: endpoint}, CredentialRef: ref, ReceiptOffset: size}
+	writeClaudeSessionRegistry(t, cfg.Binding)
 	queue, err := newClaudeQueueContext(context.Background(), root, cfg)
 	if err != nil {
 		t.Fatal(err)
