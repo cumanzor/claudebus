@@ -49,7 +49,7 @@ func claudeMessageUUID(attemptID string) string {
 func submitClaudeSocket(ctx context.Context, target claudeSocketTarget, token, attemptID, payload string) (claudeSubmission, error) {
 	result := claudeSubmission{UUID: claudeMessageUUID(attemptID), State: claudeNotSubmitted}
 	deadline, bounded := ctx.Deadline()
-	if !bounded || !filepath.IsAbs(target.Endpoint) || !uuidLike(target.SessionID) || target.Validate == nil || token == "" || attemptID == "" {
+	if !bounded || !filepath.IsAbs(target.Endpoint) || !uuidLike(target.SessionID) || target.Validate == nil || token == "" || attemptID == "" || payload == "" {
 		return result, errors.New("Claude socket requires a bounded context and an exact validated target")
 	}
 	if err := ctx.Err(); err != nil {
@@ -106,8 +106,9 @@ func writeClaudeMessage(ctx context.Context, dst io.Writer, message []byte, resu
 }
 
 type claudeReceipt struct {
-	Observed   bool
-	NextOffset int64
+	Observed        bool
+	NextOffset      int64
+	BudgetExhausted bool // Snapshot has unread bytes: continue/increase budget, not nonreceipt.
 }
 
 // The caller supplies an already identity-bound descriptor, never a discovered
@@ -156,5 +157,6 @@ func observeClaudeReceipt(ctx context.Context, transcript *os.File, sessionID, m
 	if scan.Err() != nil {
 		return result, errors.New("Claude receipt transcript read failed or exceeded the row limit")
 	}
+	result.BudgetExhausted = maxBytes < info.Size()-offset
 	return result, ctx.Err()
 }
