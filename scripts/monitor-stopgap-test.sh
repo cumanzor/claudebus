@@ -56,6 +56,30 @@ refuses "revert after a sign-in rewrote the config" revert "$tmp/cfg"
 [ -s "$out" ] && ok "post-login config survived revert" || bad "revert deleted a post-login config"
 run status "$tmp/cfg" 2>/dev/null | grep -q MODIFIED && ok "status reports MODIFIED" || bad "status missed the change"
 
+[ "$(cat "$out")" = '{"cachedGrowthBookFeatures":{},"oauthAccount":{"x":1}}' ] \
+  && ok "post-login config restored byte-identical" || bad "post-login config was altered"
+ls "$tmp/cfg"/.claude.json.reverting-* >/dev/null 2>&1 && bad "revert left an archive behind" \
+  || ok "no archive left after a restore"
+
+# adversarial: replace the config by atomic rename while revert runs. this can only find a
+# loss, never prove its absence, so it is a bounded loop and is reported as such.
+lost=0
+for i in $(seq 1 20); do
+  race="$tmp/race$i"; run seed "$race" --from "$tmp/source.json" >/dev/null 2>&1
+  printf '{"signed":"in-%d"}\n' "$i" > "$tmp/newcfg"
+  ( for _ in 1 2 3 4 5 6 7 8; do cp "$tmp/newcfg" "$tmp/stage$i" 2>/dev/null &&
+      mv -f "$tmp/stage$i" "$race/.claude.json" 2>/dev/null; done ) &
+  racer=$!
+  run revert "$race" >/dev/null 2>&1
+  wait $racer 2>/dev/null
+  # the signed-in payload must still exist somewhere: in place, or preserved as an archive
+  if ! grep -qs "in-$i" "$race/.claude.json" "$race"/.claude.json.reverting-* 2>/dev/null; then
+    # it is legitimate for the racer to have finished before revert claimed the file
+    grep -qs "in-$i" "$tmp/newcfg" && [ ! -e "$race/.claude.json" ] && lost=$((lost+1))
+  fi
+done
+[ "$lost" -eq 0 ] && ok "20 revert-vs-signin races lost no config" || bad "$lost race(s) lost a config"
+
 cp "$tmp/seeded-copy" "$out"
 run revert "$tmp/cfg" >/dev/null 2>&1 || bad "revert of an unmodified seed exited nonzero"
 [ -e "$out" ] || [ -e "$tmp/cfg/.monitor-stopgap.json" ] && bad "revert left files behind" || ok "revert removed both files"
