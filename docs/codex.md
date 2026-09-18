@@ -41,9 +41,14 @@ native executable and actual open queue database. The open database witness
 resolves profile and command-line SQLite overrides; cbus does not guess from the
 daemon's environment. If process inspection is unavailable, an explicit
 `--codex-sqlite-home ABS_PATH` is a caller-declared fallback, not independent
-proof of consumer ownership. The daemon validates CLI source and native queue
-API before registering the peer. No terminal is
-opened or moved. iTerm2 and tmux work the same way; terminal placement is a
+proof of consumer ownership. Every join or reconnect requires a verified current
+interactive CLI holding this exact thread's writable rollout and queue store;
+automatically captured process identity must match that writer. Unknown or
+ambiguous ownership is refused with a process-inspection diagnostic. Historical
+thread origin is not the current frontend: a Desktop-origin thread resumed in
+CLI can join. Running desktop clients and spawned subagent threads remain
+unsupported. Already registered peers still retain queued mail while the CLI is
+offline, including across daemon restart. No terminal is opened or moved. iTerm2 and tmux work the same way; terminal placement is a
 separate integration concern. Desktop harness clients and remote execution
 backends are outside v1. Remote bus channels are supported separately, through
 the relay described below.

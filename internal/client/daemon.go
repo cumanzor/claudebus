@@ -429,8 +429,8 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 		return nil, err
 	}
 	t, err := q.inspect(c.ThreadID)
-	if err == nil && (t.ID != c.ThreadID || t.Source != "cli") {
-		err = fmt.Errorf("exact CLI thread required; backend returned id=%q source=%q", t.ID, t.Source)
+	if err == nil && t.ID != c.ThreadID {
+		err = fmt.Errorf("exact thread required; backend returned id=%q", t.ID)
 	}
 	if err != nil {
 		d.closeQueue(c.ID)
@@ -441,6 +441,26 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 		c.RolloutPath = t.Path
 	}
 	return q, nil
+}
+
+// Source is historical thread provenance, retained across frontend changes.
+// Admit only a currently observed CLI; queue() must also work while it is down.
+func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
+	probe := *c
+	probe.Consumer = nil // A saved owner must not shadow this caller's runtime.
+	p, err := d.consumerProbe(&probe)
+	if err != nil {
+		return fmt.Errorf("cannot verify current CLI consumer: %w", err)
+	}
+	if p.State != "online" || p.PID <= 0 || p.StartToken == "" {
+		return fmt.Errorf("current interactive Codex CLI required: exact rollout writer and queue store not verified (%s); run connect from the CLI with normal process-inspection permission", p.State)
+	}
+	if c.Config.RuntimePID != 0 || c.Config.RuntimeStartToken != "" || c.Config.BindingSource == "runtime-open-queue" {
+		if p.PID != c.Config.RuntimePID || p.StartToken != c.Config.RuntimeStartToken {
+			return errors.New("current CLI consumer does not match the caller's process identity; reconnect from the exact resumed CLI")
+		}
+	}
+	return nil
 }
 
 func validateCodexQueueBinding(c CodexQueueConfig) error {
@@ -525,6 +545,10 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 			if _, err := d.queue(&next); err != nil {
 				return nil, err
 			}
+			if err := d.requireCLIConsumer(&next); err != nil {
+				d.closeQueue(c.ID) // Never cache a new binding against the old journal.
+				return nil, err
+			}
 			if next.State == "disconnected" || next.State == "binding-required" {
 				if next.State == "disconnected" {
 					next.Compaction = nil
@@ -579,6 +603,9 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 			d.closeQueue(c.ID)
 		}
 	}()
+	if err := d.requireCLIConsumer(c); err != nil {
+		return nil, err
+	}
 	var ready relaySocket
 	if c.Relay != nil {
 		ready, err = d.openRelay(c)
