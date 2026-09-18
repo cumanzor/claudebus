@@ -17,6 +17,14 @@ cbus connect feature-updates advisor-main --json
 cbus connection status feature-updates/advisor-main --json
 ```
 
+After joining, the skill checks `cbus list CHANNEL` once and reports the other
+listening peers. Relay joins use the exact `CHANNEL@HOST` for the list and retain
+`@HOST` in status/reply addresses. Relay `listen` means a connected subscription;
+it does not confirm the native session is online. Roles come from explicit
+assignments or an identified matching formation (`cbus formation show NAME`);
+saved roles are intended assignments. Live peer lists do not advertise roles,
+so absent role information is reported as unknown.
+
 This starts one local cbus supervisor as needed. It registers the exact native
 `CODEX_THREAD_ID` with the caller's `HOME`, `CODEX_HOME`, working directory,
 native executable and actual open queue database. The open database witness
@@ -39,8 +47,14 @@ tested 0.154.0 lifecycle, rejoining or cold-resuming the thread alone preserved
 that pause, even with public status `idle`; a subsequent user turn had to complete
 before queued input drained. No model calls are used to maintain an idle
 connection. Real peer join, disconnect, exit and resume events become
-model-visible presence notices with instructions not to reply; these events can
-therefore incur a recipient turn. They are not periodic maintenance calls.
+model-visible presence notices. Codex briefly tells the user who joined, left,
+departed or was renamed and updates its known roster and role assignments. It
+does not send bus acknowledgments or greetings for these events, or repeat roster
+reads after each event. These notices can incur a recipient turn; they are not
+periodic maintenance calls. Queued notices retain their event timestamps and
+describe observed transitions, not a fresh liveness check. Completed-compaction
+notices update context without changing membership or requiring a standalone
+user-facing reply.
 
 The offline lifecycle canary passed 17 checks using a scratch app-server and a
 local fake provider, including a busy turn held for 11.05 seconds and both live

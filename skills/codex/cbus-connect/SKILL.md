@@ -7,10 +7,12 @@ description: Connect this Codex CLI conversation to a cbus channel, or check and
 
 Use the current CLI conversation. Desktop harness clients are outside this integration's scope.
 
-1. Use the user's channel and optional alias. If only the channel is given, allow cbus to choose the alias.
+1. Use the user's exact channel spelling and optional alias. Local joins can let cbus choose an omitted alias. Relay joins (`CHANNEL@HOST`) require an explicit alias; if omitted, choose `codex-` plus the first eight characters of the current `CODEX_THREAD_ID`.
 2. Run `cbus connect CHANNEL [ALIAS] --json`. It uses the exact `CODEX_THREAD_ID` and the session's `CODEX_HOME`; never substitute a session name, cwd match, root session ID, or most recent transcript.
 3. Read the result. Supported ordinary Codex CLIs can join without a restart or a special launcher. `queue-ready` confirms sidecar access to queue storage; it does not prove the running recipient can consume it or that a model has received or answered a message. Use actual recipient evidence before claiming inbound delivery.
-4. Use `cbus connection status CHANNEL/ALIAS --json` to inspect delivery and errors. To leave, use `cbus connection disconnect CHANNEL/ALIAS`.
+4. After a successful join, run `cbus list CHANNEL` once for that exact channel; for a relay use `cbus list CHANNEL@HOST` with the target first and no flags. Report this session's address and the other `listen` peers. Distinguish an empty roster from a failed lookup. Local rows indicate listening; relay rows indicate a connected relay subscription, not confirmed native-session liveness. Do not count `off` rows as online or count yourself as another peer.
+5. Include roles from explicit assignments already in context. If an identified saved formation supplies the assignments, `cbus formation show NAME` is a read-only lookup: verify its channel/host and aliases match before using its rolefile references. Saved assignments describe intended roles, not proof a current peer adopted them; freeform byte counts do not reveal a role. Current live lists do not advertise roles, so otherwise say `role unknown`; never guess from aliases or message peers just to discover roles.
+6. Use `cbus connection status CHANNEL/ALIAS --json` to inspect delivery and errors. To leave, use `cbus connection disconnect CHANNEL/ALIAS`. Preserve `@HOST` in both addresses for a relay connection, including subsequent replies.
 
 Never start a Monitor, tail loop, periodic model task, or another Codex conversation to maintain the connection. The cbus daemon and Codex's native queue handle idle waiting. Busy sessions process queued messages after the current turn. An explicitly interrupted session keeps queued messages paused, including after resume; an explicit user continuation must complete before they drain. Reconnecting does not clear that pause, and a public `idle` status alone does not prove readiness.
 
@@ -27,7 +29,15 @@ explicit direction.
 The connection result also reports observed CLI consumer state separately from
 queue state. `unknown` is inconclusive, not a confirmed exit. Actual join/leave
 presence notices can invoke a recipient turn; no periodic model turn is used.
-Do not reply solely to presence or completed-compaction notices.
+For join, leave, departed or rename events, briefly tell the user which peer
+changed (and its explicitly known role), then update the known roster: joins add,
+leave/departed mark unavailable, and renames update the address. Keep the event's
+observation time in mind when processing queued notices. This is a user-facing
+notice, not a bus reply: do not send acknowledgments, greetings or roster requests
+solely because of presence. Completed-compaction notices update peer context,
+not membership, and need no standalone user-facing reply. Use the initial roster
+and later events to maintain awareness; do not poll or repeat roster reads after
+each event.
 
 # Messages and replies
 
