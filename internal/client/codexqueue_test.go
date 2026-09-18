@@ -83,6 +83,14 @@ func TestCodexQueueHelperProcess(t *testing.T) {
 				id = "someone-else"
 			}
 			thread := map[string]any{"id": id, "source": "cli", "cliVersion": "0.154.0", "cwd": "/work"}
+			switch mode {
+			case "subagent":
+				thread["source"] = map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": daemonTestThread, "depth": 1}}}
+			case "custom-root":
+				thread["source"] = map[string]any{"custom": "integration"}
+			case "null-source":
+				thread["source"] = nil
+			}
 			// Notifications may interleave with responses and must not stall RPC.
 			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"method": "thread/status/changed", "params": map[string]any{}})
 			reply(map[string]any{"thread": thread})
@@ -386,5 +394,21 @@ func TestCodexQueueCloseAndStderrAreBounded(t *testing.T) {
 	var transport *codexQueueTransportError
 	if !errors.As(err, &transport) {
 		t.Fatalf("closed transport: %v", err)
+	}
+}
+
+func TestCodexQueueRejectsNonRootButAcceptsCustomOrigin(t *testing.T) {
+	for _, mode := range []string{"subagent", "null-source", "custom-root"} {
+		t.Run(mode, func(t *testing.T) {
+			q := fakeCodexQueue(t, mode, time.Second)
+			thread, err := q.inspect("thread-1")
+			if mode == "custom-root" {
+				if err != nil || thread.Source != "custom" {
+					t.Fatalf("custom root rejected: %+v %v", thread, err)
+				}
+			} else if err == nil {
+				t.Fatal("non-root or invalid source accepted")
+			}
+		})
 	}
 }

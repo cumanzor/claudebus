@@ -70,7 +70,10 @@ func schedulerFixture(t *testing.T, count int) (*busDaemon, []*ConnectionState, 
 	root := setupStore(t)
 	d := newBusDaemon()
 	d.start = selfStart(t)
-	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) {
+	d.probeConsumer = func(_ context.Context, c *ConnectionState) (consumerProbe, error) {
+		if c.Consumer == nil {
+			return onlinePresence(nil), nil // Admission proof; presence stays independent.
+		}
 		return consumerProbe{State: "unknown"}, nil
 	}
 	if err := d.load(); err != nil {

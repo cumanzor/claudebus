@@ -23,10 +23,16 @@ type codexWriterFD struct {
 // and reopen a rollout writer after an IO error.
 func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProbe, error) {
 	unknown := consumerProbe{State: "unknown"}
-	path, err := validateConsumerRollout(c.RolloutPath, c.ThreadID)
+	rollout, err := openConsumerRollout(c.RolloutPath, c.ThreadID)
 	if err != nil {
 		return unknown, err
 	}
+	defer rollout.Close()
+	identity, err := rollout.Stat()
+	if err != nil {
+		return unknown, err
+	}
+	path := rollout.Name()
 	oldPID, oldStart := c.Config.RuntimePID, c.Config.RuntimeStartToken
 	if c.Consumer != nil && c.Consumer.PID > 0 {
 		oldPID, oldStart = c.Consumer.PID, c.Consumer.StartToken
@@ -81,7 +87,7 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 			if f.Access != "w" && f.Access != "u" {
 				continue
 			}
-			if sameExistingFile(f.Path, path) {
+			if sameOpenFile(identity, f.Path) {
 				writer = true
 			}
 			if sameExistingFile(f.Path, filepath.Join(c.Config.SQLiteHome, "queue_1.sqlite")) {
@@ -95,6 +101,9 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 		if writer && queue && !procZombie(fd.PID) {
 			found = append(found, consumerProbe{State: "online", PID: fd.PID, StartToken: before, Detail: "exact rollout writer and queue store observed"})
 		}
+	}
+	if !sameOpenFile(identity, path) {
+		return unknown, errors.New("rollout identity changed during inspection")
 	}
 	if len(found) > 1 {
 		return unknown, errors.New("multiple CLI writers hold this exact rollout; consumer ownership is ambiguous")
@@ -131,6 +140,11 @@ func sameExistingFile(a, b string) bool {
 	return err == nil && os.SameFile(left, right)
 }
 
+func sameOpenFile(identity os.FileInfo, path string) bool {
+	current, err := os.Stat(path)
+	return err == nil && os.SameFile(identity, current)
+}
+
 func interactiveCodexProcess(argv string) bool {
 	args := strings.Fields(argv)
 	if len(args) == 0 || !strings.EqualFold(commBase(args[0]), "codex") {
@@ -164,21 +178,32 @@ func interactiveCodexProcess(argv string) bool {
 }
 
 func validateConsumerRollout(path, thread string) (string, error) {
-	if !filepath.IsAbs(path) || !uuidLike(thread) {
-		return "", errors.New("exact CLI rollout path is unavailable")
-	}
-	canonical, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve CLI rollout: %w", err)
-	}
-	f, err := os.Open(canonical)
+	f, err := openConsumerRollout(path, thread)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
+	return f.Name(), nil
+}
+
+// Keep this descriptor open while observing writers: a replaced path must not
+// lend the validated UUID to a different rollout inode.
+func openConsumerRollout(path, thread string) (*os.File, error) {
+	if !filepath.IsAbs(path) || !uuidLike(thread) {
+		return nil, errors.New("exact CLI rollout path is unavailable")
+	}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve CLI rollout: %w", err)
+	}
+	f, err := os.Open(canonical)
+	if err != nil {
+		return nil, err
+	}
 	line, err := readDaemonLine(bufio.NewReader(f))
 	if err != nil {
-		return "", fmt.Errorf("read CLI rollout identity: %w", err)
+		f.Close()
+		return nil, fmt.Errorf("read CLI rollout identity: %w", err)
 	}
 	var meta struct {
 		Type    string `json:"type"`
@@ -187,7 +212,8 @@ func validateConsumerRollout(path, thread string) (string, error) {
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(line, &meta); err != nil || meta.Type != "session_meta" || meta.Payload.ID != thread {
-		return "", errors.New("rollout metadata does not match the exact registered thread")
+		f.Close()
+		return nil, errors.New("rollout metadata does not match the exact registered thread")
 	}
-	return canonical, nil
+	return f, nil
 }

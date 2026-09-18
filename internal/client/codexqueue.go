@@ -359,7 +359,17 @@ func (q *codexQueue) inspect(threadID string) (codexQueueThread, error) {
 	}
 	thread := codexQueueThread{ID: result.Thread.ID, CliVersion: result.Thread.CliVersion, Cwd: result.Thread.Cwd, Path: result.Thread.Path}
 	if err := json.Unmarshal(result.Thread.Source, &thread.Source); err != nil {
-		thread.Source = "unknown" // structured subagent sources cannot qualify as CLI roots.
+		var source struct {
+			SubAgent json.RawMessage `json:"subAgent"`
+			Custom   *string         `json:"custom"`
+		}
+		if json.Unmarshal(result.Thread.Source, &source) != nil || source.SubAgent != nil || source.Custom == nil {
+			return codexQueueThread{}, errors.New("root Codex thread required: subagent or unsupported source cannot use the non-owning queue sidecar")
+		}
+		thread.Source = "custom"
+	}
+	if thread.Source == "" {
+		return codexQueueThread{}, errors.New("codex thread/read returned missing thread source")
 	}
 	// A metadata read succeeding does not establish that this runtime can queue.
 	if _, _, err := q.queuePage(threadID, ""); err != nil {
