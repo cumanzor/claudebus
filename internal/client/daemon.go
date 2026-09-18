@@ -24,12 +24,14 @@ import (
 )
 
 type ConnectRequest struct {
-	Harness  string           `json:"harness,omitempty"`
-	Channel  string           `json:"channel"`
-	Alias    string           `json:"alias,omitempty"`
-	ThreadID string           `json:"threadId"`
-	Config   CodexQueueConfig `json:"config"`
-	Relay    *RelayConfig     `json:"relay,omitempty"`
+	Protocol int                   `json:"protocol,omitempty"`
+	Harness  string                `json:"harness,omitempty"`
+	Channel  string                `json:"channel"`
+	Alias    string                `json:"alias,omitempty"`
+	ThreadID string                `json:"threadId"`
+	Config   CodexQueueConfig      `json:"config"`
+	Claude   *ClaudeConnectBinding `json:"claude,omitempty"`
+	Relay    *RelayConfig          `json:"relay,omitempty"`
 }
 
 // ConnectionState reports queue acceptance separately from recipient receipt.
@@ -105,7 +107,7 @@ type busDaemon struct {
 	dialRelay     func(context.Context, *ConnectionState) (relaySocket, error)
 }
 
-const DaemonProtocolVersion = 2
+const DaemonProtocolVersion = 3
 
 func DaemonDir() string    { return filepath.Join(CBUSDir(), ".daemon") }
 func daemonSocket() string { return filepath.Join(DaemonDir(), "control.sock") }
@@ -267,12 +269,12 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 		}
 		switch {
 		case r.URL.Path == "/connect" && r.Method == "POST":
-			var req ConnectRequest
+			var req connectWireRequest
 			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}
-			c, err := d.connect(req)
+			c, err := d.connectWithCredential(req.ConnectRequest, req.ClaudeToken)
 			if err != nil {
 				http.Error(w, err.Error(), 400)
 				return
@@ -513,7 +515,14 @@ func sameCodexConnectionHome(existing CodexQueueConfig, requested string) bool {
 }
 
 func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
+	return d.connectWithCredential(req, "")
+}
+
+func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*ConnectionState, error) {
 	if err := validateDaemonHarness(req.Harness); err != nil {
+		return nil, err
+	}
+	if err := validateConnectEnvelope(req, token); err != nil {
 		return nil, err
 	}
 	req.Harness = daemonHarness(req.Harness)
