@@ -50,10 +50,13 @@ def real(p):
     return os.path.realpath(os.path.abspath(os.path.expanduser(p)))
 
 target_real = real(target)
-for name, live in (("live config dir", os.environ["MS_LIVE"]), ("home dir", os.environ["MS_HOME"])):
-    live_real = real(live)
-    if target_real == live_real or target_real.startswith(live_real + os.sep):
-        die("refusing to operate on the %s (%s resolves inside %s)" % (name, target, live_real))
+# home is protected as a path, not as a subtree: a dedicated sibling like
+# ~/.claude-monitor-stopgap is the documented layout and has to be allowed.
+if target_real == real(os.environ["MS_HOME"]):
+    die("refusing to operate on your home directory itself")
+live_real = real(os.environ["MS_LIVE"])
+if target_real == live_real or target_real.startswith(live_real + os.sep):
+    die("refusing to operate on the live config dir (%s resolves inside %s)" % (target, live_real))
 
 cfg = os.path.join(target_real, ".claude.json")
 man = os.path.join(target_real, MANIFEST)
@@ -86,19 +89,50 @@ if cmd == "seed":
     if not isinstance(feats, dict) or not feats:
         die("source has no cachedGrowthBookFeatures to snapshot")
     feats[FLAG] = False
-    os.makedirs(target_real, exist_ok=True)
+    if os.path.lexists(man):
+        die("%s already exists; another seed owns this directory" % man)
+    if os.path.isdir(target_real):
+        st = os.stat(target_real)
+        if st.st_uid != os.geteuid():
+            die("%s is owned by uid %d, not you" % (target, st.st_uid))
+        if st.st_mode & 0o077:
+            die("%s is group- or world-accessible (mode %o); make it private first"
+                % (target, st.st_mode & 0o777))
+    else:
+        os.makedirs(target_real, mode=0o700)
     body = json.dumps(seeded, indent=2).encode()
-    # O_EXCL|O_NOFOLLOW: refuse to follow a planted symlink, refuse to clobber a racer
-    tmp = cfg + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    sha = hashlib.sha256(body).hexdigest()
+    manifest = json.dumps({"wrote": ".claude.json", "sha256": sha, "flag": FLAG,
+                           "flagCount": len(feats)}, indent=2).encode()
+
+    def stage(path, payload):
+        # O_EXCL|O_NOFOLLOW so a planted symlink is refused rather than followed
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, payload)
+        finally:
+            os.close(fd)
+
+    def publish(tmp, final):
+        # link() fails with EEXIST when the final name appeared after our checks, so the
+        # no-clobber promise survives a race that os.replace would have lost.
+        try:
+            os.link(tmp, final)
+        except FileExistsError:
+            die("%s appeared while seeding; refusing to overwrite it" % final)
+        finally:
+            os.unlink(tmp)
+
+    stage(man + ".tmp", manifest)
+    stage(cfg + ".tmp", body)
+    # manifest first: a half-finished seed then leaves a manifest with no config, which revert
+    # already handles, rather than a config nothing can prove it owns.
+    publish(man + ".tmp", man)
     try:
-        os.write(fd, body)
-    finally:
-        os.close(fd)
-    os.replace(tmp, cfg)
-    with open(os.open(man, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "w") as fh:
-        json.dump({"wrote": ".claude.json", "sha256": hashlib.sha256(body).hexdigest(),
-                   "flag": FLAG, "flagCount": len(feats)}, fh, indent=2)
+        publish(cfg + ".tmp", cfg)
+    except SystemExit:
+        os.unlink(man)
+        raise
     print("monitor-stopgap: wrote %s (%d flags, %s=false, keys copied: %s)"
           % (cfg, len(feats), FLAG, ", ".join(sorted(seeded))))
     print("monitor-stopgap: run sessions with CLAUDE_CONFIG_DIR=%s and sign in there." % target_real)
