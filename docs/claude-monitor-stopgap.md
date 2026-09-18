@@ -105,13 +105,20 @@ depends on, and leaves you bounded anyway.
     scripts/monitor-stopgap.sh status ~/.claude-monitor-stopgap
     scripts/monitor-stopgap.sh revert ~/.claude-monitor-stopgap
 
-`seed` writes a NEW dedicated dir only. It refuses a directory that already holds a
-`.claude.json`, so it can never overwrite a config you care about, and it refuses a target
-that resolves inside your live config dir or home, canonicalizing every path component so a
-symlinked directory or a planted `.claude.json` symlink cannot redirect the write. It copies
-only `cachedGrowthBookFeatures` and `cachedGrowthBookFeaturesAt` out of your source config,
-forces `tengu_breezy_crescent` to false, writes mode 600 through `O_EXCL|O_NOFOLLOW`, and
-records a manifest with the file's sha256.
+`seed` writes a NEW dedicated dir only. A sibling of your live config dir, such as the
+`~/.claude-monitor-stopgap` above, is the intended layout: home is protected as a path, while
+the live config dir is protected as a whole subtree. Every path component is canonicalized, so
+a symlinked directory or a planted `.claude.json` symlink cannot redirect the write. A
+directory it creates is mode 0700; a directory that already exists must be yours and must not
+be group- or world-accessible.
+
+It copies only `cachedGrowthBookFeatures` and `cachedGrowthBookFeaturesAt` out of your source
+config, forces `tengu_breezy_crescent` to false, and records a manifest with the file's
+sha256. Both files are staged mode 600 through `O_EXCL|O_NOFOLLOW` and published with
+`link()`, which fails rather than overwrites if the name appeared after the initial check, so
+the no-clobber promise does not depend on a check-then-write window. The manifest publishes
+first, so an interrupted seed leaves a manifest with no config, which `revert` handles, rather
+than a config nothing can prove it owns.
 
 `revert` removes only what that manifest proves this helper wrote, and only while the file
 still hashes to the recorded value. Signing in rewrites `.claude.json`, so after a login
@@ -124,12 +131,20 @@ Then run the sessions you want the stopgap in with:
     CLAUDE_CONFIG_DIR=~/.claude-monitor-stopgap DISABLE_TELEMETRY=1 \
       CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1 claude
 
-`scripts/monitor-stopgap-test.sh` runs fifteen checks, positive and negative: allowlist
-honored, no credential copied, flag forced false, snapshot otherwise intact, mode 600,
-manifest written; and refusals for a second seed, the live config dir, a target symlinked to
-the live dir, a leaf `.claude.json` symlink, a revert with no manifest, and a revert after a
-simulated sign-in. It asserts the live fixture config is byte-unchanged through every negative
-and that an unowned config survives a revert attempt. Temp tree only.
+`scripts/monitor-stopgap-test.sh` runs twenty-four checks, most of them negative: allowlist
+honored, no credential copied, flag forced false, snapshot otherwise intact, file mode 600,
+new directory mode 0700, manifest written, no staging files left, and the documented
+`~/.claude-monitor-stopgap` path accepted; with refusals for a second seed, home itself, the
+live config dir, a target symlinked to the live dir, a leaf `.claude.json` symlink, a
+pre-existing manifest, a pre-existing config, a group-accessible target directory, a revert
+with no manifest, and a revert after a simulated sign-in. Four assert the damage rather than
+the refusal: the live fixture config is byte-unchanged through every negative, a pre-existing
+config is byte-unchanged, no config is published when the manifest collides, and an unowned
+config survives a revert attempt. Temp tree only.
+
+One honest limit: the tests cover a name that already exists, not one that appears in the
+window between the check and the publish. That window is closed by using `link()` instead of a
+replace, which is an argument from the primitive rather than from an exercised test.
 
 ## Acceptance, still open
 
