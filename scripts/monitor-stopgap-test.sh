@@ -60,4 +60,30 @@ cp "$tmp/seeded-copy" "$out"
 run revert "$tmp/cfg" >/dev/null 2>&1 || bad "revert of an unmodified seed exited nonzero"
 [ -e "$out" ] || [ -e "$tmp/cfg/.monitor-stopgap.json" ] && bad "revert left files behind" || ok "revert removed both files"
 
+# the documented layout is a dedicated sibling inside HOME, so HOME must be protected as a
+# path and not as a subtree. the first cut refused this and the fixtures did not notice.
+doc="$tmp/home/.claude-monitor-stopgap"
+run seed "$doc" --from "$tmp/source.json" >/dev/null 2>&1 \
+  && ok "documented ~/.claude-monitor-stopgap path allowed" || bad "documented path under HOME refused"
+dmode=$(stat -f '%Lp' "$doc" 2>/dev/null || stat -c '%a' "$doc")
+[ "$dmode" = "700" ] && ok "new dedicated dir is 0700" || bad "new dir is mode $dmode"
+ls "$doc"/*.tmp >/dev/null 2>&1 && bad "staging files left behind" || ok "no staging files left"
+refuses "seeding HOME itself" seed "$tmp/home" --from "$tmp/source.json"
+
+# manifest collision has to be caught BEFORE any config is published, or a seed leaves a
+# config that nothing can prove it owns
+mkdir -p "$tmp/mcol"; : > "$tmp/mcol/.monitor-stopgap.json"
+refuses "a pre-existing manifest" seed "$tmp/mcol" --from "$tmp/source.json"
+[ -e "$tmp/mcol/.claude.json" ] && bad "published a config despite the manifest collision" \
+  || ok "no config published on manifest collision"
+
+mkdir -p "$tmp/pre"; printf '{"pre":"existing"}\n' > "$tmp/pre/.claude.json"
+pre_before=$(cat "$tmp/pre/.claude.json")
+refuses "a pre-existing final config" seed "$tmp/pre" --from "$tmp/source.json"
+[ "$(cat "$tmp/pre/.claude.json")" = "$pre_before" ] && ok "pre-existing config byte-unchanged" \
+  || bad "pre-existing config was modified"
+
+mkdir -p "$tmp/loose"; chmod 755 "$tmp/loose"
+refuses "a group- or world-accessible target dir" seed "$tmp/loose" --from "$tmp/source.json"
+
 [ "$fails" -eq 0 ] && printf '\nall fixture checks passed\n' || { printf '\n%d check(s) failed\n' "$fails"; exit 1; }
