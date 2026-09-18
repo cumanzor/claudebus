@@ -107,3 +107,31 @@ func TestClaudeFreshAdmissionRefusesUnmanagedAliasWithoutMutation(t *testing.T) 
 		t.Fatal("failed unmanaged admission changed existing peer or stored a credential")
 	}
 }
+
+func TestClaudeCredentialFailureReleasesOnlyUnpublishedEmptyClaim(t *testing.T) {
+	d, _, req := claudeAdmissionFixture(t)
+	badVault := filepath.Join(d.root, claudeCredentialDir)
+	if err := os.Mkdir(badVault, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.connectWithCredential(req, "fixture-secret"); err == nil {
+		t.Fatal("insecure credential directory accepted")
+	}
+	dir := filepath.Join(CBUSDir(), req.Channel, req.Alias)
+	if dirExists(dir) || len(d.statusSnapshots()) != 0 {
+		t.Fatal("failed capability storage retained its empty alias")
+	}
+	if err := os.Chmod(badVault, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := d.connectWithCredential(req, "fixture-secret")
+	if err != nil {
+		t.Fatal("same alias could not be retried after fixing private storage")
+	}
+	if err := cleanupClaudeUnpublishedClaim(dir, c.Dev, c.Ino); err == nil {
+		t.Fatal("cleanup accepted a published registration")
+	}
+	if !dirExists(dir) {
+		t.Fatal("cleanup removed published peer")
+	}
+}
