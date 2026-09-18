@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse"), default="accepted")
     args = parser.parse_args()
     if args.idle_seconds < 10:
         parser.error("--idle-seconds must be at least 10")
@@ -61,6 +62,9 @@ def main():
         parser.error("--monitor-bounded requires --transport monitor")
     if args.transport == "cbus" and not all((args.cbus, args.cbus_sha256, args.cbus_revision)):
         parser.error("--transport cbus requires --cbus, --cbus-sha256, and --cbus-revision")
+    if args.transport != "cbus" and args.cbus_case != "accepted":
+        parser.error("--cbus-case requires --transport cbus")
+    runtime_case = args.cbus_case if args.transport == "cbus" else args.socket_case
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -124,7 +128,7 @@ def main():
             if main_request:
                 state["mainRequests"] += 1
             n = state["mainRequests"]
-            if main_request and n == 2 and args.socket_case == "busy":
+            if main_request and n == 2 and runtime_case == "busy":
                 response_release.wait(45)
             if main_request and n == 1 and args.transport == "monitor":
                 state["monitorSchema"] = next((t for t in body.get("tools", []) if t["name"] == "Monitor"), None)
@@ -192,8 +196,8 @@ def main():
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if bus_probe:
         settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
-    if args.socket_case in ("hold", "refuse"):
-        settings["crossSessionInbound"] = args.socket_case
+    if runtime_case in ("hold", "refuse"):
+        settings["crossSessionInbound"] = runtime_case
     (config / "settings.json").write_text(json.dumps(settings))
     base = f"http://127.0.0.1:{server.server_port}"
     if args.transport == "socket":
@@ -258,6 +262,7 @@ def main():
     }
     if bus_probe:
         result["cbus"] = bus_probe.result
+        result["cbusCase"] = args.cbus_case
         result["busSupportSHA256"] = hashlib.sha256(Path(sys.modules[BusProbe.__module__].__file__).read_bytes()).hexdigest()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -463,21 +468,44 @@ def main():
         result["passed"] = all(result["checks"].values())
 
     def run_cbus():
-        wait(lambda: state["mainRequests"] >= 2 and b"CBUS_WAKE_IDLE" in output, "actual Claude Bash self-connect", 45)
+        wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
         before, before_all = state["mainRequests"], len(requests)
         idle_at = time.time()
         pump(args.idle_seconds)
         result["idleSeconds"] = time.time() - idle_at
-        result["checks"]["idle_makes_no_additional_model_requests"] = state["mainRequests"] == before
-        result["checks"]["idle_makes_no_auxiliary_requests"] = len(requests) == before_all
+        window = "busy" if runtime_case == "busy" else "idle"
+        result["checks"][f"{window}_makes_no_additional_model_requests"] = state["mainRequests"] == before
+        result["checks"][f"{window}_makes_no_auxiliary_requests"] = len(requests) == before_all
         timeline.append({"event": "external_cbus_send", "at": time.time()})
         bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
-        wait(lambda: state.get("busReplyRequested") and b"CBUS_WAKE_RECEIVED" in output, "inbound event and actual cbus reply", 25)
-        wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
-        wait(bus_probe.receipt_ready, "daemon exact transcript receipt", 15)
-        result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
+        if runtime_case == "busy":
+            pump(2)
+            outstanding = [r for r in requests if r.get("mainRequest") and "responseCompletedAt" not in r]
+            result["checks"]["busy_delivery_does_not_interrupt_or_reply"] = state["mainRequests"] == before and len(outstanding) == 1 and not bus_probe.acknowledgments()
+            timeline.append({"event": "release_busy_response", "at": time.time()})
+            response_release.set()
+        if runtime_case in ("hold", "refuse"):
+            decision = "held inbound peer message" if runtime_case == "hold" else "refused inbound peer message"
+            wait(lambda: decision in (root / "debug.log").read_text(), "native inbound policy decision", 15)
+            pump(2)
+            current = bus_probe.status()
+            bus_probe.result["blocked"] = current
+            result["nativeProcessingLines"] = [line for line in (root / "debug.log").read_text().splitlines() if "[cross-session-inbound]" in line]
+            result["checks"].update({
+                "native_policy_blocks_provider_turn": state["mainRequests"] == before,
+                "blocked_marker_absent_from_provider": not any(marker in json.dumps(r["body"].get("messages", [])) for r in requests),
+                "blocked_marker_has_no_user_receipt": not receipts(),
+                "blocked_marker_has_no_bus_ack": not bus_probe.acknowledgments(),
+                "unconfirmed_submission_remains_pending": bool(current.get("pending")) and current.get("accepted") == 0 and not current.get("lastAccepted") and current.get("state") == "uncertain",
+                "native_policy_decision_observed": decision in (root / "debug.log").read_text(),
+            })
+        else:
+            wait(lambda: state.get("busReplyRequested") and b"CBUS_WAKE_RECEIVED" in output, "inbound event and actual cbus reply", 25)
+            wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
+            wait(bus_probe.receipt_ready, "daemon exact transcript receipt", 15)
+            result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
             "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
