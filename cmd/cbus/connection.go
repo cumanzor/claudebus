@@ -56,7 +56,7 @@ func runConnect(args []string) int {
 		return die("start cbus daemon: %v", err)
 	}
 	var state client.ConnectionState
-	err = client.DaemonCall("POST", "/connect", client.ConnectRequest{Channel: channel, Alias: alias, ThreadID: thread, Config: cfg, Relay: relay}, &state)
+	err = client.DaemonCall("POST", "/connect", client.ConnectRequest{Harness: "codex", Channel: channel, Alias: alias, ThreadID: thread, Config: cfg, Relay: relay}, &state)
 	if err != nil {
 		return die("%v", err)
 	}
