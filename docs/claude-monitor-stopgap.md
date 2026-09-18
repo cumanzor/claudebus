@@ -91,8 +91,11 @@ depends on, and leaves you bounded anyway.
 
 ## Gates
 
-- First-party authentication only. A gateway, Bedrock, Vertex or custom-OAuth session falls
-  back to the flag default, so the `work` profile is out of scope for this stopgap.
+- First-party provider mode only. What was traced is the provider route, not the credential:
+  the disk-cache gate requires the session to be on the first-party route, so a gateway,
+  Bedrock, Vertex or custom-OAuth session falls back to the flag default and the `work`
+  profile is out of scope. Whether a particular real account's authentication also satisfies
+  it is a separate question, and one nothing here has tested.
 - A dedicated `CLAUDE_CONFIG_DIR`. A telemetry-on session sharing the dir overwrites the seed.
 - Flags pin per session on first read, so changing a seed needs a new session.
 - Re-verify after every CLI upgrade. This is a rollout flag and the binary auto-updates.
@@ -102,6 +105,7 @@ depends on, and leaves you bounded anyway.
 ## Using the helper
 
     scripts/monitor-stopgap.sh seed   ~/.claude-monitor-stopgap
+    scripts/monitor-stopgap.sh seed   ~/.claude-monitor-stopgap --from /path/to/.claude.json
     scripts/monitor-stopgap.sh status ~/.claude-monitor-stopgap
     scripts/monitor-stopgap.sh revert ~/.claude-monitor-stopgap
 
@@ -111,6 +115,11 @@ the live config dir is protected as a whole subtree. Every path component is can
 a symlinked directory or a planted `.claude.json` symlink cannot redirect the write. A
 directory it creates is mode 0700; a directory that already exists must be yours and must not
 be group- or world-accessible.
+
+The source defaults to `~/.claude.json`. Pass `--from` when the snapshot you want lives
+somewhere else, which is the case for a CCS profile or any non-default `CLAUDE_CONFIG_DIR`:
+take it from that profile's own config rather than from the default one, or you will seed
+flags that session never had.
 
 It copies only `cachedGrowthBookFeatures` and `cachedGrowthBookFeaturesAt` out of your source
 config, forces `tengu_breezy_crescent` to false, and records a manifest with the file's
@@ -179,9 +188,18 @@ requested the same Monitor input, `persistent: true` with `timeout_ms: 2000`, an
   requests in between, the late external signal did wake it, and TaskStop then stopped it.
   20 checks, all true.
 
-Artifacts: `/tmp/cbus-monitor-runtime-pair-20260918.json`, with per-arm results at
+Both arms came from `scripts/claude_interactive_wake_canary.py`, committed in
+[PR 26](https://github.com/cumanzor/claudebus/pull/26). To reproduce the pair:
+
+    python3 scripts/claude_interactive_wake_canary.py --transport monitor --monitor-bounded
+    python3 scripts/claude_interactive_wake_canary.py --transport monitor
+
+`--monitor-bounded` is the control arm: it seeds `tengu_breezy_crescent` true. Without it the
+same run seeds the flag false. Everything else, including the twelve-second idle, is the
+canary's default. Local artifacts from the run recorded here:
+`/tmp/cbus-monitor-runtime-pair-20260918.json`, with per-arm results at
 `/tmp/cbus-cc-wake-zvj2v92m/result.json` (bounded) and `/tmp/cbus-cc-wake-d3mz3foh/result.json`
-(persistent). Canary source under `/tmp/cbus-cc-capability-20260918`.
+(persistent).
 
 What that establishes is the mechanism: on this binary, that one flag decides whether the
 Monitor schema keeps `persistent` and whether a monitor outlives its deadline. What it does
@@ -192,6 +210,6 @@ two-second deadline, so it does not measure the default five-minute or thirty-mi
 deadlines. It used environment traffic controls rather than an OS-enforced network sandbox,
 and it did not exercise cbus at all.
 
-So the remaining gate is narrower than it was, and it is still a gate: a first-party session on
-a seeded config dir, doing real work, reporting a monitor that runs until TaskStop. Do not
+So the remaining gate is narrower than it was, and it is still a gate: a real signed-in
+session on a seeded config dir, doing real work, reporting a monitor that runs until TaskStop. Do not
 describe the stopgap as proven in the field until someone runs that.
