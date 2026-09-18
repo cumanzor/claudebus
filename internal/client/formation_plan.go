@@ -96,7 +96,7 @@ type PlanWorld struct {
 	Host          string            // ShortHostname()
 	GitHead       string            // current short HEAD; "" outside a repo
 	Roster        []RosterPeer      // who is on the channel right now
-	LiveSids      map[string]string // sid -> "channel/alias" of a LIVE-ARMED holder
+	LiveSids      map[string]string // sid -> holder address; live or managed availability unresolved
 	Self          string            // this session's alias on the channel, if it is a peer
 	HasTranscript func(profile, sid string) bool
 	// InstanceProfiles sweeps the CCS instances for a sid — the recovery input
@@ -136,10 +136,9 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 	}, nil
 }
 
-// liveSids maps every session id currently held by a LIVE-ARMED peer, anywhere on
-// this machine's bus, to the address holding it. It is the structural-liveness input
-// to the resume gate: a sid that is armed somewhere else is a session that is alive
-// right now, and resuming it would attach a second process to one transcript.
+// liveSids maps session ids held by legacy live listeners or exact managed
+// consumers anywhere on this machine's bus. Unknown managed identity remains
+// claimed: only positive exit evidence permits another writer to resume it.
 //
 // The limit, named rather than hidden: this sees sessions ON THE BUS. A live session
 // that never joined, or left, is invisible here — so the gate proves "not alive on
@@ -166,6 +165,19 @@ func liveSids() map[string]string {
 			metaPath := filepath.Join(root, ch.Name(), al.Name(), "meta.json")
 			m, ok := ReadPeerMeta(metaPath)
 			if !ok || m.SessionID == "" || m.SessionID == "reserved" {
+				continue
+			}
+			if m.ConnectionID != "" {
+				managed, err := formationManagedBackend(ch.Name(), al.Name(), m)
+				claimed := err != nil || managed.LiveSession
+				if err == nil && managed.Harness == daemonHarnessCodex {
+					claimed = claimed && MetaListenerAlive(metaPath)
+				}
+				if claimed {
+					// A daemon PID is not the model process. Keep an unknown
+					// managed identity claimed; only positive exit frees it.
+					out[m.SessionID] = ch.Name() + "/" + al.Name()
+				}
 				continue
 			}
 			if MetaListenerAlive(metaPath) {
@@ -297,8 +309,8 @@ func decidePeer(p *FormationPeer, f *Formation, w *PlanWorld, live map[string]bo
 	if mode == ModeResume {
 		if at, ok := w.LiveSids[p.SessionID]; ok {
 			return PeerPlan{Peer: p, Action: ActionRefuse,
-				Reason: fmt.Sprintf("session %s is live-armed at %s — resume would attach a second process to "+
-					"one transcript; stand the original down or re-point it, or set mode=fork if a copy of it "+
+				Reason: fmt.Sprintf("session %s is held at %s (live or availability unresolved) — resume risks a second process on "+
+					"one transcript; confirm the original has stopped, or set mode=fork if a copy of it "+
 					"is what you want", p.SessionID, at)}
 		}
 		return PeerPlan{Peer: p, Action: ActionResume}

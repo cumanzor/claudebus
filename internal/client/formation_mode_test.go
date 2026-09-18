@@ -134,7 +134,7 @@ func TestModeOverrideStillGates(t *testing.T) {
 				return w
 			},
 			wantAction: ActionRefuse,
-			wantReason: "live-armed at ch/elsewhere",
+			wantReason: "held at ch/elsewhere",
 		},
 		{
 			name:       "no session recorded degrades",

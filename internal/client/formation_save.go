@@ -39,6 +39,7 @@ type RosterPeer struct {
 	Origin       string
 	Model        string
 	Profile      string // the CCS instance the session stamped about itself at join
+	ProfileKnown bool   // captured native default profile is a known blank, not missing metadata
 	Listening    bool
 	RunID        string // the peer's run claim, read from its dir (blank when unclaimed)
 	HasClaim     bool   // whether a claim file was present at all, distinct from RunID==""
@@ -79,27 +80,31 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 		if alias == "" {
 			alias = e.Name() // meta is authoritative, the dir name is the fallback
 		}
-		backend, consumerOnline, err := formationManagedBackend(ch, e.Name(), m)
+		managed, err := formationManagedBackend(ch, e.Name(), m)
 		if err != nil {
 			return nil, err
 		}
 		listening := MetaListenerAlive(metaPath)
-		if m.ConnectionID != "" {
-			listening = listening && consumerOnline
+		var backend *FormationCodexBackend
+		if managed != nil {
+			listening = listening && managed.Online
+			m.Harness, m.Cwd, m.Profile = managed.Harness, managed.Cwd, managed.Profile
+			backend = managed.CodexBackend
 		}
 		runID := readClaim(filepath.Join(chDir, e.Name()))
 		out = append(out, RosterPeer{
 			Alias:   alias,
 			Harness: m.Harness, CodexBackend: backend,
-			SessionID: m.SessionID,
-			Cwd:       m.Cwd,
-			Machine:   m.Host,
-			Origin:    m.Origin,
-			Model:     m.Model,
-			Profile:   m.Profile,
-			Listening: listening,
-			RunID:     runID,
-			HasClaim:  runID != "",
+			SessionID:    m.SessionID,
+			Cwd:          m.Cwd,
+			Machine:      m.Host,
+			Origin:       m.Origin,
+			Model:        m.Model,
+			Profile:      m.Profile,
+			ProfileKnown: managed != nil && managed.ProfileKnown,
+			Listening:    listening,
+			RunID:        runID,
+			HasClaim:     runID != "",
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Alias < out[j].Alias })
@@ -362,12 +367,11 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 	p.Cwd = r.Cwd
 	p.Machine = r.Machine
 
-	// Profile is a session fact the session stamps about itself at join, so it
-	// refreshes like cwd — but a blank meta (pre-profile binary, non-CCS host) never
-	// clobbers a hand-filled envelope, and a token the envelope would reject is
-	// skipped and surfaced like a corrupted birth-record.
-	if r.Profile != "" {
-		if core.ValidName(r.Profile) {
+	// Profile refreshes from the bound runtime when known. Legacy blank metadata
+	// remains unknown and does not clobber a hand-filled envelope. A token the
+	// envelope would reject is skipped and surfaced like a corrupted birth-record.
+	if r.Profile != "" || r.ProfileKnown {
+		if r.Profile == "" || core.ValidName(r.Profile) {
 			p.Profile = r.Profile
 		} else {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: profile %q (meta not a usable profile token)", r.Alias, r.Profile))
