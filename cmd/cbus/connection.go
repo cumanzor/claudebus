@@ -28,7 +28,7 @@ func runConnect(args []string) int {
 	if len(pos) < 1 || len(pos) > 2 {
 		return die("usage: cbus connect <channel> [alias] [--codex-sqlite-home ABS_PATH] [--json]")
 	}
-	cfg, thread, err := client.CodexConnectIdentityWithOptions(opts)
+	req, claudeToken, err := client.NativeConnectIdentity(opts)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -55,13 +55,19 @@ func runConnect(args []string) int {
 	if err = ensureDaemon(); err != nil {
 		return die("start cbus daemon: %v", err)
 	}
+	req.Channel, req.Alias, req.Relay = channel, alias, relay
 	var state client.ConnectionState
-	err = client.DaemonCall("POST", "/connect", client.ConnectRequest{Harness: "codex", Channel: channel, Alias: alias, ThreadID: thread, Config: cfg, Relay: relay}, &state)
+	err = client.DaemonConnect(req, claudeToken, &state)
 	if err != nil {
 		return die("%v", err)
 	}
 	if asJSON {
 		return printConnectionJSON(state)
+	}
+	if state.Harness == "claude" {
+		fmt.Printf("%s: native socket bound to Claude session %s\n", client.ConnectionTarget(&state), state.ThreadID)
+		fmt.Println("The daemon handles waiting; no Monitor or re-arming is needed. Socket readiness is not receipt: delivery is confirmed only by this session's exact transcript record.")
+		return 0
 	}
 	fmt.Printf("%s: native queue storage available for Codex thread %s\n", client.ConnectionTarget(&state), state.ThreadID)
 	fmt.Println("Running consumer capability and receipt are unverified until recipient evidence. Supported CLIs consume without restart; native queue wake can take about 10 seconds. Busy sessions wait; interrupted sessions need user continuation.")
@@ -352,6 +358,7 @@ func startDaemon() error {
 		return err
 	}
 	cmd := exec.Command(exe, "daemon", "serve")
+	cmd.Env = daemonEnvironment(os.Environ())
 	detachProcess(cmd)
 	cmd.Stdout = log
 	cmd.Stderr = log
