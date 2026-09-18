@@ -120,18 +120,25 @@ the no-clobber promise does not depend on a check-then-write window. The manifes
 first, so an interrupted seed leaves a manifest with no config, which `revert` handles, rather
 than a config nothing can prove it owns.
 
-`revert` removes only what that manifest proves this helper wrote, and only while the file
-still hashes to the recorded value. Signing in rewrites `.claude.json`, so after a login
-`revert` refuses and says so; `status` reports the same as MODIFIED. That is deliberate: this
-helper will not delete an account you signed into. Re-seeding a used dir is out of scope on
-purpose, and an explicit snapshot refresh would be the safe way to add it later.
+`revert` removes only what that manifest proves this helper wrote. It does not hash the file
+and then delete it, because a sign-in can replace the file between those two steps and the
+delete would take the new one. Instead it claims the file with a rename, which can only ever
+take one file, and decides afterwards: if what it holds hashes to the manifest, it removes it;
+if not, it links the file back into place untouched and removes nothing. If a new config
+appeared while it held the file, it keeps its copy alongside, names the path, and deletes
+nothing. `status` reports a changed file as MODIFIED.
+
+Stop every session using the dir before you revert. The helper is built not to lose a config
+if you forget, but a session writing while you revert is a race you do not need to run.
+Re-seeding a used dir is out of scope on purpose, and an explicit snapshot refresh would be
+the safe way to add it later.
 
 Then run the sessions you want the stopgap in with:
 
     CLAUDE_CONFIG_DIR=~/.claude-monitor-stopgap DISABLE_TELEMETRY=1 \
       CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1 claude
 
-`scripts/monitor-stopgap-test.sh` runs twenty-four checks, most of them negative: allowlist
+`scripts/monitor-stopgap-test.sh` runs twenty-seven checks, most of them negative: allowlist
 honored, no credential copied, flag forced false, snapshot otherwise intact, file mode 600,
 new directory mode 0700, manifest written, no staging files left, and the documented
 `~/.claude-monitor-stopgap` path accepted; with refusals for a second seed, home itself, the
@@ -142,9 +149,15 @@ the refusal: the live fixture config is byte-unchanged through every negative, a
 config is byte-unchanged, no config is published when the manifest collides, and an unowned
 config survives a revert attempt. Temp tree only.
 
-One honest limit: the tests cover a name that already exists, not one that appears in the
-window between the check and the publish. That window is closed by using `link()` instead of a
-replace, which is an argument from the primitive rather than from an exercised test.
+Two of the checks are about revert under concurrency: a post-login config comes back
+byte-identical with no archive left behind, and twenty rounds of revert racing an atomic
+config replacement lose nothing.
+
+Two honest limits. The publish tests cover a name that already exists, not one that appears in
+the window between the check and the publish; that window is closed by using `link()` instead
+of a replace, which is an argument from the primitive rather than from an exercised test. And
+the race loop is bounded: it can find a loss, it cannot prove there is none. Neither is a
+claim of immunity under an adversarial writer.
 
 ## Acceptance, still open
 
