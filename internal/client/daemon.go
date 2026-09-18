@@ -668,6 +668,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	var dir string
 	var unlock func()
+	var reservation *peerMeta
 	if req.Alias == "" {
 		c.Alias, dir, unlock, err = claimAliasLockedContext(d.ctx, req.Channel)
 	} else {
@@ -676,6 +677,9 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		if err == nil {
 			if err = os.MkdirAll(filepath.Dir(dir), 0755); err == nil {
 				err = os.Mkdir(dir, 0755)
+				if c.Relay == nil && errors.Is(err, os.ErrExist) {
+					reservation, err = daemonReservation(dir, c.Channel, c.Alias)
+				}
 			}
 		}
 	}
@@ -691,15 +695,15 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		}
 		return nil, fmt.Errorf("claim alias (choose another alias or explicitly unregister the existing peer): %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "inbox.jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	f, err := createDaemonInbox(dir, reservation != nil)
 	if err != nil {
 		return nil, err
 	}
+	var ok bool
+	c.Dev, c.Ino, _, ok = fileIdentityOf(f)
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	var ok bool
-	c.Dev, c.Ino, _, ok = fileIdentity(filepath.Join(dir, "inbox.jsonl"))
 	if !ok {
 		return nil, errors.New("cannot identify new inbox")
 	}
@@ -713,6 +717,9 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	now := Now()
 	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
+	if reservation != nil {
+		m.Origin, m.Model = reservation.Origin, reservation.Model
+	}
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
 	}
