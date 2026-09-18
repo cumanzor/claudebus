@@ -2,6 +2,7 @@
 """Local fake-provider probes for waking an ordinary Claude Code PTY.
 
 --transport background checks Bash completion and its output-file read.
+--transport monitor compares synthetic cached timeout flags with one short watch.
 --transport socket checks the native per-session messaging socket. A permitted
 Bash command exports its socket capability privately to this test process; the
 token remains in memory and is never written into the retained evidence.
@@ -42,14 +43,17 @@ import uuid
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--idle-seconds", type=float, default=12)
-    parser.add_argument("--transport", choices=("background", "socket"), default="background")
+    parser.add_argument("--transport", choices=("background", "socket", "monitor"), default="background")
     parser.add_argument("--socket-case", choices=("accepted", "busy", "session-mismatch", "hold", "refuse"), default="accepted")
+    parser.add_argument("--monitor-bounded", action="store_true", help="Set breezy=true for the Monitor control arm")
     parser.add_argument("--message-uuid", type=lambda value: str(uuid.UUID(value)))
     args = parser.parse_args()
     if args.idle_seconds < 10:
         parser.error("--idle-seconds must be at least 10")
     if args.transport != "socket" and args.socket_case != "accepted":
         parser.error("--socket-case requires --transport socket")
+    if args.monitor_bounded and args.transport != "monitor":
+        parser.error("--monitor-bounded requires --transport monitor")
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -66,6 +70,8 @@ def main():
     trigger = work / "signal"
     waiter = work / "wait_for_signal.py"
     waiter.write_text("import os, pathlib, time\np=pathlib.Path('signal')\npathlib.Path('waiter.pid').write_text(str(os.getpid()))\nwhile not p.exists(): time.sleep(.05)\nprint(p.read_text(), flush=True)\n")
+    if args.transport == "monitor":
+        waiter.write_text(waiter.read_text() + "while True: time.sleep(1)\n")
     command = f"{sys.executable} {waiter}"
     requests, timeline = [], []
     state = {"mainRequests": 0}
@@ -110,7 +116,15 @@ def main():
             n = state["mainRequests"]
             if main_request and n == 2 and args.socket_case == "busy":
                 response_release.wait(45)
-            if main_request and n == 1:
+            if main_request and n == 1 and args.transport == "monitor":
+                state["monitorSchema"] = next((t for t in body.get("tools", []) if t["name"] == "Monitor"), None)
+                content = [{"type": "tool_use", "id": "toolu_cbus_monitor", "name": "Monitor", "input": {"command": command, "description": "Isolated persistent flag canary", "timeout_ms": 2000, "persistent": True}}]
+                stop = "tool_use"
+            elif main_request and args.transport == "monitor" and marker in messages and not state.get("stopRequested"):
+                state["stopRequested"] = True
+                content = [{"type": "tool_use", "id": "toolu_cbus_stop", "name": "TaskStop", "input": {"task_id": state["monitorTaskID"]}}]
+                stop = "tool_use"
+            elif main_request and n == 1:
                 content = [{"type": "tool_use", "id": "toolu_cbus_wake", "name": "Bash", "input": {"command": command, "description": "Prepare isolated canary capability", "run_in_background": args.transport == "background"}}]
                 stop = "tool_use"
             elif args.transport == "background" and main_request and n == 3 and "<task-notification>" in messages:
@@ -118,7 +132,13 @@ def main():
                 content = [{"type": "tool_use", "id": "toolu_cbus_read", "name": "Read", "input": {"file_path": match.group(1)}}]
                 stop = "tool_use"
             else:
+                if args.transport == "monitor" and main_request:
+                    match = re.search(r"Monitor started \(task ([^, )]+)", messages)
+                    if match:
+                        state["monitorTaskID"] = match.group(1)
                 answer = "CBUS_WAKE_RECEIVED" if marker in messages else "CBUS_WAKE_IDLE" if main_request else "Canary"
+                if args.transport == "monitor" and main_request and n > 2 and marker not in messages:
+                    answer = "CBUS_MONITOR_EXPIRED"
                 content = [{"type": "text", "text": answer}]
                 stop = "end_turn"
             message = {"id": "msg_" + uuid.uuid4().hex, "type": "message", "role": "assistant", "model": body.get("model", "claude-sonnet-4-6"), "content": content, "stop_reason": stop, "stop_sequence": None, "usage": {"input_tokens": 100, "output_tokens": 10}}
@@ -150,6 +170,9 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     key = "sk-ant-offline-cbus-canary-not-real"
     conf = {"hasCompletedOnboarding": True, "lastOnboardingVersion": "2.1.277", "theme": "dark", "customApiKeyResponses": {"approved": [key[-20:]], "rejected": []}, "projects": {str(work): {"hasTrustDialogAccepted": True, "allowedTools": [], "hasCompletedProjectOnboarding": True}}}
+    if args.transport == "monitor":
+        conf["cachedGrowthBookFeatures"] = {"tengu_amber_sentinel": True, "tengu_breezy_crescent": args.monitor_bounded}
+        conf["cachedGrowthBookFeaturesAt"] = int(time.time()*1000)
     (config / ".claude.json").write_text(json.dumps(conf))
     (home / ".claude.json").write_text(json.dumps(conf))
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
@@ -198,6 +221,8 @@ def main():
     env.update(http_proxy=base, https_proxy=base, all_proxy=base, no_proxy="127.0.0.1,localhost",
                GIT_SSH_COMMAND="/usr/bin/false", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null",
                GIT_TERMINAL_PROMPT="0", CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL="1")
+    if args.transport == "monitor":
+        env["CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF"] = "1"
     argv = [binary, "--session-id", session, "--model", "claude-sonnet-4-6", "--permission-mode", "default", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--debug-file", str(root / "debug.log"), seed]
     result = {
         "root": str(root), "transport": args.transport, "socketCase": args.socket_case, "binary": binary,
@@ -250,11 +275,81 @@ def main():
         return [r for r in transcript_rows()
                 if r.get("type") == "user" and r.get("sessionId") == session
                 and marker in json.dumps(r)]
-    try:
-        process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
-        os.close(slave)
-        slave = None
-        result["pid"] = process.pid
+    def run_monitor():
+        def alive(pid):
+            try:
+                os.kill(pid, 0)
+                return True
+            except ProcessLookupError:
+                return False
+
+        wait(lambda: state["mainRequests"] >= 2 and b"CBUS_WAKE_IDLE" in output and (work / "waiter.pid").exists(), "Monitor starts without approval input", 45)
+        result["monitorSchema"] = state.get("monitorSchema")
+        result["monitorFlags"] = conf["cachedGrowthBookFeatures"]
+        result["requestedMonitorInput"] = {"persistent": True, "timeout_ms": 2000}
+        result["limitations"] = [
+            "Synthetic two-flag snapshot and local fake provider on firstParty code route; not real-account field proof",
+            "Two-second requested deadline only; does not measure the default 5-minute or 30-minute deadlines",
+            "Environment traffic controls, not an OS-enforced network sandbox; no cbus integration tested",
+        ]
+        initial = state["mainRequests"]
+        idle_at = time.time()
+        pump(args.idle_seconds)
+        result["idleSeconds"] = time.time() - idle_at
+        bounded = args.monitor_bounded
+        before_signal = state["mainRequests"]
+        waiter_pid = int((work / "waiter.pid").read_text())
+        waiter_alive_before_signal = alive(waiter_pid)
+        result["waiterPID"] = waiter_pid
+        timeline.append({"event": "external_signal", "at": time.time()})
+        trigger.write_text(marker)
+        if bounded:
+            pump(3)
+        else:
+            wait(lambda: state.get("stopRequested") and b"CBUS_WAKE_RECEIVED" in output, "persistent Monitor event and TaskStop", 20)
+        main_requests = [r for r in requests if r.get("mainRequest")]
+        monitor_result = next(block["content"] for message in main_requests[1]["body"]["messages"]
+                              for block in message.get("content", []) if isinstance(block, dict)
+                              and block.get("tool_use_id") == "toolu_cbus_monitor")
+        result["monitorStartResult"] = monitor_result
+        result["mainRequestTimes"] = [r["at"] for r in main_requests]
+        result["monitorTaskID"] = state.get("monitorTaskID")
+        result["checks"].update({
+            "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
+            "no_human_input_after_initial_prompt": True,
+            "monitor_available_with_fixed_sentinel": state.get("monitorSchema") is not None,
+            "persistent_schema_matches_flag": ("persistent" in (state.get("monitorSchema") or {}).get("input_schema", {}).get("properties", {})) != bounded,
+            "started_task_id_present": bool(state.get("monitorTaskID")),
+            "start_result_matches_flag": ("expires in 2s" in monitor_result) if bounded else "persistent — runs until TaskStop or session end" in monitor_result,
+            "deadline_behavior_matches_flag": before_signal > initial if bounded else before_signal == initial,
+            "waiter_lifetime_matches_flag": waiter_alive_before_signal != bounded,
+            "event_behavior_matches_flag": not any(marker in json.dumps(r["body"].get("messages", [])) for r in main_requests) if bounded else any(marker in json.dumps(r["body"].get("messages", [])) for r in main_requests),
+            "stopped_by_expiry_or_TaskStop": not state.get("stopRequested") if bounded else bool(state.get("stopRequested")),
+            "same_process_alive": process.poll() is None,
+            "exact_session_in_all_main_requests": all(json.loads(r["body"].get("metadata", {}).get("user_id", "{}")).get("session_id") == session for r in main_requests),
+        })
+        if bounded:
+            result["checks"]["no_late_request_after_expired_source_signal"] = state["mainRequests"] == before_signal
+            result["checks"]["expiry_notice_received"] = b"CBUS_MONITOR_EXPIRED" in output
+        else:
+            wait(lambda: any(r.get("type") == "user" and r.get("sessionId") == session and marker in json.dumps(r) for r in transcript_rows()), "Monitor event transcript row", 10)
+            result["checks"]["TaskStop_success"] = any("Successfully stopped task" in json.dumps(r["body"].get("messages", [])) for r in main_requests)
+            wait(lambda: not alive(waiter_pid), "waiter stopped by TaskStop", 5)
+        result["checks"]["waiter_stopped_before_cleanup"] = not alive(waiter_pid)
+        records = transcript_rows()
+        result["transcripts"] = [str(p) for p in config.glob("projects/**/*.jsonl")]
+        modes = [r["permissionMode"] for r in records if r.get("type") == "permission-mode"]
+        result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
+        result["checks"]["marketplace_autoinstall_disabled"] = "Official marketplace auto-install disabled via env var" in (root / "debug.log").read_text()
+        result["checks"]["no_temporary_url_handler"] = not (home / "Applications/Claude Code URL Handler.app").exists()
+        result["checks"]["no_marketplace_downloaded"] = not (config / "plugins/marketplaces").exists()
+        result["checks"]["no_nonlocal_proxy_attempts"] = not any(e["event"] == "blocked_proxy" for e in timeline)
+        result["providerRouteLines"] = [line for line in (root / "debug.log").read_text().splitlines()
+                                        if "dispatching to firstParty" in line]
+        result["checks"]["native_firstParty_provider_route"] = bool(result["providerRouteLines"])
+        result["passed"] = all(result["checks"].values())
+
+    def run_wake():
         wait(lambda: state["mainRequests"] >= 2 and (args.socket_case == "busy" or b"CBUS_WAKE_IDLE" in output) and ((work / "waiter.pid").exists() if args.transport == "background" else bool(capability.get("socket"))), "initial capability export and response", 45)
         before = state["mainRequests"]
         before_all = len(requests)
@@ -345,6 +440,15 @@ def main():
                 capability["token"] not in p.read_text(errors="replace")
                 for p in (root / "terminal.log", root / "debug.log", root / "provider-requests.json"))
         result["passed"] = all(result["checks"].values())
+    try:
+        process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+        os.close(slave)
+        slave = None
+        result["pid"] = process.pid
+        if args.transport == "monitor":
+            run_monitor()
+        else:
+            run_wake()
     except Exception as error:
         result["error"] = repr(error)
     finally:
