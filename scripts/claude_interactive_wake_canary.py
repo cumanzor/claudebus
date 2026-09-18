@@ -39,14 +39,19 @@ import threading
 import time
 import uuid
 
+from claude_cbus_canary import BusProbe
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--idle-seconds", type=float, default=12)
-    parser.add_argument("--transport", choices=("background", "socket", "monitor"), default="background")
+    parser.add_argument("--transport", choices=("background", "socket", "monitor", "cbus"), default="background")
     parser.add_argument("--socket-case", choices=("accepted", "busy", "session-mismatch", "hold", "refuse"), default="accepted")
     parser.add_argument("--monitor-bounded", action="store_true", help="Set breezy=true for the Monitor control arm")
     parser.add_argument("--message-uuid", type=lambda value: str(uuid.UUID(value)))
+    parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
+    parser.add_argument("--cbus-sha256")
+    parser.add_argument("--cbus-revision")
     args = parser.parse_args()
     if args.idle_seconds < 10:
         parser.error("--idle-seconds must be at least 10")
@@ -54,6 +59,8 @@ def main():
         parser.error("--socket-case requires --transport socket")
     if args.monitor_bounded and args.transport != "monitor":
         parser.error("--monitor-bounded requires --transport monitor")
+    if args.transport == "cbus" and not all((args.cbus, args.cbus_sha256, args.cbus_revision)):
+        parser.error("--transport cbus requires --cbus, --cbus-sha256, and --cbus-revision")
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -73,6 +80,9 @@ def main():
     if args.transport == "monitor":
         waiter.write_text(waiter.read_text() + "while True: time.sleep(1)\n")
     command = f"{sys.executable} {waiter}"
+    bus_probe = BusProbe(root, args, session, marker) if args.transport == "cbus" else None
+    if bus_probe:
+        command = bus_probe.connect_command
     requests, timeline = [], []
     state = {"mainRequests": 0}
     capability = {}
@@ -123,6 +133,10 @@ def main():
             elif main_request and args.transport == "monitor" and marker in messages and not state.get("stopRequested"):
                 state["stopRequested"] = True
                 content = [{"type": "tool_use", "id": "toolu_cbus_stop", "name": "TaskStop", "input": {"task_id": state["monitorTaskID"]}}]
+                stop = "tool_use"
+            elif bus_probe and main_request and marker in messages and not state.get("busReplyRequested"):
+                state["busReplyRequested"] = True
+                content = [{"type": "tool_use", "id": "toolu_cbus_reply", "name": "Bash", "input": {"command": bus_probe.reply_command, "description": "Reply to isolated verifier"}}]
                 stop = "tool_use"
             elif main_request and n == 1:
                 content = [{"type": "tool_use", "id": "toolu_cbus_wake", "name": "Bash", "input": {"command": command, "description": "Prepare isolated canary capability", "run_in_background": args.transport == "background"}}]
@@ -176,6 +190,8 @@ def main():
     (config / ".claude.json").write_text(json.dumps(conf))
     (home / ".claude.json").write_text(json.dumps(conf))
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
+    if bus_probe:
+        settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
     if args.socket_case in ("hold", "refuse"):
         settings["crossSessionInbound"] = args.socket_case
     (config / "settings.json").write_text(json.dumps(settings))
@@ -223,6 +239,8 @@ def main():
                GIT_TERMINAL_PROMPT="0", CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL="1")
     if args.transport == "monitor":
         env["CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF"] = "1"
+    if bus_probe:
+        env.update(CBUS_DIR=str(bus_probe.bus), CBUS_UPDATE_CHECK="0")
     argv = [binary, "--session-id", session, "--model", "claude-sonnet-4-6", "--permission-mode", "default", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--debug-file", str(root / "debug.log"), seed]
     result = {
         "root": str(root), "transport": args.transport, "socketCase": args.socket_case, "binary": binary,
@@ -238,6 +256,9 @@ def main():
             "No cbus transport or delivery acknowledgment tested",
         ],
     }
+    if bus_probe:
+        result["cbus"] = bus_probe.result
+        result["busSupportSHA256"] = hashlib.sha256(Path(sys.modules[BusProbe.__module__].__file__).read_bytes()).hexdigest()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
     os.set_blocking(master, False)
@@ -440,12 +461,48 @@ def main():
                 capability["token"] not in p.read_text(errors="replace")
                 for p in (root / "terminal.log", root / "debug.log", root / "provider-requests.json"))
         result["passed"] = all(result["checks"].values())
+
+    def run_cbus():
+        wait(lambda: state["mainRequests"] >= 2 and b"CBUS_WAKE_IDLE" in output, "actual Claude Bash self-connect", 45)
+        bus_probe.connection = bus_probe.status()
+        bus_probe.result["connected"] = bus_probe.connection
+        before, before_all = state["mainRequests"], len(requests)
+        idle_at = time.time()
+        pump(args.idle_seconds)
+        result["idleSeconds"] = time.time() - idle_at
+        result["checks"]["idle_makes_no_additional_model_requests"] = state["mainRequests"] == before
+        result["checks"]["idle_makes_no_auxiliary_requests"] = len(requests) == before_all
+        timeline.append({"event": "external_cbus_send", "at": time.time()})
+        bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
+        wait(lambda: state.get("busReplyRequested") and b"CBUS_WAKE_RECEIVED" in output, "inbound event and actual cbus reply", 25)
+        wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
+        wait(bus_probe.receipt_ready, "daemon exact transcript receipt", 15)
+        result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
+        main_requests = [r for r in requests if r.get("mainRequest")]
+        result["checks"].update({
+            "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
+            "no_human_input_after_initial_prompt": True,
+            "same_process_alive": process.poll() is None,
+            "exact_session_in_all_main_requests": all(json.loads(r["body"].get("metadata", {}).get("user_id", "{}")).get("session_id") == session for r in main_requests),
+            "cbus_token_not_in_public_evidence": bus_probe.token_absent_from_evidence(),
+            "no_temporary_url_handler": not (home / "Applications/Claude Code URL Handler.app").exists(),
+            "no_marketplace_downloaded": not (config / "plugins/marketplaces").exists(),
+            "no_nonlocal_proxy_attempts": not any(e["event"] == "blocked_proxy" for e in timeline),
+        })
+        modes = [r["permissionMode"] for r in transcript_rows() if r.get("type") == "permission-mode"]
+        result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
+        result["limitations"] = ["Local fake provider, not real-account field proof", "Single local Claude recipient and passive verifier; no relay, other harness, reconnect, or recovery proof"]
+        result["passed"] = all(result["checks"].values())
     try:
+        if bus_probe:
+            bus_probe.start(env, work)
         process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
         os.close(slave)
         slave = None
         result["pid"] = process.pid
-        if args.transport == "monitor":
+        if bus_probe:
+            run_cbus()
+        elif args.transport == "monitor":
             run_monitor()
         else:
             run_wake()
@@ -505,6 +562,8 @@ def main():
         while not gone(waiter_pid) and time.monotonic() < deadline:
             time.sleep(.05)
         result["cleanup"] = {"cliExited": process is None or process.poll() is not None, "serverClosed": server.fileno() == -1, "waiterExited": gone(waiter_pid)}
+        if bus_probe:
+            result["cleanup"].update(bus_probe.cleanup())
         if owned_socket is not None:
             path, dev, ino = owned_socket
             try:
