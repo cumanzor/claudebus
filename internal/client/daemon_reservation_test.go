@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +38,7 @@ func TestDaemonConnectClaimsLaunchReservation(t *testing.T) {
 }
 
 func TestDaemonConnectRefusesNonReservationWithoutChangingMail(t *testing.T) {
-	for _, kind := range []string{"real session", "managed", "owner", "listener", "wrong alias", "malformed", "symlink directory", "symlink metadata", "symlink inbox"} {
+	for _, kind := range []string{"real session", "managed", "owner", "listener", "wrong alias", "malformed", "oversized", "symlink directory", "symlink metadata", "symlink inbox"} {
 		t.Run(kind, func(t *testing.T) {
 			d, _, req := daemonFixture(t)
 			if _, err := ReserveAlias(req.Channel, req.Alias, OriginFresh, "test-model"); err != nil {
@@ -67,6 +68,13 @@ func TestDaemonConnectRefusesNonReservationWithoutChangingMail(t *testing.T) {
 			}
 			if kind == "malformed" {
 				if err := os.WriteFile(metaPath, []byte("broken"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if kind == "oversized" {
+				valid, _ := json.Marshal(m)
+				body := string(valid) + strings.Repeat(" ", (1<<20)-len(valid)) + "invalid suffix"
+				if err := os.WriteFile(metaPath, []byte(body), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
