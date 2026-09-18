@@ -16,8 +16,8 @@ See [Codex operation and recovery](../codex.md) for the complete contract.
 | `cbus connection abandon CHANNEL/ALIAS --pending ID --reason TEXT` | Explicitly skip the exact unresolved local attempt; never cancel or retransmit a possibly accepted native item |
 | `cbus connection disconnect CHANNEL/ALIAS` | Stop submissions while preserving the inbox, binding and journal |
 | `cbus daemon start\|status\|stop\|restart [--json]` | Local supervision; restart fences the observed process and preserves pending state |
-| `cbus install-codex-skills [--path DIR] [--force]` | Install the native session skill; content receipts protect local edits during upgrades |
-| `cbus codex-permissions --binary ABS_PATH [--install] [--path FILE] [--force]` | Preview or explicitly install only an exact-executable `send` allow rule; no implicit policy changes |
+| `cbus install-codex-skills [--path DIR] [--force] [--with-permissions]` | Install the native session skill; explicit `--with-permissions` also trusts all bare/installed-path cbus commands in the active Codex home. Skill `--force` preserves edited rules |
+| `cbus codex-permissions [--scope send\|bus] [--binary ABS_PATH] [--install] [--path FILE] [--force]` | Preview or explicitly install exact-path `send` permission (default) or complete cbus namespace trust; receipts protect edits |
 | `cbus spawn pane\|tab\|window\|tmux CHANNEL --harness codex [--profile NAME]` | Launch an ordinary CLI through the existing terminal interface; the child connects its own thread |
 
 Native join/exit/resume/disconnect and completed-compaction events reach peers.
