@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -68,7 +68,7 @@ def main():
     if args.cbus_shared_fixture and args.transport != "cbus":
         parser.error("--cbus-shared-fixture requires --transport cbus")
     runtime_case = args.cbus_case if args.transport == "cbus" else args.socket_case
-    runtime_case = {"restart-received": "accepted", "restart-pending": "hold"}.get(runtime_case, runtime_case)
+    runtime_case = {"restart-received": "accepted", "restart-pending": "hold", "resume-received": "accepted", "resume-pending": "hold"}.get(runtime_case, runtime_case)
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -134,7 +134,11 @@ def main():
             n = state["mainRequests"]
             if main_request and n == 2 and runtime_case == "busy":
                 response_release.wait(45)
-            if main_request and n == 1 and args.transport == "monitor":
+            if main_request and state.get("busReconnectNext"):
+                state["busReconnectNext"] = False
+                content = [{"type": "tool_use", "id": "toolu_cbus_reconnect", "name": "Bash", "input": {"command": bus_probe.connect_command, "description": "Reconnect this resumed isolated session"}}]
+                stop = "tool_use"
+            elif main_request and n == 1 and args.transport == "monitor":
                 state["monitorSchema"] = next((t for t in body.get("tools", []) if t["name"] == "Monitor"), None)
                 content = [{"type": "tool_use", "id": "toolu_cbus_monitor", "name": "Monitor", "input": {"command": command, "description": "Isolated persistent flag canary", "timeout_ms": 2000, "persistent": True}}]
                 stop = "tool_use"
@@ -200,7 +204,7 @@ def main():
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if bus_probe:
         settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
-        if args.cbus_case == "restart-received":
+        if args.cbus_case in ("restart-received", "resume-received"):
             settings["permissions"]["allow"].append(f"Bash({bus_probe.second_reply_command})")
     if runtime_case in ("hold", "refuse"):
         settings["crossSessionInbound"] = runtime_case
@@ -474,7 +478,7 @@ def main():
         result["passed"] = all(result["checks"].values())
 
     def run_cbus():
-        nonlocal marker
+        nonlocal marker, master, process
         wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
@@ -545,6 +549,66 @@ def main():
                 old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
                 old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
                 result["checks"]["daemon_restart_did_not_duplicate_original_receipt_or_ack"] = len(old_rows) == len(old_acks) == 1
+        if args.cbus_case.startswith("resume-"):
+            prior = bus_probe.status()
+            bus_probe.result["beforeResume"] = prior
+            old_pid, count = process.pid, state["mainRequests"]
+            credential_dir = bus_probe.bus / ".daemon/claude-credentials"
+            refs_before = sorted(p.name for p in credential_dir.glob("*.token"))
+            os.write(master, b"/exit")
+            pump(.4)
+            os.write(master, b"\r")
+            deadline = time.monotonic() + 8
+            while process.poll() is None and time.monotonic() < deadline:
+                pump(.1)
+            if process.poll() is None:
+                raise RuntimeError("original Claude did not exit before native resume")
+            result["checks"]["original_native_process_and_socket_exited"] = not Path(prior["claude"]["binding"]["Endpoint"]["Socket"]).exists()
+            os.close(master)
+            master, resume_slave = pty.openpty()
+            fcntl.ioctl(resume_slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+            os.set_blocking(master, False)
+            state["busReconnectNext"] = True
+            if args.cbus_case == "resume-received":
+                original_marker, original_ack = marker, bus_probe.ack
+                marker = bus_probe.marker = bus_probe.second_marker
+                bus_probe.ack, bus_probe.reply_command = bus_probe.second_ack, bus_probe.second_reply_command
+            resumed_argv = [binary, "--resume", session, *argv[3:-1], seed + "_RESUME"]
+            result["resumedArgv"] = resumed_argv
+            try:
+                process = subprocess.Popen(resumed_argv, cwd=work, env=env, stdin=resume_slave, stdout=resume_slave, stderr=resume_slave, start_new_session=True)
+            finally:
+                os.close(resume_slave)
+            result["resumedPID"] = process.pid
+            wait(lambda: state["mainRequests"] >= count + 2, "actual native resume and Bash reconnect result", 45)
+            pump(.3)
+            resumed = bus_probe.status()
+            bus_probe.result["afterResume"] = resumed
+            resume_requests = [r for r in requests if r.get("mainRequest")][count:]
+            history = resume_requests[0]["body"]["messages"] if resume_requests else []
+            result["checks"]["native_resume_preserves_same_session_history"] = process.pid != old_pid and any(
+                isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id") == "toolu_cbus_wake"
+                for message in history for block in message.get("content", []))
+            if args.cbus_case == "resume-pending":
+                result["checks"]["pending_resume_does_not_replace_old_epoch"] = all(resumed.get(k) == prior.get(k) for k in ("id", "threadId", "claude", "offset", "accepted", "pending"))
+                result["checks"]["pending_resume_creates_no_credential"] = refs_before == sorted(p.name for p in credential_dir.glob("*.token"))
+                result["checks"]["pending_resume_refusal_is_visible"] = "unresolved pending attempt" in json.dumps(resume_requests[-1]["body"]["messages"])
+                result["checks"]["pending_resume_has_no_receipt_or_ack"] = not receipts() and not bus_probe.acknowledgments() and not resumed.get("lastAccepted")
+            else:
+                result["checks"]["resume_preserves_registration_and_prior_receipt"] = all(resumed.get(k) == prior.get(k) for k in ("id", "threadId", "offset", "accepted", "lastAccepted"))
+                result["checks"]["resume_installs_fresh_runtime_and_credential"] = resumed["claude"]["binding"]["Endpoint"]["PID"] == process.pid and resumed["claude"]["credentialRef"] != prior["claude"]["credentialRef"]
+                bus_probe.connection = resumed
+                state["busReplyRequested"] = False
+                second_count = state["mainRequests"]
+                bus_probe.result["secondMarker"] = marker
+                bus_probe.result["secondReplyMarker"] = bus_probe.ack
+                bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
+                wait(lambda: state["mainRequests"] >= second_count + 2 and bool(bus_probe.acknowledgments()), "resumed runtime second round trip", 25)
+                wait(lambda: bus_probe.receipt_ready(prior["accepted"] + 1), "resumed runtime exact UUID receipt", 15)
+                result["checks"].update({"resumed_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
+                old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
+                old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
+                result["checks"]["resume_did_not_duplicate_old_receipt_or_ack"] = len(old_rows) == len(old_acks) == 1
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
             "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
@@ -561,6 +625,9 @@ def main():
         result["limitations"] = ["Local fake provider, not real-account field proof", "Single local Claude recipient and passive verifier; no relay, other harness, reconnect, or recovery proof"]
         if args.cbus_case.startswith("restart-"):
             result["limitations"][1] = "Controlled same-native-process daemon restart only; no native-process resume, session switch, relay, or other-harness proof"
+        if args.cbus_case.startswith("resume-"):
+            result["limitations"][1] = "Exact-session native-process resume only; no same-process session switch, relay, or other-harness proof"
+            result["checks"]["resumed_process_alive"] = result["checks"].pop("same_process_alive")
         result["passed"] = all(result["checks"].values())
     def terminate_requested(signum, frame):
         raise RuntimeError("canary termination requested")
