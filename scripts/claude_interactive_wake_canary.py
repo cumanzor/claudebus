@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -68,6 +68,7 @@ def main():
     if args.cbus_shared_fixture and args.transport != "cbus":
         parser.error("--cbus-shared-fixture requires --transport cbus")
     runtime_case = args.cbus_case if args.transport == "cbus" else args.socket_case
+    runtime_case = {"restart-received": "accepted", "restart-pending": "hold"}.get(runtime_case, runtime_case)
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -199,6 +200,8 @@ def main():
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if bus_probe:
         settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
+        if args.cbus_case == "restart-received":
+            settings["permissions"]["allow"].append(f"Bash({bus_probe.second_reply_command})")
     if runtime_case in ("hold", "refuse"):
         settings["crossSessionInbound"] = runtime_case
     (config / "settings.json").write_text(json.dumps(settings))
@@ -471,6 +474,7 @@ def main():
         result["passed"] = all(result["checks"].values())
 
     def run_cbus():
+        nonlocal marker
         wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
@@ -509,6 +513,38 @@ def main():
             wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
             wait(bus_probe.receipt_ready, "daemon exact transcript receipt", 15)
             result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
+        if args.cbus_case.startswith("restart-"):
+            prior = bus_probe.status()
+            bus_probe.result["beforeRestart"] = prior
+            count = state["mainRequests"]
+            held_count = (root / "debug.log").read_text().count("held inbound peer message")
+            timeline.append({"event": "restart_owned_daemon", "at": time.time()})
+            bus_probe.restart()
+            pump(3)
+            resumed = bus_probe.status()
+            bus_probe.result["afterRestart"] = resumed
+            result["checks"]["daemon_restart_did_not_wake_model"] = state["mainRequests"] == count
+            result["checks"]["daemon_restart_preserves_binding_and_cursor"] = all(resumed.get(k) == prior.get(k) for k in ("id", "threadId", "claude", "offset", "accepted"))
+            if args.cbus_case == "restart-pending":
+                result["checks"]["daemon_restart_retains_pending_attempt"] = resumed.get("pending") == prior.get("pending") and bool(resumed.get("pending")) and resumed.get("accepted") == 0 and not resumed.get("lastAccepted")
+                result["checks"]["daemon_restart_did_not_resend_held_message"] = (root / "debug.log").read_text().count("held inbound peer message") == held_count
+                result["checks"]["daemon_restart_keeps_no_receipt_or_ack"] = not receipts() and not bus_probe.acknowledgments()
+            else:
+                result["checks"]["daemon_restart_preserves_received_UUID"] = resumed.get("lastAccepted") == prior.get("lastAccepted")
+                original_marker, original_ack = marker, bus_probe.ack
+                marker = bus_probe.marker = bus_probe.second_marker
+                bus_probe.ack, bus_probe.reply_command = bus_probe.second_ack, bus_probe.second_reply_command
+                state["busReplyRequested"] = False
+                bus_probe.result["secondMarker"] = marker
+                bus_probe.result["secondReplyMarker"] = bus_probe.ack
+                bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
+                wait(lambda: state["mainRequests"] >= count + 2 and bool(bus_probe.acknowledgments()), "post-restart second round trip", 25)
+                wait(lambda: bus_probe.receipt_ready(prior["accepted"] + 1), "post-restart second UUID receipt", 15)
+                checks = bus_probe.check_receipt(transcript_rows(), process.pid)
+                result["checks"].update({"post_restart_" + k: v for k, v in checks.items()})
+                old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
+                old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
+                result["checks"]["daemon_restart_did_not_duplicate_original_receipt_or_ack"] = len(old_rows) == len(old_acks) == 1
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
             "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
@@ -523,6 +559,8 @@ def main():
         modes = [r["permissionMode"] for r in transcript_rows() if r.get("type") == "permission-mode"]
         result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
         result["limitations"] = ["Local fake provider, not real-account field proof", "Single local Claude recipient and passive verifier; no relay, other harness, reconnect, or recovery proof"]
+        if args.cbus_case.startswith("restart-"):
+            result["limitations"][1] = "Controlled same-native-process daemon restart only; no native-process resume, session switch, relay, or other-harness proof"
         result["passed"] = all(result["checks"].values())
     def terminate_requested(signum, frame):
         raise RuntimeError("canary termination requested")

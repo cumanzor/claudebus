@@ -41,6 +41,9 @@ class BusProbe:
         self.ack = "CBUS_ACK_" + uuid.uuid4().hex
         self.connect_command = shlex.join([str(self.binary), "connect", self.channel, "receiver", "--json"])
         self.reply_command = shlex.join([str(self.binary), "send", self.sender, "--force", self.ack])
+        self.second_marker = "CBUS_SECOND_" + uuid.uuid4().hex
+        self.second_ack = "CBUS_ACK_SECOND_" + uuid.uuid4().hex
+        self.second_reply_command = shlex.join([str(self.binary), "send", self.sender, "--force", self.second_ack])
         self.inbox = self.bus / self.channel / "verifier" / "inbox.jsonl"
         self.process = None
         self.log = None
@@ -91,12 +94,34 @@ class BusProbe:
         return [json.loads(line) for line in self.inbox.read_text().splitlines()
                 if line and json.loads(line).get("text") == self.ack]
 
-    def receipt_ready(self):
+    def receipt_ready(self, minimum_accepted=1):
         if not hasattr(self, "connection"):
             return False
         path = self.bus / ".daemon/connections" / (self.connection["id"] + ".json")
         saved = json.loads(path.read_text())
-        return saved.get("lastAccepted", {}).get("state") == "received"
+        return saved.get("accepted", 0) >= minimum_accepted and saved.get("lastAccepted", {}).get("state") == "received"
+
+    def restart(self):
+        if self.shared or self.process is None:
+            raise RuntimeError("restart requires an owned isolated daemon")
+        before = json.loads(self.command(["daemon", "status", "--json"]))
+        if before != self.health or before["pid"] != self.process.pid:
+            raise RuntimeError("daemon restart identity fence changed")
+        self.command(["daemon", "stop", "--json"])
+        self.process.wait(timeout=10)
+        if (self.bus / ".daemon/control.sock").exists():
+            raise RuntimeError("old daemon socket remained after stop")
+        self.process = subprocess.Popen([str(self.binary), "daemon", "serve"], cwd=self.work,
+                                        env=self.env, stdout=self.log, stderr=self.log)
+        deadline = time.monotonic() + 10
+        while not (self.bus / ".daemon/control.sock").exists():
+            if self.process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("restarted isolated daemon did not start")
+            time.sleep(.05)
+        self.health = json.loads(self.command(["daemon", "status", "--json"]))
+        if self.health["pid"] != self.process.pid or self.health["pid"] == before["pid"]:
+            raise RuntimeError("daemon restart did not produce expected fresh process")
+        self.result["daemonRestart"] = {"before": before, "after": self.health}
 
     def check_receipt(self, records, pid):
         current = self.status()
