@@ -88,11 +88,6 @@ func readClaudeCredential(daemonRoot, ref string) (string, error) {
 	return string(data), nil
 }
 
-func validClaudeCredentialRef(ref string) bool {
-	id, ok := strings.CutSuffix(ref, ".token")
-	return ok && uuidLike(id) && id == strings.ToLower(id)
-}
-
 func validClaudeCredentialToken(token string) bool {
 	return len(token) > 0 && len(token) <= claudeCredentialMaxBytes && utf8.ValidString(token) && !strings.ContainsAny(token, "\r\n\x00")
 }

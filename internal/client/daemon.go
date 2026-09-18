@@ -36,32 +36,33 @@ type ConnectRequest struct {
 // Pending survives ambiguous RPC outcomes. Absence in a subsequent queue/history
 // read is NOT proof of rejection, so an uncertain submission is never replayed.
 type ConnectionState struct {
-	ID               string                 `json:"id"`
-	Harness          string                 `json:"harness,omitempty"`
-	Channel          string                 `json:"channel"`
-	Alias            string                 `json:"alias"`
-	ThreadID         string                 `json:"threadId"`
-	Config           CodexQueueConfig       `json:"config"`
-	RecordedVersion  string                 `json:"recordedVersion"`
-	State            string                 `json:"state"`
-	Error            string                 `json:"error,omitempty"`
-	ListenerError    string                 `json:"listenerError,omitempty"`
-	Accepted         uint64                 `json:"accepted"`
-	LastQueueID      string                 `json:"lastQueueId,omitempty"`
-	Dev              uint64                 `json:"dev"`
-	Ino              uint64                 `json:"ino"`
-	Offset           int64                  `json:"offset"`
-	Pending          *queueAttempt          `json:"pending,omitempty"`
-	LastAccepted     *deliveryObservation   `json:"lastAccepted,omitempty"`
-	Abandoned        uint64                 `json:"abandoned"`
-	Resolutions      []abandonedAttempt     `json:"resolutions,omitempty"`
-	RolloutPath      string                 `json:"rolloutPath,omitempty"`
-	Consumer         *consumerObservation   `json:"consumer,omitempty"`
-	PresenceSequence uint64                 `json:"presenceSequence,omitempty"`
-	PresenceOutbox   []presenceTransition   `json:"presenceOutbox,omitempty"`
-	Relay            *RelayConfig           `json:"relay,omitempty"`
-	RelayStatus      *relayObservation      `json:"relayStatus,omitempty"`
-	Compaction       *compactionObservation `json:"compaction,omitempty"`
+	ID               string                  `json:"id"`
+	Harness          string                  `json:"harness,omitempty"`
+	Channel          string                  `json:"channel"`
+	Alias            string                  `json:"alias"`
+	ThreadID         string                  `json:"threadId"`
+	Config           CodexQueueConfig        `json:"config"`
+	Claude           *ClaudeConnectionConfig `json:"claude,omitempty"`
+	RecordedVersion  string                  `json:"recordedVersion"`
+	State            string                  `json:"state"`
+	Error            string                  `json:"error,omitempty"`
+	ListenerError    string                  `json:"listenerError,omitempty"`
+	Accepted         uint64                  `json:"accepted"`
+	LastQueueID      string                  `json:"lastQueueId,omitempty"`
+	Dev              uint64                  `json:"dev"`
+	Ino              uint64                  `json:"ino"`
+	Offset           int64                   `json:"offset"`
+	Pending          *queueAttempt           `json:"pending,omitempty"`
+	LastAccepted     *deliveryObservation    `json:"lastAccepted,omitempty"`
+	Abandoned        uint64                  `json:"abandoned"`
+	Resolutions      []abandonedAttempt      `json:"resolutions,omitempty"`
+	RolloutPath      string                  `json:"rolloutPath,omitempty"`
+	Consumer         *consumerObservation    `json:"consumer,omitempty"`
+	PresenceSequence uint64                  `json:"presenceSequence,omitempty"`
+	PresenceOutbox   []presenceTransition    `json:"presenceOutbox,omitempty"`
+	Relay            *RelayConfig            `json:"relay,omitempty"`
+	RelayStatus      *relayObservation       `json:"relayStatus,omitempty"`
+	Compaction       *compactionObservation  `json:"compaction,omitempty"`
 }
 
 type queueAttempt struct {
@@ -353,14 +354,14 @@ func (d *busDaemon) load() error {
 		if c.ID == "" || e.Name() != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !uuidLike(c.ThreadID) {
 			return fmt.Errorf("invalid connection %s", e.Name())
 		}
-		if err := validateDaemonHarness(c.Harness); err != nil {
+		if err := validateConnectionAdapter(&c); err != nil {
 			return fmt.Errorf("connection %s: %w", e.Name(), err)
 		}
 		c.Harness = daemonHarness(c.Harness)
 		if err := validateRelayConfig(c.Relay); err != nil {
 			return fmt.Errorf("connection %s: %w", e.Name(), err)
 		}
-		if err := validateCodexQueueBinding(c.Config); err != nil && c.State != "disconnected" && c.State != "detached" {
+		if err := validateConnectionBinding(&c); err != nil && c.State != "disconnected" && c.State != "detached" {
 			c.State, c.Error = "binding-required", err.Error()
 		}
 		d.register(&c)
@@ -419,17 +420,23 @@ func writeDaemonMeta(dir string, m peerMeta) error {
 }
 
 func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
-	if err := requireCodexConnection(c); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return nil, err
 	}
-	if err := validateCodexQueueBinding(c.Config); err != nil {
+	if err := validateConnectionBinding(c); err != nil {
 		return nil, err
 	}
 	// Config is keyed per connection: one peer's cwd/config must not overwrite another's.
 	if q := d.cachedQueue(c.ID); q != nil {
 		return q, nil
 	}
-	q, err := d.openQueue(c.Config)
+	var q nativeQueue
+	var err error
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		q, err = newClaudeQueueContext(d.ctx, d.root, *c.Claude)
+	} else {
+		q, err = d.openQueue(c.Config)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +462,7 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 // Source is historical thread provenance, retained across frontend changes.
 // Admit only a currently observed CLI; queue() must also work while it is down.
 func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
-	if err := requireCodexConnection(c); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
 	probe := *c
@@ -465,7 +472,13 @@ func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
 		return fmt.Errorf("cannot verify current CLI consumer: %w", err)
 	}
 	if p.State != "online" || p.PID <= 0 || p.StartToken == "" {
-		return fmt.Errorf("current interactive Codex CLI required: exact rollout writer and queue store not verified (%s); run connect from the CLI with normal process-inspection permission", p.State)
+		return fmt.Errorf("current %s CLI consumer not verified (%s); run connect from the exact CLI with normal process-inspection permission", daemonHarness(c.Harness), p.State)
+	}
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		if c.Claude == nil || p.PID != c.Claude.Binding.Endpoint.PID || p.StartToken != c.Claude.Binding.Endpoint.StartToken {
+			return errors.New("Claude consumer does not match the caller's exact process identity")
+		}
+		return nil
 	}
 	if c.Config.RuntimePID != 0 || c.Config.RuntimeStartToken != "" || c.Config.BindingSource == "runtime-open-queue" {
 		if p.PID != c.Config.RuntimePID || p.StartToken != c.Config.RuntimeStartToken {
@@ -791,7 +804,7 @@ func (d *busDaemon) disconnect(target string) error {
 }
 
 func (d *busDaemon) deliver(c *ConnectionState) error {
-	if err := requireCodexConnection(c); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
 	unlock, err := d.lockPeer(connectionLockChannel(c), c.Alias)
@@ -885,9 +898,11 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	queueID, err := q.enqueue(c.ThreadID, c.Pending.ClientID, nativeBusPayload(line, msg))
 	if err != nil {
 		var rejection *rpcError
-		if errors.As(err, &rejection) && rejection.Code == -32600 {
-			// The verified Codex queue invalid-request paths precede enqueue.
-			// Internal and other unverified RPC errors may follow insertion.
+		var claudeRejected *claudeNotSubmittedError
+		if (daemonHarness(c.Harness) == daemonHarnessCodex && errors.As(err, &rejection) && rejection.Code == -32600) ||
+			(daemonHarness(c.Harness) == daemonHarnessClaude && errors.As(err, &claudeRejected)) {
+			// Only adapter-specific proof that no message was submitted can
+			// release this attempt. Unconfirmed socket writes remain pending.
 			next := *c
 			next.Pending = nil
 			next.State = "error"
@@ -906,12 +921,19 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 }
 
 func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) error {
+	if daemonHarness(c.Harness) == daemonHarnessClaude && (c.Claude == nil || evidence == nil || evidence.State != codexMessageReceived || evidence.ReceiptOffset == nil) {
+		return errors.New("Claude acceptance requires exact persisted user receipt; socket writes are unconfirmed")
+	}
 	// Keep the in-memory attempt intact on persistence failure, too.
 	if evidence != nil {
 		observed := *evidence
 		c.Pending.Evidence = &observed
 	}
 	next := *c
+	if c.Claude != nil {
+		cfg := *c.Claude
+		next.Claude = &cfg
+	}
 	next.Offset = c.Pending.End
 	next.LastQueueID = c.Pending.QueueID
 	next.LastAccepted = &deliveryObservation{Attempt: *c.Pending, State: "accepted", ObservedAt: Now()}
@@ -920,18 +942,27 @@ func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) err
 		next.LastAccepted.ItemID = evidence.ItemID
 		next.LastAccepted.Attempt.QueueID = evidence.QueueID
 		next.LastQueueID = evidence.QueueID
+		if daemonHarness(c.Harness) == daemonHarnessClaude {
+			if *evidence.ReceiptOffset < c.Claude.ReceiptOffset {
+				return errors.New("Claude receipt cursor moved backwards")
+			}
+			next.Claude.ReceiptOffset = *evidence.ReceiptOffset
+		}
 	}
 	next.LastAccepted.Attempt.Evidence = nil
 	next.Pending = nil
 	next.Accepted++
 	if next.State != "disconnected" {
-		next.State = "queue-ready"
+		next.State = connectionReadyState(c)
 	}
 	next.Error = ""
 	if err := d.save(&next); err != nil {
 		return err
 	}
 	*c = next
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		d.closeQueue(c.ID) // Reopen with the newly committed receipt cursor.
+	}
 	return nil
 }
 
