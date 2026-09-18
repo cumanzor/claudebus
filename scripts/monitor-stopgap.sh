@@ -16,7 +16,8 @@ usage: monitor-stopgap.sh seed|status|revert <config-dir> [--from <source .claud
 
 <config-dir> must not be your live config dir. Use it as CLAUDE_CONFIG_DIR for the sessions
 you want the stopgap in, and sign in there. Signing in rewrites .claude.json, after which
-revert refuses to touch it: that is deliberate, so a login is never deleted by this helper.
+revert restores it and removes nothing: that is deliberate, so a login is never deleted by
+this helper. Stop every session using the dir before you revert.
 USAGE
   exit 2
 }
@@ -153,14 +154,31 @@ elif cmd == "revert":
     m = read_manifest()
     if os.path.islink(cfg):
         die("%s is a symlink; refusing to follow it" % cfg)
-    if not os.path.isfile(cfg):
+    if not os.path.lexists(cfg):
         os.remove(man)
         print("monitor-stopgap: config already gone; removed the manifest")
         sys.exit(0)
-    if digest(cfg) != m.get("sha256"):
-        die("%s changed since seeding, most likely a sign-in. Refusing to delete it; remove it "
-            "yourself if you are sure." % cfg)
-    os.remove(cfg)
-    os.remove(man)
-    print("monitor-stopgap: removed %s and its manifest" % cfg)
+    # claim the file by rename before inspecting it. hashing and then unlinking would delete a
+    # config that a sign-in replaced in between; a rename can only ever take one file, and we
+    # decide what to do with it once it is ours and nothing else can swap it.
+    archive = "%s.reverting-%d-%s" % (cfg, os.getpid(), os.urandom(4).hex())
+    if os.path.lexists(archive):
+        die("scratch name %s already exists" % archive)
+    os.rename(cfg, archive)
+    if digest(archive) == m.get("sha256"):
+        os.remove(archive)
+        os.remove(man)
+        print("monitor-stopgap: removed %s and its manifest" % cfg)
+        sys.exit(0)
+    # not what we wrote, so it is someone's real config, most likely a sign-in. put it back
+    # without clobbering anything that appeared in the meantime.
+    try:
+        os.link(archive, cfg)
+    except FileExistsError:
+        die("%s changed since seeding and a new file appeared while reverting; nothing was "
+            "deleted and your copy is preserved at %s" % (cfg, archive))
+    os.unlink(archive)
+    die("%s changed since seeding, most likely a sign-in. Restored it untouched and removed "
+        "nothing; delete it yourself if you are sure. Stop sessions using this config dir "
+        "before reverting." % cfg)
 PY
