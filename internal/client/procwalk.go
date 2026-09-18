@@ -42,12 +42,12 @@ func harnessWalk(start, rootPid int, lookup func(int) (procRecord, bool)) string
 		if havePrev && !ancestryPlausible(prev, rec) {
 			return "" // the link we followed was stale; anything above it is a stranger
 		}
-		if base := commBase(rec.Comm); isHarnessComm(base) {
-			return normalizeHarness(base)
+		if harness := harnessForExecutable(rec.Comm); harness != "" {
+			return harness
 		}
 		if f := strings.Fields(rec.Argv); len(f) > 0 {
-			if base := commBase(f[0]); isHarnessComm(base) {
-				return normalizeHarness(base)
+			if harness := harnessForExecutable(f[0]); harness != "" {
+				return harness
 			}
 		}
 		if rec.PPid <= rootPid {
@@ -55,6 +55,16 @@ func harnessWalk(start, rootPid int, lookup func(int) (procRecord, bool)) string
 		}
 		prev, havePrev = rec, true
 		p = rec.PPid
+	}
+	return ""
+}
+
+func harnessForExecutable(name string) string {
+	if base := commBase(name); isHarnessComm(base) {
+		return normalizeHarness(base)
+	}
+	if claudeNativeVersionPath(name) {
+		return "claude"
 	}
 	return ""
 }

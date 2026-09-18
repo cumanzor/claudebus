@@ -35,6 +35,23 @@ func TestHookExitPreservesManagedInboxAndLeavesLegacyPeers(t *testing.T) {
 	}
 }
 
+func TestHookJoinSkipsNativeClaudeWithoutSuppressingOtherHarnesses(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", ""} {
+		t.Run(harness, func(t *testing.T) {
+			root := setupStore(t)
+			t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/fixture/session.sock")
+			previous := harnessNameFn
+			harnessNameFn = func() string { return harness }
+			defer func() { harnessNameFn = previous }()
+			HookJoin(strings.NewReader(`{"session_id":"SESSION"}`), "hooked", "worker", "")
+			joined := fileExists(filepath.Join(root, "hooked", "worker", "meta.json"))
+			if joined == (harness == "claude") {
+				t.Fatalf("native/legacy hook dispatch incorrect for %q", harness)
+			}
+		})
+	}
+}
+
 // TestHookExitLeavesLocalKeepsRemote: the SessionEnd hook leaves this session's LOCAL
 // registrations (reading the id from stdin JSON) but leaves REMOTE markers untouched —
 // the relay has no leave endpoint; a dead session's markers die via the ownerPid sweep.
