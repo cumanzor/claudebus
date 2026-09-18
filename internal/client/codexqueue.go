@@ -432,9 +432,10 @@ const (
 )
 
 type codexMessageLookup struct {
-	State   string `json:"state"`
-	QueueID string `json:"queueId,omitempty"`
-	ItemID  string `json:"itemId,omitempty"`
+	State         string `json:"state"`
+	QueueID       string `json:"queueId,omitempty"`
+	ItemID        string `json:"itemId,omitempty"`
+	ReceiptOffset *int64 `json:"receiptOffset,omitempty"`
 }
 
 // lookupMessage distinguishes durable queue presence from a userMessage in the
