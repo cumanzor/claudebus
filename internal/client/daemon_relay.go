@@ -97,6 +97,9 @@ func (d *busDaemon) connectRelay(c *ConnectionState, ready ...relaySocket) error
 }
 
 func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
+	if err := requireCodexConnection(c); err != nil {
+		return err
+	}
 	dir := filepath.Join(CBUSDir(), ".remote", c.Relay.Host, c.Channel)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
