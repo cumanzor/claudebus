@@ -185,7 +185,7 @@ func TestCommittedTemplatesArePureAndLoad(t *testing.T) {
 	if len(files) == 0 {
 		t.Skip("no committed templates")
 	}
-	promptMarkers := []string{"Arm your listener", "Monitor tool", "cbus tail", "Standing doctrines", "NEVER Bash", "first reply (required)"}
+	promptMarkers := []string{"cbus connect", "socket-ready", "Standing doctrines", "do not start a Monitor", "first reply (required)"}
 	personalMarkers := []string{"/Users/", "carlos", ".ccs/", "carlos-mbp"}
 	for _, fp := range files {
 		b, err := os.ReadFile(fp)

@@ -536,7 +536,9 @@ func runBranch(args []string) int {
 		return die("%v", err)
 	}
 	fmt.Printf("parent: %s/%s; child: %s/%s (alias reserved + session titled — it joins as it boots)\n", rch, alias, rch, child)
-	fmt.Printf("arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", rch, alias)
+	if !printManagedListenerHint(rch, alias) {
+		fmt.Printf("arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", rch, alias)
+	}
 	return 0
 }
 
@@ -807,7 +809,9 @@ func runJoin(args []string) int {
 	}
 	if already {
 		fmt.Printf("already joined \"%s\" as \"%s\"\n", ch, chosen)
-		fmt.Printf("listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", ch, chosen)
+		if !printManagedListenerHint(ch, chosen) {
+			fmt.Printf("listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail %s/%s\n", ch, chosen)
+		}
 		return 0
 	}
 	sid := client.SessionID()

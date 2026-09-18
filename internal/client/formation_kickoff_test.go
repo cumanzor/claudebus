@@ -41,9 +41,9 @@ func TestKickoffCarriesEverythingDesignAsksFor(t *testing.T) {
 
 	got := kickoffFor(t, f, pp, "Build formations v1 per the design.")
 	for _, want := range []string{
-		"cbus join ch coder",             // how to get on the bus
-		"Monitor tool",                   // armed the right way
-		"NEVER Bash",                     // the trap named
+		"cbus connect ch coder",          // how to get on the bus
+		"socket-ready",                   // armed the right way
+		"do not start a Monitor",         // the trap named
 		"never fold two into one commit", // the role body, verbatim
 		"Build formations v1",            // the effort brief
 		"work_state: tracker item ABC",   // payload references
@@ -77,10 +77,11 @@ func TestKickoffPerModeFraming(t *testing.T) {
 	if !strings.Contains(resume, "SAME session you were before") {
 		t.Errorf("a resumed peer must be told it is itself:\n%s", resume)
 	}
-	// doctrine 2: a local re-arm seeks to the end — a restored peer MUST know it
-	// missed whatever arrived while it was down
-	if !strings.Contains(resume, "NOT replayed") || !strings.Contains(resume, "ask peers to resend") {
-		t.Errorf("a resumed peer must be warned about the replay gap:\n%s", resume)
+	// Native recovery preserves unread and uncertain mail; do not instruct a
+	// resumed peer to duplicate it on the old assumption of a lossy tail.
+	if !strings.Contains(resume, "preserve unread mail and uncertain attempts") ||
+		!strings.Contains(resume, "do not assume mail was lost") || strings.Contains(resume, "NOT replayed") {
+		t.Errorf("resumed native peer received unsafe replay advice:\n%s", resume)
 	}
 
 	fork := kickoffFor(t, f, PeerPlan{Peer: &f.Peers[0], Action: ActionFork}, "")
@@ -212,7 +213,7 @@ func TestBootstrapPeerComposesLikeApply(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	for _, want := range []string{
-		"cbus join ch coder", "Monitor tool", "NEVER Bash",
+		"cbus connect ch coder", "socket-ready", "do not start a Monitor",
 		"You implement things.", "Build the thing.", "work_state: tracker ABC",
 		"cbus send ch/orchestrator", // this session is on the channel, so it answers us
 		"provenance", "cbus-ok-coder-",
@@ -234,7 +235,7 @@ func TestBootstrapPeerDoesNotSkipOtherMachines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap must serve the peer apply cannot launch: %v", err)
 	}
-	if !strings.Contains(got, "cbus join ch remote") {
+	if !strings.Contains(got, "cbus connect ch remote") {
 		t.Errorf("prompt = %s", got)
 	}
 }
