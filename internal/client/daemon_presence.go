@@ -54,11 +54,14 @@ func clonePresenceFields(next, c *ConnectionState) {
 }
 
 func (d *busDaemon) consumerProbe(c *ConnectionState) (consumerProbe, error) {
-	if err := requireCodexConnection(c); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return consumerProbe{State: "unknown"}, err
 	}
 	if d.probeConsumer != nil {
 		return d.probeConsumer(d.ctx, c)
+	}
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		return observeClaudeConsumer(c)
 	}
 	return observeCodexConsumer(d.ctx, c)
 }

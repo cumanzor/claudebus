@@ -108,7 +108,7 @@ func TestDaemonHarnessLegacyJournalPreservesPendingAcrossLoadAndReconnect(t *tes
 func TestDaemonHarnessRejectsUnsupportedJournalWithoutRewriting(t *testing.T) {
 	d, q, req := daemonFixture(t)
 	c := mustDaemonConnect(t, d, req)
-	c.Harness = "claude"
+	c.Harness = "future-adapter"
 	b := mustBindingJSON(t, c)
 	journal := filepath.Join(d.root, "connections", c.ID+".json")
 	if err := os.WriteFile(journal, b, 0600); err != nil {
@@ -116,7 +116,7 @@ func TestDaemonHarnessRejectsUnsupportedJournalWithoutRewriting(t *testing.T) {
 	}
 	reloaded := newBusDaemon()
 	defer reloaded.cancel()
-	if err := reloaded.load(); err == nil || !strings.Contains(err.Error(), "unsupported daemon harness") {
+	if err := reloaded.load(); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("unsupported persisted adapter fell back to Codex: %v", err)
 	}
 	after, err := os.ReadFile(journal)
@@ -150,7 +150,7 @@ func TestDaemonHarnessGuardsCodexEntryPoints(t *testing.T) {
 		t.Fatal("unsupported harness reached Codex consumer probe")
 		return consumerProbe{}, nil
 	}
-	c := &ConnectionState{Harness: "claude"}
+	c := &ConnectionState{Harness: "future-adapter"}
 	checks := map[string]func() error{
 		"queue":      func() error { _, err := d.queue(c); return err },
 		"admission":  func() error { return d.requireCLIConsumer(c) },
@@ -162,12 +162,12 @@ func TestDaemonHarnessGuardsCodexEntryPoints(t *testing.T) {
 	}
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {
-			if err := check(); err == nil || !strings.Contains(err.Error(), "daemon harness") {
+			if err := check(); err == nil || !strings.Contains(err.Error(), "unsupported") {
 				t.Fatalf("unsupported harness reached Codex implementation: %v", err)
 			}
 		})
 	}
-	if q.opens != 0 || !reflect.DeepEqual(c, &ConnectionState{Harness: "claude"}) {
+	if q.opens != 0 || !reflect.DeepEqual(c, &ConnectionState{Harness: "future-adapter"}) {
 		t.Fatal("rejected adapter changed connection state or opened a queue")
 	}
 }
