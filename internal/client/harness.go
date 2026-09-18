@@ -83,6 +83,12 @@ func HookJoin(stdin io.Reader, channel, alias, rendezvous string) {
 	if channel == "" {
 		return // no channel: nothing to join
 	}
+	// Native Claude joins on its first session-side connect after the transcript
+	// exists. Creating a legacy registration here would block that admission or
+	// introduce a second Monitor sink. Inherited socket env alone is not identity.
+	if os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET") != "" && harnessNameFn() == "claude" {
+		return
+	}
 	sid := hookSessionID(stdin)
 	if sid == "" {
 		return // sessionless: no identity to record, so no useful registration
