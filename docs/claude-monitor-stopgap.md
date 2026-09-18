@@ -55,7 +55,8 @@ are true only when scoped this way:
 
 - "The seed restores `persistent`": yes, because of the read path Monitor uses.
 - "The seed freezes every flag": no. Blocking reads, blocking gate checks and dynamic configs
-  that block on init still resolve normally.
+  that block on init do not consult the seed. With telemetry off, evaluation is disabled, so
+  those reads return their built-in defaults rather than a fetched value.
 
 Do not generalize either claim to a flag you have not traced to its accessor.
 
@@ -63,10 +64,17 @@ Do not generalize either claim to a flag you have not traced to its accessor.
 
 A seeded snapshot pins every cached and pinned flag at the values in it, for as long as you
 run with that config dir. Today's snapshot on this machine carries 664 flags. A feature whose
-rollout flips after you seed will not reach you until you re-seed. Concretely,
-`tengu_agents_md_mod` is in the snapshot, so AGENTS.md handling is one of the behaviors that
-freezes with everything else: a session on a seeded config dir keeps whatever that flag said
-when you took the snapshot, even after the rollout moves.
+rollout flips after you seed, and whose gate is read through the cached or pinned path, will
+not reach you until you re-seed.
+
+AGENTS.md is the case to be careful about, in both directions. A flag named
+`tengu_agents_md_mod` is present in the snapshot, but presence of a flag name is not proof
+that a given behavior is gated on it, and this helper's own rule is not to generalize from an
+untraced flag. Separately, the official memory documentation says a telemetry-off session may
+disable the instruction-file loader, which would affect AGENTS.md whatever the flag does. Both
+point the same way: do not rely on AGENTS.md discovery inside a seeded, telemetry-off session.
+Put the project instructions where neither question matters, with a `CLAUDE.md` that carries
+`@AGENTS.md`, and keep AGENTS.md as the included file rather than the discovered one.
 
 Telemetry-off is load-bearing for the mechanism and has its own consequence. The disk cache is
 only read while telemetry is disabled:
@@ -97,21 +105,36 @@ depends on, and leaves you bounded anyway.
     scripts/monitor-stopgap.sh status ~/.claude-monitor-stopgap
     scripts/monitor-stopgap.sh revert ~/.claude-monitor-stopgap
 
-`seed` copies only `cachedGrowthBookFeatures` and `cachedGrowthBookFeaturesAt` out of your
-source config, forces `tengu_breezy_crescent` to false, and writes the result mode 600. It
-refuses to write into your live config dir, and it backs up an existing file so `revert`
-returns you to it. Then run the sessions you want the stopgap in with:
+`seed` writes a NEW dedicated dir only. It refuses a directory that already holds a
+`.claude.json`, so it can never overwrite a config you care about, and it refuses a target
+that resolves inside your live config dir or home, canonicalizing every path component so a
+symlinked directory or a planted `.claude.json` symlink cannot redirect the write. It copies
+only `cachedGrowthBookFeatures` and `cachedGrowthBookFeaturesAt` out of your source config,
+forces `tengu_breezy_crescent` to false, writes mode 600 through `O_EXCL|O_NOFOLLOW`, and
+records a manifest with the file's sha256.
+
+`revert` removes only what that manifest proves this helper wrote, and only while the file
+still hashes to the recorded value. Signing in rewrites `.claude.json`, so after a login
+`revert` refuses and says so; `status` reports the same as MODIFIED. That is deliberate: this
+helper will not delete an account you signed into. Re-seeding a used dir is out of scope on
+purpose, and an explicit snapshot refresh would be the safe way to add it later.
+
+Then run the sessions you want the stopgap in with:
 
     CLAUDE_CONFIG_DIR=~/.claude-monitor-stopgap DISABLE_TELEMETRY=1 \
       CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1 claude
 
-`scripts/monitor-stopgap-test.sh` runs the fixture checks: allowlist honored, no credential
-copied, flag forced false, snapshot otherwise intact, mode 600, live-dir guard refuses, revert
-leaves nothing behind. It touches a temp tree only.
+`scripts/monitor-stopgap-test.sh` runs fifteen checks, positive and negative: allowlist
+honored, no credential copied, flag forced false, snapshot otherwise intact, mode 600,
+manifest written; and refusals for a second seed, the live config dir, a target symlinked to
+the live dir, a leaf `.claude.json` symlink, a revert with no manifest, and a revert after a
+simulated sign-in. It asserts the live fixture config is byte-unchanged through every negative
+and that an unowned config survives a revert attempt. Temp tree only.
 
 ## Acceptance, still open
 
-Nothing here has been measured on 2.1.277. The source is confirmed and the behavior is not.
+Nothing here has been measured on 2.1.277. The source reading predicts that an unflagged
+session keeps `persistent`; the running behavior is unverified.
 The acceptance gate is a live proof on this version: one first-party session on a seeded
 config dir whose Monitor result says it runs until TaskStop, against a control session on an
 unseeded dir whose result says it expires. Until someone runs that pair and records it, treat
