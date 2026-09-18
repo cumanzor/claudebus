@@ -344,7 +344,7 @@ func TestFormationBootstrapVerb(t *testing.T) {
 			t.Fatalf("rc=%d", rc)
 		}
 	})
-	for _, want := range []string{"cbus join roles coder", "Monitor tool", "Ship v1.",
+	for _, want := range []string{"cbus connect roles coder", "socket-ready", "Ship v1.",
 		"cbus send roles/orchestrator", "provenance", "cbus-ok-coder-"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("bootstrap output missing %q:\n%s", want, out)
