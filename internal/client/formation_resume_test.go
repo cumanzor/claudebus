@@ -56,10 +56,10 @@ func TestResumeAnchorLaunchShape(t *testing.T) {
 	}
 	prompt := argv[len(argv)-1]
 	for _, want := range []string{
-		"SAME session",              // restored framing, not a fresh brief
-		"cbus formation apply dd",   // the reconcile instruction
-		"finish the rollout",        // the brief rode along
-		"cbus join dd orchestrator", // re-join instruction with real names
+		"SAME session",                 // restored framing, not a fresh brief
+		"cbus formation apply dd",      // the reconcile instruction
+		"finish the rollout",           // the brief rode along
+		"cbus connect dd orchestrator", // re-join instruction with real names
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("kickoff missing %q", want)
