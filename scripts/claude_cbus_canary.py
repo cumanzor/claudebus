@@ -40,6 +40,8 @@ class BusProbe:
         self.target, self.sender = self.channel + "/receiver", self.channel + "/verifier"
         self.ack = "CBUS_ACK_" + uuid.uuid4().hex
         self.connect_command = shlex.join([str(self.binary), "connect", self.channel, "receiver", "--json"])
+        self.clear_connect_command = shlex.join([str(self.binary), "connect", self.channel, "receiver-new", "--json"])
+        self.extra_connections = []
         self.reply_command = shlex.join([str(self.binary), "send", self.sender, "--force", self.ack])
         self.second_marker = "CBUS_SECOND_" + uuid.uuid4().hex
         self.second_ack = "CBUS_ACK_SECOND_" + uuid.uuid4().hex
@@ -159,7 +161,8 @@ class BusProbe:
         if self.shared:
             try:
                 if hasattr(self, "connection"):
-                    self.command(["connection", "disconnect", self.target, "--json"])
+                    for target in [*self.extra_connections, self.target]:
+                        self.command(["connection", "disconnect", target, "--json"])
                 clean["sharedDaemonPreserved"] = json.loads(self.command(["daemon", "status", "--json"])) == self.health
             except Exception as error:
                 self.result["cleanupError"] = str(error)
@@ -172,7 +175,8 @@ class BusProbe:
                     if health != self.health or health["pid"] != self.process.pid:
                         raise RuntimeError("daemon health fence changed")
                     if hasattr(self, "connection"):
-                        self.command(["connection", "disconnect", self.target, "--json"])
+                        for target in [*self.extra_connections, self.target]:
+                            self.command(["connection", "disconnect", target, "--json"])
                     self.command(["daemon", "stop", "--json"])
                     self.process.wait(timeout=10)
             except Exception as error:
