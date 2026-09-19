@@ -1,5 +1,9 @@
 # claudebus — System Overview
 
+> **Historical scope:** the Monitor receive loop below describes the legacy
+> interface. For current native Claude/Codex operation, start with
+> [how-it-works](../how-it-works.md) and the harness guides linked there.
+>
 > Audience: a developer browsing this repo. This document describes the system as
 > audited at HEAD `f213e26` (2026-07-12), when the client was the bash `bin/cbus` —
 > behavioral quirks flagged, not fixed. **As of 2026-07-13 the installed client is the Go
