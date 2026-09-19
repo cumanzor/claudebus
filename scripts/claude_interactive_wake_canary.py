@@ -126,6 +126,16 @@ def main():
             if main_request:
                 state["mainRequests"] += 1
             n = state["mainRequests"]
+            if bus_probe and bus_probe.autostart and main_request and n <= 2:
+                try:
+                    if n == 1:
+                        bus_probe.before_bash_connect("toolu_cbus_wake")
+                    else:
+                        bus_probe.after_bash_connect(body)
+                except Exception as error:
+                    state["autostartError"] = repr(error)
+                    self.send_error(500, "autostart proof failed")
+                    return
             if main_request and n == 2 and runtime_case == "busy":
                 response_release.wait(45)
             if main_request and state.get("busReconnectNext"):
@@ -271,6 +281,8 @@ def main():
     def wait(predicate, name, timeout=35):
         until = time.monotonic() + timeout
         while not predicate():
+            if state.get("autostartError"):
+                raise RuntimeError(state["autostartError"])
             if time.monotonic() >= until:
                 raise TimeoutError(name)
             if process.poll() is not None:
@@ -388,8 +400,16 @@ def main():
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
         if bus_probe.autostart:
+            result["checks"]["actual_CC_Bash_autostarted_daemon"] = (
+                bus_probe.result.get("autostartObservedAfterBash") is True
+                and [row["phase"] for row in bus_probe.result["autostartAbsence"] if row["absent"]]
+                == ["before-verifier-join", "after-verifier-join", "before-bash-connect-emission"]
+                and bus_probe.connection.get("threadId") == session
+                and bus_probe.connection.get("claude", {}).get("binding", {}).get("Endpoint", {}).get("PID") == process.pid
+                and bus_probe.process is None)
+            if not result["checks"]["actual_CC_Bash_autostarted_daemon"]:
+                raise RuntimeError("daemon environment has no exact Bash autostart attribution")
             keys = set(bus_probe.result["daemonEnvironmentKeys"])
-            result["checks"]["actual_CC_Bash_autostarted_daemon"] = bus_probe.result.get("initialDaemonAbsent") and bus_probe.process is None
             identity = {"CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CLAUDE_ENV_FILE", "CBUS_SESSION_ID", "CBUS_CHANNEL", "CBUS_ALIAS", "CBUS_HARNESS", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "GROK_SESSION_ID"}
             result["checks"]["autostart_daemon_scrubs_session_identity_and_capability"] = not (keys & identity) and not any(k.startswith("CLAUDE_CODE_MESSAGING_") for k in keys)
             result["checks"]["autostart_daemon_keeps_isolated_store_configuration"] = {"CBUS_DIR", "HOME", "PATH"} <= keys

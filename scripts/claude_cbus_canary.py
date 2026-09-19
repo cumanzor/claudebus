@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -45,6 +46,26 @@ def process_environment_keys(pid):
         if b"=" in part:
             keys.add(part.split(b"=", 1)[0].decode())
     return executable.resolve(), sorted(keys)
+
+
+def matching_processes(binary):
+    """Find only the frozen fixture executable; never inspect command arguments."""
+    if sys.platform == "darwin":
+        rows = subprocess.check_output(["ps", "-axo", "pid=,comm="], text=True)
+        matches = []
+        for row in rows.splitlines():
+            parts = row.strip().split(None, 1)
+            if len(parts) == 2 and parts[1] == str(binary):
+                matches.append(int(parts[0]))
+        return matches
+    matches = []
+    for path in Path("/proc").glob("[0-9]*/exe"):
+        try:
+            if path.resolve(strict=True) == binary:
+                matches.append(int(path.parent.name))
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            pass
+    return matches
 
 
 class BusProbe:
@@ -103,11 +124,10 @@ class BusProbe:
         self.env, self.work = env.copy(), work
         self.result["version"] = self.command(["--version"]).strip()
         if self.autostart:
-            if (self.bus / ".daemon/control.sock").exists():
-                raise RuntimeError("autostart fixture must begin without a daemon")
-            self.result["initialDaemonAbsent"] = True
+            self.assert_daemon_absent("before-verifier-join")
             (self.root / "daemon.log").write_text("CLI-autostarted daemon; see bus/.daemon/daemon.log.\n")
             self.command(["join", self.channel, "verifier", "--session-id", str(uuid.uuid4())])
+            self.assert_daemon_absent("after-verifier-join")
             return
         elif self.shared:
             self.health = json.loads(self.command(["daemon", "status", "--json"]))
@@ -130,21 +150,57 @@ class BusProbe:
         self.command(["join", self.channel, "verifier", "--session-id", str(uuid.uuid4())])
 
     def status(self):
-        if self.autostart and not hasattr(self, "health"):
-            self.capture_autostart()
+        if self.autostart and not self.result.get("autostartObservedAfterBash"):
+            raise RuntimeError("autostart was not bound to the completed Bash connect")
         states = json.loads(self.command(["connection", "status", self.target, "--json"]))
         if len(states) != 1:
             raise RuntimeError("expected one exact connection")
         return states[0]
 
+    def assert_daemon_absent(self, phase):
+        # The lock detects initialization before the control socket is published.
+        paths = [self.bus / ".daemon" / name for name in ("control.sock", "lock")]
+        present = [path.name for path in paths if os.path.lexists(path)]
+        pids = matching_processes(self.binary.resolve())
+        absent = not present and not pids
+        self.result.setdefault("autostartAbsence", []).append(
+            {"phase": phase, "at": time.time(), "absent": absent, "paths": present, "pids": pids})
+        if not absent:
+            raise RuntimeError("unexpected fixture daemon at " + phase)
+
+    def before_bash_connect(self, tool_id):
+        self.assert_daemon_absent("before-bash-connect-emission")
+        self.result["autostartConnect"] = {"toolUseId": tool_id, "emittedAt": time.time()}
+
+    def after_bash_connect(self, body):
+        proof = self.result.get("autostartConnect")
+        if not proof:
+            raise RuntimeError("autostart connect was not emitted")
+        blocks = [block for message in body.get("messages", [])
+                  for block in message.get("content", []) if isinstance(block, dict)]
+        replies = [block for block in blocks if block.get("type") == "tool_result"
+                   and block.get("tool_use_id") == proof["toolUseId"]]
+        if len(replies) != 1 or replies[0].get("is_error"):
+            raise RuntimeError("expected successful exact Bash connect tool result")
+        self.capture_autostart()
+        proof.update(observedAt=time.time(), health=self.health,
+                     socketDevice=self.autostart_socket[0], socketInode=self.autostart_socket[1],
+                     executable=str(self.binary.resolve()))
+        self.result["autostartObservedAfterBash"] = True
+
     def capture_autostart(self):
+        socket = self.bus / ".daemon/control.sock"
+        before = socket.lstat()
         health = json.loads(self.command(["daemon", "status", "--json"]))
         executable, keys = process_environment_keys(health["pid"])
-        if executable != self.binary.resolve() or health != json.loads(self.command(["daemon", "status", "--json"])):
-            raise RuntimeError("autostart daemon executable or runtime identity changed")
+        after = socket.lstat()
+        if (not stat.S_ISSOCK(before.st_mode) or before.st_uid != os.geteuid()
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or executable != self.binary.resolve()
+                or health != json.loads(self.command(["daemon", "status", "--json"]))):
+            raise RuntimeError("autostart daemon executable, socket or runtime identity changed")
         self.health = health
-        st = (self.bus / ".daemon/control.sock").lstat()
-        self.autostart_socket = (st.st_dev, st.st_ino)
+        self.autostart_socket = (before.st_dev, before.st_ino)
         self.result["daemonPID"] = health["pid"]
         self.result["daemonEnvironmentKeys"] = keys
 
@@ -219,6 +275,19 @@ class BusProbe:
         if self.autostart:
             try:
                 socket = self.bus / ".daemon/control.sock"
+                observed = {pid for row in self.result.get("autostartAbsence", []) for pid in row["pids"]}
+                observed.update(matching_processes(self.binary.resolve()))
+                deadline = time.monotonic() + 10
+                while not socket.exists() and observed:
+                    for pid in list(observed):
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            observed.remove(pid)
+                    if observed and time.monotonic() >= deadline:
+                        raise RuntimeError("fixture process remains without a verifiable daemon socket")
+                    if observed:
+                        time.sleep(.05)
                 if socket.exists():
                     if not hasattr(self, "health"):
                         self.capture_autostart()
