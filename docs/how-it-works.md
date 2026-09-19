@@ -1,6 +1,40 @@
 # How it works
 
-Each participating session **joins a channel** and **arms a listener**:
+## Native sessions
+
+Ordinary Claude and Codex CLI sessions run `cbus connect CHANNEL [ALIAS] --json`
+from inside the target session. The daemon receives mail and delivers through the
+exact session's native adapter: Claude's messaging socket or Codex's queue.
+iTerm2, tmux and manually opened terminals use the same transport. No Monitor,
+tail process or periodic model polling is needed. Native Claude requires a build
+with the Claude adapter; v0.12.2 supports native Codex only. See [Claude](claude.md)
+and [Codex](codex.md) for capability checks, recovery and receipt semantics.
+
+After joining, check `cbus list CHANNEL` once (retain `@host` for relays), report
+listening peers and explicitly known roles, then update the observed roster from
+presence events. An alias is not role evidence. Claude's `socket-ready` means an
+available endpoint, not receipt. A successful socket write stays pending until
+its exact session/message UUID appears in the bound transcript. Codex queue
+acceptance is likewise separate from history receipt. Receipt is not a reply or
+completed work. Busy sessions wait for their turn; hold/refuse policy still applies.
+
+Use `cbus connection status CHANNEL/ALIAS --json` or
+`cbus connection reconcile CHANNEL/ALIAS --json` on demand; never blindly resend
+an uncertain submission. Disconnect retains the inbox. The daemon reconnects
+native relay subscriptions through `/tail/durable-v1`; relay acknowledgment means
+durable local storage, not model receipt. See [relay.md](relay.md).
+
+## Legacy file and Monitor interface
+
+The join/tail mechanism below remains available for deliberately unmanaged peers;
+it is not the current `/bus-join` flow. Never arm a Monitor against a native
+managed inbox or silently fall back when native checks fail. Prefer a fresh alias
+when migrating. Reusing an old alias requires stopping its known Monitor,
+exporting unread mail and explicitly deciding whether `cbus leave` may delete
+that inbox; do not blindly replay exports. See the full [migration
+boundary](claude.md#migrating-an-existing-monitor-peer).
+
+Each legacy session **joins a channel** and **arms a listener**:
 
 - **Store** — `~/.claude-bus/<channel>/<alias>/` holds:
   - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}` (plus `origin`/`model` birth-record fields; see [Birth records](formations.md#birth-records))
@@ -32,7 +66,7 @@ Each participating session **joins a channel** and **arms a listener**:
   session's own registration where possible; unjoined senders fall back to an unroutable
   `hostname-PID`).
 
-## Design details worth knowing
+### Legacy delivery details
 
 - **No lost messages during setup.** `join` truncates the inbox and the *first*
   arm replays the whole inbox from the start, so anything sent between *join* and
@@ -67,12 +101,12 @@ Each participating session **joins a channel** and **arms a listener**:
   but don't expose the bus directory beyond your own machine.
 - **Channels are namespaces, not isolation.** Any local process can send to any channel;
   the channel only scopes addressing and cleanup.
-- **Delivery is push — an idle session wakes and can act autonomously.** A Monitor
-  event re-invokes the receiving agent on its own: a session sitting idle at the
-  prompt processes the message (and can reply) with no human present. Only a *busy*
-  session defers — the event queues until its current step completes rather than
-  interrupting it. Corollary: a peer message can trigger action while you're away,
-  which is why incoming messages are treated as untrusted peer requests.
+- **Delivery can wake an idle session autonomously.** Native input (or a legacy
+  Monitor event) can re-invoke the receiving agent: a session sitting idle at the
+  prompt can process the message and reply with no human present. A busy session
+  defers input until its turn completes; hold/refuse policy still applies. A peer
+  message can trigger action while you're away, which is why incoming messages
+  are treated as untrusted peer requests.
 - **No broadcast primitive.** `cbus send` targets one peer; message N times to reach N peers.
 - **No runtime dependencies.** The client is a single static Go binary (the bash-era
   python3 and `tail -F` requirements are gone).

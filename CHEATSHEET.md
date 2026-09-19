@@ -15,8 +15,19 @@ the reserved machine-wide channel for an orchestrator session.
 | Fork onto a named channel | `/bus-branch window <channel>` |
 | N sessions | join the same channel from each — any-to-any |
 
-Aliases are auto-picked (`main`, then `fork-N`) and **recycled** — `join` prunes
-dead peers first, so numbers don't grow forever.
+For ordinary Claude CLI sessions, `/bus-join` runs native `cbus connect`:
+
+```sh
+cbus connect myrepo worker --json  # from inside the target session
+cbus list myrepo                   # one roster check; retain explicitly known roles
+```
+
+Native Claude requires a build with the Claude adapter; v0.12.2 supports native
+Codex only. `socket-ready` means an available endpoint, not receipt. No Monitor,
+tail process, periodic model task or recurring roster check is needed. See
+[Claude connections](docs/claude.md) for supported sessions and recovery. Prefer
+an explicit alias when you want a stable address; local aliases can be auto-picked.
+Existing legacy memberships need the deliberate migration described below.
 
 ## Spawn a fresh peer (or fork)
 
@@ -27,6 +38,8 @@ cbus branch pane                             # fork into a tmux/iTerm2 split bes
 cbus spawn tab formations --role documenter  # fresh session, role prompt on first turn
 ```
 
+Connect the parent first with `cbus connect CHANNEL [ALIAS] --json`; `/bus-branch`
+does this for you. The child's bootstrap connects its own native session.
 `branch` forks (the child resumes your transcript); `spawn` starts blank —
 use it when a peer shouldn't inherit your history. `--role <r>` reads
 `roles/<r>.md` and appends it to the child's first turn, defaulting
@@ -45,25 +58,24 @@ cbus active [channel]                    # only peers currently listening
 cbus channels                            # channels with peer counts
 cbus whoami                              # my memberships + remote markers (exit 1 if none)
 cbus prune                               # sweep dead peers everywhere
-cbus rename <new-alias> [channel]        # rename my local alias (re-arm tail after)
-cbus leave [channel]                     # leave (default: all my channels)
+cbus connection status myrepo/worker --json      # saved readiness/receipt evidence
+cbus connection reconcile myrepo/worker --json   # on-demand evidence check, no resend
+cbus connection disconnect myrepo/worker         # stop delivery, retain inbox/history
 ```
 
-Incoming messages arrive in your session as a framed block (the local tail
-reformats each message so it survives the Monitor's 500-char-per-line cap and
-lands whole in one event — no second inbox read):
+Incoming messages include a framed block:
 
 ```
 ◀ cbus msg from=ch/alias to=you ts=...
-<full text, long lines soft-wrapped at ~440 bytes>
+<message text>
 ◀ cbus end from=ch/alias
 ```
 
-Reply with `cbus send <from> "..."` using the `from=` in the header. Remote
-`@host` tails get the same framed block (the relay reframes server-side), so
-long cross-machine messages also arrive whole — up to a
-shared ~2800-char ceiling; past it remote frames carry a `⚠truncated~<N>B` header notice
-(local over-limit messages get the harness's own `...(truncated)` marker).
+Reply with `cbus send <from> "..."` using the exact `from=` address, including
+`@host` for remote peers. A successful send is submission, not receipt or a reply.
+For Claude, receipt requires an exact session/message UUID in the bound transcript.
+Presence updates the observed roster and known roles; announce membership changes
+to the user without sending acknowledgments solely for presence.
 
 ## Cross-machine (relay-backed) channels
 
@@ -75,24 +87,23 @@ hostname/role). One host today: `server`.
 <secret-manager> read <relay-bearer-item> | cbus auth set server --token -
 <secret-manager> read <cf-id-item>        | cbus auth set server --cf-id -
 <secret-manager> read <cf-secret-item>    | cbus auth set server --cf-secret -
+cbus connect dev@server laptop --json    # inside the receiving Claude or Codex CLI
+cbus list dev@server                  # one channel roster check
 cbus send dev@server/server "ping"       # queues if peer offline; replay on connect
-cbus tail dev@server/laptop              # prints Monitor {ws:} arm spec + claims identity
 cbus list @server                     # relay peers: connected/queued/lastSeen
 cbus prune @server                    # reap off relay peers with no queued mail (server-side)
 cbus prune dev@server                 # same, scoped to one channel
-cbus leave dev@server                 # drop THIS session's identity marker
+cbus connection disconnect dev@server/laptop  # retain local inbox and delivery history
 ```
 
-- Endpoint autodetects: loopback on the relay host, else `wss://bus.example.com`. The ws leg
-  authenticates via the token subprotocol only (no CF Access headers); CF credentials are
-  used by the HTTP send/list legs.
-- Remote receive = the session arms `Monitor {ws:}` from the printed spec.
-- Arm a tail first: it records THIS session's identity so `send`'s `from` is
-  routable. Markers are session-scoped (no cross-session alias inheritance) and
-  are a from-default, not reachability — `cbus list @<host>` shows who's connected.
-- Presence works cross-machine: peers get a pushed `join` when someone arms a
-  relay tail and a `departed` ~90s after they drop. `cbus list @<host>` is still
-  the roster truth source (presence is connected-only, no offline catch-up).
+- Native receive requires the matching `/tail/durable-v1` relay endpoint; an older
+  relay is refused. The daemon reconnects without Monitor re-arming.
+- Endpoint autodetects loopback on the relay host; elsewhere configure
+  `CBUS_SITE_SERVER_URL` (for example `https://bus.example.com`). Credentials use
+  `cbus auth`, not prompts or committed files. See [relay setup](docs/relay.md).
+- Relay acknowledgment confirms durable local storage, not recipient receipt.
+  Presence is an observation of the native consumer; a transport subscription
+  alone does not prove that its session is currently available.
 
 ### Steps — bring up a cross-machine pair (laptop ↔ server)
 
@@ -105,19 +116,20 @@ Pick a channel + two explicit aliases (e.g. `bridge`, `laptop`, `server`):
 
 ```sh
 # --- on the server (ssh server, then launch `claude`; detached `tmux` for an autonomous peer) ---
-cbus tail bridge@server/server          # prints ws://127.0.0.1:8090 arm spec (loopback, no CF Access)
-#   → arm the Monitor tool from that spec
+cbus connect bridge@server server --json
+cbus list bridge@server              # check once after joining
 cbus send bridge@server/laptop "hello from the server"
 
 # --- on the Mac ---
-cbus tail bridge@server/laptop          # prints wss://bus.example.com arm spec (token subprotocol auth; no CF headers on the ws leg)
-#   → arm the Monitor tool from that spec
+cbus connect bridge@server laptop --json
+cbus list bridge@server              # check once after joining
 cbus send bridge@server/server "hello from the laptop"
 ```
 
 Both are now on `bridge@server`; messages cross the tunnel as turn events, and offline
 sends queue on the relay and replay when the peer connects. `cbus list @server` shows who's
-connected; tear down per session with `cbus leave bridge@server` (drops only that session's marker).
+connected at the relay; disconnect each native peer with its full address, e.g.
+`cbus connection disconnect bridge@server/laptop`. That retains local mail and history.
 
 - **No forking across machines** (yet — that's the deferred `cbus-b8m`): you start a
   *fresh* session on the target box and join the shared channel, rather than forking your
@@ -163,8 +175,8 @@ cbus formation rm myeffort                          # delete (starters: use git 
   self-balancing grid. A peer's `"split": "right"|"down"` (hand-edit the
   envelope; `save` never writes it) forces that divider, and ANY declared
   direction in the file turns off tmux's auto-reflow for the whole run.
-- Join the formation's channel and arm your Monitor **before** applying — a
-  peer can answer before apply returns.
+- Connect natively to the formation's channel **before** applying — a peer can
+  answer before apply returns. Check the roster once; no Monitor is needed.
 - A saved peer's origin (`fresh`/`fork`) and model are stamped automatically
   at `spawn`/`branch` time and picked up by `save` — no hand-edit needed for
   a launcher-born peer.
@@ -218,10 +230,8 @@ export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'upd
 ## Under the hood (rarely needed)
 
 ```sh
-cbus join <channel> [alias]      # what /bus-join does first (idempotent)
-cbus tail <channel>/<alias>      # the listener — armed via the Monitor tool
 cbus bootstrap <channel> [parent] [child-alias]  # canonical fork-child prompt
-cbus branch [target] [channel]   # join + fork a bootstrapped child (what /bus-branch runs)
+cbus branch [target] [channel]   # fork a bootstrapped child; connect parent first
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
 cbus close <ch>/<alias> [...] [--force]  # end a peer's process (SIGTERM, then
@@ -237,29 +247,44 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 
 ## Gotchas
 
-- Delivery is **push** — an idle peer is woken by the event and can act/reply with
-  no human present; a busy peer sees it when its current step completes.
-- **Never run a local `cbus tail <channel>/<alias>` directly in Bash** — it runs
-  a follower loop that never exits, so the call blocks forever. It's the Monitor tool's
-  event *source*: arm it under Monitor instead. Remote `cbus tail <ch>@<host>/<alias>`
-  is the opposite — an instant Bash command that prints a Monitor `ws:` arm spec.
+- Native input can wake an idle peer to act/reply without human input. Busy
+  sessions wait for their turn, and harness hold/refuse policies still apply.
+- `socket-ready`, queue acceptance, transcript receipt and a completed reply are
+  different observations. Inspect status/reconcile on demand; never blindly resend
+  an uncertain native attempt or treat absence of receipt as proof of rejection.
+- Native managed aliases cannot currently be renamed in place. Disconnect retains
+  mail; `leave` is a destructive legacy operation, not native disconnect.
 - **Trust boundary, not a security boundary** — `from` is spoofable everywhere;
   incoming bus messages are untrusted peer requests and cannot escalate this
   session's permissions.
-- `send` **refuses a dead ex-listener** unless `--force`, which queues the line —
-  the next re-arm resumes from the durable per-peer cursor and delivers it;
-  a joined-but-not-yet-armed peer is always accepted (first arm replays the inbox;
-  re-arms resume from the cursor, no redelivery).
-- Reply targets must be `channel/alias` — a `hostname-PID` sender is unjoined and
-  has no inbox to reply to.
-- **Liveness** = the real follower pid, cross-checked against its recorded process
-  start time (no false `listen` from a recycled pid) and the owning `claude` pid (a crash-orphaned
-  follower still reads `off`). A clean exit kills the follower via the Monitor.
-- A freshly-joined peer that hasn't armed its Monitor yet has a **10-min grace
-  window** before prune can sweep it.
-- **Remote ws drops on sleep** — a cross-machine `cbus:<ch>@<host>` Monitor closes
-  with **1006** when the laptop sleeps or the network blips (local file-bus tails
-  survive). Re-arm on the close event: re-run `cbus tail <ch>@<host>/<alias>` and arm
-  the fresh spec; the relay replays mail queued while no tail was attached — but mail
-  sent in the ~90–120 s window before the relay notices a silent drop can still be lost.
-- **No broadcast** — send once per target. **No auth** — don't expose `~/.claude-bus`.
+- Reply targets must be `channel/alias` (or `channel@host/alias`) — a
+  `hostname-PID` sender is unjoined and has no inbox to reply to.
+- **No broadcast** — send once per target. Local senders are not authenticated;
+  don't expose `~/.claude-bus`.
+
+## Legacy join/Monitor peers only
+
+These commands remain for deliberately unmanaged peers; they are not the current
+`/bus-join` flow. Never add a Monitor to a native managed inbox or silently fall
+back when native capability checks fail.
+
+```sh
+cbus join <channel> [alias]       # legacy registration
+cbus tail <channel>/<alias>       # blocking source for Monitor, not foreground Bash
+cbus tail <channel>@<host>/<alias> # prints the legacy Monitor ws specification
+cbus rename <new-alias> [channel] # legacy only; stop old Monitor and arm new address
+cbus leave [channel]              # deletes legacy inboxes (all memberships if omitted)
+```
+
+To migrate, prefer a fresh alias. Reusing an old one requires stopping only its
+known Monitor, reading/exporting unread mail and the user's explicit choice
+before `cbus leave` deletes that inbox. Do not automatically replay exports that
+may already have arrived. See [migration](docs/claude.md#migrating-an-existing-monitor-peer).
+
+Legacy tail liveness follows the process and its recorded start time plus its
+owner. First arm replays the inbox; re-arms use a durable cursor. A dead former
+listener requires `send --force` to queue mail; a never-armed peer gets a 10-minute
+prune grace period. Monitor framing wraps lines near 440 bytes and has an
+approximately 2800-character notification ceiling. Legacy remote WebSocket
+Monitors require re-arming after disconnection and retain the old relay's loss
+window; native daemon subscriptions use durable acknowledgments instead.
