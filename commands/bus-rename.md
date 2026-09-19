@@ -1,5 +1,5 @@
 ---
-description: Rename this session's cbus alias and re-arm its listener on the new address
+description: Rename this session's legacy cbus alias and re-arm its Monitor on the new address
 argument-hint: "<new-alias> [channel]"
 allowed-tools: Bash(cbus:*), Monitor, TaskStop
 ---
