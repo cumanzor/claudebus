@@ -21,7 +21,7 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    target is <channel>/<alias>, or a bare
                                    <alias> within your own channel(s)
        --from <ch/alias>           override sender (default: auto-resolved)
-       --force                     queue even if a legacy target's listener died;
+       --force                     send even if a legacy listener died — queues
                                    the line anyway; the next re-arm resumes from
                                    the durable cursor and delivers it
                                    (a joined-but-not-yet-armed peer is always
