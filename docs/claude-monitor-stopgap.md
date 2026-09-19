@@ -1,17 +1,20 @@
-# Monitor stopgap: keeping `persistent` while we build the real receive path
+# Optional stopgap for legacy Monitor peers
 
-Status: temporary, opt-in, unproven on this version. Pinned to Claude Code 2.1.277.
+Status: temporary and opt-in, pinned to Claude Code 2.1.277. The mechanism is
+measured with a local fake provider; real-account field proof remains open.
 
 Around 2026-09-14 Claude Code stopped granting `persistent` to the Monitor tool. Every cbus
 listener now expires at its `timeout_ms`, capped at 30 minutes, and each expiry costs two API
 requests to re-arm while re-reading the full cached context. Measured machine-wide on
 2026-09-17: 106 expiries, 216 requests, about 59M cache-read tokens.
 
-This document describes a stopgap that restores `persistent` for sessions you opt in, and
+This document describes a stopgap intended to restore `persistent` for eligible sessions, and
 `scripts/monitor-stopgap.sh` performs the one step that is fiddly. Read the limits before
 using it. The stopgap is not the plan of record: cross-session messaging over each session's
 Unix socket inbox is the durable path, it needs none of the gates below, and it makes this
-document obsolete once cbus delivers through it.
+document unnecessary for peers using the native receive path now available in source.
+Use [native Claude connections](claude.md) for that path; this helper is only for
+sessions deliberately retaining the legacy Monitor transport.
 
 ## What actually changed
 
@@ -137,8 +140,8 @@ if not, it links the file back into place untouched and removes nothing. If a ne
 appeared while it held the file, it keeps its copy alongside, names the path, and deletes
 nothing. `status` reports a changed file as MODIFIED.
 
-Stop every session using the dir before you revert. The helper is built not to lose a config
-if you forget, but a session writing while you revert is a race you do not need to run.
+Stop every session using the dir before you revert. The atomic-replacement fixture
+below exercises one concurrent-writing case; it does not make active-session revert safe.
 Re-seeding a used dir is out of scope on purpose, and an explicit snapshot refresh would be
 the safe way to add it later.
 
@@ -167,6 +170,9 @@ the window between the check and the publish; that window is closed by using `li
 of a replace, which is an argument from the primitive rather than from an exercised test. And
 the race loop is bounded: it can find a loss, it cannot prove there is none. Neither is a
 claim of immunity under an adversarial writer.
+Writes through an already-open file descriptor are not covered: renaming a file
+does not prevent a process from continuing to modify that same inode. The
+stop-sessions precondition remains required.
 
 ## Acceptance: mechanism measured, field proof still open
 
