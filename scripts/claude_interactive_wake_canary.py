@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "clear"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -204,8 +204,10 @@ def main():
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if bus_probe:
         settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
-        if args.cbus_case in ("restart-received", "resume-received"):
+        if args.cbus_case in ("restart-received", "resume-received", "clear"):
             settings["permissions"]["allow"].append(f"Bash({bus_probe.second_reply_command})")
+        if args.cbus_case == "clear":
+            settings["permissions"]["allow"].append(f"Bash({bus_probe.clear_connect_command})")
     if runtime_case in ("hold", "refuse"):
         settings["crossSessionInbound"] = runtime_case
     (config / "settings.json").write_text(json.dumps(settings))
@@ -478,7 +480,8 @@ def main():
         result["passed"] = all(result["checks"].values())
 
     def run_cbus():
-        nonlocal marker, master, process
+        nonlocal marker, master, process, session
+        original_session, session_switch_count = session, None
         wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
@@ -609,12 +612,73 @@ def main():
                 old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
                 old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
                 result["checks"]["resume_did_not_duplicate_old_receipt_or_ack"] = len(old_rows) == len(old_acks) == 1
+        if args.cbus_case == "clear":
+            prior = bus_probe.status()
+            bus_probe.result["beforeClear"] = prior
+            session_switch_count = state["mainRequests"]
+            old_target = bus_probe.target
+            marker = bus_probe.marker = bus_probe.second_marker
+            bus_probe.ack, bus_probe.reply_command = bus_probe.second_ack, bus_probe.second_reply_command
+            state["busReplyRequested"] = False
+            result["driverInputs"] = ["/clear", seed + "_CLEAR", seed + "_RECONNECT"]
+            os.write(master, b"/clear")
+            pump(.4)
+            os.write(master, b"\r")
+            pump(1)
+            os.write(master, (seed + "_CLEAR").encode())
+            pump(.3)
+            os.write(master, b"\r")
+            wait(lambda: state["mainRequests"] > session_switch_count, "new prompt after actual native clear", 20)
+            pump(.3)
+            cleared_request = [r for r in requests if r.get("mainRequest")][session_switch_count]
+            new_session = json.loads(cleared_request["body"]["metadata"]["user_id"])["session_id"]
+            if new_session == session:
+                raise RuntimeError("native /clear did not change the current session UUID")
+            session = bus_probe.session = new_session
+            result["newSessionId"] = session
+            endpoint = prior["claude"]["binding"]["Endpoint"]
+            st = Path(endpoint["Socket"]).lstat()
+            result["checks"]["native_clear_changed_session_without_changing_PID_or_socket"] = process.pid == endpoint["PID"] and (st.st_dev, st.st_ino) == (endpoint["Dev"], endpoint["Ino"])
+            registry = json.loads((config / "sessions" / f"{process.pid}.json").read_text())
+            result["currentSessionRegistry"] = {k: registry.get(k) for k in ("pid", "sessionId", "cwd", "startedAt")}
+            stale_marker = "CBUS_STALE_SESSION_" + uuid.uuid4().hex
+            bus_probe.result["staleMarker"] = stale_marker
+            before_stale = state["mainRequests"]
+            bus_probe.command(["send", old_target, "--force", "--from", bus_probe.sender, stale_marker])
+            checkpoint = bus_probe.bus / ".daemon/connections" / (prior["id"] + ".json")
+            wait(lambda: "no longer current" in json.loads(checkpoint.read_text()).get("error", ""), "old binding rejects changed native session", 15)
+            pump(2)
+            old = bus_probe.status()
+            bus_probe.result["oldBindingAfterClear"] = old
+            result["checks"].update({
+                "clear_old_binding_cannot_wake_new_session": state["mainRequests"] == before_stale,
+                "clear_stale_marker_has_no_transcript_receipt": not any(stale_marker in json.dumps(r) for r in transcript_rows()),
+                "clear_old_binding_claims_no_new_delivery": old.get("accepted") == prior.get("accepted") and old.get("offset") == prior.get("offset") and old.get("lastAccepted") == prior.get("lastAccepted"),
+                "clear_old_binding_keeps_original_identity": old.get("threadId") == original_session and old.get("claude") == prior.get("claude"),
+            })
+            bus_probe.extra_connections.append(old_target)
+            bus_probe.target = bus_probe.channel + "/receiver-new"
+            bus_probe.connect_command = bus_probe.clear_connect_command
+            bus_probe.result["originalTarget"], bus_probe.result["target"] = old_target, bus_probe.target
+            state["busReconnectNext"] = True
+            before_connect = state["mainRequests"]
+            os.write(master, (seed + "_RECONNECT").encode())
+            pump(.3)
+            os.write(master, b"\r")
+            wait(lambda: state["mainRequests"] >= before_connect + 2, "new exact-session Bash connect after clear", 30)
+            bus_probe.connection = bus_probe.status()
+            bus_probe.result["connectedAfterClear"] = bus_probe.connection
+            before_second = state["mainRequests"]
+            bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
+            wait(lambda: state["mainRequests"] >= before_second + 2 and bool(bus_probe.acknowledgments()), "post-clear second round trip", 25)
+            wait(bus_probe.receipt_ready, "post-clear exact UUID receipt", 15)
+            result["checks"].update({"after_clear_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
             "ordinary_interactive_PTY": "-p" not in argv and "--bare" not in argv,
             "no_human_input_after_initial_prompt": True,
             "same_process_alive": process.poll() is None,
-            "exact_session_in_all_main_requests": all(json.loads(r["body"].get("metadata", {}).get("user_id", "{}")).get("session_id") == session for r in main_requests),
+            "exact_session_in_all_main_requests": all(json.loads(r["body"].get("metadata", {}).get("user_id", "{}")).get("session_id") == (original_session if session_switch_count is not None and i < session_switch_count else session) for i, r in enumerate(main_requests)),
             "cbus_token_not_in_public_evidence": bus_probe.token_absent_from_evidence(),
             "no_temporary_url_handler": not (home / "Applications/Claude Code URL Handler.app").exists(),
             "no_marketplace_downloaded": not (config / "plugins/marketplaces").exists(),
@@ -628,6 +692,9 @@ def main():
         if args.cbus_case.startswith("resume-"):
             result["limitations"][1] = "Exact-session native-process resume only; no same-process session switch, relay, or other-harness proof"
             result["checks"]["resumed_process_alive"] = result["checks"].pop("same_process_alive")
+        if args.cbus_case == "clear":
+            result["limitations"][1] = "Actual same-process /clear with documented driver prompts; no same-process /resume, relay, or other-harness proof"
+            result["checks"]["no_permission_approval_input"] = result["checks"].pop("no_human_input_after_initial_prompt")
         result["passed"] = all(result["checks"].values())
     def terminate_requested(signum, frame):
         raise RuntimeError("canary termination requested")
