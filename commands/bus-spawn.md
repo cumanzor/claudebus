@@ -5,8 +5,8 @@ allowed-tools: Bash(cbus:*), AskUserQuestion
 ---
 
 Open a **fresh** Claude Code session (blank transcript — NOT a fork of this one)
-in a new terminal, prompted to join a `cbus` channel and arm its own listener —
-and join THIS session to the same channel first, so parent and child can
+in a new terminal, prompted to connect natively to a `cbus` channel through the daemon,
+and connect THIS session to the same channel first, so parent and child can
 message each other immediately.
 
 For a **codex** peer rather than a Claude one, use `/bus-codex`: `cbus spawn`
