@@ -1,0 +1,147 @@
+{
+  "root": "/private/tmp/cbus-cc-wake-zvj2v92m",
+  "transport": "monitor",
+  "socketCase": "accepted",
+  "binary": "<LOCAL_HOME>/.local/share/claude/versions/2.1.277",
+  "binarySHA256": "73d6a2a55c46907e49bd8bb7608e134333bd71173351ee16ddce7d7db9914b9c",
+  "scriptSHA256": "741d0e8c96a6e0d4ce902d84b975d6ad7d8f0d6a38d2c34ad00989625178d03e",
+  "version": "2.1.277 (Claude Code)",
+  "sessionId": "31bbc9e3-4087-43bb-9a6d-9a5d550d7bdb",
+  "argv": [
+    "<LOCAL_HOME>/.local/share/claude/versions/2.1.277",
+    "--session-id",
+    "31bbc9e3-4087-43bb-9a6d-9a5d550d7bdb",
+    "--model",
+    "claude-sonnet-4-6",
+    "--permission-mode",
+    "default",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "{\"mcpServers\":{}}",
+    "--debug-file",
+    "/private/tmp/cbus-cc-wake-zvj2v92m/debug.log",
+    "CBUS_WAKE_SEED_442c3bf447204d5085cb8fe10035d87d"
+  ],
+  "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 /private/tmp/cbus-cc-wake-zvj2v92m/project/wait_for_signal.py",
+  "messageUUID": "f523eeb4-1c04-4d02-9113-4f1a45b5480b",
+  "sendSessionId": "31bbc9e3-4087-43bb-9a6d-9a5d550d7bdb",
+  "markers": {
+    "seed": "CBUS_WAKE_SEED_442c3bf447204d5085cb8fe10035d87d",
+    "signal": "CBUS_WAKE_SIGNAL_8146d0e4a49c488caa4b19de81d53b96"
+  },
+  "provider": "http://127.0.0.1:49542",
+  "passed": true,
+  "checks": {
+    "ordinary_interactive_PTY": true,
+    "no_human_input_after_initial_prompt": true,
+    "monitor_available_with_fixed_sentinel": true,
+    "persistent_schema_matches_flag": true,
+    "started_task_id_present": true,
+    "start_result_matches_flag": true,
+    "deadline_behavior_matches_flag": true,
+    "waiter_lifetime_matches_flag": true,
+    "event_behavior_matches_flag": true,
+    "stopped_by_expiry_or_TaskStop": true,
+    "same_process_alive": true,
+    "exact_session_in_all_main_requests": true,
+    "no_late_request_after_expired_source_signal": true,
+    "expiry_notice_received": true,
+    "waiter_stopped_before_cleanup": true,
+    "default_permission_mode": true,
+    "marketplace_autoinstall_disabled": true,
+    "no_temporary_url_handler": true,
+    "no_marketplace_downloaded": true,
+    "no_nonlocal_proxy_attempts": true,
+    "native_firstParty_provider_route": true
+  },
+  "limitations": [
+    "Synthetic two-flag snapshot and local fake provider on firstParty code route; not real-account field proof",
+    "Two-second requested deadline only; does not measure the default 5-minute or 30-minute deadlines",
+    "Environment traffic controls, not an OS-enforced network sandbox; no cbus integration tested"
+  ],
+  "pid": 71406,
+  "monitorSchema": {
+    "name": "Monitor",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 300000,
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "command": {
+          "type": "string"
+        },
+        "ws": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+              }
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "description",
+        "timeout_ms"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "monitorFlags": {
+    "tengu_amber_sentinel": true,
+    "tengu_breezy_crescent": true
+  },
+  "requestedMonitorInput": {
+    "persistent": true,
+    "timeout_ms": 2000
+  },
+  "idleSeconds": 12.003911018371582,
+  "waiterPID": 71439,
+  "monitorStartResult": "Monitor started (task bu151whxw, expires in 2s unless the source ends first; you get one notice at expiry \u2014 re-arm if you still need the watch). You will be notified on each event. Keep working \u2014 do not poll or sleep. Events may arrive while you are waiting for the user \u2014 an event is not their reply.\n\n<system-reminder>\n<total_tokens>14999890 tokens left</total_tokens>\n</system-reminder>",
+  "mainRequestTimes": [
+    1789774445.6859782,
+    1789774445.751513,
+    1789774447.7552571
+  ],
+  "monitorTaskID": "bu151whxw",
+  "transcripts": [
+    "/private/tmp/cbus-cc-wake-zvj2v92m/config/projects/-private-tmp-cbus-cc-wake-zvj2v92m-project/31bbc9e3-4087-43bb-9a6d-9a5d550d7bdb.jsonl"
+  ],
+  "providerRouteLines": [
+    "2026-09-18T23:34:05.676Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-6",
+    "2026-09-18T23:34:05.676Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-6",
+    "2026-09-18T23:34:05.750Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-6",
+    "2026-09-18T23:34:07.753Z [DEBUG] [API:timing] dispatching to firstParty model=claude-sonnet-4-6"
+  ],
+  "mainProviderRequests": 3,
+  "cleanup": {
+    "cliExited": true,
+    "serverClosed": true,
+    "waiterExited": true,
+    "nativeSocketRemoved": true
+  },
+  "timeline": [
+    {
+      "event": "external_signal",
+      "at": 1789774457.810855
+    }
+  ]
+}
