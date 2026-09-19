@@ -22,6 +22,9 @@ type compactionObservation struct {
 }
 
 func (d *busDaemon) observeCompaction(c *ConnectionState) error {
+	if err := requireCodexConnection(c); err != nil {
+		return err
+	}
 	if c.RolloutPath == "" || c.State == "detached" || c.State == "binding-required" {
 		return nil
 	}

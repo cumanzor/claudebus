@@ -24,6 +24,7 @@ import (
 )
 
 type ConnectRequest struct {
+	Harness  string           `json:"harness,omitempty"`
 	Channel  string           `json:"channel"`
 	Alias    string           `json:"alias,omitempty"`
 	ThreadID string           `json:"threadId"`
@@ -36,6 +37,7 @@ type ConnectRequest struct {
 // read is NOT proof of rejection, so an uncertain submission is never replayed.
 type ConnectionState struct {
 	ID               string                 `json:"id"`
+	Harness          string                 `json:"harness,omitempty"`
 	Channel          string                 `json:"channel"`
 	Alias            string                 `json:"alias"`
 	ThreadID         string                 `json:"threadId"`
@@ -351,6 +353,10 @@ func (d *busDaemon) load() error {
 		if c.ID == "" || e.Name() != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !uuidLike(c.ThreadID) {
 			return fmt.Errorf("invalid connection %s", e.Name())
 		}
+		if err := validateDaemonHarness(c.Harness); err != nil {
+			return fmt.Errorf("connection %s: %w", e.Name(), err)
+		}
+		c.Harness = daemonHarness(c.Harness)
 		if err := validateRelayConfig(c.Relay); err != nil {
 			return fmt.Errorf("connection %s: %w", e.Name(), err)
 		}
@@ -413,6 +419,9 @@ func writeDaemonMeta(dir string, m peerMeta) error {
 }
 
 func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
+	if err := requireCodexConnection(c); err != nil {
+		return nil, err
+	}
 	if err := validateCodexQueueBinding(c.Config); err != nil {
 		return nil, err
 	}
@@ -446,6 +455,9 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 // Source is historical thread provenance, retained across frontend changes.
 // Admit only a currently observed CLI; queue() must also work while it is down.
 func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
+	if err := requireCodexConnection(c); err != nil {
+		return err
+	}
 	probe := *c
 	probe.Consumer = nil // A saved owner must not shadow this caller's runtime.
 	p, err := d.consumerProbe(&probe)
@@ -488,6 +500,10 @@ func sameCodexConnectionHome(existing CodexQueueConfig, requested string) bool {
 }
 
 func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
+	if err := validateDaemonHarness(req.Harness); err != nil {
+		return nil, err
+	}
+	req.Harness = daemonHarness(req.Harness)
 	if !d.connectMu.TryLock() {
 		return nil, errDaemonBusy
 	}
@@ -513,8 +529,12 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 		return nil, errors.New("remote connect requires an explicit alias")
 	}
 	for _, selected := range d.statusSnapshots() {
-		if req.Relay != nil && sameRelay(selected.Relay, req.Relay) && selected.Channel == req.Channel && selected.Alias == req.Alias && selected.State != "detached" && (selected.ThreadID != req.ThreadID || !sameCodexConnectionHome(selected.Config, req.Config.Home)) {
+		sameHarness := daemonHarness(selected.Harness) == req.Harness
+		if req.Relay != nil && sameRelay(selected.Relay, req.Relay) && selected.Channel == req.Channel && selected.Alias == req.Alias && selected.State != "detached" && (!sameHarness || selected.ThreadID != req.ThreadID || !sameCodexConnectionHome(selected.Config, req.Config.Home)) {
 			return nil, errors.New("remote alias is already managed by another exact thread/store; choose another alias")
+		}
+		if !sameHarness {
+			continue
 		}
 		if selected.Channel == req.Channel && selected.ThreadID == req.ThreadID && sameRelay(selected.Relay, req.Relay) && sameCodexConnectionHome(selected.Config, req.Config.Home) {
 			c, finish, err := d.beginOperation(selected.ID)
@@ -537,6 +557,7 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 				d.closeQueue(c.ID)
 			}
 			next := *c
+			next.Harness = req.Harness
 			next.Config = req.Config
 			if c.Relay != nil && c.Relay.Base != req.Relay.Base {
 				return nil, errors.New("relay endpoint changed; refusing to redirect an existing connection")
@@ -588,7 +609,7 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &ConnectionState{ID: id, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Relay: cloneRelay(req.Relay), State: "queue-ready", Consumer: &consumerObservation{State: "unknown"}}
+	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Relay: cloneRelay(req.Relay), State: "queue-ready", Consumer: &consumerObservation{State: "unknown"}}
 	_, finish, err := d.beginOperation(c.ID)
 	if err != nil {
 		return nil, err
@@ -653,7 +674,7 @@ func (d *busDaemon) connect(req ConnectRequest) (*ConnectionState, error) {
 		return nil, err
 	}
 	now := Now()
-	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: c.Config.Cwd, ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: "codex", ConnectionID: c.ID}
+	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: c.Config.Cwd, ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
 	}
@@ -770,6 +791,9 @@ func (d *busDaemon) disconnect(target string) error {
 }
 
 func (d *busDaemon) deliver(c *ConnectionState) error {
+	if err := requireCodexConnection(c); err != nil {
+		return err
+	}
 	unlock, err := d.lockPeer(connectionLockChannel(c), c.Alias)
 	if err != nil {
 		return err

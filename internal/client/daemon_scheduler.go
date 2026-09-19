@@ -280,6 +280,9 @@ func (d *busDaemon) schedule() {
 }
 
 func (d *busDaemon) scheduledOperation(c *ConnectionState) error {
+	if err := validateDaemonHarness(c.Harness); err != nil {
+		return err
+	}
 	if c.Relay != nil && (c.State != "disconnected" || len(c.PresenceOutbox) > 0) {
 		if err := d.startRelay(c, nil); err != nil {
 			return err
