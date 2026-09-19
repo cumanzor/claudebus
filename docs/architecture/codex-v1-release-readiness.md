@@ -1,8 +1,46 @@
 # Codex CLI v1 release readiness
 
-Updated 2026-09-18. Tracker: `cbus-6ij.13`; broader epic: `cbus-6ij`.
+Updated 2026-09-18. Release tracker: `cbus-6ij.21`; broader epic: `cbus-6ij`.
 
-**Verdict: implementation acceptance passed; release preparation is in progress.**
+**Verdict: Codex CLI v1 is released; v0.12.2 was installed on Mac and server.**
+[v0.12.2](https://github.com/cumanzor/claudebus/releases/tag/v0.12.2) uses source
+`fa0d206833b3a3b19cd2200226cd134c269e22b5`. It fixes current CLI connections
+rejected by saved thread source metadata. Current CLI ownership and queue-store
+identity remain required; historical source labels do not establish the current
+runtime. Desktop attachment remains outside v1.
+
+## v0.12.2 release and installation evidence
+
+- All five client assets reproduced byte-for-byte from independent clean source
+  clones. Published downloads matched the prepared hashes. Source tests, vet and
+  the client/CLI race suites passed. Provenance: `/tmp/cbus-v0122-provenance.json`.
+- Final-asset acceptance used actual Codex CLI 0.154.0 and local fake providers:
+  80 assertions on Mac, 51 on Linux. Coverage includes saved-source CLI resume,
+  automatic multi-home/profile/SQLite binding and restart delivery; Mac also
+  exercised trusted-bus commands. Result-only evidence:
+  `/tmp/cbus-v0122-acceptance-result-only.json`, tracker attachment
+  `78347441d578773e`, review `fe7debe4410e4d0c`.
+- Normal selfupdate installed the matching assets and the daemons restarted on
+  v0.12.2. Configuration, Codex rules and seven saved registrations were retained.
+  Mac: `/tmp/cbus-v0122-install-mac.json` (107 checks); server:
+  `/tmp/cbus-v0122-install-server.json` (59 checks). Saved registrations are not a
+  count of online peers. No pending work existed before this upgrade, so these
+  install checks do not prove pending-message recovery or recipient delivery.
+- Installed Mac arm64 SHA-256:
+  `55a435401d579a1a3ddba4da0584674a7b94c286ff8cb8d7c01d4f8ed7dc8f69`.
+  Installed Linux amd64 SHA-256:
+  `b60577ba007a81abaf8604c6b4ce5ee06dc66f7650dbcf0fe7ff413b301936d2`.
+- The relay was unchanged and was not redeployed in v0.12.2. This rollout did not
+  repeat a live cross-machine message exchange. The CC Monitor idle-cost issue
+  remains separate work.
+
+## Historical v1 pre-release acceptance snapshot
+
+The remainder preserves the earlier `cbus-6ij.13` readiness record. Its gate
+statuses, environment versions and local artifacts describe that earlier stage,
+not current deployment. These candidate results are not v0.12.2 binary evidence;
+the narrower final-asset checks above are recorded separately.
+
 The native CLI integration, compatibility fixes and coordinated relay changes
 are implemented. Intermediate acceptance below is strong evidence, but it must
 not be attributed to a different final binary. The approved isolated iTerm2 GUI placement check now passes with mock children;
@@ -13,7 +51,7 @@ work, including the six directed routes between all three harnesses. Desktop
 harness clients are v2. Terminal choice is independent of harness choice:
 iTerm2/tmux launch support and ordinary manual CLI launch remain in v1.
 
-| Requirement | Implemented behavior and evidence | Remaining release gate |
+| Requirement | Implemented behavior and evidence | Gate recorded before release |
 |---|---|---|
 | Fair delivery and responsive controls | Independent connection lanes, bounded shared workers, immutable status snapshots; blocked sidecars/peer locks do not hold the status mutex; cancellation and contention tests pass | Full race suite passes after final observer change |
 | Exact runtime/config binding | Actual CLI process/start and open queue database witness; captured HOME, CODEX_HOME, cwd and executable. Real automatic connects across separate homes, profiles and `-c` SQLite overrides pass on Mac and Linux | Final Linux runtime check passes; record source/asset provenance |
@@ -31,7 +69,7 @@ iTerm2/tmux launch support and ordinary manual CLI launch remain in v1.
 | Platform and provenance | Actual Mac and isolated Linux 0.154.0 tests pass. Server installed 0.135.0 and existing sessions untouched. Windows native connect/daemon explicitly unsupported | All five client builds and Windows client/CLI test compilation pass; clean-source artifact preparation remains. Actual Windows runtime is not established here |
 | Product documentation | Native connect first, terminal independence, permissions, upgrades, relay contract, formation limits and pre-hook deferral documented | README, operations, command reference, cheatsheet and changelogs updated; prepare reviewable release notes |
 
-## Acceptance evidence
+### Historical acceptance evidence
 
 The scripts under `scripts/` use temporary homes and local fake model providers.
 They verify real CLI execution and transport mechanics without paid inference;
@@ -70,15 +108,16 @@ is not an exhaustive billing record, and that old candidate predates this work.
 Real presence and compaction events can cause recipient turns; idle supervision
 must not cause periodic model turns.
 
-## Publication boundary
+### Historical publication boundary
 
-Follow [the release checklist](../RELEASE-CHECKLIST.md) after remaining gates.
-No release, tag, global installation, user config change, or production relay
-restart has been performed in this effort. A coordinated new relay is required
-for native remote subscriptions; local connections do not depend on it.
-The CC Monitor 30-minute incident remains separate from the Codex integration.
+At this snapshot, the remaining gates preceded
+[the release checklist](../RELEASE-CHECKLIST.md). No release, tag, global
+installation, user config change or production relay restart had yet been
+performed. A coordinated relay upgrade was required for native remote
+subscriptions; local connections did not depend on it. This is historical,
+not a statement that the subsequent releases or installations are still pending.
 
-## Latest acceptance artifacts
+### Historical final-preparation artifacts
 
 - Final full race suite: `/tmp/cbus-v1-final-race2.log`; `go vet ./...` and
   `git diff --check` pass. Windows client and CLI test binaries compile.
