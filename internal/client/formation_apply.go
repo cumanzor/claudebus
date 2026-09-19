@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -293,6 +292,10 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	if err := formationHarnessRefusal(p); err != nil {
 		return "", err
 	}
+	env, err := peerEnv(p.Profile)
+	if err != nil {
+		return "", err
+	}
 	// A template and a fork both launch a NOT-YET-EXISTENT session, so claim the alias
 	// before it boots — the title and alias agree, and two applies cannot race for it —
 	// and stamp the birth-record the reclaim will carry (cbus-m9l, D19). A template is
@@ -321,7 +324,8 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	spec := ForkSpec{
 		Target:      launchTarget(p.Target),
 		Argv:        peerLaunchArgv(pp, prompt, model),
-		Env:         peerEnv(p.Profile),
+		Env:         env,
+		UnsetEnv:    claudeLaunchUnset,
 		Dir:         launchDir(p.Cwd),
 		Title:       p.Alias,
 		Anchor:      anchor,
@@ -401,16 +405,19 @@ func peerLaunchArgv(pp PeerPlan, prompt, model string) []string {
 // instance — the same derivation transcriptRoots uses to FIND that peer's
 // transcript, so the session we resume and the profile we relaunch it under cannot
 // disagree. A blank profile keeps the applier's.
-func peerEnv(profile string) map[string]string {
-	env := forkReplicatedEnv()
-	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
+func peerEnv(profile string) (map[string]string, error) {
+	env, err := forkReplicatedEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg := env["CLAUDE_CONFIG_DIR"]
 	// isCCSInstanceDir, not a forward-slash literal: this doc comment promises the SAME
 	// derivation transcriptRoots uses, and a literal that only matches on unix broke that
 	// promise on windows — the transcript was found and the relaunch profile was not.
 	if profile != "" && core.ValidName(profile) && isCCSInstanceDir(cfg) {
 		env["CLAUDE_CONFIG_DIR"] = filepath.Join(filepath.Dir(cfg), profile)
 	}
-	return env
+	return env, nil
 }
 
 // kickoffNonce is the token a peer must echo back for its launch to count as
