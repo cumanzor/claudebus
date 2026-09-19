@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -411,7 +410,7 @@ func peerEnv(profile string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := os.Getenv("CLAUDE_CONFIG_DIR")
+	cfg := env["CLAUDE_CONFIG_DIR"]
 	// isCCSInstanceDir, not a forward-slash literal: this doc comment promises the SAME
 	// derivation transcriptRoots uses, and a literal that only matches on unix broke that
 	// promise on windows — the transcript was found and the relaunch profile was not.

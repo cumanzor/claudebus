@@ -358,12 +358,19 @@ func forkReplicatedEnv() (map[string]string, error) {
 	}
 	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": home, "CBUS_DIR": bus}
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); cfg != "" {
+		cfg, err = filepath.Abs(cfg)
+		if err != nil {
+			return nil, err
+		}
 		env["CLAUDE_CONFIG_DIR"] = cfg
 	}
 	return env, nil
 }
 
+// Clear a terminal server's config selection before applying an explicit child
+// override. With no override, the selected HOME supplies the default config root.
 var claudeLaunchUnset = []string{
+	"CLAUDE_CONFIG_DIR",
 	"CBUS_SESSION_ID", "CBUS_CHANNEL", "CBUS_ALIAS", "CBUS_HARNESS",
 	"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_PID", "CLAUDECODE",
 	"CLAUDE_ENV_FILE", "CLAUDE_CODE_SESSION_LOG", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
