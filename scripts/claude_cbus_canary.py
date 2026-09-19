@@ -22,7 +22,20 @@ class BusProbe:
         if actual != args.cbus_sha256:
             raise ValueError("cbus candidate does not match the supplied SHA-256")
         self.bus = root / "bus"
-        self.bus.mkdir(mode=0o700)
+        self.shared = None
+        if getattr(args, "cbus_shared_fixture", None):
+            fixture = Path(args.cbus_shared_fixture).resolve(strict=True)
+            info = fixture.stat()
+            self.shared = json.loads(fixture.read_text())
+            self.bus = Path(self.shared["busRoot"])
+            if (info.st_uid != os.geteuid() or info.st_mode & 0o077
+                    or self.shared.get("kind") != "claude-cbus-isolated-pair"
+                    or self.shared.get("binarySHA256") != actual
+                    or self.bus.resolve().parent != fixture.parent):
+                raise ValueError("invalid private shared cbus fixture")
+            os.kill(self.shared["ownerPID"], 0)
+        else:
+            self.bus.mkdir(mode=0o700)
         self.channel = "cc-canary-" + uuid.uuid4().hex[:12]
         self.target, self.sender = self.channel + "/receiver", self.channel + "/verifier"
         self.ack = "CBUS_ACK_" + uuid.uuid4().hex
@@ -48,18 +61,24 @@ class BusProbe:
     def start(self, env, work):
         self.env, self.work = env.copy(), work
         self.result["version"] = self.command(["--version"]).strip()
-        self.log = (self.root / "daemon.log").open("wb")
-        self.process = subprocess.Popen([str(self.binary), "daemon", "serve"], cwd=work,
-                                        env=env, stdout=self.log, stderr=self.log)
-        self.result["daemonPID"] = self.process.pid
-        deadline = time.monotonic() + 10
-        while not (self.bus / ".daemon/control.sock").exists():
-            if self.process.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError("isolated daemon did not start")
-            time.sleep(.05)
-        self.health = json.loads(self.command(["daemon", "status", "--json"]))
-        if self.health["pid"] != self.process.pid:
-            raise RuntimeError("isolated daemon PID did not match launched process")
+        if self.shared:
+            self.health = json.loads(self.command(["daemon", "status", "--json"]))
+            if self.health != self.shared["health"]:
+                raise RuntimeError("shared fixture daemon identity changed")
+            (self.root / "daemon.log").write_text("Shared isolated fixture daemon; see parent result.\n")
+        else:
+            self.log = (self.root / "daemon.log").open("wb")
+            self.process = subprocess.Popen([str(self.binary), "daemon", "serve"], cwd=work,
+                                            env=env, stdout=self.log, stderr=self.log)
+            deadline = time.monotonic() + 10
+            while not (self.bus / ".daemon/control.sock").exists():
+                if self.process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError("isolated daemon did not start")
+                time.sleep(.05)
+            self.health = json.loads(self.command(["daemon", "status", "--json"]))
+            if self.health["pid"] != self.process.pid:
+                raise RuntimeError("isolated daemon PID did not match launched process")
+        self.result["daemonPID"] = self.health["pid"]
         self.command(["join", self.channel, "verifier", "--session-id", str(uuid.uuid4())])
 
     def status(self):
@@ -112,6 +131,15 @@ class BusProbe:
 
     def cleanup(self):
         clean = {}
+        if self.shared:
+            try:
+                if hasattr(self, "connection"):
+                    self.command(["connection", "disconnect", self.target, "--json"])
+                clean["sharedDaemonPreserved"] = json.loads(self.command(["daemon", "status", "--json"])) == self.health
+            except Exception as error:
+                self.result["cleanupError"] = str(error)
+                clean["sharedDaemonPreserved"] = False
+            return clean
         if self.process is not None:
             try:
                 if self.process.poll() is None:
