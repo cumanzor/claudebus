@@ -15,11 +15,12 @@ it does not mean combining them into one large merge.
 | Delivery and admission | [20](https://github.com/cumanzor/claudebus/pull/20) → [21](https://github.com/cumanzor/claudebus/pull/21) → [22](https://github.com/cumanzor/claudebus/pull/22) → [23](https://github.com/cumanzor/claudebus/pull/23) | Exact durable receipts, unresolved attempts without replay, native admission and reconnect. |
 | User flow and lifecycle | [24](https://github.com/cumanzor/claudebus/pull/24), [25](https://github.com/cumanzor/claudebus/pull/25), [28](https://github.com/cumanzor/claudebus/pull/28) → [29](https://github.com/cumanzor/claudebus/pull/29) → [30](https://github.com/cumanzor/claudebus/pull/30) → [31](https://github.com/cumanzor/claudebus/pull/31), [37](https://github.com/cumanzor/claudebus/pull/37), [38](https://github.com/cumanzor/claudebus/pull/38) | In-session connect, reservations, current-session fencing, formations, prompts, commands, legacy migration and isolated child launch environments. |
 | Reproducible acceptance | [17](https://github.com/cumanzor/claudebus/pull/17) → [26](https://github.com/cumanzor/claudebus/pull/26) → [27](https://github.com/cumanzor/claudebus/pull/27) → [32](https://github.com/cumanzor/claudebus/pull/32) → [33](https://github.com/cumanzor/claudebus/pull/33), then [34](https://github.com/cumanzor/claudebus/pull/34) and [36](https://github.com/cumanzor/claudebus/pull/36) | Ordinary CLI receipt/reply, isolation, lifecycle, relay and mixed Claude/Codex self-join. |
-| Optional Monitor workaround | [35](https://github.com/cumanzor/claudebus/pull/35) | Reversible pinned-version helper, measured mechanism and explicit field limits. Native receive does not depend on it. |
+| Optional Monitor workaround | [35](https://github.com/cumanzor/claudebus/pull/35), evidence [40](https://github.com/cumanzor/claudebus/pull/40) | Reversible pinned-version helper, measured mechanism and explicit field limits. Native receive does not depend on it. |
 
-The largest current review is the 515-line optional stopgap package; the remaining
-component PRs are below 500 changed lines. Generated acceptance data stays out of
-those diffs.
+The optional stopgap package is about 520 changed lines; other implementation
+components remain below 500. Public Monitor snapshots are separate in #40: 52
+lines of explanation and 762 lines of generated JSON evidence/manifest. The guide
+links immutable evidence directly; temporary run paths are provenance only.
 
 The actual bases are declared on each PR. In particular, #24 depends on #22,
 #25 on #21, #28 on #23, #38 on #30, and #34/#36 are siblings based on #33.
