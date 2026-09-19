@@ -14,13 +14,14 @@ import (
 )
 
 // HookExit runs the SessionEnd hook: it announces this session's departure by leaving
-// its LOCAL registrations (a 'left' presence per local channel), reading the session
+// its legacy LOCAL registrations (a 'left' presence per local channel), reading the session
 // id from the hook's stdin {session_id} JSON first, the environment second (the hook
 // may not export CLAUDE_CODE_SESSION_ID). It leaves REMOTE markers UNTOUCHED — the
 // relay has no leave endpoint, and a dead session's markers die via the ownerPid
 // sweep; deleting them here would be a behavior change. Best-effort and SILENT: it
 // never fails the session (the caller always exits 0), and it covers only graceful
-// exits — a hard kill relies on the lazy-prune 'departed' backstop. bin/cbus:680-689.
+// exits — a hard kill relies on the lazy-prune 'departed' backstop. Managed peers
+// retain durable inboxes; daemon runtime observation owns their departure event.
 func HookExit(stdin io.Reader) {
 	sid := hookSessionID(stdin)
 	if sid == "" {
@@ -31,7 +32,7 @@ func HookExit(stdin io.Reader) {
 	// hook would leave the WRONG session's registrations. The override outranks every env;
 	// Leave reads the id via SessionID().
 	defer OverrideSessionID(sid)()
-	_, _ = Leave("") // local registrations only; a "not joined" error is ignored
+	_, _ = leaveSession("", true) // a "not joined" error is ignored
 }
 
 // HookCompact runs the PreCompact/PostCompact hooks: it tells every LOCAL channel this
@@ -81,6 +82,12 @@ func HookCompact(phase string, stdin io.Reader) error {
 func HookJoin(stdin io.Reader, channel, alias, rendezvous string) {
 	if channel == "" {
 		return // no channel: nothing to join
+	}
+	// Native Claude joins on its first session-side connect after the transcript
+	// exists. Creating a legacy registration here would block that admission or
+	// introduce a second Monitor sink. Inherited socket env alone is not identity.
+	if os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET") != "" && harnessNameFn() == "claude" {
+		return
 	}
 	sid := hookSessionID(stdin)
 	if sid == "" {
