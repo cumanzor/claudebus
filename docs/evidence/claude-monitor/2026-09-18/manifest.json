@@ -1,0 +1,31 @@
+{
+  "scope": "Sanitized result snapshots from actual Claude Code 2.1.277 interactive Monitor comparison with a local fake provider; not a real-account field trial.",
+  "transformations": [
+    "Replace the original machine-local user-home prefix with <LOCAL_HOME> in string values.",
+    "Within monitorSchema only, omit string-valued description fields (native tool help); retain property schemas, including the description argument schema.",
+    "Serialize as JSON with two-space indentation and a final newline. No other field, value, check or timing changed."
+  ],
+  "artifacts": {
+    "runtime-pair.json": {
+      "originalPath": "/tmp/cbus-monitor-runtime-pair-20260918.json",
+      "originalSHA256": "c76329bc78b87075d6434697eb50b6e756c630c5f79a63ceef69b1d02a1ce520",
+      "originalBytes": 31143,
+      "publishedSHA256": "6a530d7f4efffb97e0a2e5fc103ed58bb73254af6183533f1ea07661c121896f",
+      "publishedBytes": 16834
+    },
+    "bounded.json": {
+      "originalPath": "/tmp/cbus-cc-wake-zvj2v92m/result.json",
+      "originalSHA256": "dc0b1d1f48c40ddf69c2e1965451cadbe5bb87fc639e679a6c3762db1772ce43",
+      "originalBytes": 12441,
+      "publishedSHA256": "ece7c8a49410d6bce9dc2d2e03097cfa9c5bd14382939e2c8b98e366fe7e7ab2",
+      "publishedBytes": 5263
+    },
+    "persistent.json": {
+      "originalPath": "/tmp/cbus-cc-wake-d3mz3foh/result.json",
+      "originalSHA256": "caa509ecafef4e4f92d4f6ba497c70b00300c477c95856935173d7c73395830e",
+      "originalBytes": 12430,
+      "publishedSHA256": "cca44f3c581fd9b51e981a2890bf96515a93e54f83921c5a45f6d74b1330e666",
+      "publishedBytes": 5348
+    }
+  }
+}
