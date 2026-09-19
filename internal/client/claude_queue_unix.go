@@ -66,6 +66,9 @@ func (q *claudeQueue) enqueue(threadID, attemptID, payload string) (string, erro
 	if _, err := q.inspect(threadID); err != nil {
 		return reject(err)
 	}
+	if err := validateCurrentClaudeSession(q.cfg.Binding); err != nil {
+		return reject(err)
+	}
 	token, err := readClaudeCredential(q.root, q.cfg.CredentialRef)
 	if err != nil {
 		return reject(err)
@@ -76,7 +79,10 @@ func (q *claudeQueue) enqueue(threadID, attemptID, payload string) (string, erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return q.cfg.Binding.Endpoint.validateConnected(conn)
+		if err := q.cfg.Binding.Endpoint.validateConnected(conn); err != nil {
+			return err
+		}
+		return validateCurrentClaudeSession(q.cfg.Binding)
 	}}
 	result, err := submitClaudeSocket(ctx, target, token, attemptID, payload)
 	if result.State == claudeNotSubmitted {

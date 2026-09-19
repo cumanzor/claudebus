@@ -107,6 +107,7 @@ func TestClaudeReconnectChangedEpochWaitsForExactReceipt(t *testing.T) {
 	appendAdmissionTranscript(t, req, `{"type":"assistant","sessionId":"`+req.ThreadID+`"}`)
 	_, _, b.TranscriptSize, _ = fileIdentity(b.TranscriptPath)
 	b.TranscriptOffset = b.TranscriptSize
+	writeClaudeSessionRegistry(t, b)
 	got, err := d.connectWithCredential(next, "fixture-new-capability")
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +129,7 @@ func TestClaudeReconnectAfterExplicitAbandonment(t *testing.T) {
 	b := *req.Claude
 	b.Endpoint, _, _ = testClaudeEndpoint(t)
 	req.Claude = &b
+	writeClaudeSessionRegistry(t, b)
 	got, err := d.connectWithCredential(req, "fixture-resumed-capability")
 	if err != nil || got.Pending != nil || got.Offset != end || got.Abandoned != 1 || len(q.calls) != 1 {
 		t.Fatalf("explicit abandonment could not rebind safely: %v", err)
@@ -181,6 +183,7 @@ func TestClaudeReconnectSaveFailureRetainsOldBindingAndCapability(t *testing.T) 
 	b := *req.Claude
 	b.Endpoint, _, _ = testClaudeEndpoint(t)
 	req.Claude = &b
+	writeClaudeSessionRegistry(t, b)
 	restore := blockDaemonJournal(t, d, c)
 	_, err := d.connectWithCredential(req, "fixture-new-capability")
 	restore()
