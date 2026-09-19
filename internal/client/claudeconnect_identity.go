@@ -166,14 +166,14 @@ func exactClaudeTranscript(config, sid string) (string, uint64, uint64, int64, i
 	defer f.Close()
 	opened, err := f.Stat()
 	dev, ino, size, ok := fileIdentityOf(f)
-	if err != nil || !opened.Mode().IsRegular() || !ok {
-		return "", 0, 0, 0, 0, errors.New("cannot identify opened Claude transcript")
+	if err != nil || !trustedClaudeTranscriptInfo(opened) || !ok {
+		return "", 0, 0, 0, 0, errors.New("Claude transcript must be owned by the current user, single-linked and not writable by group or others")
 	}
 	if err := validateClaudeTranscript(f, sid); err != nil {
 		return "", 0, 0, 0, 0, err
 	}
 	current, pathErr := os.Lstat(path)
-	if pathErr != nil || !current.Mode().IsRegular() || !os.SameFile(opened, current) {
+	if pathErr != nil || !trustedClaudeTranscriptInfo(current) || !os.SameFile(opened, current) {
 		return "", 0, 0, 0, 0, errors.New("Claude transcript changed during binding")
 	}
 	offset, err := completeClaudeTranscriptOffset(f, size)
@@ -188,7 +188,7 @@ func openBoundClaudeTranscript(binding ClaudeConnectBinding) (*os.File, error) {
 	}
 	info, statErr := f.Stat()
 	dev, ino, _, ok := fileIdentityOf(f)
-	if statErr != nil || !info.Mode().IsRegular() || info.Size() < binding.TranscriptSize || !ok || dev != binding.TranscriptDev || ino != binding.TranscriptIno {
+	if statErr != nil || !trustedClaudeTranscriptInfo(info) || info.Size() < binding.TranscriptSize || !ok || dev != binding.TranscriptDev || ino != binding.TranscriptIno {
 		f.Close()
 		return nil, errors.New("opened Claude transcript no longer matches its bound file identity")
 	}

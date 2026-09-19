@@ -8,8 +8,74 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
+
+func TestClaudeCallerRejectsUnsafeTranscriptAtCaptureAndReopen(t *testing.T) {
+	for _, kind := range []string{"group-writable", "other-writable", "hard-link", "foreign-owner"} {
+		t.Run(kind, func(t *testing.T) {
+			path, runtime := claudeCallerFixture(t)
+			binding, err := claudeConnectIdentity(runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "group-writable":
+				err = os.Chmod(path, 0660)
+			case "other-writable":
+				err = os.Chmod(path, 0602)
+			case "hard-link":
+				err = os.Link(path, path+".alias")
+			case "foreign-owner":
+				if os.Geteuid() != 0 {
+					t.Skip("changing file ownership requires root; foreign metadata is checked separately")
+				}
+				err = os.Chown(path, 1, -1)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f, err := openBoundClaudeTranscript(binding); err == nil {
+				f.Close()
+				t.Fatal("unsafe bound transcript reopened")
+			}
+			if _, err := claudeConnectIdentity(runtime); err == nil {
+				t.Fatal("unsafe transcript captured")
+			}
+		})
+	}
+}
+
+type claudeTranscriptStatOverride struct {
+	os.FileInfo
+	stat syscall.Stat_t
+}
+
+func (info claudeTranscriptStatOverride) Sys() any { return &info.stat }
+
+func TestClaudeTranscriptRejectsForeignOwnerMetadata(t *testing.T) {
+	path, _ := claudeCallerFixture(t)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !trustedClaudeTranscriptInfo(info) {
+		t.Fatal("owner-only fixture refused")
+	}
+	foreign := claudeTranscriptStatOverride{FileInfo: info, stat: *info.Sys().(*syscall.Stat_t)}
+	foreign.stat.Uid++
+	if trustedClaudeTranscriptInfo(foreign) {
+		t.Fatal("foreign owner metadata trusted")
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(path)
+	if err != nil || !trustedClaudeTranscriptInfo(info) {
+		t.Fatal("read-only access for others must not imply external write access")
+	}
+}
 
 func claudeCallerFixture(t *testing.T) (string, func() (int, string, error)) {
 	t.Helper()
