@@ -17,8 +17,10 @@ it does not mean combining them into one large merge.
 | Reproducible native acceptance | [17](https://github.com/cumanzor/claudebus/pull/17) → [27](https://github.com/cumanzor/claudebus/pull/27) → [32](https://github.com/cumanzor/claudebus/pull/32) → [33](https://github.com/cumanzor/claudebus/pull/33), then [34](https://github.com/cumanzor/claudebus/pull/34) and [36](https://github.com/cumanzor/claudebus/pull/36) | Ordinary CLI receipt/reply, isolation, lifecycle, relay and mixed Claude/Codex self-join. |
 | Optional Monitor workaround, last | Comparison [26](https://github.com/cumanzor/claudebus/pull/26) → evidence [40](https://github.com/cumanzor/claudebus/pull/40) → helper [35](https://github.com/cumanzor/claudebus/pull/35) | Reversible pinned-version helper, measured mechanism and explicit field limits. Native receive does not depend on it. |
 
-The optional stopgap package is about 520 changed lines; other implementation
-components remain below 500. Public Monitor snapshots are separate in #40: 52
+Most components remain below 500 changed lines. Review fixes bring the transcript
+trust milestone #19 to 571 lines and the operational documentation #31 to 697;
+both retain small coherent commits. The optional stopgap package is about 520
+lines. Public Monitor snapshots are separate in #40: 52
 lines of explanation and 762 lines of generated JSON evidence/manifest. The guide
 links immutable evidence directly; temporary run paths are provenance only.
 
@@ -95,6 +97,21 @@ signed-in-account, relay, reconnect or long-idle evidence.
 The canaries record source/script/binary hashes, exact runtime/session evidence,
 assertions and owned-process cleanup. Use their `--help` with explicitly supplied
 candidate paths. Never point isolated probes at an existing user's bus store.
+
+Independent review also found that the original autostart check could not exclude
+the verifier starting the daemon before Claude's Bash command. Repair `521413c`
+checks absence after verifier setup and before emitting that exact tool call,
+then records the daemon identity after its successful tool result. The fault
+fixture rejects early verifier startup and refuses to claim cleanup when a
+process remains alive before its socket appears. Earlier green autostart results
+alone do not establish this stronger attribution.
+
+Relay landing review reproduced a different test race: the persisted checkpoint
+could show a receipt before CLI status converged, producing an intermittent
+failure. Repair `5b2d99a` waits on the same exact CLI receipt snapshot used by the
+final assertions and records convergence time. Its 15-second timeout remains a
+failure; this changes test observation, not delivery or retry behavior. A passing
+run is evidence for that path, not a claim that timing failures are impossible.
 
 The combined source `c301e0f` passed `go test ./...`, focused native/lifecycle/
 launcher race checks and `go vet ./...`. Independent review found no additional
