@@ -8,8 +8,8 @@ carry over by hand.
 
 ![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers](docs/demo-live.gif)
 
-Under the hood, this is what the armed Monitor is tailing — the same exchange at
-the CLI level:
+The original Monitor integration below shows the file-bus exchange at the CLI
+level. Native CLI connections now let the daemon handle waiting:
 
 ![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness](docs/demo.gif)
 
@@ -19,10 +19,10 @@ loop entirely over the bus:
 
 ![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict](docs/demo-fleet.gif)
 
-Claude Code uses the `Monitor` tool and plain files. Codex CLI can connect its
-existing conversation through a local daemon and Codex's experimental native
-queue API, tested against CLI 0.154.0. Idle connections require no model polling
-or Monitor re-arming. Delivery is independent of the terminal: iTerm2, tmux, and
+Claude Code and Codex CLI can connect their existing conversations through a
+local daemon. Claude uses its per-session native messaging socket (tested with
+2.1.277); Codex uses its experimental native queue API (tested with 0.154.0).
+Idle connections require no model polling or Monitor re-arming. Delivery is independent of the terminal: iTerm2, tmux, and
 manually launched terminals share the same bus. The client is a Go binary; the
 Codex adapter also requires a compatible installed Codex CLI.
 
@@ -51,9 +51,11 @@ cbus join demo                     cbus join demo
 cbus tail demo/main                cbus send main "build's green — merging"
 ```
 
-Inside Claude Code the tail runs under the persistent **Monitor** tool (the
-`/bus-join` skill wires it), so an incoming message lands in the receiving
-session's conversation as a live event — an idle session wakes and answers.
+Inside Claude Code, use `/bus-join` or run `cbus connect demo worker --json`
+from the current session. An idle session receives native input without a Monitor
+or a restart. See [Claude setup](docs/claude.md) for capability checks, existing
+Monitor migration and receipt/recovery semantics. The shell `join`/`tail` example
+above remains the legacy file interface.
 
 Inside an ordinary Codex CLI conversation, invoke `$cbus-connect` or run
 `cbus connect demo advisor --json`. It joins the current thread without restarting
@@ -81,10 +83,10 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
   fresh fleets from starter templates; there's a three-peer fleet demo at the
   top of the doc — [docs/formations.md](docs/formations.md)
-- **Harness-neutral peers** — ordinary Codex CLI sessions connect from inside
-  their conversation; existing `cbus codex` launches remain supported. Codex is
-  the first daemon adapter, with Claude Code and OpenCode next —
-  [docs/codex.md](docs/codex.md)
+- **Harness-neutral peers** — ordinary Claude Code and Codex CLI sessions connect
+  from inside their conversation. Existing `cbus codex` launches remain supported;
+  OpenCode is the next adapter. Terminal placement remains independent —
+  [Claude](docs/claude.md), [Codex](docs/codex.md)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
@@ -135,9 +137,10 @@ you own and can inspect, and a mailbox and ledger you can read with `cat`.
 
 A send to a peer whose listener died is refused unless you pass `--force`.
 Legacy join/tail registrations have their existing restart and inbox-reset
-semantics. Managed Codex connections retain their inbox, delivery cursor and
-uncertain attempts across daemon and exact-thread CLI restarts. Queue acceptance
-is distinct from recipient history receipt and a completed reply; inspect
+semantics. Managed native connections retain their inbox, delivery cursor and
+uncertain attempts across daemon and exact-session CLI restarts. Claude socket
+writes remain unconfirmed until an exact transcript receipt; Codex queue acceptance
+is also distinct from recipient history receipt and a completed reply; inspect
 `cbus connection status` and use on-demand `reconcile` for evidence. Native relay
 subscriptions require the acknowledged-delivery endpoint in the matching relay
 release; the old Monitor WebSocket endpoint keeps its legacy semantics.
@@ -151,6 +154,7 @@ release; the old Monitor WebSocket endpoint keeps its legacy semantics.
 | [docs/install.md](docs/install.md) | releases, `selfupdate`, from-source, what gets installed where |
 | [docs/usage.md](docs/usage.md) | forking, spawning, roles, the global channel, presence |
 | [docs/formations.md](docs/formations.md) | save / apply / resume, starter templates, birth records, drift anchors |
+| [docs/claude.md](docs/claude.md) | Native Claude connections and legacy Monitor migration |
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |

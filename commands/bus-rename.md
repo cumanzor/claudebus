@@ -1,5 +1,5 @@
 ---
-description: Rename this session's cbus alias and re-arm its listener on the new address
+description: Rename this session's legacy cbus alias and re-arm its Monitor on the new address
 argument-hint: "<new-alias> [channel]"
 allowed-tools: Bash(cbus:*), Monitor, TaskStop
 ---
@@ -9,6 +9,10 @@ name (e.g. `fork-3` → `discovery`) instead of an auto-picked one.
 
 The user passed: "$ARGUMENTS" — first word is the new alias (required), optional
 second word is the channel (needed only if this session joined more than one).
+
+Native managed aliases cannot currently be renamed in place. The CLI refuses this
+case; report that refusal and preserve the connection and pending mail. The steps
+below apply only to legacy join/Monitor peers.
 
 1. Run `cbus rename <new-alias> [channel]`. It `mv`s this session's peer dir and
    rewrites `meta.alias`, printing the new `channel/alias` address. It refuses if
