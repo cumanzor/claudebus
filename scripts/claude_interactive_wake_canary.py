@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "clear"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "clear", "autostart"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -485,6 +485,12 @@ def main():
         wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
+        if bus_probe.autostart:
+            keys = set(bus_probe.result["daemonEnvironmentKeys"])
+            result["checks"]["actual_CC_Bash_autostarted_daemon"] = bus_probe.result.get("initialDaemonAbsent") and bus_probe.process is None
+            identity = {"CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CLAUDE_ENV_FILE", "CBUS_SESSION_ID", "CBUS_CHANNEL", "CBUS_ALIAS", "CBUS_HARNESS", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "GROK_SESSION_ID"}
+            result["checks"]["autostart_daemon_scrubs_session_identity_and_capability"] = not (keys & identity) and not any(k.startswith("CLAUDE_CODE_MESSAGING_") for k in keys)
+            result["checks"]["autostart_daemon_keeps_isolated_store_configuration"] = {"CBUS_DIR", "HOME", "PATH"} <= keys
         before, before_all = state["mainRequests"], len(requests)
         idle_at = time.time()
         pump(args.idle_seconds)
