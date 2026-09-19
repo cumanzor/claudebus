@@ -79,6 +79,19 @@ probe uses earlier runtime source `3d4eb1e`, macOS SHA-256
 These are immutable test candidates, not release assets. Later source changes do
 not inherit an earlier binary's exact-byte acceptance claim.
 
+Independent landing review subsequently found a transcript trust gap in #19.
+Repair `92f7856` rejects foreign ownership, group/other write permission and hard
+links during capture and every bound reopen. The new filesystem regressions fail
+on the original head and pass on the repair. Foreign-owner metadata is exercised;
+changing actual file ownership is skipped when tests run without root.
+
+After that repair, native runtime assembly `428eddf` passed a fresh ordinary
+Claude 2.1.277 self-connect, exact receipt and reply canary: 17 assertions and six
+cleanup checks. Its macOS binary SHA-256 is
+`37b8079cc8149e7c7f9cf29cece3a149ebb9fb05c7c8fbf69694b4de8ec097b2`.
+This used the Monitor-free runner and a local fake provider. It adds no new
+signed-in-account, relay, reconnect or long-idle evidence.
+
 The canaries record source/script/binary hashes, exact runtime/session evidence,
 assertions and owned-process cleanup. Use their `--help` with explicitly supplied
 candidate paths. Never point isolated probes at an existing user's bus store.
