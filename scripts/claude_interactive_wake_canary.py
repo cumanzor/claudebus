@@ -446,7 +446,7 @@ def main():
         else:
             wait(lambda: state.get("busReplyRequested") and b"CBUS_WAKE_RECEIVED" in output, "inbound event and actual cbus reply", 25)
             wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
-            wait(bus_probe.receipt_ready, "daemon exact transcript receipt", 15)
+            wait(lambda: bus_probe.receipt_ready(transcript_rows()), "daemon exact transcript receipt", 15)
             result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
         if args.cbus_case.startswith("restart-"):
             prior = bus_probe.status()
@@ -474,7 +474,7 @@ def main():
                 bus_probe.result["secondReplyMarker"] = bus_probe.ack
                 bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
                 wait(lambda: state["mainRequests"] >= count + 2 and bool(bus_probe.acknowledgments()), "post-restart second round trip", 25)
-                wait(lambda: bus_probe.receipt_ready(prior["accepted"] + 1), "post-restart second UUID receipt", 15)
+                wait(lambda: bus_probe.receipt_ready(transcript_rows(), prior["accepted"] + 1), "post-restart second UUID receipt", 15)
                 checks = bus_probe.check_receipt(transcript_rows(), process.pid)
                 result["checks"].update({"post_restart_" + k: v for k, v in checks.items()})
                 old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
@@ -535,7 +535,7 @@ def main():
                 bus_probe.result["secondReplyMarker"] = bus_probe.ack
                 bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
                 wait(lambda: state["mainRequests"] >= second_count + 2 and bool(bus_probe.acknowledgments()), "resumed runtime second round trip", 25)
-                wait(lambda: bus_probe.receipt_ready(prior["accepted"] + 1), "resumed runtime exact UUID receipt", 15)
+                wait(lambda: bus_probe.receipt_ready(transcript_rows(), prior["accepted"] + 1), "resumed runtime exact UUID receipt", 15)
                 result["checks"].update({"resumed_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
                 old_rows = [r for r in transcript_rows() if r.get("type") == "user" and r.get("sessionId") == session and original_marker in json.dumps(r)]
                 old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
@@ -599,7 +599,7 @@ def main():
             before_second = state["mainRequests"]
             bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
             wait(lambda: state["mainRequests"] >= before_second + 2 and bool(bus_probe.acknowledgments()), "post-clear second round trip", 25)
-            wait(bus_probe.receipt_ready, "post-clear exact UUID receipt", 15)
+            wait(lambda: bus_probe.receipt_ready(transcript_rows()), "post-clear exact UUID receipt", 15)
             result["checks"].update({"after_clear_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
         main_requests = [r for r in requests if r.get("mainRequest")]
         result["checks"].update({
