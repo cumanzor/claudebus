@@ -99,6 +99,15 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 	if strings.Contains(addr, "/") {
 		return "", "", fmt.Errorf("spawn takes a channel or channel@host, no alias — use --name to fix the child's alias")
 	}
+	childEnv := codexLaunch.env
+	var unsetEnv []string
+	if opts.Harness == "claude" {
+		childEnv, err = forkReplicatedEnv()
+		if err != nil {
+			return "", "", err
+		}
+		unsetEnv = claudeLaunchUnset
+	}
 	var title, prompt string
 	if IsRemote(addr) {
 		at := strings.Index(addr, "@")
@@ -133,11 +142,12 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		prompt = prompt + "\n\n" + strings.TrimSpace(roleBody)
 	}
 	spec := ForkSpec{
-		Target: target,
-		Argv:   freshLaunchArgv(model, title, prompt),
-		Env:    forkReplicatedEnv(),
-		Dir:    cwd(),
-		Title:  title,
+		Target:   target,
+		Argv:     freshLaunchArgv(model, title, prompt),
+		Env:      childEnv,
+		UnsetEnv: unsetEnv,
+		Dir:      cwd(),
+		Title:    title,
 	}
 	if opts.Harness == "codex" {
 		spec.Argv = codexLaunch.argv(opts.Profile, model, prompt)
