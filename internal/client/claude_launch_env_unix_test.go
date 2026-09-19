@@ -14,19 +14,27 @@ func TestClaudeLaunchCommandsPreserveStoreAndClearTerminalIdentity(t *testing.T)
 	identityKeys := []string{"CBUS_SESSION_ID", "CBUS_ALIAS", "CBUS_CHANNEL", "CBUS_HARNESS",
 		"CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CLAUDECODE", "CLAUDE_ENV_FILE",
 		"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CODEX_THREAD_ID", "GROK_SESSION_ID"}
-	for _, launch := range []string{"fresh", "fork"} {
-		t.Run(launch, func(t *testing.T) {
+	for _, tc := range []struct {
+		launch  string
+		profile bool
+	}{{"fresh", true}, {"fork", true}, {"fresh-default", false}, {"fork-default", false}} {
+		t.Run(tc.launch, func(t *testing.T) {
 			root := t.TempDir()
 			home, bus := filepath.Join(root, "chosen home"), filepath.Join(root, "chosen bus")
-			config := filepath.Join(home, ".ccs", "instances", "alpha")
+			config := ""
+			if tc.profile {
+				config = filepath.Join(home, ".ccs", "instances", "alpha")
+			}
 			bin := filepath.Join(root, "bin")
 			if err := os.MkdirAll(bin, 0700); err != nil {
 				t.Fatal(err)
 			}
 			// The only launched child is a shell fixture. Its argv still carries
 			// the real fresh/fork prompt, but no harness, GUI or model is invoked.
-			if err := os.WriteFile(filepath.Join(bin, "ccs"), []byte("#!/bin/sh\n/usr/bin/env\n"), 0700); err != nil {
-				t.Fatal(err)
+			for _, name := range []string{"ccs", "claude"} {
+				if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n/usr/bin/env\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
 			}
 			t.Setenv("PATH", bin+":/usr/bin:/bin")
 			t.Setenv("HOME", home)
@@ -36,7 +44,7 @@ func TestClaudeLaunchCommandsPreserveStoreAndClearTerminalIdentity(t *testing.T)
 			t.Setenv("CLAUDE_CODE_SESSION_ID", "parent-session")
 			f := &fakeForker{}
 			var err error
-			if launch == "fresh" {
+			if strings.HasPrefix(tc.launch, "fresh") {
 				_, _, err = Spawn("tab", "launch-test", "", "child", "", f)
 			} else {
 				_, _, _, err = Branch("tab", "launch-test", "", "child", f)
@@ -79,6 +87,11 @@ func TestClaudeLaunchCommandsPreserveStoreAndClearTerminalIdentity(t *testing.T)
 							t.Errorf("%s=%q, want %q", key, got[key], want)
 						}
 					}
+					if !tc.profile {
+						if _, exists := got["CLAUDE_CONFIG_DIR"]; exists {
+							t.Error("default profile inherited terminal-server config")
+						}
+					}
 					for _, key := range identityKeys {
 						if _, exists := got[key]; exists {
 							t.Errorf("inherited runtime identity %s survived generated launch", key)
@@ -90,9 +103,10 @@ func TestClaudeLaunchCommandsPreserveStoreAndClearTerminalIdentity(t *testing.T)
 	}
 }
 
-func TestClaudeLaunchPinsRelativeBusBeforeChangingDirectory(t *testing.T) {
+func TestClaudeLaunchPinsRelativeRootsBeforeChangingDirectory(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("CBUS_DIR", "relative-bus")
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative-config")
 	env, err := peerEnv("")
 	if err != nil {
 		t.Fatal(err)
@@ -100,5 +114,16 @@ func TestClaudeLaunchPinsRelativeBusBeforeChangingDirectory(t *testing.T) {
 	want := filepath.Join(cwd(), "relative-bus")
 	if env["CBUS_DIR"] != want || !filepath.IsAbs(env["CBUS_DIR"]) {
 		t.Fatalf("relative bus would follow restored peer cwd: %q", env["CBUS_DIR"])
+	}
+	if env["CLAUDE_CONFIG_DIR"] != filepath.Join(cwd(), "relative-config") {
+		t.Fatalf("relative config would follow restored peer cwd: %q", env["CLAUDE_CONFIG_DIR"])
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(".ccs", "instances", "alpha"))
+	env, err = peerEnv("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["CLAUDE_CONFIG_DIR"] != filepath.Join(cwd(), ".ccs", "instances", "beta") {
+		t.Fatalf("selected peer profile lost anchored config: %q", env["CLAUDE_CONFIG_DIR"])
 	}
 }
