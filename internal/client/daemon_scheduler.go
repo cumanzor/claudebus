@@ -72,11 +72,19 @@ func cloneConnection(c *ConnectionState) *ConnectionState {
 	copyAttempt := func(a queueAttempt) queueAttempt {
 		if a.Evidence != nil {
 			e := *a.Evidence
+			if e.ReceiptOffset != nil {
+				v := *e.ReceiptOffset
+				e.ReceiptOffset = &v
+			}
 			a.Evidence = &e
 		}
 		return a
 	}
 	next := *c
+	if c.Claude != nil {
+		cfg := *c.Claude
+		next.Claude = &cfg
+	}
 	clonePresenceFields(&next, c)
 	if c.Relay != nil {
 		v := *c.Relay
@@ -280,7 +288,7 @@ func (d *busDaemon) schedule() {
 }
 
 func (d *busDaemon) scheduledOperation(c *ConnectionState) error {
-	if err := validateDaemonHarness(c.Harness); err != nil {
+	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
 	if c.Relay != nil && (c.State != "disconnected" || len(c.PresenceOutbox) > 0) {
