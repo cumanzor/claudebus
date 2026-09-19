@@ -51,6 +51,7 @@ def main():
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
     parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse"), default="accepted")
+    parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
         parser.error("--idle-seconds must be at least 10")
@@ -60,6 +61,8 @@ def main():
         parser.error("--transport cbus requires --cbus, --cbus-sha256, and --cbus-revision")
     if args.transport != "cbus" and args.cbus_case != "accepted":
         parser.error("--cbus-case requires --transport cbus")
+    if args.cbus_shared_fixture and args.transport != "cbus":
+        parser.error("--cbus-shared-fixture requires --transport cbus")
     runtime_case = args.cbus_case if args.transport == "cbus" else args.socket_case
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
@@ -423,6 +426,10 @@ def main():
         result["checks"]["default_permission_mode"] = bool(modes) and set(modes) == {"default"}
         result["limitations"] = ["Local fake provider, not real-account field proof", "Single local Claude recipient and passive verifier; no relay, other harness, reconnect, or recovery proof"]
         result["passed"] = all(result["checks"].values())
+    def terminate_requested(signum, frame):
+        raise RuntimeError("canary termination requested")
+
+    signal.signal(signal.SIGTERM, terminate_requested)
     try:
         if bus_probe:
             bus_probe.start(env, work)
