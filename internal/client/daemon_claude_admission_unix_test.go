@@ -19,6 +19,7 @@ func claudeAdmissionFixture(t *testing.T) (*busDaemon, *daemonFakeQueue, Connect
 	if err != nil {
 		t.Fatal(err)
 	}
+	writeClaudeSessionRegistry(t, binding)
 	d.probeConsumer = nil
 	req.Protocol, req.Harness, req.Config, req.Claude = DaemonProtocolVersion, daemonHarnessClaude, CodexQueueConfig{}, &binding
 	t.Cleanup(func() {
