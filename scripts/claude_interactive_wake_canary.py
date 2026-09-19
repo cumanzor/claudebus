@@ -250,11 +250,7 @@ def main():
         return [r for r in transcript_rows()
                 if r.get("type") == "user" and r.get("sessionId") == session
                 and marker in json.dumps(r)]
-    try:
-        process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
-        os.close(slave)
-        slave = None
-        result["pid"] = process.pid
+    def run_wake():
         wait(lambda: state["mainRequests"] >= 2 and (args.socket_case == "busy" or b"CBUS_WAKE_IDLE" in output) and ((work / "waiter.pid").exists() if args.transport == "background" else bool(capability.get("socket"))), "initial capability export and response", 45)
         before = state["mainRequests"]
         before_all = len(requests)
@@ -345,6 +341,13 @@ def main():
                 capability["token"] not in p.read_text(errors="replace")
                 for p in (root / "terminal.log", root / "debug.log", root / "provider-requests.json"))
         result["passed"] = all(result["checks"].values())
+
+    try:
+        process = subprocess.Popen(argv, cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+        os.close(slave)
+        slave = None
+        result["pid"] = process.pid
+        run_wake()
     except Exception as error:
         result["error"] = repr(error)
     finally:
