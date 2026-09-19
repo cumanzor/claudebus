@@ -139,8 +139,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    preview reply permission (default) or bus trust;
                                    --install writes it explicitly, never automatic
   cbus connect <channel> [alias] [--codex-sqlite-home ABS_PATH] [--json]
-                                   connect this Codex CLI thread via its native
-                                   queue, without restarting (experimental pilot)
+                                   connect this Claude or Codex CLI session via
+                                   its native adapter, without restarting
                                    <channel> is a name, never a subcommand:
                                    "cbus connect status" joins a channel called
                                    status. To inspect, use cbus connection status
