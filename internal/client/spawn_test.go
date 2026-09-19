@@ -67,7 +67,7 @@ func TestSpawnRemoteAddress(t *testing.T) {
 		t.Fatalf("remote spawn without --name must not fix an alias, got %q", child)
 	}
 	prompt := f.spec.Argv[len(f.spec.Argv)-1]
-	for _, want := range []string{"ws arm spec", "dev@server", "1006", "cbus list @server"} {
+	for _, want := range []string{"cbus connect dev@server", "your-explicit-alias", "do not start a Monitor", "cbus list dev@server"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("remote prompt missing %q:\n%s", want, prompt)
 		}
@@ -83,7 +83,7 @@ func TestSpawnRemoteAddress(t *testing.T) {
 
 func TestSpawnPromptLocalContent(t *testing.T) {
 	p := SpawnPrompt("dev")
-	for _, want := range []string{"cbus join dev", "NEVER Bash", "cbus list dev"} {
+	for _, want := range []string{"cbus connect dev", "do not start a Monitor", "cbus list dev"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("local prompt missing %q:\n%s", want, p)
 		}
@@ -95,13 +95,13 @@ func TestSpawnPromptLocalContent(t *testing.T) {
 
 func TestSpawnPromptAliasedContent(t *testing.T) {
 	p := SpawnPromptAliased("dev", "worker3")
-	for _, want := range []string{"cbus join dev worker3", "cbus tail dev/worker3", "cbus:dev/worker3", "NEVER Bash"} {
+	for _, want := range []string{"cbus connect dev worker3", "cbus list dev", "preserved pending mail", "do not start a Monitor"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("aliased local prompt missing %q:\n%s", want, p)
 		}
 	}
 	r := SpawnPromptAliased("dev@server", "laptop2")
-	for _, want := range []string{"cbus tail dev@server/laptop2", "cbus:dev@server/laptop2", "1006", "cbus list @server"} {
+	for _, want := range []string{"cbus connect dev@server laptop2", "cbus list dev@server", "do not start a Monitor"} {
 		if !strings.Contains(r, want) {
 			t.Fatalf("aliased remote prompt missing %q:\n%s", want, r)
 		}
@@ -277,7 +277,7 @@ func TestBranchNameFixesAliasAndDefault(t *testing.T) {
 	if i := slices.Index(argv, "--name"); i < 0 || argv[i+1] != "tester2" {
 		t.Fatalf("argv = %v", argv)
 	}
-	if !strings.Contains(argv[len(argv)-1], "cbus join namechan tester2") {
+	if !strings.Contains(argv[len(argv)-1], "cbus connect namechan tester2") {
 		t.Fatalf("prompt must carry the explicit join: %q", argv[len(argv)-1])
 	}
 	// default: auto-picked, distinct from the parent's alias

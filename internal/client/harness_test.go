@@ -595,15 +595,15 @@ func TestHookJoinNoRendezvousWhenUnset(t *testing.T) {
 
 // ---- bootstrap -------------------------------------------------------------------
 
-// TestBootstrapPromptSubstitution: $ch (4x) and $parent (1x) expand correctly and the
+// TestBootstrapPromptSubstitution: channel and parent expand correctly and the
 // body carries no leftover placeholders or trailing newline.
 func TestBootstrapPromptSubstitution(t *testing.T) {
 	got := BootstrapPrompt("myrepo", "lead")
 	if strings.Contains(got, "$ch") || strings.Contains(got, "$parent") {
 		t.Fatalf("unsubstituted placeholder remains: %q", got)
 	}
-	if strings.Count(got, "myrepo") != 4 {
-		t.Errorf("expected 4 channel substitutions, got %d", strings.Count(got, "myrepo"))
+	if !strings.Contains(got, "cbus connect myrepo") || !strings.Contains(got, "cbus list myrepo") {
+		t.Errorf("native join or roster channel is missing: %q", got)
 	}
 	if !strings.Contains(got, "'myrepo/lead'") {
 		t.Errorf("parent substitution missing: %q", got)
@@ -665,7 +665,7 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 		}
 	}
 	last := f.spec.Argv[len(f.spec.Argv)-1]
-	if !strings.Contains(last, "cbus join mychan "+child) {
+	if !strings.Contains(last, "cbus connect mychan "+child) {
 		t.Errorf("last argv should be the aliased bootstrap prompt: %q", last)
 	}
 	if i := slices.Index(f.spec.Argv, "--name"); i < 0 || f.spec.Argv[i+1] != child {
@@ -755,5 +755,24 @@ func TestLauncherScriptByteExact(t *testing.T) {
 func TestITerm2CommandBare(t *testing.T) {
 	if got := iterm2Command("/tmp/cc-branch.123.sh"); got != "/bin/bash /tmp/cc-branch.123.sh" {
 		t.Fatalf("iterm2Command = %q, want a bare, unquoted two-token command", got)
+	}
+}
+
+func TestBranchPreservesManagedParent(t *testing.T) {
+	d, _, req := daemonFixture(t)
+	c := mustDaemonConnect(t, d, req)
+	t.Setenv("CBUS_SESSION_ID", req.ThreadID)
+	end := appendDaemonMessage(t, c, "", "unread parent mail")
+	f := &fakeForker{}
+	ch, alias, child, err := Branch("window", req.Channel, "", "native-child", f)
+	if err != nil || ch != c.Channel || alias != c.Alias || child != "native-child" || !f.called || !d.owns(c) {
+		t.Fatalf("managed parent could not branch without legacy join: %v", err)
+	}
+	dev, ino, size, ok := fileIdentity(InboxPath(ch, alias))
+	if !ok || dev != c.Dev || ino != c.Ino || size != end || c.Offset != 0 {
+		t.Fatal("branch modified managed parent inbox")
+	}
+	if !strings.Contains(f.spec.Argv[len(f.spec.Argv)-1], "cbus connect "+ch+" "+child) {
+		t.Fatal("child did not receive its own native connect instruction")
 	}
 }
