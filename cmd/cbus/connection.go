@@ -154,7 +154,7 @@ func runConnection(args []string) int {
 		if asJSON {
 			return printConnectionJSON(map[string]any{"target": pos[1], "disconnected": true})
 		}
-		fmt.Printf("disconnected %s; inbox retained; already accepted Codex queue items are unchanged\n", pos[1])
+		fmt.Printf("disconnected %s; inbox retained; previously submitted native input is not revoked\n", pos[1])
 		return 0
 	default:
 		return die("unknown connection command %q", pos[0])
