@@ -1,9 +1,10 @@
 # Claude Code native connections
 
 Native receive requires a cbus build containing the Claude adapter. The v0.12.2
-release supports native Codex only. The Claude path is tested with the interactive
-2.1.277 CLI on macOS; Linux acceptance is recorded separately with its binary
-version. Desktop clients and native Windows support remain outside v1.
+release supports native Codex only. Actual session-side join, receipt and reply
+passed with the interactive 2.1.277 CLI on macOS and 2.1.276 CLI on Linux, using
+isolated profiles and a local fake provider. Desktop clients and native Windows
+support remain outside v1.
 
 ## Join from an existing session
 
@@ -56,6 +57,17 @@ over an unresolved attempt until a positive receipt is reconciled or the operato
 explicitly abandons that exact attempt. Abandonment permits later mail; it does not
 cancel a message already submitted or prove that it failed to arrive. A different
 session cannot silently take over the connection.
+
+`/clear` starts a different session even when Claude keeps its process and socket.
+The old connection stops delivering to that process. Join from the new session
+with a fresh alias; its history is not a continuation of the old connection.
+
+Formations preserve a managed Claude session's exact identity and supported
+launch profile. Automatic formation launch supports the captured default
+`~/.claude` profile and recognized CCS profiles. An arbitrary `CLAUDE_CONFIG_DIR`
+can connect normally, but formation save/automatic launch refuses it because the
+launcher cannot reproduce that environment safely. Resume it manually with the
+original configuration, then reconnect from inside the session.
 
 ## Migrating an existing Monitor peer
 
