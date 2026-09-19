@@ -196,10 +196,14 @@ Both arms came from `scripts/claude_interactive_wake_canary.py`, committed in
 
 `--monitor-bounded` is the control arm: it seeds `tengu_breezy_crescent` true. Without it the
 same run seeds the flag false. Everything else, including the twelve-second idle, is the
-canary's default. Local artifacts from the run recorded here:
-`/tmp/cbus-monitor-runtime-pair-20260918.json`, with per-arm results at
-`/tmp/cbus-cc-wake-zvj2v92m/result.json` (bounded) and `/tmp/cbus-cc-wake-d3mz3foh/result.json`
-(persistent).
+canary's default. Read the retained [runtime pair](https://github.com/cumanzor/claudebus/blob/96e59067a8d28022c2d949e0220d89987d2a0864/docs/evidence/claude-monitor/2026-09-18/runtime-pair.json),
+[bounded arm](https://github.com/cumanzor/claudebus/blob/96e59067a8d28022c2d949e0220d89987d2a0864/docs/evidence/claude-monitor/2026-09-18/bounded.json) and
+[persistent arm](https://github.com/cumanzor/claudebus/blob/96e59067a8d28022c2d949e0220d89987d2a0864/docs/evidence/claude-monitor/2026-09-18/persistent.json).
+These immutable snapshots retain the checks, timings and limitations; the
+[provenance manifest](https://github.com/cumanzor/claudebus/blob/96e59067a8d28022c2d949e0220d89987d2a0864/docs/evidence/claude-monitor/2026-09-18/manifest.json)
+records original/public hashes and the removal of local home paths and unrelated tool-help
+text. Local `/tmp` paths inside the snapshots identify the original run, not external
+references. Complete originals are also retained in the project's evidence store.
 
 What that establishes is the mechanism: on this binary, that one flag decides whether the
 Monitor schema keeps `persistent` and whether a monitor outlives its deadline. What it does
