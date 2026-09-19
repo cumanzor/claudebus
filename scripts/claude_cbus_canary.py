@@ -1,6 +1,7 @@
 """Scratch-only cbus fixture for the ordinary Claude PTY capability canary."""
 
 import hashlib
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -8,8 +9,42 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import uuid
+
+
+def process_environment_keys(pid):
+    """Read only an owned fixture process; return executable and names, never values."""
+    if sys.platform != "darwin":
+        executable = Path(f"/proc/{pid}/exe").resolve()
+        environment = Path(f"/proc/{pid}/environ").read_bytes()
+    else:
+        libc = ctypes.CDLL(None, use_errno=True)
+        mib, size = (ctypes.c_int * 3)(1, 49, pid), ctypes.c_size_t()
+        if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0):
+            raise OSError(ctypes.get_errno())
+        buf = ctypes.create_string_buffer(size.value)
+        if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
+            raise OSError(ctypes.get_errno())
+        raw = buf.raw[:size.value]
+        argc = int.from_bytes(raw[:4], sys.byteorder)
+        end = raw.index(b"\0", 4)
+        executable = Path(raw[4:end].decode())
+        pos = end + 1
+        while raw[pos] == 0:
+            pos += 1
+        for _ in range(argc):
+            pos = raw.index(b"\0", pos) + 1
+        environment = raw[pos:]
+    parts = environment.lstrip(b"\0").split(b"\0")
+    keys = set()
+    for part in parts:
+        if not part:
+            break  # Darwin's following Apple vector is not the environment.
+        if b"=" in part:
+            keys.add(part.split(b"=", 1)[0].decode())
+    return executable.resolve(), sorted(keys)
 
 
 class BusProbe:
@@ -49,6 +84,7 @@ class BusProbe:
         self.inbox = self.bus / self.channel / "verifier" / "inbox.jsonl"
         self.process = None
         self.log = None
+        self.autostart = getattr(args, "cbus_case", "") == "autostart"
         self.result = {"sourceBinary": str(source), "frozenBinary": str(self.binary),
                        "sha256": actual, "declaredSourceRevision": args.cbus_revision,
                        "channel": self.channel, "target": self.target, "sender": self.sender,
@@ -66,7 +102,14 @@ class BusProbe:
     def start(self, env, work):
         self.env, self.work = env.copy(), work
         self.result["version"] = self.command(["--version"]).strip()
-        if self.shared:
+        if self.autostart:
+            if (self.bus / ".daemon/control.sock").exists():
+                raise RuntimeError("autostart fixture must begin without a daemon")
+            self.result["initialDaemonAbsent"] = True
+            (self.root / "daemon.log").write_text("CLI-autostarted daemon; see bus/.daemon/daemon.log.\n")
+            self.command(["join", self.channel, "verifier", "--session-id", str(uuid.uuid4())])
+            return
+        elif self.shared:
             self.health = json.loads(self.command(["daemon", "status", "--json"]))
             if self.health != self.shared["health"]:
                 raise RuntimeError("shared fixture daemon identity changed")
@@ -87,10 +130,23 @@ class BusProbe:
         self.command(["join", self.channel, "verifier", "--session-id", str(uuid.uuid4())])
 
     def status(self):
+        if self.autostart and not hasattr(self, "health"):
+            self.capture_autostart()
         states = json.loads(self.command(["connection", "status", self.target, "--json"]))
         if len(states) != 1:
             raise RuntimeError("expected one exact connection")
         return states[0]
+
+    def capture_autostart(self):
+        health = json.loads(self.command(["daemon", "status", "--json"]))
+        executable, keys = process_environment_keys(health["pid"])
+        if executable != self.binary.resolve() or health != json.loads(self.command(["daemon", "status", "--json"])):
+            raise RuntimeError("autostart daemon executable or runtime identity changed")
+        self.health = health
+        st = (self.bus / ".daemon/control.sock").lstat()
+        self.autostart_socket = (st.st_dev, st.st_ino)
+        self.result["daemonPID"] = health["pid"]
+        self.result["daemonEnvironmentKeys"] = keys
 
     def acknowledgments(self):
         return [json.loads(line) for line in self.inbox.read_text().splitlines()
@@ -154,10 +210,38 @@ class BusProbe:
         secret = secret_path.read_bytes()
         paths = [self.root / name for name in ("terminal.log", "debug.log", "provider-requests.json", "daemon.log")]
         paths += list((self.bus / ".daemon/connections").glob("*.json"))
+        if (self.bus / ".daemon/daemon.log").exists():
+            paths.append(self.bus / ".daemon/daemon.log")
         return bool(secret) and secret not in json.dumps(self.result).encode() and all(secret not in p.read_bytes() for p in paths)
 
     def cleanup(self):
         clean = {}
+        if self.autostart:
+            try:
+                socket = self.bus / ".daemon/control.sock"
+                if socket.exists():
+                    if not hasattr(self, "health"):
+                        self.capture_autostart()
+                    st = socket.lstat()
+                    if (st.st_dev, st.st_ino) != self.autostart_socket or json.loads(self.command(["daemon", "status", "--json"])) != self.health:
+                        raise RuntimeError("autostart daemon cleanup identity fence changed")
+                    if hasattr(self, "connection"):
+                        self.command(["connection", "disconnect", self.target, "--json"])
+                    self.command(["daemon", "stop", "--json"])
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        try:
+                            os.kill(self.health["pid"], 0)
+                        except ProcessLookupError:
+                            break
+                        time.sleep(.05)
+                    else:
+                        raise RuntimeError("autostart daemon did not exit after stop")
+                clean.update(daemonExited=True, daemonSocketRemoved=not socket.exists())
+            except Exception as error:
+                self.result["cleanupError"] = str(error)
+                clean["daemonExited"] = False
+            return clean
         if self.shared:
             try:
                 if hasattr(self, "connection"):
