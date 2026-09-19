@@ -34,11 +34,11 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus inbox <channel>/<alias>     print inbox path
   cbus bootstrap <channel> [parent] [child-alias]  print the canonical fork-child
                                    prompt (child-alias: the reserved-alias variant)
-  cbus branch [target] [channel]   join + fork a bootstrapped child in one shot
+  cbus branch [target] [channel]   fork a bootstrapped child; connect parent first
                                    (target: window|tab|tmux|pane — pane splits
                                    your own tmux pane or iTerm2 session, and
                                    errors when in neither; channel auto-derives
-                                   from the git repo name; arm the Monitor after;
+                                   from the git repo name; no native Monitor;
                                    the child's alias is reserved at fork time and
                                    its session title matches it)
        --model <m>                 launch the child on a specific model
@@ -46,7 +46,7 @@ const usage = `cbus — message bus between coding sessions, in named channels
        --name <n>                  fix the child's alias AND session title
                                    (default: auto-pick — main, fork-N)
   cbus spawn [target] [channel]    open a FRESH session (blank transcript, not
-                                   a fork) that joins + arms the channel on its
+                                   a fork) that connects to the channel on its
                                    own (target: window|tab|tmux|pane; local
                                    channel auto-derives — child alias reserved +
                                    titled like branch; channel@host must be
