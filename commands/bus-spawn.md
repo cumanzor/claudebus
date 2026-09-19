@@ -1,17 +1,17 @@
 ---
 description: Open a fresh session in a new window, both sides joined to a cbus channel
 argument-hint: "[window|tab|tmux|pane] [channel|ch@host] [--model m] [--name n]"
-allowed-tools: Bash(cbus:*), Monitor, AskUserQuestion
+allowed-tools: Bash(cbus:*), AskUserQuestion
 ---
 
 Open a **fresh** Claude Code session (blank transcript — NOT a fork of this one)
-in a new terminal, prompted to join a `cbus` channel and arm its own listener —
-and join THIS session to the same channel first, so parent and child can
+in a new terminal, prompted to connect natively to a `cbus` channel through the daemon,
+and connect THIS session to the same channel first, so parent and child can
 message each other immediately.
 
 For a **codex** peer rather than a Claude one, use `/bus-codex`: `cbus spawn`
-launches Claude Code only, and a codex peer is wired differently (an app-server,
-a TUI, and a bridge that listens on the peer's behalf).
+defaults to Claude Code; `--harness codex` launches an ordinary Codex CLI
+whose own session connects through the daemon.
 
 The user passed: "$ARGUMENTS" — first word is the target (window | tab | tmux |
 pane; ask via AskUserQuestion ONLY if empty), optional second word is the channel: a
@@ -32,28 +32,14 @@ tmux window name (alias charset: [A-Za-z0-9._-]). Omitted: a local channel auto-
 and titles the child with it; a remote channel leaves the child to pick its
 own alias, titling it with the address.
 
-Three steps:
-
-1. **Join this side first** — skip steps 1 and 2 entirely if this session
-   already has a cbus Monitor armed for this channel. Local channel: run
-   `cbus join <channel>` (idempotent; auto-picks `main`/`fork-N`, prunes dead
-   peers) and note the `channel/alias` it prints. Joining before spawning means
-   a fresh channel gives the parent `main` and the child `fork-N` — the same
-   layout as `cbus branch`; don't reorder to change that. Remote channel
-   (`<channel>@<host>`): there is no join verb — pick an explicit alias (short
-   hostname/role, e.g. `mbp`) and run `cbus tail <channel>@<host>/<alias>` to
-   get the **Monitor ws arm spec** (requires `cbus auth` credentials; if
-   missing, tell the user to run `cbus auth set <host>`).
-2. **Arm this session's listener** with the **Monitor** tool, persistent —
-   local: command `cbus tail <channel>/<alias>`, description
-   `cbus:<channel>/<alias>`. Remote: arm from the ws spec (`ws:` source, NOT a
-   command); if a `[WebSocket closed]` event later fires, re-run the same
-   `cbus tail` and arm the fresh spec. ⚠️ Never run a **local** `cbus tail` in
-   Bash — it execs a follower that never exits, so a Bash call blocks forever
-   and delivers nothing; it is the Monitor tool's event source only.
-3. Run `cbus spawn <target> <channel> [--model m] [--name n]`. The child joins
-   and arms ITSELF — its launch prompt carries the join + Monitor-arming
-   instructions, so there is nothing more to arm and no bootstrap to print.
+1. Connect this session first with `cbus connect CHANNEL [ALIAS] --json`.
+   For a relay, use an explicit alias. If already connected, preserve the exact
+   address. Follow `/bus-join` for capability errors, roster and presence handling.
+   Do not create a Monitor or tail loop.
+2. Run `cbus spawn <target> <channel> [--model m] [--name n]`. The child receives
+   native connect instructions and uses its assigned alias (claiming the launch
+   reservation for a local channel).
+   Terminal placement is independent of delivery.
 
 Then confirm in one line: channel, this session's address, the child's alias
 (from the spawn output), and the target. Verify membership when asked:
