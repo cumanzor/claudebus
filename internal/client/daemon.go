@@ -669,6 +669,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	var dir string
 	var unlock func()
 	var reservation *peerMeta
+	// Reservation inspection can replace ErrExist with a more specific refusal.
+	var aliasExists bool
 	if req.Alias == "" {
 		c.Alias, dir, unlock, err = claimAliasLockedContext(d.ctx, req.Channel)
 	} else {
@@ -677,7 +679,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		if err == nil {
 			if err = os.MkdirAll(filepath.Dir(dir), 0755); err == nil {
 				err = os.Mkdir(dir, 0755)
-				if c.Relay == nil && errors.Is(err, os.ErrExist) {
+				aliasExists = errors.Is(err, os.ErrExist)
+				if c.Relay == nil && aliasExists {
 					reservation, err = daemonReservation(dir, c.Channel, c.Alias)
 				}
 			}
@@ -687,7 +690,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		defer unlock()
 	}
 	if err != nil {
-		if c.Claude != nil && os.IsExist(err) {
+		if c.Claude != nil && aliasExists {
 			m, ok := ReadPeerMeta(filepath.Join(d.peerDir(c), "meta.json"))
 			if ok && m.ConnectionID == "" && m.SessionID == c.ThreadID {
 				return nil, fmt.Errorf("cannot claim alias %s: this session has an unmanaged registration; stop any Monitor for this exact alias and explicitly leave it before native connect, or choose a fresh alias", ConnectionTarget(c))

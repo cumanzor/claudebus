@@ -92,15 +92,20 @@ func TestClaudeFreshAdmissionRefusesUnmanagedAliasWithoutMutation(t *testing.T) 
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	meta := []byte(`{"sessionId":"` + req.ThreadID + `","harness":"claude"}`)
+	meta := mustBindingJSON(t, peerMeta{Alias: req.Alias, Channel: req.Channel, SessionID: req.ThreadID,
+		Harness: "claude", ListenerPid: jsonNull, OwnerPid: jsonNull})
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), meta, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "inbox.jsonl"), []byte("legacy mail\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.connectWithCredential(req, "fixture-secret"); err == nil || !strings.Contains(err.Error(), "Monitor") || !strings.Contains(err.Error(), req.Channel+"/"+req.Alias) {
+	_, err := d.connectWithCredential(req, "fixture-secret")
+	if err == nil {
 		t.Fatal("unmanaged alias was adopted")
+	}
+	if !strings.Contains(err.Error(), "Monitor") || !strings.Contains(err.Error(), req.Channel+"/"+req.Alias) {
+		t.Fatalf("unmanaged refusal lost exact-alias migration guidance: %v", err)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
 	inbox, _ := os.ReadFile(filepath.Join(dir, "inbox.jsonl"))
