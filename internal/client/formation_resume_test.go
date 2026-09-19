@@ -161,7 +161,7 @@ func TestResumeAnchorRefusals(t *testing.T) {
 			// cross-profile shape — live-armed must still win (gate order pinned by the
 			// first real-store smoke, where the wrong refusal fired)
 			w.HasTranscript = func(string, string) bool { return false }
-		}, "live-armed"},
+		}, "held at"},
 	} {
 		f, w := resumeFixture(), resumeWorld()
 		tc.mut(f, w)

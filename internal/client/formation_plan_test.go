@@ -257,7 +257,7 @@ func TestPlanResumeGateOnLiveSid(t *testing.T) {
 	if got.Action != ActionRefuse {
 		t.Fatalf("resume on a live sid: action = %v, want refuse", got.Action)
 	}
-	for _, want := range []string{"live-armed at un/orchestrator", "mode=fork"} {
+	for _, want := range []string{"held at un/orchestrator", "mode=fork"} {
 		if !strings.Contains(got.Reason, want) {
 			t.Errorf("reason should carry %q: %s", want, got.Reason)
 		}
