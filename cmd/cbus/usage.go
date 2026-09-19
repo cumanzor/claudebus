@@ -10,18 +10,18 @@ package main
 // `--model`/`--name` flags on branch/spawn, and the `formation` block.
 const usage = `cbus — message bus between coding sessions, in named channels
 
-  cbus join <channel> [alias]      join a channel (alias auto: main, fork-N;
+  cbus join <channel> [alias]      legacy registration (alias auto: main, fork-N;
                                    prunes dead peers in the channel first)
        --session-id <id>           act AS this session id on join/leave/rename/
                                    send (overrides the $*_SESSION_ID env chain);
                                    for hooks and scripted multi-session drivers
-  cbus tail <channel>/<alias>      stream inbox — arm under the Monitor tool,
+  cbus tail <channel>/<alias>      legacy inbox source for the Monitor tool,
                                    NEVER in Bash (it blocks forever)
   cbus send <target> [opts] TEXT   append a message to a peer's inbox;
                                    target is <channel>/<alias>, or a bare
                                    <alias> within your own channel(s)
        --from <ch/alias>           override sender (default: auto-resolved)
-       --force                     send even if target's listener died — queues
+       --force                     queue even if a legacy target's listener died;
                                    the line anyway; the next re-arm resumes from
                                    the durable cursor and delivers it
                                    (a joined-but-not-yet-armed peer is always
@@ -75,7 +75,7 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    git_head stays machine-owned; convention:
                                    tracker=<id> links the effort's tracker item)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
-                                   host (sequential, anchor first); join the
+                                   host (sequential, anchor first); connect to the
                                    channel first — peers are briefed to answer you.
                                    name resolves runtime-first, then the repo's
                                    formations/ starter templates.
@@ -106,7 +106,7 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    formation's ANCHOR session (right cwd, right
                                    CCS profile, --resume its own sid) from any
                                    shell on the recording machine. The anchor is
-                                   briefed to re-join, re-arm, and reconcile the
+                                   briefed to reconnect natively and reconcile the
                                    rest itself via apply. Refuses loudly instead
                                    of degrading: gone transcript, fork-born or
                                    unattributed origin, live-armed sid, wrong
@@ -185,8 +185,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    drives, leaving it the writer role
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
-  cbus leave [channel]             leave channel(s) this session joined
-  cbus rename <new-alias> [channel]  rename this session's local alias (mv dir +
+  cbus leave [channel]             remove this session's legacy memberships/inboxes
+  cbus rename <new-alias> [channel]  rename this session's legacy alias (mv dir +
                                    meta); re-arm the Monitor on the new address
   cbus unregister <channel>/<alias>  force-remove any peer
   cbus close <channel>/<alias> [...] [--force]   end peer sessions: SIGTERM the
@@ -216,16 +216,16 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
 
   cbus send <ch>@<host>/<al> TEXT  POST to the relay (queues if peer offline)
        --from <ch@host/al>         override sender (default: THIS session's
-                                   identity marker, set when it armed a remote
-                                   tail on that channel; sessions never inherit
+                                   identity marker, set by native connect or a
+                                   legacy tail; sessions never inherit
                                    another session's alias)
-  cbus tail <ch>@<host>/<al>       print the Monitor ws arm spec (url +
+  cbus tail <ch>@<host>/<al>       print the legacy Monitor ws arm spec (url +
                                    protocols) and claim the alias as this
                                    machine's identity on that channel
   cbus list [<ch>]@<host>          peers known to the relay (connected/queued)
   cbus prune [<ch>]@<host>         drop off relay peers with no queued mail
                                    (channel-scoped; omit <ch> to sweep the host)
-  cbus leave <ch>@<host>           drop THIS session's identity marker
+  cbus leave <ch>@<host>           drop THIS session's legacy identity marker
   cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   (V='-'=stdin)
   cbus auth status [host]          credential state, masked
 
