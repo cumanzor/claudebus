@@ -15,8 +15,8 @@ func daemonHarness(harness string) string {
 }
 
 func validateDaemonHarness(harness string) error {
-	if daemonHarness(harness) != daemonHarnessCodex {
-		return fmt.Errorf("unsupported daemon harness %q; only codex is available", harness)
+	if daemonHarness(harness) != daemonHarnessCodex && harness != daemonHarnessClaude {
+		return fmt.Errorf("unsupported daemon harness %q; only codex and claude are available", harness)
 	}
 	return nil
 }
