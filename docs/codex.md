@@ -364,8 +364,8 @@ tmux new-session -d -s codexpeer -c "$PWD" 'cbus codex --channel <ch> --alias <a
 
 `-c` is load-bearing, not cosmetic: the window's cwd is the peer's cwd, and it is what `resume
 --last` filters on. With no tmux the command goes to a human to run in a new terminal. The
-`/bus-codex` skill carries this whole flow, including joining and arming the launching session
-first so the two can talk immediately. Use
+`/bus-codex` skill carries this whole flow, including connecting the launching
+Claude session natively first; no parent Monitor is needed. Use
 `cbus spawn pane CHANNEL --harness codex --name ALIAS` for
 the ordinary CLI integration described above.
 

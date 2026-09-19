@@ -16,6 +16,48 @@ see below):
 > uncommon. The relay host itself reaches its channels over loopback and needs no
 > `CBUS_SITE_*` override; every other client does.
 
+## Native Claude and Codex subscriptions
+
+An ordinary Claude or Codex CLI session connects through its local daemon.
+Native Claude requires a build with the Claude adapter; v0.12.2 supports native
+Codex only. Configure `CBUS_SITE_<HOST>_URL` and `cbus auth` as described below,
+then run inside each target session:
+
+```sh
+cbus connect dev@server laptop --json
+cbus list dev@server                              # one roster check after joining
+cbus connection status dev@server/laptop --json       # on-demand receipt inspection
+cbus connection disconnect dev@server/laptop         # stop delivery, retain local history
+```
+
+No Monitor, tail or periodic model polling is needed. This requires the relay's
+`/tail/durable-v1` endpoint; an older server is refused before consuming messages.
+
+The durable stream sends a stable message ID with the raw bus message. The
+daemon acknowledges only after an atomic, synchronized local inbox append;
+the relay moves the message to delivered storage after that acknowledgment.
+Reconnection deduplicates those IDs. Relay acknowledgment is not recipient
+receipt. Claude socket writes remain pending until an exact transcript receipt;
+Codex queue acceptance is also distinct from recipient history. Inspect with
+`cbus connection status CHANNEL@HOST/ALIAS --json` and `connection reconcile`.
+
+A mailbox has a consumer identity: the same consumer may reconnect, but a
+different active consumer is refused. Presence uses the actual CLI consumer's
+join/exit/resume transitions; losing and restoring the WebSocket does not create
+false consumer leave/join events. Presence delivery is journaled with recipient
+ownership checks, while ordinary `/tail` behavior remains compatible with
+existing Monitor clients. Compaction notices remain local-only in v1.
+
+Do not add a Monitor to a managed inbox or silently fall back if native checks
+fail. For existing legacy memberships, follow the deliberate [migration
+steps](claude.md#migrating-an-existing-monitor-peer); `leave` deletes a legacy
+inbox and is not native disconnect.
+
+## Legacy Monitor relay interface
+
+The `/tail` protocol and join/arm examples below apply only to legacy peers.
+Native peers use the durable subscription above.
+
 - **`POST /send`** (bearer token) appends `{from,to,ts,text}` — the exact local
   inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
 - **`GET /tail?channel=&alias=`** upgrades to WebSocket, authed via
@@ -30,7 +72,7 @@ see below):
   displacement checks; delivery is at-least-once — a narrow handover race can deliver
   one in-flight message to both tails).
 
-## Using remote channels from cbus
+### Configuring credentials and using legacy remote tails
 
 The client speaks to the relay through the `<channel>@<host>/<alias>` address
 form. Each `<host>` resolves from its `CBUS_SITE_<HOST>_URL` env var — there are
@@ -86,24 +128,3 @@ Details that matter:
   (or bare `@<host>`) reaps those from the server side: it drops every peer that
   has no live tail **and** no queued mail — a peer with pending mail is always
   kept, so nothing undelivered is lost.
-
-## Native Codex daemon subscriptions
-
-An ordinary Codex CLI session uses `cbus connect CHANNEL@HOST ALIAS` and the
-local daemon, with the same endpoint and credential configuration above.
-It does not arm a Monitor. This requires the new relay `/tail/durable-v1`
-endpoint; an older server is refused before consuming any messages.
-
-The durable stream sends a stable message ID with the raw bus message. The
-daemon acknowledges only after an atomic, synchronized local inbox append;
-the relay moves the message to delivered storage after that acknowledgment.
-Reconnection deduplicates those IDs. Native queue acceptance and observed
-recipient history remain separate states, visible through
-`cbus connection status CHANNEL@HOST/ALIAS --json` and `connection reconcile`.
-
-A mailbox has a consumer identity: the same consumer may reconnect, but a
-different active consumer is refused. Presence uses the actual CLI consumer's
-join/exit/resume transitions; losing and restoring the WebSocket does not create
-false consumer leave/join events. Presence delivery is journaled with recipient
-ownership checks, while ordinary `/tail` behavior remains compatible with
-existing Monitor clients. Compaction notices remain local-only in v1.
