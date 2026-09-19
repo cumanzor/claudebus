@@ -100,6 +100,10 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	// double-launches one conversation. Written after every other refusal on purpose —
 	// a fork-born anchor must hear about origin=fork, not about an intent — and before
 	// the fork, so the window it guards is never open.
+	env, err := peerEnv(launchProfile)
+	if err != nil {
+		return "", "", err
+	}
 	in, age, claimed, err := ClaimLaunchIntent(f.Channel, p.Alias, p.SessionID)
 	if err != nil {
 		// fail closed: without the marker the next resume cannot see this one, and a
@@ -125,11 +129,12 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	argv = append(argv, "--resume", p.SessionID, "--name", p.Alias)
 	argv = append(argv, prompt)
 	spec := ForkSpec{
-		Target: launchTarget(p.Target),
-		Argv:   argv,
-		Env:    peerEnv(launchProfile),
-		Dir:    launchDir(p.Cwd),
-		Title:  p.Alias,
+		Target:   launchTarget(p.Target),
+		Argv:     argv,
+		Env:      env,
+		UnsetEnv: claudeLaunchUnset,
+		Dir:      launchDir(p.Cwd),
+		Title:    p.Alias,
 	}
 	created, err = forker.Fork(spec)
 	if err != nil {

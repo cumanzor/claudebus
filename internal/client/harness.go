@@ -160,19 +160,20 @@ func hookSessionID(stdin io.Reader) string {
 }
 
 // ForkSpec is the terminal-agnostic description of a forked child session: what to
-// run (Argv), the environment vars that MUST be replicated (Env — PATH and, under a
-// CCS profile, CLAUDE_CONFIG_DIR), and the working directory (Dir). This env
+// run (Argv), selected environment (Env), inherited runtime identity to remove
+// (UnsetEnv), and the working directory (Dir). This env
 // replication is the essential function cc-branch.sh existed for; a TerminalForker
 // only places the spec in a new window/tab/pane. Modeling it as data makes it testable
 // without a real terminal.
 type ForkSpec struct {
-	Target string            // window | tab | tmux | pane
-	Argv   []string          // launch command, e.g. ["ccs","personal","--resume",sid,"--fork-session",prompt]
-	Env    map[string]string // env vars to replicate (PATH always; CLAUDE_CONFIG_DIR when set)
-	Dir    string            // working directory to replicate
-	Title  string            // child's alias/title; names the tmux window (iTerm2 titles from the session itself)
-	Anchor string            // pane only: surface to split (iTerm2 session UUID / tmux pane id); "" = the caller
-	Split  string            // pane only: "auto"/"" (geometry heuristic), "right" (side-by-side), "down" (stacked)
+	Target   string            // window | tab | tmux | pane
+	Argv     []string          // launch command, e.g. ["ccs","personal","--resume",sid,"--fork-session",prompt]
+	Env      map[string]string // selected PATH, HOME, CBUS_DIR and optional harness config
+	UnsetEnv []string          // remove inherited runtime identities before applying Env
+	Dir      string            // working directory to replicate
+	Title    string            // child's alias/title; names the tmux window (iTerm2 titles from the session itself)
+	Anchor   string            // pane only: surface to split (iTerm2 session UUID / tmux pane id); "" = the caller
+	Split    string            // pane only: "auto"/"" (geometry heuristic), "right" (side-by-side), "down" (stacked)
 	// NoNormalize suppresses tmux's auto main-vertical reflow for THIS fork. Apply
 	// sets it on EVERY pane spec of a run whose file declares any right/down: the
 	// reflow is per-window, so one auto peer normalizing would stomp the layout a
@@ -219,6 +220,10 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	if why := core.StoreNameReason(ch); why != "" {
 		return "", "", "", fmt.Errorf("bad channel %q: %s", ch, why)
 	}
+	childEnv, err := forkReplicatedEnv()
+	if err != nil {
+		return "", "", "", err
+	}
 	managed := false
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch {
@@ -248,11 +253,12 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 		return "", "", "", err
 	}
 	spec := ForkSpec{
-		Target: target,
-		Argv:   forkLaunchArgv(SessionID(), model, childAlias, BootstrapPromptAliased(ch, alias, childAlias)),
-		Env:    forkReplicatedEnv(),
-		Dir:    cwd(),
-		Title:  childAlias,
+		Target:   target,
+		Argv:     forkLaunchArgv(SessionID(), model, childAlias, BootstrapPromptAliased(ch, alias, childAlias)),
+		Env:      childEnv,
+		UnsetEnv: claudeLaunchUnset,
+		Dir:      cwd(),
+		Title:    childAlias,
 	}
 	if _, err := forker.Fork(spec); err != nil {
 		Unreserve(ch, childAlias)
@@ -335,15 +341,33 @@ func launchPrefix(profile string) []string {
 	return []string{"ccs", profile}
 }
 
-// forkReplicatedEnv is the env cc-branch.sh replicated verbatim: PATH always, plus
-// CLAUDE_CONFIG_DIR when set (the CCS profile). The child inherits the rest from the
-// terminal's fresh shell; these two are the ones a bare relaunch would get wrong.
-func forkReplicatedEnv() map[string]string {
-	env := map[string]string{"PATH": os.Getenv("PATH")}
+// Terminal servers can retain another session's environment. Preserve selected
+// configuration and pin the bus root before changing to a restored peer's cwd.
+func forkReplicatedEnv() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	home, err = filepath.Abs(home)
+	if err != nil {
+		return nil, err
+	}
+	bus, err := filepath.Abs(CBUSDir())
+	if err != nil {
+		return nil, err
+	}
+	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": home, "CBUS_DIR": bus}
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); cfg != "" {
 		env["CLAUDE_CONFIG_DIR"] = cfg
 	}
-	return env
+	return env, nil
+}
+
+var claudeLaunchUnset = []string{
+	"CBUS_SESSION_ID", "CBUS_CHANNEL", "CBUS_ALIAS", "CBUS_HARNESS",
+	"CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_PID", "CLAUDECODE",
+	"CLAUDE_ENV_FILE", "CLAUDE_CODE_SESSION_LOG", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+	"CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_EXEC_SERVER_URL", "GROK_SESSION_ID",
 }
 
 // OSAForker is the real TerminalForker: iTerm2 (osascript) for window/tab, tmux for
@@ -436,6 +460,9 @@ func iterm2Command(scriptPath string) string { return "/bin/bash " + scriptPath 
 func launcherScript(spec ForkSpec, scriptPath string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\n")
+	for _, k := range spec.UnsetEnv {
+		b.WriteString("unset " + shQuote(k) + "\n")
+	}
 	for _, k := range sortedKeys(spec.Env) {
 		b.WriteString("export " + k + "=" + shQuote(spec.Env[k]) + "\n")
 	}
@@ -497,6 +524,9 @@ func terminalCommand(spec ForkSpec) string {
 func forkShellCommand(spec ForkSpec) string {
 	var b strings.Builder
 	b.WriteString("cd " + shQuote(spec.Dir) + " && exec env")
+	for _, k := range spec.UnsetEnv {
+		b.WriteString(" -u " + shQuote(k))
+	}
 	for _, k := range sortedKeys(spec.Env) { // deterministic order for testability
 		b.WriteString(" " + k + "=" + shQuote(spec.Env[k]))
 	}
