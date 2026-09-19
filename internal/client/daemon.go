@@ -668,6 +668,9 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	var dir string
 	var unlock func()
+	var reservation *peerMeta
+	// Reservation inspection can replace ErrExist with a more specific refusal.
+	var aliasExists bool
 	if req.Alias == "" {
 		c.Alias, dir, unlock, err = claimAliasLockedContext(d.ctx, req.Channel)
 	} else {
@@ -676,6 +679,10 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		if err == nil {
 			if err = os.MkdirAll(filepath.Dir(dir), 0755); err == nil {
 				err = os.Mkdir(dir, 0755)
+				aliasExists = errors.Is(err, os.ErrExist)
+				if c.Relay == nil && aliasExists {
+					reservation, err = daemonReservation(dir, c.Channel, c.Alias)
+				}
 			}
 		}
 	}
@@ -683,7 +690,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		defer unlock()
 	}
 	if err != nil {
-		if c.Claude != nil && os.IsExist(err) {
+		if c.Claude != nil && aliasExists {
 			m, ok := ReadPeerMeta(filepath.Join(d.peerDir(c), "meta.json"))
 			if ok && m.ConnectionID == "" && m.SessionID == c.ThreadID {
 				return nil, fmt.Errorf("cannot claim alias %s: this session has an unmanaged registration; stop any Monitor for this exact alias and explicitly leave it before native connect, or choose a fresh alias", ConnectionTarget(c))
@@ -691,15 +698,15 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		}
 		return nil, fmt.Errorf("claim alias (choose another alias or explicitly unregister the existing peer): %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "inbox.jsonl"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	f, err := createDaemonInbox(dir, reservation != nil)
 	if err != nil {
 		return nil, err
 	}
+	var ok bool
+	c.Dev, c.Ino, _, ok = fileIdentityOf(f)
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	var ok bool
-	c.Dev, c.Ino, _, ok = fileIdentity(filepath.Join(dir, "inbox.jsonl"))
 	if !ok {
 		return nil, errors.New("cannot identify new inbox")
 	}
@@ -713,6 +720,9 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	now := Now()
 	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
+	if reservation != nil {
+		m.Origin, m.Model = reservation.Origin, reservation.Model
+	}
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
 	}
