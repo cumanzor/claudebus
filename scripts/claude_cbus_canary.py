@@ -1,6 +1,7 @@
 """Scratch-only cbus fixture for the ordinary Claude PTY capability canary."""
 
 import hashlib
+import copy
 import ctypes
 import json
 import os
@@ -208,12 +209,42 @@ class BusProbe:
         return [json.loads(line) for line in self.inbox.read_text().splitlines()
                 if line and json.loads(line).get("text") == self.ack]
 
-    def receipt_ready(self, minimum_accepted=1):
+    def receipt_context(self):
+        return {"connectionId": self.connection["id"], "target": self.target,
+                "sessionId": self.session, "marker": self.marker}
+
+    def receipt_rows(self, records, current):
+        receipt_uuid = current.get("lastAccepted", {}).get("itemId")
+        return [r for r in records if receipt_uuid and r.get("type") == "user"
+                and r.get("sessionId") == self.session and r.get("uuid") == receipt_uuid
+                and self.marker in json.dumps(r)]
+
+    def receipt_ready(self, records, minimum_accepted=1):
         if not hasattr(self, "connection"):
             return False
-        path = self.bus / ".daemon/connections" / (self.connection["id"] + ".json")
-        saved = json.loads(path.read_text())
-        return saved.get("accepted", 0) >= minimum_accepted and saved.get("lastAccepted", {}).get("state") == "received"
+        context = {**self.receipt_context(), "minimumAccepted": minimum_accepted}
+        if getattr(self, "receipt_wait_context", None) != context:
+            self.receipt_wait_context = context
+            self.receipt_wait_started = time.monotonic()
+            self.result["receiptWait"] = {**context, "startedAt": time.time(), "samples": 0}
+        self.receipt_snapshot = None
+        current = self.status()
+        progress = self.result["receiptWait"]
+        progress.update(samples=progress["samples"] + 1,
+                        elapsedSeconds=time.monotonic() - self.receipt_wait_started,
+                        status=copy.deepcopy(current))
+        ready = (current.get("id") == self.connection["id"]
+                 and current.get("threadId") == self.session
+                 and current.get("state") == "socket-ready"
+                 and current.get("accepted", 0) >= minimum_accepted
+                 and current.get("lastAccepted", {}).get("state") == "received"
+                 and len(self.receipt_rows(records, current)) == 1)
+        if ready:
+            # Final assertions consume this exact CLI sample, not a second read
+            # that may observe a different scheduler stage after checkpoint save.
+            self.receipt_snapshot = copy.deepcopy(progress)
+            self.result.setdefault("receiptConvergence", []).append(self.receipt_snapshot)
+        return ready
 
     def restart(self):
         if self.shared or self.process is None:
@@ -238,12 +269,13 @@ class BusProbe:
         self.result["daemonRestart"] = {"before": before, "after": self.health}
 
     def check_receipt(self, records, pid):
-        current = self.status()
+        snapshot = getattr(self, "receipt_snapshot", None)
+        if not snapshot or any(snapshot.get(k) != v for k, v in self.receipt_context().items()):
+            raise RuntimeError("no converged CLI receipt snapshot for this message and session")
+        current = snapshot["status"]
         self.result["received"] = current
         receipt = current.get("lastAccepted", {})
-        receipt_uuid = receipt.get("itemId")
-        rows = [r for r in records if r.get("type") == "user" and r.get("sessionId") == self.session
-                and r.get("uuid") == receipt_uuid and self.marker in json.dumps(r)]
+        rows = self.receipt_rows(records, current)
         acks = self.acknowledgments()
         self.result["acknowledgments"] = acks
         if rows:
