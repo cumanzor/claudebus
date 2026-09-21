@@ -1,6 +1,44 @@
 # Changelog (detailed)
 
-## Unreleased — Codex CLI daemon integration
+## v0.13.0 — native Claude receive (release candidate)
+
+- Ordinary Claude Code CLI sessions join with `cbus connect` through their own
+  session socket, without a restart, wrapper, Monitor or periodic model turn.
+  The daemon handles waiting; session permission and hold/refuse policies remain
+  effective. Native receive supports macOS/Linux, alongside the released Codex
+  native queue integration.
+- Admission binds the exact process, socket, session and trusted transcript.
+  A socket write is submission; only the exact persisted session/message UUID
+  confirms receipt, which is separate from a reply or completed work. Uncertain
+  attempts stay recorded and are not blindly retried.
+- Pending mail and receipt state survive daemon restart and normal session exit.
+  Reconnect/resume retains identity; `/clear` fences the old binding even when
+  the process/socket stay the same. Native connect preserves mail already queued
+  to a launch reservation.
+- Join instructions check the roster once and announce membership changes.
+  Native spawn/branch and formations preserve supported harness/profile identity;
+  child environments exclude inherited session credentials. Terminal placement
+  remains an iTerm2/tmux concern, independent of message delivery.
+- Primary guides, command prompts and executable help lead with native receive.
+  Legacy aliases need deliberate migration: leaving a legacy peer deletes its
+  inbox, so preserve unread mail before choosing that path.
+- Optional `scripts/monitor-stopgap.sh` supplies seed/status/revert for legacy
+  Monitor peers on the pinned Claude 2.1.277 mechanism. It uses a separate private
+  config and allowlisted flag snapshot; it is not enabled automatically or needed
+  for native receive. Stop sessions before reverting. Real-account effectiveness
+  remains unproven, and the helper does not freeze every feature flag.
+
+[Evidence and release gates]
+The [merged review and acceptance record](docs/claude-native-review.md) separates
+fixture checks, actual CLI processes with local fake providers, and historical
+candidate hashes. It includes Mac/Linux receive, isolation, lifecycle, mixed
+Claude/Codex, isolated relay and 35-minute idle evidence. Those runs are not new
+release-asset or signed-in/CCS field proof. Final artifact reproducibility, the
+signed-in pilot, publication and staged installation remain release gates.
+OpenCode, desktop harness clients, native Windows receive, the full cross-harness
+route matrix and broader terminal/formation UX acceptance are outside this release.
+
+## v0.12.x — Codex CLI daemon integration (released)
 
 - Ordinary CLI current-thread connect uses native queue storage without a second
   thread writer or model polling. Captures actual runtime/storage binding;
@@ -24,9 +62,9 @@
   native-child teardown. Standalone bridge creation respects the server caller's
   configured permission policy.
 
-Intermediate evidence and final-candidate gates are in
-[the release audit](docs/architecture/codex-v1-release-readiness.md) and cbus-6ij.13.
-No tag, publication, global install or relay deployment has occurred in this work.
+The [release audit](docs/architecture/codex-v1-release-readiness.md) records
+v0.12.2 publication and Mac/server installation separately from the historical
+pre-release candidate evidence. The relay was not redeployed in v0.12.2.
 
 ## [2026-09-17 05:09:37 UTC] [Release/Harness] v0.11.4 SHIPPED: named tmux windows on the fleet
 
