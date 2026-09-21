@@ -26,6 +26,7 @@ import pty
 import re
 import select
 import shutil
+import shlex
 import signal
 import socket
 import stat
@@ -52,7 +53,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "clear", "autostart"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "busy-tool", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "clear", "autostart"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -87,6 +88,14 @@ def main():
     waiter.write_text("import os, pathlib, time\np=pathlib.Path('signal')\npathlib.Path('waiter.pid').write_text(str(os.getpid()))\nwhile not p.exists(): time.sleep(.05)\nprint(p.read_text(), flush=True)\n")
     if args.transport == "monitor":
         waiter.write_text(waiter.read_text() + "while True: time.sleep(1)\n")
+    busy_started, busy_finished = work / "busy-started", work / "busy-finished"
+    busy_tool = work / "busy_tool.py"
+    busy_tool.write_text("import pathlib,time,os,json,subprocess\n"
+                         + "pid=os.getpid();start=subprocess.check_output(['ps','-p',str(pid),'-o','lstart='],text=True).strip()\n"
+                         + "pathlib.Path('busy.pid').write_text(json.dumps({'pid':pid,'start':start}))\n"
+                         + "pathlib.Path('busy-started').write_text(str(time.time()))\n"
+                         + f"time.sleep({args.idle_seconds + 10!r})\n"
+                         + "pathlib.Path('busy-finished').write_text(str(time.time()))\n")
     command = f"{sys.executable} {waiter}"
     bus_probe = BusProbe(root, args, session, marker) if args.transport == "cbus" else None
     if bus_probe:
@@ -147,6 +156,9 @@ def main():
             if main_request and state.get("busReconnectNext"):
                 state["busReconnectNext"] = False
                 content = [{"type": "tool_use", "id": "toolu_cbus_reconnect", "name": "Bash", "input": {"command": bus_probe.connect_command, "description": "Reconnect this resumed isolated session"}}]
+                stop = "tool_use"
+            elif main_request and n == 2 and runtime_case == "busy-tool":
+                content = [{"type": "tool_use", "id": "toolu_cbus_busy", "name": "Bash", "input": {"command": shlex.join([sys.executable, str(busy_tool)]), "description": "Hold one foreground tool for busy delivery"}}]
                 stop = "tool_use"
             elif main_request and n == 1 and args.transport == "monitor":
                 state["monitorSchema"] = next((t for t in body.get("tools", []) if t["name"] == "Monitor"), None)
@@ -214,7 +226,9 @@ def main():
     settings = {"permissions": {"allow": [f"Bash({command})"], "defaultMode": "default"}, "autoUpdatesChannel": "stable", "disableDeepLinkRegistration": "disable"}
     if bus_probe:
         settings["permissions"]["allow"].append(f"Bash({bus_probe.reply_command})")
-        if args.cbus_case in ("restart-received", "resume-received", "clear"):
+        if runtime_case == "busy-tool":
+            settings["permissions"]["allow"].append(f"Bash({shlex.join([sys.executable, str(busy_tool)])})")
+        if args.cbus_case in ("restart-received", "resume-received", "clear", "busy-tool"):
             settings["permissions"]["allow"].append(f"Bash({bus_probe.second_reply_command})")
         if args.cbus_case == "clear":
             settings["permissions"]["allow"].append(f"Bash({bus_probe.clear_connect_command})")
@@ -494,7 +508,7 @@ def main():
     def run_cbus():
         nonlocal marker, master, process, session
         original_session, session_switch_count = session, None
-        wait(lambda: state["mainRequests"] >= 2 and (runtime_case == "busy" or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
+        wait(lambda: state["mainRequests"] >= 2 and (runtime_case in ("busy", "busy-tool") or b"CBUS_WAKE_IDLE" in output), "actual Claude Bash self-connect", 45)
         bus_probe.connection = bus_probe.status()
         bus_probe.result["connected"] = bus_probe.connection
         if bus_probe.autostart:
@@ -511,14 +525,20 @@ def main():
             identity = {"CLAUDE_CODE_SESSION_ID", "CLAUDE_PID", "CLAUDE_ENV_FILE", "CBUS_SESSION_ID", "CBUS_CHANNEL", "CBUS_ALIAS", "CBUS_HARNESS", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "GROK_SESSION_ID"}
             result["checks"]["autostart_daemon_scrubs_session_identity_and_capability"] = not (keys & identity) and not any(k.startswith("CLAUDE_CODE_MESSAGING_") for k in keys)
             result["checks"]["autostart_daemon_keeps_isolated_store_configuration"] = {"CBUS_DIR", "HOME", "PATH"} <= keys
+        if runtime_case == "busy-tool":
+            wait(lambda: busy_started.exists(), "actual foreground busy tool start", 15)
+            if busy_finished.exists():
+                raise RuntimeError("busy tool already completed before injection window")
         before, before_all = state["mainRequests"], len(requests)
         idle_at = time.time()
         pump(args.idle_seconds)
         result["idleSeconds"] = time.time() - idle_at
-        window = "busy" if runtime_case == "busy" else "idle"
+        window = "busy" if runtime_case in ("busy", "busy-tool") else "idle"
         result["checks"][f"{window}_makes_no_additional_model_requests"] = state["mainRequests"] == before
         result["checks"][f"{window}_makes_no_auxiliary_requests"] = len(requests) == before_all
         timeline.append({"event": "external_cbus_send", "at": time.time()})
+        if runtime_case == "busy-tool" and busy_finished.exists():
+            raise RuntimeError("missed actual foreground busy tool window")
         bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
         if runtime_case == "busy":
             pump(2)
@@ -546,6 +566,36 @@ def main():
             wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
             wait(lambda: bus_probe.receipt_ready(transcript_rows()), "daemon exact transcript receipt", 15)
             result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
+        if runtime_case == "busy-tool":
+            prior = bus_probe.receipt_snapshot["status"]
+            original_marker, original_ack = marker, bus_probe.ack
+            original_rows = bus_probe.receipt_rows(transcript_rows(), prior)
+            enqueues = [r for r in transcript_rows() if r.get("type") == "queue-operation"
+                        and r.get("operation") == "enqueue" and r.get("sessionId") == session
+                        and marker in r.get("content", "")]
+            result["checks"]["busy_tool_exact_attachment_receipt"] = len(original_rows) == 1 and original_rows[0].get("type") == "attachment"
+            result["checks"]["busy_exact_first_acceptance"] = prior.get("accepted") == 1 and not prior.get("pending")
+            from datetime import datetime
+            enqueue_at = datetime.fromisoformat(enqueues[0]["timestamp"].replace("Z", "+00:00")).timestamp() if len(enqueues) == 1 else 0
+            result["checks"]["message_enqueued_during_actual_tool"] = (busy_finished.exists()
+                and float(busy_started.read_text()) < enqueue_at < float(busy_finished.read_text()))
+            marker = bus_probe.marker = bus_probe.second_marker
+            bus_probe.ack, bus_probe.reply_command = bus_probe.second_ack, bus_probe.second_reply_command
+            state["busReplyRequested"] = False
+            bus_probe.result["busyReceipt"] = original_rows
+            bus_probe.result["secondMarker"] = marker
+            bus_probe.result["secondReplyMarker"] = bus_probe.ack
+            bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
+            wait(lambda: bool(bus_probe.acknowledgments()), "following message real bus reply", 25)
+            wait(lambda: bus_probe.receipt_ready(transcript_rows(), prior["accepted"] + 1), "following exact UUID receipt", 15)
+            result["checks"].update({"following_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
+            old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
+            old_rows = [r for r in transcript_rows() if r.get("sessionId") == session and (
+                r.get("type") == "attachment" and r.get("attachment", {}).get("type") == "queued_command"
+                and original_marker in json.dumps(r.get("attachment", {}).get("prompt", ""))
+                or r.get("type") == "user" and original_marker in json.dumps(r.get("message", {})))]
+            result["checks"]["busy_exact_second_acceptance"] = bus_probe.receipt_snapshot["status"].get("accepted") == 2 and not bus_probe.receipt_snapshot["status"].get("pending")
+            result["checks"]["busy_message_not_replayed"] = len(old_rows) == len(old_acks) == 1
         if args.cbus_case.startswith("restart-"):
             prior = bus_probe.status()
             bus_probe.result["beforeRestart"] = prior
@@ -774,6 +824,31 @@ def main():
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+        busy_identity, busy_cleanup_error = None, None
+        try:
+            busy_identity = json.loads((work / "busy.pid").read_text()) if (work / "busy.pid").exists() else None
+        except Exception as error:
+            busy_cleanup_error = repr(error)
+        def busy_alive():
+            if busy_cleanup_error:
+                raise RuntimeError(busy_cleanup_error)
+            if busy_identity is None:
+                return False
+            observed = subprocess.run(["ps", "-p", str(busy_identity["pid"]), "-o", "lstart="], capture_output=True, text=True, timeout=2)
+            if observed.returncode == 1:
+                return False
+            if observed.returncode != 0:
+                raise RuntimeError("cannot verify owned busy tool identity")
+            return observed.stdout.strip() == busy_identity["start"]
+        try:
+            if busy_alive():
+                # The PID/start pair came from this fixture's own bounded child.
+                try:
+                    os.kill(busy_identity["pid"], signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        except Exception as error:
+            busy_cleanup_error = repr(error)
         if waiter_pid:
             try:
                 os.kill(waiter_pid, signal.SIGTERM)
@@ -795,6 +870,16 @@ def main():
         while not gone(waiter_pid) and time.monotonic() < deadline:
             time.sleep(.05)
         result["cleanup"] = {"cliExited": process is None or process.poll() is not None, "serverClosed": server.fileno() == -1, "waiterExited": gone(waiter_pid)}
+        if runtime_case == "busy-tool":
+            try:
+                deadline = time.monotonic() + 3
+                while busy_alive() and time.monotonic() < deadline:
+                    time.sleep(.05)
+                result["cleanup"]["busyToolExited"] = not busy_alive()
+            except Exception as error:
+                result["cleanup"]["busyToolExited"] = False
+                result["busyToolCleanupError"] = repr(error)
+            result["busyToolIdentity"] = busy_identity
         if bus_probe:
             result["cleanup"].update(bus_probe.cleanup())
         if owned_socket is not None:
