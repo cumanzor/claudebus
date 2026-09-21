@@ -30,9 +30,9 @@ messaging endpoint is unsupported. Terminal choice does not select the transport
 iTerm2, tmux and manually launched terminals use the same connection.
 
 `socket-ready` describes an available native endpoint. It does not prove receipt.
-Busy sessions process peer input after their current turn. Claude's hold/refuse
-settings remain effective; cbus does not bypass them or infer which policy caused
-an unconfirmed submission. After joining, the command instructions check the roster
+Busy sessions can receive peer input between tool calls in their current turn.
+Claude's hold/refuse settings remain effective; cbus does not bypass them or infer
+which policy caused an unconfirmed submission. After joining, the command instructions check the roster
 once, retain known roles and announce membership changes to the user without bus
 acknowledgments or repeated roster polling.
 
@@ -46,8 +46,10 @@ cbus connection disconnect demo/worker
 
 Status and reconciliation are on-demand tools, not maintenance loops. A successful
 socket write remains pending until the exact session and message UUID appear as a
-persisted user entry in the bound transcript. That receipt is not proof of a reply
-or completed work. An absent receipt does not prove rejection, so cbus never
+persisted user entry or a verified peer queued-command attachment in the bound
+transcript. For a mid-turn attachment, the original UUID is its `source_uuid`,
+not the attachment record's own UUID. That receipt is not proof of a reply or
+completed work. An absent receipt does not prove rejection, so cbus never
 blindly retries an uncertain native submission.
 
 The daemon keeps unread mail and pending attempts across its own restart and a
