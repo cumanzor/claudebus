@@ -114,7 +114,7 @@ type claudeReceipt struct {
 // The caller supplies an already identity-bound descriptor, never a discovered
 // path. Offset must be zero or a previous complete-line cursor. Scan at most
 // maxBytes without moving the descriptor cursor.
-// A positive receipt means persisted user input, not model execution or reply.
+// A positive receipt means persisted peer input, not model execution or reply.
 func observeClaudeReceipt(ctx context.Context, transcript *os.File, sessionID, messageUUID string, offset, maxBytes int64) (claudeReceipt, error) {
 	result := claudeReceipt{NextOffset: offset}
 	_, bounded := ctx.Deadline()
@@ -144,12 +144,26 @@ func observeClaudeReceipt(ctx context.Context, transcript *os.File, sessionID, m
 		}
 		var row struct {
 			Type, SessionID, UUID string
+			IsSidechain           *bool `json:"isSidechain"`
+			Attachment            struct {
+				Type, CommandMode string
+				SourceUUID        string `json:"source_uuid"`
+				IsMeta            bool
+				Origin            struct{ Kind string }
+			}
 		}
 		if err := json.Unmarshal(scan.Bytes(), &row); err != nil {
 			return result, errors.New("Claude receipt transcript has a malformed complete row")
 		}
 		result.NextOffset += int64(len(scan.Bytes()) + 1)
-		if row.Type == "user" && row.SessionID == sessionID && row.UUID == messageUUID {
+		// Busy Claude sessions persist peer prompts as queued_command attachments
+		// instead of user rows. source_uuid retains the submitted message UUID;
+		// the attachment's own UUID identifies a different transcript record.
+		// Queue enqueue/remove records alone contain no such identity evidence.
+		peerAttachment := row.Type == "attachment" && row.IsSidechain != nil && !*row.IsSidechain &&
+			row.Attachment.Type == "queued_command" && row.Attachment.SourceUUID == messageUUID &&
+			row.Attachment.CommandMode == "prompt" && row.Attachment.IsMeta && row.Attachment.Origin.Kind == "peer"
+		if row.SessionID == sessionID && (row.Type == "user" && row.UUID == messageUUID || peerAttachment) {
 			result.Observed = true
 			return result, nil
 		}
