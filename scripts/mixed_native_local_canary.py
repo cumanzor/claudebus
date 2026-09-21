@@ -5,6 +5,9 @@ Every model response comes from a local scripted fake provider. Scratch homes,
 profiles and a frozen SHA-gated cbus binary are retained under --temp-root.
 No observer connect, Monitor, paid inference or installed profile changes occur.
 Traffic controls are environment restrictions, not an OS network sandbox.
+Historical defaults require Codex 0.154.0 and Claude 2.1.277. For another explicit
+pair, add --expected-codex-version 0.155.1 --expected-claude-version 2.1.278
+alongside --codex and --claude; installed and rollout versions must still match.
 """
 import argparse
 import fcntl
@@ -221,12 +224,23 @@ class MixedCanary(ResumeCanary):
     def states(self):
         return {r["alias"]: r for r in json.loads(self.fixture.command(["connection", "status", "--json"]))}
 
+    def check_codex_identity(self, meta):
+        self.result["codexRolloutVersion"] = meta.get("cli_version")
+        self.check("ordinary_codex_cli", meta.get("source") == "cli")
+        self.check("codex_rollout_version_matches_expected", meta.get("cli_version") == self.args.expected_codex_version)
+
     def run(self):
+        # Refuse an unintended runtime before starting fake providers or the daemon.
+        version_env = {"PATH": self.env["PATH"], "HOME": str(self.root), "CODEX_HOME": str(self.home),
+                       "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1",
+                       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+        self.result["expectedVersions"] = {"codex": self.args.expected_codex_version,
+                                           "claude": self.args.expected_claude_version}
+        self.result["versions"] = {"codex": subprocess.check_output([self.codex, "--version"], env=version_env, cwd=self.root, timeout=10, text=True).strip(),
+                                   "claude": subprocess.check_output([self.args.claude, "--version"], env=version_env, cwd=self.root, timeout=10, text=True).strip()}
+        self.check("installed_codex_version_matches_expected", self.result["versions"]["codex"] == "codex-cli " + self.args.expected_codex_version)
+        self.check("installed_claude_version_matches_expected", self.result["versions"]["claude"] == self.args.expected_claude_version + " (Claude Code)")
         self.prepare()
-        self.result["versions"] = {"codex": subprocess.check_output([self.codex, "--version"], env=self.env, text=True).strip(),
-                                   "claude": subprocess.check_output([self.args.claude, "--version"], env=self.cc_env, text=True).strip()}
-        self.check("pinned_codex_0154", self.result["versions"]["codex"] == "codex-cli 0.154.0")
-        self.check("pinned_claude_21277", self.result["versions"]["claude"].startswith("2.1.277 "))
         self.cc_master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         os.set_blocking(self.cc_master, False)
@@ -244,7 +258,7 @@ class MixedCanary(ResumeCanary):
         meta = next(r["payload"] for r in self.entries() if r.get("type") == "session_meta")
         self.thread = meta["id"]
         self.result.update(codexThread=self.thread, rollout=str(self.rollout), claudePID=self.cc_process.pid)
-        self.check("ordinary_codex_cli", meta.get("source") == "cli" and meta.get("cli_version") == "0.154.0")
+        self.check_codex_identity(meta)
         self.until(lambda: incoming([r.get("message", {}) for r in self.cc_rows() if r.get("type") == "user"], self.target, self.cc_target, self.markers["ack"]), "three-hop native bus round trip", 70)
         def ack_checkpoint():
             state = self.states()["receiver"]
@@ -333,15 +347,21 @@ class MixedCanary(ResumeCanary):
         (self.root / "result.json").write_text(json.dumps(self.result, indent=2) + "\n")
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cbus", required=True)
     parser.add_argument("--cbus-sha256", required=True)
     parser.add_argument("--cbus-revision", required=True)
     parser.add_argument("--codex", required=True)
     parser.add_argument("--claude", required=True)
+    parser.add_argument("--expected-codex-version", default="0.154.0", help="Exact installed and rollout version (default: %(default)s)")
+    parser.add_argument("--expected-claude-version", default="2.1.277", help="Exact installed version (default: %(default)s)")
     parser.add_argument("--temp-root", default="/tmp")
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main():
+    args = parse_args()
     args.watcher_window, args.resume_selector = 11, "uuid"
     canary = MixedCanary(args)
     print("Mixed native artifacts: " + str(canary.root), flush=True)
@@ -351,7 +371,9 @@ def main():
         canary.result["error"] = str(error)
     finally:
         canary.cleanup()
-    print(json.dumps({"passed": canary.result["passed"], "error": canary.result.get("error"), "checks": canary.result["checks"], "result": str(canary.root / "result.json")}), flush=True)
+    print(json.dumps({"passed": canary.result["passed"], "error": canary.result.get("error"), "checks": canary.result["checks"],
+                      "expectedVersions": canary.result.get("expectedVersions"), "versions": canary.result.get("versions"),
+                      "codexRolloutVersion": canary.result.get("codexRolloutVersion"), "result": str(canary.root / "result.json")}), flush=True)
     return 0 if canary.result["passed"] else 1
 
 
