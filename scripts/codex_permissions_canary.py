@@ -12,12 +12,39 @@ operations using bare and absolute commands after explicit trusted-bus setup.
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 import uuid
 
 from codex_cli_resume_canary import ResumeCanary
 from codex_queue_lifecycle_canary import FakeProvider
+
+
+def filesystem_denial(output):
+    """Require a failed completed tool, not merely denial words in its output."""
+    text = str(output)
+    try:
+        decoded = json.loads(text)
+    except (ValueError, TypeError):
+        decoded = None
+    if isinstance(decoded, dict):
+        metadata = decoded.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return False
+        exit_code = metadata.get("exit_code", decoded.get("exit_code"))
+        diagnostic = str(decoded.get("output", ""))
+    else:
+        header, separator, diagnostic = text.replace("\r\n", "\n").partition("\nOutput:\n")
+        exits = re.findall(r"^Process exited with code (-?\d+)\s*$", header, re.MULTILINE)
+        if not separator or len(exits) != 1:
+            return False
+        exit_code = int(exits[0])
+    diagnostic = diagnostic.lower()
+    return (type(exit_code) is int and exit_code != 0
+            and "sent to cli-permissions/verifier" not in diagnostic
+            and any(reason in diagnostic for reason in (
+                "operation not permitted", "permission denied", "read-only file system")))
 
 
 class PermissionsCanary(ResumeCanary):
@@ -160,8 +187,7 @@ class PermissionsCanary(ResumeCanary):
             followup = self.provider_turns()[1]
             outputs = [item for item in followup["body"].get("input", []) if item.get("type") == "function_call_output"]
             if self.without_rule:
-                self.check("no_rule_tool_denied_by_filesystem", any(any(reason in str(item.get("output", "")).lower()
-                           for reason in ("operation not permitted", "permission denied")) for item in outputs))
+                self.check("no_rule_tool_denied_by_filesystem", any(filesystem_denial(item.get("output", "")) for item in outputs))
                 self.check("no_rule_tool_did_not_claim_success", not any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
             else:
                 self.check("actual_cli_tool_returned_success", any("sent to cli-permissions/verifier" in str(item.get("output", "")) for item in outputs))
