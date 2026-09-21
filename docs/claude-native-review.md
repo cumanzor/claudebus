@@ -1,12 +1,16 @@
 # Native Claude receive: review and acceptance
 
-This work is prepared for review in the [Claude Code native receive milestone](https://github.com/cumanzor/claudebus/milestone/1).
-It is not included in v0.12.2. Review, merging, release and installation are separate steps.
+The [Claude Code native receive milestone](https://github.com/cumanzor/claudebus/milestone/1)
+is merged into `main`: 28 component PRs merged, with #37 incorporated into #25.
+It is prepared for v0.13.0 and is not included in v0.12.2. Final release-artifact
+validation, signed-in/CCS field use, publication and installation are separate gates.
 
-## Review order
+## Merged review order
 
-Keep each component independently reviewable. Grouping these PRs supplies context;
-it does not mean combining them into one large merge.
+The following preserves the completed component review sequence and its dependency
+map. The landing instructions and frozen staging references describe that review;
+they are not outstanding merge work. Historical acceptance remains attributed to
+the exact candidates below, not automatically to the eventual release assets.
 
 | Group | PRs in suggested order | Review focus |
 | --- | --- | --- |
