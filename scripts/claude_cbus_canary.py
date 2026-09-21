@@ -215,9 +215,17 @@ class BusProbe:
 
     def receipt_rows(self, records, current):
         receipt_uuid = current.get("lastAccepted", {}).get("itemId")
-        return [r for r in records if receipt_uuid and r.get("type") == "user"
-                and r.get("sessionId") == self.session and r.get("uuid") == receipt_uuid
-                and self.marker in json.dumps(r)]
+        def matches(row):
+            if not receipt_uuid or row.get("sessionId") != self.session:
+                return False
+            if row.get("type") == "user":
+                return row.get("uuid") == receipt_uuid and self.marker in json.dumps(row.get("message", {}))
+            attachment = row.get("attachment", {})
+            return (row.get("type") == "attachment" and row.get("isSidechain") is False
+                    and attachment.get("type") == "queued_command" and attachment.get("source_uuid") == receipt_uuid
+                    and attachment.get("commandMode") == "prompt" and attachment.get("isMeta") is True
+                    and attachment.get("origin", {}).get("kind") == "peer" and self.marker in attachment.get("prompt", ""))
+        return [row for row in records if matches(row)]
 
     def receipt_ready(self, records, minimum_accepted=1):
         if not hasattr(self, "connection"):
