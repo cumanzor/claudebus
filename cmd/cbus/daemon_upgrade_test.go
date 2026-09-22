@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
+	"net/url"
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -90,5 +94,59 @@ func TestDaemonRestartLegacyRequiresExplicitStop(t *testing.T) {
 	err := restartDaemonWith(context.Background(), func(context.Context) (daemonHealth, error) { return daemonHealth{Running: true, PID: 42}, nil }, func(context.Context, daemonHealth) error { t.Fatal("legacy daemon cannot fence stop"); return nil }, func() (bool, error) { t.Fatal("legacy lock must not be used"); return false, nil }, func() error { t.Fatal("legacy daemon still running"); return nil })
 	if err == nil || !strings.Contains(err.Error(), "cbus daemon stop") {
 		t.Fatalf("unsafe legacy restart accepted: %v", err)
+	}
+}
+
+// exitingProbe is what a health probe sees when the daemon closes a connection it
+// accepted just before its listener went away: `Get "http://cbus/health": EOF`.
+func exitingProbe(err error) error {
+	return &url.Error{Op: "Get", URL: "http://cbus/health", Err: err}
+}
+
+func TestDaemonRestartStartsAfterExitingProbe(t *testing.T) {
+	reset := &net.OpError{Op: "read", Net: "unix", Err: &os.SyscallError{Syscall: "read", Err: syscall.ECONNRESET}}
+	for _, cut := range []error{io.EOF, io.ErrUnexpectedEOF, reset, context.DeadlineExceeded} {
+		probes, locks, starts := 0, 0, 0
+		err := restartDaemonWith(context.Background(), func(context.Context) (daemonHealth, error) {
+			probes++
+			if probes == 1 {
+				return daemonHealth{Running: true, PID: 42, Start: "old", Protocol: 2}, nil
+			}
+			return daemonHealth{}, exitingProbe(cut)
+		}, func(context.Context, daemonHealth) error { return nil }, func() (bool, error) { locks++; return locks > 1, nil }, func() error { starts++; return nil })
+		if err != nil || starts != 1 || locks != 2 {
+			t.Fatalf("%v: a probe cut off by the exiting daemon must not abandon the restart: %v locks=%d starts=%d", cut, err, locks, starts)
+		}
+	}
+}
+
+func TestDaemonRestartExitingProbeWaitsForLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	probes, starts := 0, 0
+	err := restartDaemonWith(ctx, func(context.Context) (daemonHealth, error) {
+		probes++
+		if probes == 1 {
+			return daemonHealth{Running: true, PID: 42, Start: "old", Protocol: 2}, nil
+		}
+		return daemonHealth{}, exitingProbe(io.EOF)
+	}, func(context.Context, daemonHealth) error { return nil }, func() (bool, error) { return false, nil }, func() error { starts++; return nil })
+	if !errors.Is(err, context.DeadlineExceeded) || starts != 0 {
+		t.Fatalf("EOF is not proof of exit; a held lock must block the start: %v %d", err, starts)
+	}
+}
+
+func TestDaemonRestartUnknownProbeErrorDoesNotStart(t *testing.T) {
+	probes, starts := 0, 0
+	odd := errors.New("health returned malformed JSON")
+	err := restartDaemonWith(context.Background(), func(context.Context) (daemonHealth, error) {
+		probes++
+		if probes == 1 {
+			return daemonHealth{Running: true, PID: 42, Start: "old", Protocol: 2}, nil
+		}
+		return daemonHealth{}, odd
+	}, func(context.Context, daemonHealth) error { return nil }, func() (bool, error) { t.Fatal("lock must not decide an unknown failure"); return false, nil }, func() error { starts++; return nil })
+	if !errors.Is(err, odd) || starts != 0 {
+		t.Fatalf("unknown probe failure started a daemon: %v %d", err, starts)
 	}
 }
