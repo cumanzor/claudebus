@@ -154,8 +154,11 @@ you own and can inspect, and a mailbox and ledger you can read with `cat`.
 
 A send to a peer whose listener died is refused unless `--force`: a legacy
 listener that exited, a disconnected native peer, or any native peer while
-the daemon is down. (A joined-never-armed legacy peer is accepted: send.go:48
-refuses only armed-then-dead.)
+the daemon is down. (A legacy peer that joined but never armed still accepts
+mail.) For a connected native peer, listen means the daemon holds the
+connection, not that the CLI session is running; session presence is
+`consumer.state` in `cbus connection status CH/AL --json`, and mail to a
+departed native session queues for its resume.
 Legacy join/tail registrations have their existing restart and inbox-reset
 semantics. Managed native connections retain their inbox, delivery cursor and
 uncertain attempts across daemon and exact-session CLI restarts. Claude socket
