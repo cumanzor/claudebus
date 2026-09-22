@@ -1,5 +1,36 @@
 # Changelog (detailed)
 
+## [2026-09-22 19:07:05 UTC] [Client/Layout] weighted split rebased onto v0.13.0 main, retested live
+
+[Attempt #2] `feat/layout-weighted-split` rebased from `28b4641` onto `fa73e88` (178 commits of main, including v0.13.0 and the windows layout split `0a96d11`).
+
+[SHA map] The four layout entries below cite pre-rebase SHAs: 8cf3189 -> 307b785, b962252 -> 4481498, bafa16e -> b5c82b4, 6dc5a59 -> 1fe5a41, c083e74 -> ea92ff3, 23c1cfb -> f4ff251.
+
+[Conflict resolution]
+- `internal/client/layout.go`: main moved `os/exec` and the tmux/tty resolvers into `layout_unix.go`; kept main's split, added `strconv` and `path/filepath`.
+- `cmd/cbus/layout.go`: main moved `runArrange` into `cmd/cbus/layout_unix.go`; the `TmuxPaneWindows` lookup and three-arg `PlanLayout` call applied there.
+- `internal/client/layout_test.go`: dropped the branch's copy of `TestPeerPaneResolvesSelfBeforeMeta` (main has it in `layout_unix_test.go`), kept `TestRunLayoutOpsRetriesWithFallback`.
+
+[Adaptations in f4ff251]
+- `touchActivity` (`internal/client/store.go`) now takes `lockPeer` and returns early on a daemon-managed meta (`connectionId` set). Main's `armMeta` gained both rules after the branch was cut; daemon-managed peers are never reaped by grace and their meta belongs to the connection lifecycle. New `TestSelfPaneLeavesDaemonManagedMetaAlone` asserts byte-unchanged; killed by removing the guard (fails on the byte assertion).
+- The unregistered-caller hint moved into `unresolvedError` in `layout.go` (cross-platform) and `ResolvePeerPanes` in `layout_unix.go` calls it. The original test called `ResolvePeerPanes`, which is unix-only now and also needs a live tmux server (it passed on the branch only because it ran inside tmux); `TestUnresolvedErrorExplainsAnUnregisteredCaller` tests the helper directly.
+- Hint text: "re-join, then arm the Monitor" became "reconnect with `cbus connect <ch>`", matching v0.13 `/bus-join`.
+
+[Testing Notes]
+- `go vet` darwin/linux/windows clean; `go test ./...` green with the Claude session env unset (`TestHookJoin*` fail inside a Claude Code session on main as well).
+- Live, private tmux server (`tmux -L cbtest`, 240x60), four stand-in peers (argv0 `claude`, legacy join + armed `cbus tail`), branch binary vs main binary, both driven through `$TMUX` at the private socket:
+  - `a | b | c`: branch 81/78/79, main 120/59/59.
+  - Same spec three times: branch unchanged each time, main anchor 120 -> 60 -> 30.
+  - `a:50% | b | c`: branch 119/59/60.
+  - `a:30% | (b / c / d)`: branch 71 wide, rows 20/19/19; main 72, rows 30/14/14.
+  - `a:80 | b` and `a:70% | b:40%`: branch refuses both (rc 1); main accepted both.
+  - Unarmed `lead`, lastActivity backdated to 2020: control run pruned it. Fresh copy, one `arrange 'lead | coder'` with `TMUX_PANE` = its own pane: stamp current, `prune` reports nothing to prune.
+  - Same with `connectionId` set: meta sha unchanged across the self-arrange.
+  - Unknown alias: hint shown for an unregistered caller, absent for a registered one.
+
+[Possible Ripple Effects]
+Breaking: `:N` cell-count sizes are now refused. Any saved spec or skill text using them fails loudly at parse time.
+
 ## [2026-08-21 22:38:22 UTC] [Client/Layout] arrange idempotence, and percentages only
 
 [Attempt #1] `bafa16e` (normalisation) and `6dc5a59` (percentages only) on
