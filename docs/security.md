@@ -25,7 +25,7 @@ design is honest about that line.
 - **Identity is a convenience, not a credential.** `from` is spoofable (local and remote). The
   session-scoped remote marker prevents *accidental* cross-session impersonation, but it is not
   auth. `cbus list <ch>@<host>` reports who's actually connected; a marker is only a from-default.
-- The local daemon holds each connected native session's messaging credential under
+- The local daemon holds each connected Claude session's messaging token under
   `$CBUS_DIR/.daemon/claude-credentials/`, one file per binding, mode `0600`.
   Protection is user file permissions only, the same trust boundary as the bus
   directory above: anything running as your user can read those tokens and

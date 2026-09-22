@@ -37,9 +37,9 @@ which policy caused an unconfirmed submission. After joining, the command instru
 once, retain known roles and announce membership changes to the user without bus
 acknowledgments or repeated roster polling.
 
-A shared daemon that upgraded to a new version or protocol refuses new
-connects until it is restarted; see [usage.md](usage.md#the-daemon) for the
-refusal text. [Codex](codex.md#explicit-optional-reply-permissions-and-upgrades)
+After a cbus upgrade, the daemon still running the previous version refuses
+new connects until `cbus daemon restart`; [install.md](install.md) quotes the
+refusal. [Codex](codex.md#explicit-optional-reply-permissions-and-upgrades)
 covers the same daemon restart, and it applies equally here.
 
 ## Delivery and resume

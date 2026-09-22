@@ -123,13 +123,13 @@ fresh shell on the machine that saved the formation. It relaunches just the
 anchor session (right directory, right profile, resuming its own transcript),
 and the restored anchor wakes to a decision brief: the saved roster, which
 peers are still resumable, and the `apply` commands to bring them back as
-themselves or fresh — its call, confirmed with you. `--brief TEXT` adds an
+themselves or fresh: its call, confirmed with you. `--brief TEXT` adds an
 effort brief to the anchor's resume kickoff, the same way it does on `apply`.
 A guard refuses double-resumes while the anchor is booting, and a formation
 that is already running refuses with directions to the live seat; other
 refusal cases (a gone transcript, a fork-born or unattributed anchor origin,
-a live-armed session id, or resuming from the wrong machine) are documented
-in `cbus formation resume --help`.
+a live-armed session id, or resuming from the wrong machine) are documented,
+listed under formation resume in `cbus --help`.
 
 ## Anchors and integrations
 

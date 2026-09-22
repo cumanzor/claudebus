@@ -29,7 +29,7 @@ ruling on its target doc.
   guide) and cross-referenced from relay.md. Per the ruling, stated as
   a requirement; I did not inspect the live CF Access configuration.
 - Daemon credential storage (M2-F4): new security.md bullet, per-session
-  native messaging credentials under `$CBUS_DIR/.daemon/claude-credentials/`
+  Claude session messaging tokens under `$CBUS_DIR/.daemon/claude-credentials/`
   (mode 0600), same trust boundary as the bus directory.
 - "daemon binds 127.0.0.1" (M2-F5): corrected to "the relay" in security.md;
   that document's one remaining use of "daemon" meant the relay, not the
@@ -41,15 +41,16 @@ ruling on its target doc.
   `"split": "right"|"down"` override, `/save-formation` linked next to
   `/bus-formation`, and `resume --brief` plus a pointer to `--help` for the
   other resume refusal cases (gone transcript, fork-born/unattributed
-  origin, live-armed session id, wrong machine) which I did not transcribe
-  verbatim since the finding did not capture their exact text.
+  origin, live-armed session id, wrong machine), listed under formation
+  resume in `cbus --help`, not `formation resume --help` (which `formation`
+  parses as a formation name literally called `--help`).
 - Model example (M2-F8): `"model": "claude-opus-5"`, not a real model id,
   replaced with `claude-opus-5-5` in formations.md; docs-only, the D8 hold
   covers commands/ and roles/, not this file.
-- Daemon restart pointer (M2-F12): one paragraph in claude.md, pointing at
-  usage.md's daemon section (M1-F8) and codex.md's existing coverage; a
-  shared daemon on a stale version/protocol refuses new connects from
-  either harness until restarted.
+- Daemon restart pointer (M2-F12): one paragraph in claude.md: after a cbus
+  upgrade, the daemon still running the previous version refuses new
+  connects until `cbus daemon restart`, install.md quotes the refusal;
+  linked alongside codex.md's existing coverage of the same restart.
 - Monitor stopgap currency (M2-F9): claude-monitor-stopgap.md no longer says
   native receive is merely "available in source" (it shipped in v0.13.0),
   and states plainly that the persistent-Monitor mechanism was measured on
