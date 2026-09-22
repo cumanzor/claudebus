@@ -71,8 +71,9 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 ## Codex CLI permission and daemon setup
 
 Use `$cbus-connect` from an existing ordinary Codex CLI session. No special cbus
-launcher is required. Since v0.13.0, native Claude and Codex receive support
-macOS/Linux. Codex release field checks used 0.155.1 on macOS and 0.154.0 on Linux;
+launcher is required. Native Codex receive has shipped since v0.12.0 and native
+Claude receive since v0.13.0, both on macOS/Linux. Codex release field checks
+used 0.155.1 on macOS and 0.154.0 on Linux;
 the app-server queue surface remains experimental. See the
 [Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
 Windows retains its existing cbus functionality and explicitly refuses native
