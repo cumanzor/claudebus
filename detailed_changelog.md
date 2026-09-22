@@ -1,5 +1,53 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:21:44 UTC] [Docs/M4a] reviewer fixup on the M4a commit
+
+[Attempt #1] Separate worktree off `docs/audit-m4a` (documenter was mid-M4b),
+2 files (overview.md, command-reference.md) plus this entry pair.
+
+[What changed]
+- F1: the `join` command's Explicit alias-claim step had picked up
+  `ReserveAlias`'s lockPeer citation (`store.go:393`) and refusal text
+  ("choose another alias or explicitly unregister..."), but `join` calls a
+  different function, `Join()` (`store.go:206`), whose own daemon-managed
+  refusal ("use cbus connect instead of replacing it with join",
+  `store.go:264`) was already correctly documented a few lines above.
+  Dropped the misattributed content; `ReserveAlias`'s own lock and refusal
+  belong with spawn/branch in M4b.
+- F2: `close`'s remote-target handling was described as "fails name
+  validation"; it actually checks `client.IsRemote` explicitly and refuses
+  with its own message, `close is local-only — a remote peer must be closed
+  on its own host` (`main.go:975-976`), now quoted verbatim.
+- F3, five findings the M4a report claimed but had not actually written:
+  local arm mechanics (§3) rewritten off the bash-era exec framing to
+  `ArmLocalTail`'s actual `(listenerPid, listenerStart)` witness and the
+  harness-generic owner-pid walk (`marker.go:115-121`, not Claude-only); the
+  state diagram's "meta.json older than 10 min" corrected to lastActivity;
+  a second, separate "whoami is the only nonzero-empty exit" claim (distinct
+  from the one already fixed in the exit-code table) corrected to name
+  `connection status <target>`; the join meta field list expanded and its
+  missing-channel error corrected from "bash usage guard" to the actual Go
+  usage string; `hook-compact` added to the Go-native verb list; and the two
+  Monitor-arming surfaces that actually check `printManagedListenerHint`
+  (`join` when already joined, `branch` success) gain the daemon-managed
+  variant, quoted verbatim from `managed_listener_hint.go:14`.
+- F4: the session-identity chain gained its missing link, `CODEX_THREAD_ID`
+  (`identity.go:51`), in its actual resolution order.
+- F5: dropped an internal audit finding id (`M1-F4`) from repo doc prose;
+  those ids are for this effort's own changelog and tracker, not for a
+  future reader of the reference itself.
+- F6: fixed em dashes on 8 lines the reviewer named, all on lines this
+  milestone had already changed. Dashes inside verbatim-quoted binary
+  strings (e.g. `close`'s own "local-only — a remote peer..." message) were
+  left exactly as the binary prints them, per F2's explicit instruction.
+
+[Testing Notes]
+Every F3 claim re-verified against source before writing (store.go's
+`Join`/`ReserveAlias`, `ArmLocalTail`/`armMetaLocked` in follow.go,
+`isHarnessComm` in marker.go, `managed_listener_hint.go`, `identity.go`'s
+`SessionID` chain, `main.go`'s close/join/branch call sites). Links and
+prose rules re-checked after editing.
+
 ## [2026-09-22 22:09:10 UTC] [Docs/M4a] architecture reference corrected against source-traced findings, part 1 of 3
 
 [Attempt #1] On `docs/audit-m4a`, branched from `docs/audit-m3`, in worktree

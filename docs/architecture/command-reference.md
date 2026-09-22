@@ -148,7 +148,7 @@ including usage errors (`cbus channels junk` → `cbus: usage: cbus channels
 
 **Bash-era only (historical):** the retired script's `die()` (bin/cbus:19)
 printed `cbus: <message>`, but required-positional errors instead used bash
-`${1:?usage: ...}` guards, which rendered in bash's own format — no `cbus:`
+`${1:?usage: ...}` guards, which rendered in bash's own format: no `cbus:`
 prefix, script path and line number included, also stderr, also exit 1:
 
 ```
@@ -179,7 +179,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
 | `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — the COMPAT(P3 #4) byte-parity help line was dropped from `--help` at P3 homogenization |
-| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain — the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID` (`internal/client/identity.go`) — and "without it" means the whole chain is empty. `CODEX_THREAD_ID` is the equivalent identity for a Codex session and is missing from this chain description |
+| `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain: the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID`, then `$CODEX_THREAD_ID` (`internal/client/identity.go:51`); "without it" means the whole chain is empty |
 | `CBUS_ALIAS` | send.go:67-72 | Last-resort `from` on **local** send only, unvalidated on its own; when `CBUS_CHANNEL` is also set and both pass `ValidStoreName`, `from` becomes `CBUS_CHANNEL/CBUS_ALIAS` instead of the bare alias |
 | `CBUS_CHANNEL` | send.go:67-72; also read by `hook-join` (main.go:313) | Pairs with `CBUS_ALIAS` for local send's `from` default; `hook-join` auto-joins this channel from a SessionStart hook |
 | `CBUS_CODEX_RENDEZVOUS` | main.go:313 | Passed to `HookJoin` for Codex rendezvous on the join hook path |
@@ -201,7 +201,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | `cbus hook-compact <pre\|post>` | Reads the PreCompact/PostCompact hook's JSON payload; extracts `session_id` + `trigger`. Same TTY-block behavior as `hook-exit` |
 | `cbus hook-join` | Reads the SessionStart hook's JSON payload (`main.go:313`) |
 | `cbus codex-stop-hook` | Reads the Codex Stop hook's JSON payload; long-polls the inbox under the hook's timeout |
-| (internal) | The Go client dials the relay directly over `net/http`, never a shelled-out `curl`; Keychain writes go through `security -i` — secrets never appear in any argv |
+| (internal) | The Go client dials the relay directly over `net/http`, never a shelled-out `curl`; Keychain writes go through `security -i`; secrets never appear in any argv |
 
 ### Dispatch table
 
@@ -233,7 +233,8 @@ switch to a `run*` function).
 | anything else | `cbus: unknown command '<X>' (cbus --help)`, exit 1 | |
 
 > **Go-native verbs (post-cutover).** `connect`, `connection`, `daemon`,
-> `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`,
+> `codex`, `codex-bridge`, `hook-join`, `hook-compact <pre|post>`,
+> `codex-stop-hook`,
 > `install-codex-skills`, `codex-permissions`, `spawn`, the `formation …`
 > family, `close`, `arrange`/`scatter`/`focus` (§9), `selfupdate`,
 > `install-commands`, `install-roles`, and
@@ -293,9 +294,10 @@ skipped check.
 
 - A target is remote iff it contains `@` anywhere (`IsRemote`, `addr.go:20`),
   checked on the first arg of `send`, `tail`, `list`, `leave`, and, Go-native,
-  `prune` and `connect`. `rename` rejects `@` outright; `close` has no remote
-  form, so an `@`-containing target fails name validation instead of routing
-  remote.
+  `prune`, `connect`, and `close`. `rename` rejects `@` outright; `close`
+  checks the same `IsRemote` and refuses instead of routing remote: `close is
+  local-only — a remote peer must be closed on its own host` (`main.go:975-976`,
+  quoted verbatim).
 - Empty channel (`@server`) is intended for `list`. **Quirk:** `send`/`tail` also
   accept an empty channel: `cbus send @host/al` builds a payload the relay
   400s; `cbus tail @host/al` exits 0, prints an arm spec the relay will reject,
@@ -433,9 +435,9 @@ The warning is repeated verbatim at every surface the model reads:
 | Surface | Exact text |
 |---|---|
 | `cbus join` success (3rd line) | ``now arm the Monitor tool (NOT Bash — `cbus tail` runs a follower loop that never exits, so a Bash call blocks forever) on: cbus tail <ch>/<alias>`` |
-| `cbus join` when already joined | ``listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>`` |
+| `cbus join` when already joined | ``listen (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>``. **Daemon-managed variant**: ``daemon-managed: inspect cbus connection status <ch>/<alias>; do not arm a Monitor or tail loop`` instead (`managed_listener_hint.go:14`, checked first at `main.go:811-813`) |
 | `cbus rename` success | ``re-arm the Monitor tool (old tail is now stale; NOT Bash — `cbus tail` blocks forever in a shell): cbus tail <ch>/<new>`` |
-| `cbus branch` success | ``arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>`` |
+| `cbus branch` success | ``arm listening (if not armed) via the Monitor tool, NOT Bash (`cbus tail` blocks forever in a shell): cbus tail <ch>/<alias>``. **Daemon-managed variant**: same ``daemon-managed: inspect cbus connection status ...`` line, checked first at `main.go:539-541` (for the parent's own registration) |
 | Bootstrap prompt (`bootstrap_prompt.go`) | **Native now, not this warning at all**: `cbus bootstrap` prints a native `cbus connect` prompt; no Monitor is armed or mentioned |
 | `cbus --help` | Same warning, same rationale, for the legacy path only |
 
@@ -448,21 +450,24 @@ natively and arm nothing.
 (or `cbus:<ch>@<host>/<alias>` for remote). The description is how a later
 step (e.g. `/bus-rename`) finds and TaskStops the right Monitor. **Not
 persistent**: Claude Code 2.1.280's Monitor has no `persistent` option; it
-expires at its `timeout_ms` (max 30 min) and must be re-armed (M1-F4).
+expires at its `timeout_ms` (max 30 min) and must be re-armed.
 
 ### Local arm mechanics
 
-1. `cmd_tail` records `listenerPid = $$` and `ownerPid` (nearest `claude`/
-   `claude-*` ancestor, ≤16 parent hops) into `meta.json`, then **`exec`s** the
-   follower — so the recorded pid *is* the Monitor-managed process. When the
-   Monitor kills it, liveness flips to "off" by itself; no trap needed.
-   *(Bash-era mechanics; P3 tranche 2 replaced argv-grep liveness with a
-   structural `(listenerPid, listenerStart)` witness and moved the follower
-   in-process — nothing re-execs any more. This pair of steps was not updated
-   for that landing; flagged, not fixed, out of M4's scope.)*
-2. The inbox path is deliberately kept in the follower's **argv** — liveness
-   checks grep `ps -ww -o args=` for it (pid-recycling guard). A port that
-   hides the inbox path from the process identity breaks every liveness check.
+1. `ArmLocalTail` (`internal/client/follow.go:41`) establishes the
+   `(listenerPid, listenerStart)` witness first (`procStartTime(os.Getpid())`),
+   refusing to arm at all if it cannot be established, then records
+   `listenerPid`/`listenerStart`/`ownerPid` into `meta.json`
+   (`armMetaLocked`, `follow.go:117`) and runs the follower **in-process**
+   (no `exec`, no child process). `ownerPid` walks ancestors for any
+   supported harness process, not Claude only: `claude`/`claude-*`, `grok`,
+   `xai-grok-pager`, `opencode`, `codex` (`isHarnessComm`, `marker.go:115-121`).
+   When the Monitor stops the tail, the in-process loop exits and liveness
+   flips to "off" on its own.
+2. The pid-recycling guard no longer depends on the inbox path riding in
+   argv (that was the bash follower's `ps -ww -o args=` grep): identity is
+   the `(listenerPid, listenerStart)` witness itself, checked against the
+   process now wearing the pid.
 3. **Replay semantics (M4, `cbus-8k9.4`):** a durable per-peer `.cursor`
    sidecar (behavior-spec.md §8.6) now decides resume position, replacing the
    null-`listenerPid` tri-state this item used to describe. A fresh join (no
@@ -485,7 +490,7 @@ expires at its `timeout_ms` (max 30 min) and must be re-armed (M1-F4).
 stateDiagram-v2
     [*] --> Unarmed: cbus join (inbox truncated, listenerPid null, .cursor removed)
     Unarmed --> Listening: first cbus tail under Monitor (replays whole inbox)
-    Unarmed --> Pruned: never armed and meta.json older than 10 min
+    Unarmed --> Pruned: never armed and lastActivity older than 10 min
     Listening --> Off: Monitor stopped / window closed / session crash (ownerPid dead)
     Off --> Listening: re-arm (resumes from the .cursor boundary, not from inbox END)
     Off --> Pruned: prune or join auto-prune (departed broadcast)
@@ -619,18 +624,18 @@ for hooks and scripted multi-session drivers.
    - *Auto* (no alias arg): `main`, else lowest free `fork-N`; claimed with a
      bare atomic `mkdir` in a retry loop (concurrent siblings can't truncate
      each other's inbox); 50 failures → `cbus: cannot claim an alias in "<ch>"`.
-   - *Explicit*: claiming also takes a per-peer lifecycle lock
-     (`lockPeer`, `store.go:393`). A daemon-managed slot refuses outright:
-     `"<ch>/<alias>" is daemon-managed — choose another alias or explicitly
-     unregister this peer before reserving its alias`. Otherwise, if the slot
-     has a **live** listener → `cbus: "<ch>/<alias>" is taken by a live
-     listener`. A dead holder is silently reclaimed — **quirk:** `rm -rf`
-     destroys the dead peer's queued inbox, with no `departed` broadcast
-     (unlike rename's reclaim); a reclaim that fails to remove the old
-     directory (e.g. a permission error) surfaces as `cannot reclaim
-     "<ch>/<alias>" from a dead peer: <err>` instead of silently proceeding.
+   - *Explicit*: if the slot has a **live** listener → `cbus: "<ch>/<alias>"
+     is taken by a live listener`. A dead holder is silently reclaimed:
+     **quirk:** `rm -rf` destroys the dead peer's queued inbox, with no
+     `departed` broadcast (unlike rename's reclaim); a reclaim that fails to
+     remove the old directory (e.g. a permission error) surfaces as `cannot
+     reclaim "<ch>/<alias>" from a dead peer: <err>` instead of silently
+     proceeding.
 5. Truncate/create a fresh `inbox.jsonl`; write `meta.json`
-   (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host, ts}`).
+   (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host, ts}`,
+   plus `listenerStart`, `lastActivity`, `harness`, and, for a launcher-born
+   peer, `origin`/`model`; `connectionId` stays absent until a native
+   `connect` claims the alias).
 6. Broadcast `join` presence (`joined <ch> as <alias>`) to all non-dead peers.
 
 **Output (3 lines):**
@@ -651,8 +656,8 @@ deleted, `internal/client/liveness.go:158-161`). A daemon-managed
 (`ConnectionID` set) peer is never judged dead by this path at all: it is
 removed only by explicit `leave`/`unregister` (`liveness.go:144-146`).
 
-**Errors:** missing channel → bash usage guard; bad alias →
-`cbus: alias must be [A-Za-z0-9._-]`.
+**Errors:** missing channel → `cbus: usage: cbus join <channel> [alias]`; bad
+alias → `cbus: alias must be [A-Za-z0-9._-]`.
 
 ```sh
 cbus join claudebus            # auto-alias: main, or fork-1, fork-2, …
@@ -682,8 +687,10 @@ the first):
    A marker is a from-default, **not** proof of reachability —
    `cbus list @<host>` is the truth source.
 
-If neither: prints `not joined in this session` (to stdout) and **exits 1** —
-the only read-only command with a nonzero "empty" exit. Scripts using it as an
+If neither: prints `not joined in this session` (to stdout) and **exits 1**,
+not the only read-only command with a nonzero "empty" exit: `connection
+status <target>` also dies 1 when no managed connection matches (§1).
+Scripts using it as an
 am-I-joined probe must expect nonzero. ~~Extra args are silently dropped~~ —
 stale since cutover (`581b1c7`), unrelated to M5: the Go port's `noExtra` guard
 makes trailing junk a hard error, `cbus: usage: cbus whoami [--json]` (rc 1),
