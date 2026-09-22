@@ -1518,6 +1518,23 @@ charset, so an alias never needs quoting inside the spec (the shell still does: 
 and `(` are metacharacters, so single-quote the whole spec). Duplicate aliases are
 refused — a peer occupies one pane.
 
+**The caller's own registration** is resolved from `$TMUX_PANE` directly, skipping the
+chain below, and resolving it also refreshes that peer's `lastActivity`. That second
+part is load-bearing: `lastActivity` is written by `join` and then only by the armed
+follower, so a joined-but-never-armed peer's stamp never moves and `PeerDead` reaps it
+once `unarmedGrace` (10m) elapses. Running one of these verbs is the only activity an
+unarmed peer can produce, and a peer resolving its own pane is proof it is alive. Only
+the caller's own registration is stamped — vouching for anyone else would keep an
+abandoned registration alive forever, which is the reaper's job undone. A
+daemon-managed registration (`connectionId` set) is never reaped by grace and its meta
+belongs to the connection lifecycle, so it is left untouched, the same rule `armMeta`
+follows. The write takes the peer's lifecycle lock.
+
+When an alias cannot be resolved AND this session holds no alias in the channel at all,
+the error says so and names the cause, because "no peer ch/alias" about a session the
+user can see running is otherwise unreadable. The hint points at `cbus connect <ch>`.
+A registered caller is asking about somebody else and is not told any of this.
+
 **Resolution.** alias → pane is resolved LIVE, never stored: `meta.json` →
 `ownerPid` (falling back to the listener's owner under the same
 `listenerIdentityHolds` test `close` applies) → `ps -o tty= -p` →
@@ -1532,17 +1549,37 @@ child that had already grown sub-panes, landing the next sibling one level too d
 Each subtree is represented by its first leaf's pane, the one owning that region
 before the subtree exists.
 
-**Sizing** runs as a second pass after every join (a resize against a region still
-growing sizes the wrong geometry). The axis comes from the PARENT: `-x` under a
-columns node, `-y` under a rows node. A size on the root is dropped rather than
-errored on — the root has no sibling to take space from.
+**Sizing** is one rule: a node's children divide the parent region by weight. An
+explicit percentage is taken as written; every unsized child takes an equal cut of
+what is left. Even thirds for three peers is not a special case, it falls out of the
+rule. Percentages exceeding 100% under one split are refused rather than clamped.
+
+A percentage is realised by the join itself (`join-pane -l N%`), sized as the suffix
+of the weight list over the tail the target still holds — so the panes land at the
+right size instead of being reflowed afterwards, and a plan contains no resize ops at
+all. `-l N%` needs tmux >= 3.1, the same
+floor the pane splitter retries under, so every sized join carries an unsized fallback:
+a correctly-placed pane at the wrong width beats no pane at all.
+
+Sizes are PERCENTAGES ONLY. A cell count (`:80`) is refused, by ruling: it is not a
+share of anything the planner can know, so it could only be applied as a post-hoc
+resize, which takes its cells from one neighbour and leaves the siblings uneven
+(`a:40 | b | c` measured 40/75/57 live before the form was dropped). Half-supporting it
+was worse than not supporting it, and the parser refuses it by name rather than
+silently ignoring the size.
+
+A size on the root is dropped rather than errored on — the root has no sibling to take
+space from.
 
 | Behavior | Detail |
 |---|---|
 | Target window | the window of the FIRST alias in the spec |
 | `--dry-run` | prints the tmux argv, byte-for-byte what a real run executes |
 | Join failure | **hard** — stops, exit 1, reports `applied N of M`; re-running finishes it |
-| Resize failure | **best-effort** — skipped, not counted as applied (old tmux lacks `%` sizing) |
+| Sized join failure | retried once unsized, then hard (`-l N%` needs tmux >= 3.1) |
+| Sizes over 100% | refused at plan time, before any tmux call |
+| Cell-count size (`:80`) | refused at parse time; percentages only |
+| Already-arranged window | spec panes in the anchor's window are broken out first, so a repeat arrange is idempotent |
 | Unresolved alias | all failures reported at once, before any tmux call runs |
 | `scatter` | `break-pane -d -n <alias>` per peer; one already alone in its window is renamed and reported, not an error |
 | `focus` | `select-window` then `select-pane` on the same pane id — a split and a window of its own are the same handle |

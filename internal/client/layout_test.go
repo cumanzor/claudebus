@@ -1,7 +1,10 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -47,7 +50,6 @@ func TestParseLayoutShapes(t *testing.T) {
 		{"((a))", "a"},                           // ...repeatedly
 		{"  a  |  b  ", "(a | b)"},               // whitespace around separators
 		{"a:30% | b", "(a:30% | b)"},             // percentage size
-		{"a:80 | b", "(a:80 | b)"},               // cell-count size
 		{"(a / b):70% | c", "((a / b):70% | c)"}, // a group carries a size too
 		{"a-1.x_y | b", "(a-1.x_y | b)"},         // the full alias charset
 	} {
@@ -79,8 +81,10 @@ func TestParseLayoutErrors(t *testing.T) {
 		{"a@b", "unexpected"},
 		{"a | a", "twice"},
 		{"a | (b / a)", "twice"},
-		{"a: | b", "must be a number"},
-		{"a:% | b", "must be a number"},
+		{"a: | b", "must be a percentage"},
+		{"a:% | b", "must be a percentage"},
+		{"a:80 | b", "cell counts are not supported"}, // dropped by ruling
+		{"a:80", "cell counts are not supported"},     // ...at end of spec too
 		{"a :30% | b", "unexpected"},
 	} {
 		n, err := ParseLayout(tc.spec)
@@ -115,11 +119,26 @@ func TestLayoutAliasesOrder(t *testing.T) {
 // user is shown.
 func planOf(t *testing.T, spec string, panes map[string]string) []string {
 	t.Helper()
+	// each pane in a window of its own, which is the precondition every geometry
+	// golden below assumes: nothing needs breaking out, so the plan is joins only.
+	windows := make(map[string]string, len(panes))
+	i := 0
+	for _, pane := range panes {
+		windows[pane] = fmt.Sprintf("@%d", i)
+		i++
+	}
+	return planOfIn(t, spec, panes, windows)
+}
+
+// planOfIn is planOf with the pane->window map given, for the cases where the STARTING
+// arrangement is the thing under test rather than the resulting geometry.
+func planOfIn(t *testing.T, spec string, panes, windows map[string]string) []string {
+	t.Helper()
 	n, err := ParseLayout(spec)
 	if err != nil {
 		t.Fatalf("ParseLayout(%q): %v", spec, err)
 	}
-	ops, err := PlanLayout(n, panes)
+	ops, err := PlanLayout(n, panes, windows)
 	if err != nil {
 		t.Fatalf("PlanLayout(%q): %v", spec, err)
 	}
@@ -136,8 +155,8 @@ var threePanes = map[string]string{"orchestrator": "%1", "coder": "%2", "reviewe
 // right one stacked. Two joins and nothing else — no create, no kill, no select.
 func TestPlanLayoutMarquee(t *testing.T) {
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -v -s %3 -t %2",
+		"tmux join-pane -d -h -s %2 -t %1 -l 50%",
+		"tmux join-pane -d -v -s %3 -t %2 -l 50%",
 	}
 	if got := planOf(t, "orchestrator | (coder / reviewer)", threePanes); !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
@@ -155,9 +174,9 @@ func TestPlanLayoutMarquee(t *testing.T) {
 func TestPlanLayoutBuildsLevelBeforeDescending(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3", "d": "%4"}
 	want := []string{
-		"tmux join-pane -d -h -s %3 -t %1", // columns first, both sides still single panes
-		"tmux join-pane -d -v -s %2 -t %1", // then inside the left column
-		"tmux join-pane -d -v -s %4 -t %3", // then inside the right
+		"tmux join-pane -d -h -s %3 -t %1 -l 50%", // columns first, both sides still single panes
+		"tmux join-pane -d -v -s %2 -t %1 -l 50%", // then inside the left column
+		"tmux join-pane -d -v -s %4 -t %3 -l 50%", // then inside the right
 	}
 	got := planOf(t, "(a / b) | (c / d)", panes)
 	if !slices.Equal(got, want) {
@@ -165,55 +184,98 @@ func TestPlanLayoutBuildsLevelBeforeDescending(t *testing.T) {
 	}
 }
 
-// TestPlanLayoutChainsSiblings: three columns join sibling-to-previous-sibling, not
-// all against the first. Joining c against a would place it between a and b, putting
-// the panes in an order the user did not write.
-func TestPlanLayoutChainsSiblings(t *testing.T) {
+// TestPlanLayoutThreeSiblingsSplitEvenly is the anti-50/25/25 test, and it covers the
+// sizing rule as a whole: children divide the PARENT by weight, and an unsized child's
+// weight is inferred from how many unsized children there are. Without it each join
+// halves the previous SIBLING, so `a | b | c` came out 50/25/25 — measured on a real
+// 174-column window as 87/43/42 before this changed.
+//
+// The ratios are suffix-over-tail, not 1/n: joining b takes 66% of a's region (leaving
+// a its third) and joining c then halves what b holds. Chaining is still how the tree
+// is built; only the sizing of each join changed.
+func TestPlanLayoutThreeSiblingsSplitEvenly(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -h -s %3 -t %2",
+		"tmux join-pane -d -h -s %2 -t %1 -l 66%",
+		"tmux join-pane -d -h -s %3 -t %2 -l 50%",
 	}
 	if got := planOf(t, "a | b | c", panes); !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 	}
 }
 
-// TestPlanLayoutSizingRunsLastAndFollowsParentAxis: every resize lands after every
-// join, because a resize against a region that is still growing sizes the wrong
-// geometry. The axis comes from the PARENT — a child of a columns node is sized
-// across (-x), a child of a rows node down (-y) — so the two resizes here differ
-// despite both being written the same way in the spec.
-func TestPlanLayoutSizingRunsLastAndFollowsParentAxis(t *testing.T) {
+// TestPlanLayoutPercentSizesAreRealisedInTheJoin: a percentage is a share of the
+// parent region, which is exactly what join-pane's -l takes, so it is placed as the
+// pane lands rather than resized afterwards. That is one op instead of two and no
+// post-hoc reflow. `a:30%` leaves a its 30% by giving the joined group 70%; inside the
+// group `b:40%` leaves b its 40% by giving c 60%.
+func TestPlanLayoutPercentSizesAreRealisedInTheJoin(t *testing.T) {
 	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
 	want := []string{
-		"tmux join-pane -d -h -s %2 -t %1",
-		"tmux join-pane -d -v -s %3 -t %2",
-		"tmux resize-pane -t %1 -x 30%", // a: child of the columns root
-		"tmux resize-pane -t %2 -y 40%", // b: child of the rows group
+		"tmux join-pane -d -h -s %2 -t %1 -l 70%",
+		"tmux join-pane -d -v -s %3 -t %2 -l 60%",
 	}
-	if got := planOf(t, "a:30% | (b:40% / c)", panes); !slices.Equal(got, want) {
+	got := planOf(t, "a:30% | (b:40% / c)", panes)
+	if !slices.Equal(got, want) {
 		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+	for _, op := range got {
+		if strings.Contains(op, "resize-pane") {
+			t.Errorf("a percentage should need no resize pass, got %q", op)
+		}
 	}
 }
 
-// TestPlanLayoutSizeOpsAreBestEffort: an older tmux without percentage sizing must
-// not fail an otherwise-good arrange — the panes are the point, the width is a
-// nicety. The joins must NOT carry the same flag, or a failed join would be skipped
-// past and leave the tree silently wrong.
-func TestPlanLayoutSizeOpsAreBestEffort(t *testing.T) {
-	n, err := ParseLayout("a:30% | b")
+// TestParseLayoutCellCountIsRefusedNotIgnored: `a:80` must not parse as a bare alias
+// with the size quietly dropped. Silently ignoring a size the user wrote produces a
+// layout that does not match the spec, with nothing said about why — the exact failure
+// mode that made cell counts worth removing rather than half-supporting.
+func TestParseLayoutCellCountIsRefusedNotIgnored(t *testing.T) {
+	n, err := ParseLayout("a:80 | b")
+	if err == nil {
+		t.Fatalf("a cell count should be refused, got %s", renderTree(n))
+	}
+	if !strings.Contains(err.Error(), "30%") {
+		t.Errorf("the error should show the accepted form, got %q", err)
+	}
+}
+
+// TestPlanLayoutRejectsOversizedSplit: percentages that add past 100 describe a layout
+// that cannot exist. Refusing beats silently clamping, which would hand back a window
+// that does not match what was asked for with no indication why.
+func TestPlanLayoutRejectsOversizedSplit(t *testing.T) {
+	n, err := ParseLayout("a:60% | b:60%")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2"})
+	_, err = PlanLayout(n, map[string]string{"a": "%1", "b": "%2"}, nil)
+	if err == nil {
+		t.Fatal("120% of a region should be refused")
+	}
+	if !strings.Contains(err.Error(), "120") {
+		t.Errorf("error should name the total, got %q", err)
+	}
+}
+
+// TestPlanLayoutJoinsCarryAPlainFallback: `-l N%` needs tmux >= 3.1, the same floor the
+// pane splitter already retries under. A join is a HARD op, so it cannot be skipped on
+// failure the way a resize can — it carries an unsized retry instead, because a
+// correctly-placed pane at the wrong width beats no pane at all.
+func TestPlanLayoutJoinsCarryAPlainFallback(t *testing.T) {
+	n, err := ParseLayout("a | b | c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := PlanLayout(n, map[string]string{"a": "%1", "b": "%2", "c": "%3"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range ops {
-		wantBestEffort := op.Argv[0] == "resize-pane"
-		if op.BestEffort != wantBestEffort {
-			t.Errorf("op %v BestEffort = %v, want %v", op.Argv, op.BestEffort, wantBestEffort)
+		if slices.Contains(op.Argv, "-l") && len(op.Fallback) == 0 {
+			t.Errorf("sized join %v has no fallback", op.Argv)
+		}
+		if slices.Contains(op.Fallback, "-l") {
+			t.Errorf("the fallback must be unsized, got %v", op.Fallback)
 		}
 	}
 }
@@ -223,7 +285,7 @@ func TestPlanLayoutSizeOpsAreBestEffort(t *testing.T) {
 // and a user who wrote it still gets the layout they asked for.
 func TestPlanLayoutRootSizeDropped(t *testing.T) {
 	got := planOf(t, "(a | b):50%", map[string]string{"a": "%1", "b": "%2"})
-	want := []string{"tmux join-pane -d -h -s %2 -t %1"}
+	want := []string{"tmux join-pane -d -h -s %2 -t %1 -l 50%"}
 	if !slices.Equal(got, want) {
 		t.Errorf("plan = %v, want %v", got, want)
 	}
@@ -237,7 +299,7 @@ func TestPlanLayoutMissingPane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = PlanLayout(n, map[string]string{"orchestrator": "%1"})
+	_, err = PlanLayout(n, map[string]string{"orchestrator": "%1"}, nil)
 	if err == nil {
 		t.Fatal("PlanLayout with an unresolved alias should error")
 	}
@@ -301,37 +363,6 @@ func TestRunLayoutOpsStopsAtFirstHardFailure(t *testing.T) {
 	}
 }
 
-// TestRunLayoutOpsBestEffortFailureDoesNotAbort is the other half, and the one that
-// would rot silently: a resize that an old tmux rejects must leave the arrange
-// standing. It must also NOT be counted as applied — reporting a step that failed as
-// done is how "applied N of M" stops meaning anything.
-func TestRunLayoutOpsBestEffortFailureDoesNotAbort(t *testing.T) {
-	var ran int
-	tmuxRun = func(argv []string) ([]byte, error) {
-		ran++
-		if argv[0] == "resize-pane" {
-			return []byte("unknown option"), fmt.Errorf("exit status 1")
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { tmuxRun = defaultTmuxRun })
-
-	applied, err := RunLayoutOps([]LayoutOp{
-		{Argv: []string{"join-pane", "-t", "%1"}},
-		{Argv: []string{"resize-pane", "-t", "%1", "-x", "30%"}, BestEffort: true},
-		{Argv: []string{"join-pane", "-t", "%3"}},
-	})
-	if err != nil {
-		t.Fatalf("a failing best-effort op must not fail the run: %v", err)
-	}
-	if ran != 3 {
-		t.Errorf("ran %d ops, want all 3", ran)
-	}
-	if applied != 2 {
-		t.Errorf("applied = %d, want 2 — the failed resize must not count", applied)
-	}
-}
-
 // ---- peer resolution -------------------------------------------------------------
 
 // TestSelfPaneResolvesThisSessionFromEnv: the caller is the one peer whose pane needs
@@ -375,5 +406,218 @@ func TestSelfPaneRejectsStaleEnv(t *testing.T) {
 		if got := selfPane("ch", "orchestrator", live); got != "" {
 			t.Errorf("%s: selfPane returned %q, want \"\" (fall through to the real lookup)", name, got)
 		}
+	}
+}
+
+// TestRunLayoutOpsRetriesWithFallback: the plan tests prove a sized join CARRIES a
+// fallback; this proves the runner USES it. On a tmux older than 3.1 the `-l N%` form
+// is the only reason the join fails, and the whole point of the retry is that the
+// arrange still completes, unsized, instead of dying on a width.
+func TestRunLayoutOpsRetriesWithFallback(t *testing.T) {
+	var ran [][]string
+	tmuxRun = func(argv []string) ([]byte, error) {
+		ran = append(ran, argv)
+		if slices.Contains(argv, "-l") {
+			return []byte("unknown option -l"), fmt.Errorf("exit status 1")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { tmuxRun = defaultTmuxRun })
+
+	sized := []string{"join-pane", "-d", "-h", "-s", "%2", "-t", "%1", "-l", "66%"}
+	plain := []string{"join-pane", "-d", "-h", "-s", "%2", "-t", "%1"}
+	applied, err := RunLayoutOps([]LayoutOp{{Argv: sized, Fallback: plain}})
+	if err != nil {
+		t.Fatalf("the retry should carry the arrange: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("applied = %d, want 1 — a join that succeeded on retry still landed", applied)
+	}
+	if len(ran) != 2 || slices.Contains(ran[1], "-l") {
+		t.Errorf("want a sized attempt then an unsized retry, got %v", ran)
+	}
+}
+
+// TestPlanLayoutBreaksOutPanesAlreadyInTheAnchorWindow is the idempotence fix, and the
+// numbers in this comment are measured, not imagined. join-pane removes its source from
+// wherever it sits; when that is the window being BUILT, the removal frees space that
+// tmux reflows into panes already placed, so every later -l is measured against a region
+// that just moved. Re-running `orchestrator | (coder / reviewer)` on its own output went
+// 86/87/87 -> 42/131/131 -> 20/153/153, halving the anchor each time.
+//
+// Breaking them out first means no join ever removes a pane from the target window.
+func TestPlanLayoutBreaksOutPanesAlreadyInTheAnchorWindow(t *testing.T) {
+	panes := map[string]string{"orchestrator": "%0", "coder": "%3", "reviewer": "%4"}
+	// the state a second arrange starts from: everything already in one window
+	windows := map[string]string{"%0": "@25", "%3": "@25", "%4": "@25"}
+	want := []string{
+		"tmux break-pane -d -s %3",
+		"tmux break-pane -d -s %4",
+		"tmux join-pane -d -h -s %3 -t %0 -l 50%",
+		"tmux join-pane -d -v -s %4 -t %3 -l 50%",
+	}
+	got := planOfIn(t, "orchestrator | (coder / reviewer)", panes, windows)
+	if !slices.Equal(got, want) {
+		t.Errorf("plan =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// TestPlanLayoutLeavesOtherWindowsAlone: only the ANCHOR's window needs normalising.
+// Spec panes sharing some OTHER window can be joined straight out of it, because that
+// window is about to be dismantled and its reflow never touches the one being built.
+// Breaking them out anyway would be two wasted ops and two extra frames of flicker.
+func TestPlanLayoutLeavesOtherWindowsAlone(t *testing.T) {
+	panes := map[string]string{"orchestrator": "%0", "coder": "%3", "reviewer": "%4"}
+	windows := map[string]string{"%0": "@1", "%3": "@2", "%4": "@2"} // coder+reviewer share @2
+	for _, op := range planOfIn(t, "orchestrator | (coder / reviewer)", panes, windows) {
+		if strings.Contains(op, "break-pane") {
+			t.Errorf("no pane shares the anchor window; nothing should be broken out, got %q", op)
+		}
+	}
+}
+
+// TestPlanLayoutNormalisationRunsBeforeEveryJoin: ordering IS the fix. A break emitted
+// after a join has already run is worse than no break at all, because it dismantles the
+// layout that join just built.
+func TestPlanLayoutNormalisationRunsBeforeEveryJoin(t *testing.T) {
+	panes := map[string]string{"a": "%1", "b": "%2", "c": "%3"}
+	windows := map[string]string{"%1": "@1", "%2": "@1", "%3": "@1"}
+	seenJoin := false
+	for _, op := range planOfIn(t, "a | b | c", panes, windows) {
+		if strings.Contains(op, "join-pane") {
+			seenJoin = true
+		}
+		if strings.Contains(op, "break-pane") && seenJoin {
+			t.Errorf("break-pane after a join would dismantle what the join built: %q", op)
+		}
+	}
+}
+
+// TestSelfPaneRefreshesOwnActivity: lastActivity is written by Join and then only by
+// the armed follower, so an unarmed peer's stamp never moves and PeerDead reaps it once
+// unarmedGrace passes. Resolving a peer to its own pane proves that peer is alive, so
+// it stamps. Without this, selfPane's whole affordance (arrange yourself before arming)
+// is true for ten minutes and false afterwards.
+func TestSelfPaneRefreshesOwnActivity(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+
+	metaPath := filepath.Join(root, "ch", "orchestrator", "meta.json")
+	stale := "2020-01-01T00:00:00Z"
+	rewriteLastActivity(t, metaPath, stale)
+	if !PeerDead(metaPath) {
+		t.Fatal("precondition: a 2020 stamp must read as past the unarmed grace")
+	}
+
+	if got := selfPane("ch", "orchestrator", map[string]string{"/dev/ttys001": "%7"}); got != "%7" {
+		t.Fatalf("selfPane = %q, want %%7", got)
+	}
+	if PeerDead(metaPath) {
+		t.Error("after resolving its own pane the peer must no longer read as dead")
+	}
+}
+
+// TestSelfPaneDoesNotStampOtherPeers: the refresh is a peer vouching for ITSELF. Doing
+// it for anyone else would keep a genuinely abandoned registration alive forever, which
+// is the reaper's whole job undone.
+func TestSelfPaneDoesNotStampOtherPeers(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "somebody-else", "sid-other")
+
+	metaPath := filepath.Join(root, "ch", "somebody-else", "meta.json")
+	rewriteLastActivity(t, metaPath, "2020-01-01T00:00:00Z")
+	_ = selfPane("ch", "somebody-else", map[string]string{"/dev/ttys001": "%7"})
+	if !PeerDead(metaPath) {
+		t.Error("another session's peer must not be kept alive by this session's command")
+	}
+}
+
+// TestSelfPaneLeavesDaemonManagedMetaAlone: a daemon-managed registration is never
+// reaped by grace and its meta belongs to the connection lifecycle, so the self-stamp
+// must not rewrite it, the same rule armMeta follows.
+func TestSelfPaneLeavesDaemonManagedMetaAlone(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "%7")
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+
+	metaPath := filepath.Join(root, "ch", "orchestrator", "meta.json")
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["connectionId"], _ = json.Marshal("conn-1")
+	raw["lastActivity"], _ = json.Marshal("2020-01-01T00:00:00Z")
+	before, _ := json.Marshal(raw)
+	if err := os.WriteFile(metaPath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := selfPane("ch", "orchestrator", map[string]string{"/dev/ttys001": "%7"}); got != "%7" {
+		t.Fatalf("selfPane = %q, want %%7", got)
+	}
+	after, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("a daemon-managed meta must be byte-unchanged, got %s", after)
+	}
+}
+
+// TestUnresolvedErrorExplainsAnUnregisteredCaller: the error a user actually hit was
+// "no peer layouttest/orchestrator" about a session they could see running. The hint
+// fires only when this session holds no alias in the channel.
+func TestUnresolvedErrorExplainsAnUnregisteredCaller(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CBUS_SESSION_ID", "sid-self")
+	t.Setenv("TMUX_PANE", "")
+
+	err := unresolvedError("ch", []string{"no peer ch/orchestrator"})
+	if !strings.Contains(err.Error(), "not registered") || !strings.Contains(err.Error(), "cbus connect ch") {
+		t.Errorf("an unregistered caller should be told why and what to do, got %q", err)
+	}
+
+	seedPeer(t, root, "ch", "orchestrator", "sid-self")
+	err = unresolvedError("ch", []string{"no peer ch/nosuchpeer"})
+	if strings.Contains(err.Error(), "not registered") {
+		t.Errorf("this session IS registered; the hint is noise here: %q", err)
+	}
+	if !strings.Contains(err.Error(), "no peer ch/nosuchpeer") {
+		t.Errorf("the underlying failure must still be reported, got %q", err)
+	}
+}
+
+// rewriteLastActivity backdates a peer's stamp in place, touching only that field so
+// the rest of the meta round-trips exactly as the store wrote it.
+func rewriteLastActivity(t *testing.T, metaPath, stamp string) {
+	t.Helper()
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["lastActivity"], _ = json.Marshal(stamp)
+	out, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, out, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

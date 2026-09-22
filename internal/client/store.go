@@ -851,3 +851,33 @@ func LeaveRemote(host, ch string) error {
 	_ = os.Remove(filepath.Join(CBUSDir(), ".remote", host))
 	return nil
 }
+
+// touchActivity refreshes lastActivity on a peer's own meta, the read-mutate-write
+// shape armMeta uses and under the same round-trip contract. Best-effort by design:
+// a peer that cannot refresh its stamp is not a peer that should fail its command.
+//
+// It exists because lastActivity is written exactly twice — once by Join, then only by
+// the armed follower — so a joined-but-unarmed peer's stamp never moves and PeerDead
+// reaps it once unarmedGrace elapses. A session doing demonstrable work is alive, and
+// this is how it says so.
+func touchActivity(metaPath string) {
+	peerDir := filepath.Dir(metaPath)
+	unlock, err := lockPeer(filepath.Base(filepath.Dir(peerDir)), filepath.Base(peerDir))
+	if err != nil {
+		return
+	}
+	defer unlock()
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		return
+	}
+	var m peerMeta
+	if json.Unmarshal(b, &m) != nil {
+		return
+	}
+	if m.ConnectionID != "" {
+		return // the daemon owns this registration and it is never reaped by grace
+	}
+	m.LastActivity = Now()
+	_ = writeMeta(filepath.Dir(metaPath), m)
+}

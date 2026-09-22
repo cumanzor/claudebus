@@ -3,6 +3,8 @@ package client
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"claudebus/internal/core"
@@ -35,12 +37,16 @@ type LayoutNode struct {
 // Leaf reports whether n names a peer rather than splitting a region.
 func (n *LayoutNode) Leaf() bool { return len(n.Kids) == 0 }
 
-// LayoutOp is one tmux invocation in a plan. BestEffort marks the sizing tail: an
-// older tmux without percentage sizing must not fail an otherwise-good arrange, the
-// same call the pane splitter already makes for its resize.
+// LayoutOp is one tmux invocation in a plan. Every op is a break-pane or a join-pane
+// and every one is load-bearing, so there is no best-effort tier: the only tolerated
+// failure is a sized join, which retries unsized via Fallback rather than being
+// skipped.
 type LayoutOp struct {
-	Argv       []string
-	BestEffort bool
+	Argv []string
+	// Fallback is retried when Argv fails, for ops whose sizing form is newer than the
+	// tmux that may be running: `-l N%` needs tmux >= 3.1, and the pane matters more
+	// than its width. Empty means no retry.
+	Fallback []string
 }
 
 // ParseLayout builds the tree from a spec string. Errors carry the offending text
@@ -94,6 +100,45 @@ func LayoutAliases(n *LayoutNode) []string {
 	return out
 }
 
+// normalizeOps breaks every pane in the spec OUT of the anchor's window before any
+// join runs, so that no join has to remove a pane from the window it is building.
+//
+// This is not tidiness, it is correctness. join-pane removes the source from wherever
+// it is, and when that is the target's own window the removal frees space which tmux
+// immediately reflows into the panes already placed — so every later `-l` percentage is
+// measured against a region that just moved. Re-running the same arrange on an
+// already-arranged window is therefore not idempotent, and not even stable: measured
+// live, `orchestrator | (coder / reviewer)` went 86/87/87 then 42/131/131 then
+// 20/153/153, halving the anchor every time.
+//
+// Only panes sharing the ANCHOR's window need breaking out. Spec panes sitting together
+// in some other window can be joined directly: their removal reflows that window, which
+// is about to be dismantled anyway, and never touches the one being built.
+func normalizeOps(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp, error) {
+	if len(windows) == 0 {
+		return nil, nil
+	}
+	anchor, err := repPane(root, panes)
+	if err != nil {
+		return nil, err
+	}
+	anchorWin, ok := windows[anchor]
+	if !ok {
+		return nil, nil
+	}
+	var ops []LayoutOp
+	for _, alias := range LayoutAliases(root) {
+		pane := panes[alias]
+		if pane == anchor {
+			continue
+		}
+		if windows[pane] == anchorWin {
+			ops = append(ops, LayoutOp{Argv: []string{"break-pane", "-d", "-s", pane}})
+		}
+	}
+	return ops, nil
+}
+
 // PlanLayout turns the tree plus an alias→pane map into the tmux calls that realize
 // it. Pure, so --dry-run prints exactly what a real run executes.
 //
@@ -106,8 +151,11 @@ func LayoutAliases(n *LayoutNode) []string {
 //
 // Sizing runs as a second pass over the whole tree, after every join, because a
 // resize against a region that is still growing is a resize of the wrong geometry.
-func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
-	var ops []LayoutOp
+func PlanLayout(root *LayoutNode, panes, windows map[string]string) ([]LayoutOp, error) {
+	ops, err := normalizeOps(root, panes, windows)
+	if err != nil {
+		return nil, err
+	}
 	var build func(n *LayoutNode) error
 	build = func(n *LayoutNode) error {
 		if n.Leaf() {
@@ -121,12 +169,25 @@ func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
 		if err != nil {
 			return err
 		}
-		for _, k := range n.Kids[1:] {
+		w, err := childWeights(n)
+		if err != nil {
+			return err
+		}
+		for i, k := range n.Kids[1:] {
 			src, err := repPane(k, panes)
 			if err != nil {
 				return err
 			}
-			ops = append(ops, LayoutOp{Argv: []string{"join-pane", "-d", flag, "-s", src, "-t", prev}})
+			argv := []string{"join-pane", "-d", flag, "-s", src, "-t", prev}
+			plain := append([]string{}, argv...)
+			// -t prev currently holds the region for kids i+1..n-1 (0-based), and the
+			// joined pane takes everything after prev. Sizing it by that suffix ratio is
+			// what makes n children divide the PARENT evenly instead of each one halving
+			// the previous pane, which is where 50/25/25 came from.
+			if pct := suffixPct(w, i+1); pct > 0 && pct < 100 {
+				argv = append(argv, "-l", strconv.Itoa(pct)+"%")
+			}
+			ops = append(ops, LayoutOp{Argv: argv, Fallback: plain})
 			prev = src
 		}
 		for _, k := range n.Kids {
@@ -139,34 +200,69 @@ func PlanLayout(root *LayoutNode, panes map[string]string) ([]LayoutOp, error) {
 	if err := build(root); err != nil {
 		return nil, err
 	}
-	// parentRows picks the axis: a child of a columns node is sized across (-x), a
-	// child of a rows node down (-y). The root has no parent region to divide, so its
-	// own Size is meaningless and deliberately dropped rather than errored on — the
-	// spec `(a|b):50%` is harmless, just unenforceable.
-	var size func(n *LayoutNode, parentRows bool, isRoot bool) error
-	size = func(n *LayoutNode, parentRows, isRoot bool) error {
-		if n.Size != "" && !isRoot {
-			pane, err := repPane(n, panes)
-			if err != nil {
-				return err
-			}
-			axis := "-x"
-			if parentRows {
-				axis = "-y"
-			}
-			ops = append(ops, LayoutOp{Argv: []string{"resize-pane", "-t", pane, axis, n.Size}, BestEffort: true})
-		}
-		for _, k := range n.Kids {
-			if err := size(k, n.Rows, false); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := size(root, false, true); err != nil {
-		return nil, err
-	}
 	return ops, nil
+}
+
+// childWeights turns one node's children into shares of the parent region: an
+// explicit percentage is taken as written, and every unsized child takes an equal cut
+// of whatever is left. That is the whole sizing rule — the split is inferred from how
+// many children there are, unless the spec says otherwise — and even thirds for three
+// peers falls out of it rather than being a special case.
+func childWeights(n *LayoutNode) ([]int, error) {
+	w := make([]int, len(n.Kids))
+	explicit, unsized := 0, 0
+	for i, k := range n.Kids {
+		if pct, ok := pctSize(k.Size); ok {
+			w[i] = pct
+			explicit += pct
+			continue
+		}
+		unsized++
+	}
+	if explicit > 100 {
+		return nil, fmt.Errorf("sizes under one split add up to %d%%, over 100%%", explicit)
+	}
+	if unsized > 0 {
+		share := (100 - explicit) / unsized
+		for i := range w {
+			if w[i] == 0 {
+				w[i] = share
+			}
+		}
+	}
+	return w, nil
+}
+
+// pctSize reads "30%" as 30. The parser guarantees the suffix, so the only miss here
+// is an absent size, which means "infer my share".
+func pctSize(size string) (int, bool) {
+	if !strings.HasSuffix(size, "%") {
+		return 0, false
+	}
+	v, err := strconv.Atoi(strings.TrimSuffix(size, "%"))
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// suffixPct is the share of the CURRENT target region that the pane being joined
+// should take: everything from index i onward, over everything from i-1 onward. The
+// target still holds the whole tail at this point, so the ratio is against that tail
+// and not against the window.
+func suffixPct(w []int, i int) int {
+	if i <= 0 || i >= len(w) {
+		return 0
+	}
+	tail, whole := 0, 0
+	for j := i; j < len(w); j++ {
+		tail += w[j]
+	}
+	whole = tail + w[i-1]
+	if whole <= 0 {
+		return 0
+	}
+	return tail * 100 / whole
 }
 
 // repPane is the pane standing in for a whole subtree: its first leaf's, which is
@@ -194,10 +290,12 @@ var tmuxRun = defaultTmuxRun
 func RunLayoutOps(ops []LayoutOp) (applied int, err error) {
 	for _, op := range ops {
 		out, runErr := tmuxRun(op.Argv)
+		if runErr != nil && len(op.Fallback) > 0 {
+			// the sizing form is the only reason a join fails on an older tmux, and a
+			// correctly-placed pane at the wrong width beats no pane at all.
+			out, runErr = tmuxRun(op.Fallback)
+		}
 		if runErr != nil {
-			if op.BestEffort {
-				continue
-			}
 			return applied, fmt.Errorf("tmux %s: %v: %s",
 				strings.Join(op.Argv, " "), runErr, strings.TrimSpace(string(out)))
 		}
@@ -234,10 +332,41 @@ func selfPane(ch, alias string, byTTY map[string]string) string {
 	}
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch && reg.Alias == alias {
+			// running this command IS activity, and it is the only activity an unarmed
+			// peer can produce: join stamps lastActivity once and nothing refreshes it
+			// afterwards except the armed follower, so without this an unarmed caller's
+			// registration is reaped 10 minutes after joining no matter how much work it
+			// is doing. Resolving a peer to its own pane is proof that peer is alive.
+			touchActivity(filepath.Join(CBUSDir(), ch, alias, "meta.json"))
 			return pane
 		}
 	}
 	return ""
+}
+
+// unresolvedError joins every alias failure into one error. When this session holds
+// no alias in ch at all, it also says why: the confusing case is a caller that put
+// itself in the spec after its registration was reaped, and "no peer ch/alias" about
+// a session the user can see running is otherwise unreadable. A registered caller is
+// asking about somebody else and is told nothing extra.
+func unresolvedError(ch string, bad []string) error {
+	msg := strings.Join(bad, "; ")
+	if !selfRegisteredIn(ch) {
+		msg += fmt.Sprintf("\n  this session is not registered in %q either. A legacy peer that "+
+			"joins without arming a listener is reaped after %s; reconnect with `cbus connect %s`",
+			ch, unarmedGrace, ch)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+// selfRegisteredIn reports whether this session holds ANY alias in ch.
+func selfRegisteredIn(ch string) bool {
+	for _, reg := range ResolveSelf() {
+		if reg.Channel == ch {
+			return true
+		}
+	}
+	return false
 }
 
 // layoutScanner is a hand-rolled recursive-descent reader over the spec. The
@@ -332,9 +461,15 @@ func (s *layoutScanner) term() (*LayoutNode, error) {
 	return &LayoutNode{Alias: alias, Size: size}, nil
 }
 
-// size reads an optional :30% or :80 suffix. No whitespace is skipped before the
-// colon: `coder :30%` is a typo, and reading it as a size would silently accept a
-// spec the user did not write.
+// size reads an optional :30% suffix. Percentages only, BY RULING: a size is a share
+// of the parent region, and a cell count is not a share of anything the planner can
+// know — it cannot be turned into a ratio until tmux has drawn the region, so it could
+// only ever be applied as a post-hoc resize, which takes its cells from one neighbour
+// and leaves the siblings uneven (`a:40 | b | c` measured 40/75/57 live). Half-support
+// was worse than none.
+//
+// No whitespace is skipped before the colon: `coder :30%` is a typo, and reading it as
+// a size would silently accept a spec the user did not write.
 func (s *layoutScanner) size() (string, error) {
 	if s.i >= len(s.src) || s.src[s.i] != ':' {
 		return "", nil
@@ -345,11 +480,12 @@ func (s *layoutScanner) size() (string, error) {
 		s.i++
 	}
 	digits := s.i - start
-	if s.i < len(s.src) && s.src[s.i] == '%' {
-		s.i++
+	if s.i >= len(s.src) || s.src[s.i] != '%' {
+		return "", fmt.Errorf("a size must be a percentage like :30%% (got %q) — cell counts are not supported", s.src[start-1:s.i])
 	}
+	s.i++
 	if digits == 0 {
-		return "", fmt.Errorf("size after ':' must be a number of columns or a percentage")
+		return "", fmt.Errorf("a size must be a percentage like :30%%")
 	}
 	return s.src[start:s.i], nil
 }
