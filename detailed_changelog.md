@@ -34,8 +34,9 @@ where the fix needed a judgment call.
 - Legacy Monitor is not persistent (M1-F4): drops the "(persistent)" label in
   how-it-works.md, states the `timeout_ms` expiry/re-arm cost, points at
   docs/claude-monitor-stopgap.md.
-- GIF captions (M1-F5): all three README recordings captioned pre-native
-  (v0.10-era); re-recording is a separate item, not done here.
+- GIF captions (M1-F5): all three README recordings captioned v0.9-era
+  (committed 2026-08-10), before native connect; re-recording is a separate
+  item, not done here.
 - Busy-session input handling (M1-F6): how-it-works.md's Caveats section
   contradicted its own Native sessions section. Split into harness-specific
   behavior: Claude between foreground tool calls, Codex waits its turn,

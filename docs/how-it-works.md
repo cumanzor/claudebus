@@ -42,7 +42,7 @@ boundary](claude.md#migrating-an-existing-monitor-peer).
 Each legacy session **joins a channel** and **arms a listener**:
 
 - **Store** — `~/.claude-bus/<channel>/<alias>/` holds:
-  - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}`, among other fields (`listenerStart`, `lastActivity`, `harness`, and, for a native peer, `connectionId`; plus `origin`/`model` birth-record fields; see [Birth records](formations.md#birth-records)). The store is shared with native peers: a native meta's `listenerPid` is the daemon's pid and its `ownerPid` is null.
+  - `meta.json`: registry entry, `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}`, among other fields (`listenerStart`, `lastActivity`, `harness`, and, for a native peer, `connectionId`; plus `origin`/`model` birth-record fields; see [Birth records](formations.md#birth-records)). The store is shared with native peers: a native meta's `listenerPid` is the daemon's pid and its `ownerPid` is null.
   - `inbox.jsonl` — append-only, one JSON message per line
 - **Join** — `cbus join <channel>` auto-picks the alias (`main` if free, then
   `fork-1`, `fork-2`, …), is idempotent for a session already in the channel, and
