@@ -35,8 +35,9 @@ anchor overclaim (M4 finding, applies to an M3 file).
   already folded into the M1 commit at kickoff, not reopened here.
 - Formation surface (M3-F4): commands/bus-formation.md's argument-hint and
   verb list gain `resume`; a new `resume` section documents it (decision
-  brief, `--brief`, refusal cases relayed verbatim like `apply`'s); the
-  `apply` bullet gains `--mode resume|fork|template`.
+  brief, `--brief`, refusal cases relayed verbatim like `apply`'s, and a
+  note that it opens a terminal with no dry-run, so run it only on request);
+  the `apply` bullet gains `--mode resume|fork|template`.
 - Local-row liveness (M3-F5): skills/codex/cbus-connect/SKILL.md's "local
   rows indicate listening" corrected to "local rows show the daemon
   connection, not confirmed native-session liveness," matching the relay-row

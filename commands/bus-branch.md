@@ -17,7 +17,7 @@ First connect this session with `cbus connect CHANNEL [ALIAS] --json` using
 hint on the parent, which must not be followed: connect natively instead.
 Then:
 
-1. Run `cbus branch <target> [channel]` — one shot: uses this session's native
+1. Run `cbus branch <target> [channel]`, one shot: uses this session's native
    connection (channel auto-derives from the git repo name if omitted),
    reserves the child's alias, forks the conversation with the canonical
    bootstrap prompt, and prints BOTH addresses (parent + reserved child). The

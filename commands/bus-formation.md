@@ -65,7 +65,9 @@ while the anchor is booting, and a formation that is already running refuses
 with directions to the live seat; other refusal cases (a gone transcript, a
 fork-born or unattributed anchor origin, a live-armed session id, or resuming
 from the wrong machine) are listed under formation resume in `cbus --help`,
-relayed verbatim, the same as an `apply` refusal.
+relayed verbatim, the same as an `apply` refusal. `resume` opens a terminal
+window and has no dry-run: run it only when the user asked for it, otherwise
+show the command and let them confirm.
 
 **bootstrap `<name> <alias>` [--brief TEXT]** — print ONE peer's first-turn prompt
 for the user to paste by hand. This is the path for a peer `apply` will not launch

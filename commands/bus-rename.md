@@ -22,11 +22,11 @@ below apply only to legacy join/Monitor peers.
 2. The old `cbus tail` is now stale (it follows the old inbox path). **Re-arm the
    listener**: stop the existing cbus Monitor for this session (TaskStop on the
    task whose description was `cbus:<channel>/<old-alias>`), then arm the Monitor
-   tool on `cbus tail <channel>/<new-alias>` — description
+   tool on `cbus tail <channel>/<new-alias>`, description
    `cbus:<channel>/<new-alias>`. It is not persistent: it expires at its
    `timeout_ms` (max 30 min) and must be re-armed; see
    `docs/claude-monitor-stopgap.md` for the opt-in workaround. ⚠️ `cbus tail`
-   goes to the **Monitor** tool, never Bash — it blocks forever in a shell (the
+   goes to the **Monitor** tool, never Bash: it blocks forever in a shell (the
    follower never exits).
 3. Report the new address in one line. If you want the Claude Code session title
    to match, note that you (the user) can set it with `/rename <new-alias>` — the
