@@ -1,7 +1,7 @@
 # claudebus cheat sheet
 
-For **v0.13.0**. Native Claude Code and Codex CLI receive works on macOS/Linux;
-desktop harness clients and OpenCode are outside this release.
+Native Claude Code and Codex CLI receive works on macOS/Linux; desktop harness
+clients and OpenCode are outside this release.
 
 Jump to: [Codex CLI](#codex-cli-quick-reference) · [Claude CLI](#claude-cli-join-a-channel) ·
 [Relay](#cross-machine-relay-backed-channels) · [Formations](#formations--saverelaunch-a-channels-peers) ·
@@ -100,7 +100,7 @@ cbus connect myrepo worker --json  # from inside the target session
 cbus list myrepo                   # one roster check; retain explicitly known roles
 ```
 
-v0.13.0 supports native Claude alongside Codex. `socket-ready` means an available endpoint, not receipt. No Monitor,
+Native Claude is supported since v0.13.0, alongside Codex. `socket-ready` means an available endpoint, not receipt. No Monitor,
 tail process, periodic model task or recurring roster check is needed. See
 [Claude connections](docs/claude.md) for supported sessions and recovery. Prefer
 an explicit alias when you want a stable address; local aliases can be auto-picked.
@@ -116,7 +116,9 @@ cbus spawn tab formations --role documenter  # fresh session, role prompt on fir
 ```
 
 Connect the parent first with `cbus connect CHANNEL [ALIAS] --json`; `/bus-branch`
-does this for you. The child's bootstrap connects its own native session.
+does this for you. On an unconnected parent, `branch` falls back to a legacy
+registration and prints a Monitor-arming hint; do not follow it, connect
+natively instead. The child's bootstrap connects its own native session.
 `branch` forks (the child resumes your transcript); `spawn` starts blank —
 use it when a peer shouldn't inherit your history. `--role <r>` reads
 `roles/<r>.md` and appends it to the child's first turn, defaulting
@@ -134,7 +136,7 @@ cbus list [channel]                      # peers + listen/off state
 cbus active [channel]                    # only peers currently listening
 cbus channels                            # channels with peer counts
 cbus whoami                              # my memberships + remote markers (exit 1 if none)
-cbus prune                               # sweep dead peers everywhere
+cbus prune                               # sweep dead legacy peers everywhere
 cbus connection status myrepo/worker --json      # saved readiness/receipt evidence
 cbus connection reconcile myrepo/worker --json   # on-demand evidence check, no resend
 cbus connection disconnect myrepo/worker         # stop delivery, retain inbox/history
@@ -153,7 +155,16 @@ Reply with `cbus send <from> "..."` using the exact `from=` address, including
 For Claude, receipt requires exact session/message identity in a persisted native
 input record; a busy-tool receipt may be a verified queued-command attachment.
 Presence updates the observed roster and known roles; announce membership changes
-to the user without sending acknowledgments solely for presence.
+to the user without sending acknowledgments solely for presence. For a native
+peer, `list`'s listen/off reflects the daemon holding the connection, not
+whether the CLI session is running; session presence is `consumer.state` in
+`cbus connection status --json`, and mail to a departed native session queues
+for its resume. `cbus prune` sweeps only legacy (join/tail) peers; a native
+alias stays reserved until `leave`/`unregister`, even after disconnect. On
+uncertain delivery, `cbus connection reconcile` checks evidence on demand;
+`cbus connection abandon CHANNEL/ALIAS --pending CLIENT_ID --reason TEXT`
+releases one named uncertain attempt so later mail can proceed, without
+resolving whether the original one arrived.
 
 ## Cross-machine (relay-backed) channels
 
@@ -290,7 +301,8 @@ arrange, which makes trying one cheap.
 ## Install & update
 
 ```sh
-curl -fsSL <raw get.sh> | CBUS_REPO=owner/repo sh   # first install (needs gh authed)
+curl -fsSL https://raw.githubusercontent.com/cumanzor/claudebus/main/get.sh | CBUS_REPO=cumanzor/claudebus sh   # first install (needs gh authed)
+# CBUS_INSTALL_DIR=/path overrides the ~/.local/bin default; CBUS_VERSION=vX.Y.Z installs a specific tag instead of latest
 cbus selfupdate                                     # update the binary in place
 cbus selfupdate --check                             # is there a newer release?
 cbus install-commands                               # (re)write the /bus-* skills
@@ -309,7 +321,10 @@ export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'upd
   Restart the daemon explicitly; upgrade the relay separately for native remote receive.
 - For a private test store, export an absolute `CBUS_DIR` before launching the
   harness, or consistently use an explicit wrapper. Changing one tool shell does
-  not change its parent session. Runtime formations live in `$CBUS_DIR/.formations`;
+  not change its parent session. Keep the path short: the daemon socket lives
+  at `$CBUS_DIR/.daemon/control.sock`, and macOS caps a unix socket path at 104
+  bytes, past which commands fail with `dial unix .../.daemon/control.sock:
+  connect: invalid argument`. Runtime formations live in `$CBUS_DIR/.formations`;
   committed starters resolve from the launch checkout's `formations/`.
 
 ## Under the hood (rarely needed)

@@ -4,12 +4,16 @@ The client is a single static Go binary — no runtime dependencies (python3 is 
 longer needed).
 
 **From a release.** Bootstrap once, then update in place. The `gh` CLI must be
-installed; the repo slug is passed in (it is not baked into the script):
+installed and authenticated (`gh auth login`); the repo slug is passed in (it
+is not baked into the script):
 
 ```sh
-curl -fsSL <raw get.sh> | CBUS_REPO=owner/repo sh   # downloads cbus + installs the skills
+curl -fsSL https://raw.githubusercontent.com/cumanzor/claudebus/main/get.sh | CBUS_REPO=cumanzor/claudebus sh
 cbus selfupdate                                     # thereafter, update in place
 ```
+
+`CBUS_INSTALL_DIR=/path` overrides the `~/.local/bin` default; `CBUS_VERSION=vX.Y.Z`
+installs that tag instead of latest.
 
 `get.sh` writes `cbus` to `~/.local/bin` and installs Claude commands, role prompts,
 and the Codex `cbus-connect` skill.
@@ -67,7 +71,7 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 ## Codex CLI permission and daemon setup
 
 Use `$cbus-connect` from an existing ordinary Codex CLI session. No special cbus
-launcher is required. In v0.13.0 native Claude and Codex receive support
+launcher is required. Since v0.13.0, native Claude and Codex receive support
 macOS/Linux. Codex release field checks used 0.155.1 on macOS and 0.154.0 on Linux;
 the app-server queue surface remains experimental. See the
 [Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
@@ -103,6 +107,11 @@ protected. See [Codex setup](codex.md).
 
 After updating a running installation, `cbus daemon restart` loads the new binary
 while retaining pending mail. The daemon is started on demand, not installed as
-a login service. A stale version/protocol is refused instead of silently reused.
+a login service; see [the daemon](usage.md#the-daemon) for what it is and where
+its log lives. A daemon whose version differs from the binary, even by a patch,
+refuses new connects and `daemon start` instead of silently being reused:
+"running daemon is incompatible (version=... protocol=...; this binary=...);
+run cbus daemon restart to load this binary; registrations and pending mail
+are retained." `send`/`list` do not go through that check.
 Native cross-machine subscriptions also require the matching relay's
 `/tail/durable-v1` endpoint; deploying that relay is a separate release action.

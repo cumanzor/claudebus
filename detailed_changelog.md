@@ -1,5 +1,101 @@
 # Changelog (detailed)
 
+## [2026-09-22 21:35:56 UTC] [Docs/M1] front-door docs corrected against source-traced findings
+
+[Attempt #1] On `docs/audit-m1`, branched from main (`fee2b2e`), in worktree
+`claudebus-docs`. 5 files edited (README.md, CHEATSHEET.md, docs/install.md,
+docs/usage.md, docs/how-it-works.md) plus one entry in each changelog. Part of
+a three-role formation (orchestrator, reviewer, documenter) running the
+post-v0.14.1 docs audit (epic tracked outside this repo); this is milestone 1
+of 5 (M2-M5 to follow as stacked branches).
+
+[Motivating problem]
+The daemon work shipped in v0.13.0-v0.14.1 (native Claude/Codex receive,
+layout/resume changes, the restart EOF fix) moved faster than the front-door
+docs. The reviewer read all five files in full against source at `fee2b2e`
+and the installed v0.14.1 binary (a scratch `CBUS_DIR`, no real-store writes,
+no connect/leave, the live daemon only probed with a read-only `daemon
+status`), and filed 16 findings plus a crossing note from the M3 pass. All 16
+were accepted as written, with per-finding rulings from the orchestrator
+where the fix needed a judgment call.
+
+[What changed]
+- Native listen/off semantics (M1-F1): `list`/`active`'s listen state
+  reflects the daemon holding the connection, not the CLI session; added
+  wherever the docs implied otherwise (README, CHEATSHEET, usage.md). Session
+  presence is `consumer.state` via `cbus connection status`; mail to a
+  departed native session queues for its resume.
+- Daemon version/protocol refusal (M1-F2): quoted the actual refusal text in
+  install.md, added `cbus daemon restart` to the README quickstart.
+- Version pins (M1-F3): "v0.13.0"/"in v0.13.0" changed to "since v0.13.0"
+  everywhere it marks when native receive shipped (README, CHEATSHEET x2,
+  install.md, usage.md, how-it-works.md); release-link URLs to the v0.13.0
+  tag left as-is, they are validation records, not currency claims.
+- Legacy Monitor is not persistent (M1-F4): drops the "(persistent)" label in
+  how-it-works.md, states the `timeout_ms` expiry/re-arm cost, points at
+  docs/claude-monitor-stopgap.md.
+- GIF captions (M1-F5): all three README recordings captioned pre-native
+  (v0.10-era); re-recording is a separate item, not done here.
+- Busy-session input handling (M1-F6): how-it-works.md's Caveats section
+  contradicted its own Native sessions section. Split into harness-specific
+  behavior: Claude between foreground tool calls, Codex waits its turn,
+  legacy Monitor on step completion.
+- Alias recycling and prune (M1-F7): scoped to legacy joins in usage.md and
+  CHEATSHEET.md; a native alias is held until `leave`/`unregister`, and
+  `cbus prune` skips native peers.
+- The daemon (M1-F8): new "## The daemon" section in usage.md (per-`CBUS_DIR`
+  daemon, socket/log paths, status/restart/stop, the refusal text), one
+  pointer line from install.md. Not duplicated into README/CHEATSHEET, which
+  already had daemon commands where relevant.
+- CBUS_DIR socket path length (M1-F9): one line in CHEATSHEET's private-store
+  note; macOS caps a unix socket path at 104 bytes, quoted the resulting
+  `connect: invalid argument` error.
+- `cbus connection abandon` (M1-F10): documented next to `reconcile` in
+  CHEATSHEET and how-it-works.md only, per the ruling (not all five files).
+- get.sh URL and CBUS_REPO (M1-F11, ruled): real raw URL
+  (`raw.githubusercontent.com/cumanzor/claudebus/main/get.sh`) and
+  `CBUS_REPO=cumanzor/claudebus` in install.md and CHEATSHEET, since the repo
+  is public; documented `CBUS_INSTALL_DIR`/`CBUS_VERSION`. README's "not
+  packaged for others" disclaimer kept as-is.
+- `gh` auth (M1-F12): install.md now says "installed and authenticated (`gh
+  auth login`)", matching CHEATSHEET's existing wording.
+- Source build line (M1-F13): README's quickstart "from source" build now
+  uses install.md's `-ldflags -X main.version=...` line instead of a bare
+  `go build`, which stamps `dev` and makes `selfupdate` refuse without
+  `--force`.
+- Model string pass-through (M1-F14, ruled): one sentence in usage.md only
+  (an alias like `opus` floats, a role's pinned `MODEL:` line does not);
+  roles/ and commands/ untouched, that is M3 and held for Carlos.
+- README docs table (M1-F15): added the three missing guides
+  (claude-monitor-stopgap.md, shared-instructions.md, claude-native-review.md)
+  and a `/save-formation` mention in the Formations bullet.
+- `meta.json` field list (M1-F16): corrected in how-it-works.md to note
+  `listenerStart`/`lastActivity`/`harness`/`connectionId`, and that a native
+  meta's `listenerPid` is the daemon's pid with `ownerPid` null, even though
+  the section is headed "legacy" (the store is shared).
+- M3 carry-back (crossing note, folded into this commit since M1 had not
+  committed yet): `cbus branch` on an unconnected parent falls back to a
+  legacy registration and prints a Monitor-arming hint; documented in
+  usage.md and CHEATSHEET that the hint should not be followed, connect
+  natively first instead.
+
+[Testing Notes]
+No code changed. Findings were verified by the reviewer via source trace at
+`fee2b2e` and command runs against the installed v0.14.1 binary in a removed
+scratch `CBUS_DIR`; a few are marked relayed-not-rerun in
+`M1-findings.md` (kept in the tracker, not this repo). Prose checked line by
+line against CLAUDE.md's rules (no em/en dashes, no banned vocabulary, no
+bold-lead-in bullet lists) on every added or changed line; untouched
+surrounding prose (which already uses em dashes throughout) was left as-is.
+
+[Possible Ripple Effects]
+Propagation chase (within the five M1 files) found no further stale copies
+of any fixed claim. Outside M1 scope, the same "v0.13.0 ships/in" wording
+recurs in relay.md, codex.md, claude.md and formations.md; left untouched,
+already queued as M2-F1 under the same "since v0.13.0" rule. `overview.md`'s
+and `docs/codex.md`'s links into `docs/architecture/` are M4/M2 concerns and
+untouched here.
+
 ## [2026-09-22 20:20:04 UTC] [Client/Daemon] restart survives the exiting daemon's EOF, and the v0.14.0 release
 
 [Attempt #1] `05feade` on `fix/daemon-restart-eof` off main (`7b18fb2`). 2 files.

@@ -6,8 +6,8 @@ Ordinary Claude and Codex CLI sessions run `cbus connect CHANNEL [ALIAS] --json`
 from inside the target session. The daemon receives mail and delivers through the
 exact session's native adapter: Claude's messaging socket or Codex's queue.
 iTerm2, tmux and manually opened terminals use the same transport. No Monitor,
-tail process or periodic model polling is needed. v0.13.0 ships both native CLI
-adapters on macOS and Linux. See [Claude](claude.md)
+tail process or periodic model polling is needed. Both native CLI adapters have
+shipped since v0.13.0, on macOS and Linux. See [Claude](claude.md)
 and [Codex](codex.md) for capability checks, recovery and receipt semantics.
 
 After joining, check `cbus list CHANNEL` once (retain `@host` for relays), report
@@ -22,7 +22,10 @@ when its CLI is ready.
 
 Use `cbus connection status CHANNEL/ALIAS --json` or
 `cbus connection reconcile CHANNEL/ALIAS --json` on demand; never blindly resend
-an uncertain submission. Disconnect retains the inbox. The daemon reconnects
+an uncertain submission. `cbus connection abandon CHANNEL/ALIAS --pending
+CLIENT_ID --reason TEXT` releases one named uncertain attempt so later mail
+can proceed, without resolving whether the original one arrived. Disconnect
+retains the inbox. The daemon reconnects
 native relay subscriptions through `/tail/durable-v1`; relay acknowledgment means
 durable local storage, not model receipt. See [relay.md](relay.md).
 
@@ -39,14 +42,17 @@ boundary](claude.md#migrating-an-existing-monitor-peer).
 Each legacy session **joins a channel** and **arms a listener**:
 
 - **Store** — `~/.claude-bus/<channel>/<alias>/` holds:
-  - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}` (plus `origin`/`model` birth-record fields; see [Birth records](formations.md#birth-records))
+  - `meta.json` — registry entry: `{alias, channel, sessionId, listenerPid, ownerPid, cwd, host, ts}`, among other fields (`listenerStart`, `lastActivity`, `harness`, and, for a native peer, `connectionId`; plus `origin`/`model` birth-record fields; see [Birth records](formations.md#birth-records)). The store is shared with native peers: a native meta's `listenerPid` is the daemon's pid and its `ownerPid` is null.
   - `inbox.jsonl` — append-only, one JSON message per line
 - **Join** — `cbus join <channel>` auto-picks the alias (`main` if free, then
   `fork-1`, `fork-2`, …), is idempotent for a session already in the channel, and
   **auto-prunes dead peers first** so alias numbers get recycled instead of
   growing forever.
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
-  **Monitor** tool (persistent). It runs the blocking follower in-process, so
+  **Monitor** tool. A Monitor is not persistent: it expires after `timeout_ms`
+  (default 5 minutes, max 30) and must be re-armed, at which point the peer
+  reads `off` until it is. See [the Monitor stopgap](claude-monitor-stopgap.md)
+  for the opt-in workaround. It runs the blocking follower in-process, so
   *its own pid* becomes the liveness signal, recorded together with its process
   start time (`listenerStart` in `meta.json`) — the identity witness the
   liveness check matches. The follower reframes each stored message into a
@@ -105,9 +111,11 @@ Each legacy session **joins a channel** and **arms a listener**:
   the channel only scopes addressing and cleanup.
 - **Delivery can wake an idle session autonomously.** Native input (or a legacy
   Monitor event) can re-invoke the receiving agent: a session sitting idle at the
-  prompt can process the message and reply with no human present. A busy session
-  defers input until its turn completes; hold/refuse policy still applies. A peer
-  message can trigger action while you're away, which is why incoming messages
+  prompt can process the message and reply with no human present. A busy Claude
+  session can take the input between its own foreground tool calls; a busy Codex
+  session waits for its turn; a legacy Monitor event arrives once the current
+  step completes. Hold/refuse policy still applies either way. A peer message
+  can trigger action while you're away, which is why incoming messages
   are treated as untrusted peer requests.
 - **No broadcast primitive.** `cbus send` targets one peer; message N times to reach N peers.
 - **No runtime dependencies.** The client is a single static Go binary (the bash-era
