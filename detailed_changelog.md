@@ -1,5 +1,133 @@
 # Changelog (detailed)
 
+## [2026-09-22 23:10:29 UTC] [Docs/M4c] architecture reference corrected against source-traced findings, part 3 of 3
+
+[Attempt #1] On `docs/audit-m4c`, branched from `docs/audit-m4b`, in
+worktree `claudebus-docs`. 1 file edited (docs/architecture/command-reference.md,
+arrange/scatter/focus plus sections 10-16) plus one entry in each changelog.
+Third of three stacked PRs; also touched 2 command files' worth of behavior
+description (§12 rewrite) without editing the command files themselves, since
+they already carry the current instructions and only this reference doc had
+drifted.
+
+[Motivating problem]
+Same shape as M4a/M4b: the layout verbs and the second half of the reference
+describe bash-era or pre-multi-harness behavior. 29 findings (C60-C88), split
+between reviewer-verified ([ver]) and subagent-traced, reviewer-spot-checked
+([sub]). Every [sub] claim was independently re-verified against source in
+this session before being written; none contradicted what was filed.
+
+[What changed, by section]
+- arrange/scatter/focus (C60-C65): new "Known limitation" paragraph stating
+  the verbs cannot currently place a native peer other than the caller (a
+  code defect in the process-owner walk, `ownerFromPid`/`PeerPane`,
+  `layout_unix.go`; not named by tracker id in the doc). Grammar fixed
+  (`:N` bare is refused, percentages only). Table rows corrected: sizes over
+  100% refuse before any mutating tmux call, not before every tmux call;
+  scatter's full argv, per-peer output lines and its zero-resolved-only exit
+  1; "not in tmux" quotes the real `no server running on ...` message; new
+  Windows and channel-resolution rows.
+- §10 formations (C66-C77): envelope citation fixed to
+  `formation.go:83-105`, field list gains `harness`/`codexBackend`. Save
+  documents managed-Claude-peer profile sourcing from the connection
+  binding's `ConfigHome` and the custom-config-root refusal (verbatim,
+  `formation_harness.go:91`). Apply's precondition, "nothing to launch" and
+  "NOT converged" strings are quoted verbatim
+  (`formation_apply.go:163,272`, `cmd/cbus/formation.go:244`); the
+  heading gains `[--mode resume|fork|template]`. Plan refusals list expands
+  from four items to seven: harness-identity mismatch and the
+  `harness=codex` launch refusal, duplicate-sid (verbatim), and the D14
+  live-session refusal upgraded from paraphrase to its exact quote; a new
+  paragraph documents the `onStale` skip/fail/template fallback and its
+  reason suffixes. Drift-diffing corrected to `git_head` only (the same
+  overclaim the M3 rider already fixed in `save-formation.md`), in both the
+  apply-output and `show` descriptions. Resume documents its Codex-anchor
+  refusal (same `formationHarnessRefusal` apply uses) and the
+  terminal-surface precheck that runs right before the launch-intent claim
+  (`OSAForker.Precheck`); the launch-intent marker's clear path is corrected
+  to legacy `Join()` only (`ClearLaunchIntentFor`, `store.go:304`, its one
+  call site), a native-resumed peer's marker just ages out on the 180s TTL;
+  the roster gains the `unchecked (harness=codex)` transcript state,
+  checked ahead of the machine-based unchecked state. Bootstrap's "consults
+  no live state" claim is corrected: it does read `ResolveSelf` once, for
+  the reply-to address, alongside the file-only identity refusals it does
+  make (harness/Codex, duplicate sid, origin checks). `show` documents its
+  `harness`/Codex-backend/extra-address rows and that the warnings trailer
+  (including a `no anchor` state) is omitted entirely when nothing warns.
+- §11 distribution (C78-C81): selfupdate's refresh corrected to include
+  `install-codex-skills` (without `--force`, unlike the other two) alongside
+  `install-commands --force`/`install-roles --force`; documents the
+  unconditional daemon-restart hint, `--force` reinstalling even when
+  already on latest, and the Windows-only displaced-image cleanup
+  (`cleanDisplaced`) plus the `.exe` asset suffix and why it is required.
+  install-commands/install-roles section gains the correct 8-file count and
+  a CCS `--path` note (`defaultCommandsDir` is not CCS-instance-aware).
+  Two verbs with no §11 entry get one: `install-codex-skills` and
+  `codex-permissions`. Update-check hint's skip list gains
+  `hook-compact`/`version` (both were missing); documents it polls
+  `gh release view --repo <slug> --json tagName` and that the hint itself
+  fires only when both the cached tag and the running binary look like
+  clean release versions (`newerRelease`), never on a dev/local build.
+- §12 slash commands (C82-C84): rewritten wholesale. The blanket "every
+  command ends with Do nothing else" claim is wrong (`bus-join.md` doesn't,
+  verified by reading all 8 files' tails); fixed to name the exception. All
+  8 files' `allowed-tools` frontmatter re-read from source: 7 of 8 now
+  connect natively with no `Monitor` tool at all; only `bus-rename.md` keeps
+  `Monitor`, for its legacy-peer-only fallback path, and its entry gains the
+  native-managed-alias-refused-outright paragraph it was missing. Every
+  per-command description rewritten from the actual current file content
+  (native `cbus connect ... --json` throughout, no join/arm/tail
+  instructions except in bus-rename's legacy branch). Two missing entries
+  added: `/bus-layout` and `/save-formation` (8 commands shipped, 6 had
+  entries).
+- §13-15 historical (C85-C86): §13's "RETIRED (de07cbe)" banner was wrong;
+  `git show --stat` on both commits confirms `de07cbe` removed only the two
+  installers, `bin/cbus` and `bin/cc-branch.sh` were deleted the next day in
+  `f78fad0` (P3 homogenization tranche). Fixed the §13 banner's attribution
+  and §14's "rolling back is a manual copy over ~/.local/bin/cbus" claim,
+  which has had nothing to copy since `f78fad0`; rollback is git-history
+  recovery, matching the preamble's existing correct framing. §15's two
+  present-tense references to the deleted bash client ("`bin/cbus` ...
+  still has it as a live verb", "Accepted as a `tab` synonym by the helper
+  only") moved to past tense with a §13/§14 pointer.
+- §16 quirk index (C87-C88): eight items were bash-era-only behavior with no
+  `(bash era)` tag, several now actively wrong for the Go client: two error
+  dialects (only one dialect remains), unknown-relay-host handling (was a
+  bash `$(...)`-substitution quirk, the Go client has no such boundary to
+  swallow an error inside), `auth status` "always exits 0" (now exits 1 on
+  a bad host, §8) and `${v: -4}` masking (the Go client's `MaskTail` does
+  the opposite, printing a short value in full), the 10-minute unarmed
+  grace (was mtime-keyed, now `lastActivity`-only since P3,
+  `unarmedGraceElapsed`, `liveness.go:158-169`), no-timeout curls (the Go
+  remote client is timeout-bounded throughout, `remote.go:27-32`),
+  claude-only owner detection (now claude/grok/opencode/codex,
+  `marker.go:102-107`), and a `die()` line citation moved from `main.go:110`
+  to `:136`. `CBUS_ALIAS` corrected: documented in `--help` and paired with
+  `CBUS_CHANNEL`, not undocumented. `CBUS_PYTHON` corrected: read by no code
+  path at all (only a comment names it), and already dropped from `--help`
+  itself, not still a vestige there. `cbus close`'s refusal list gains the
+  two cases it was missing: a daemon-managed peer (verbatim) and this
+  session itself (verbatim).
+- One fix outside the findings list, found during the mandatory dash sweep:
+  the new arrange/scatter/focus "Channel resolution" table row cited a
+  function (`layoutChannel`, `internal/client/layout.go`) that does not
+  exist there and skipped a real resolution step. The actual function lives
+  in `cmd/cbus/layout.go:61-85` and tries an `arrange`-hint resolution
+  (`FindPeerChannel`) between the explicit `--channel` and the
+  session's-own-registrations fallback; rewritten to match, all three
+  refusal strings quoted verbatim.
+
+[Testing Notes]
+Every `[sub]`-tagged claim re-verified against source before writing (no
+disagreements found this milestone). Full verification sweep run on the
+complete diff: em/en-dash scan (self-authored dashes fixed to
+comma/colon/semicolon, verbatim source-string dashes preserved byte for
+byte, including the two introduced by this milestone's own dash-fix pass
+that needed a second look), banned-vocabulary scan (clean), relative-link
+check (30 links, all resolve), stray audit-tracker-id scan (clean, one
+`.cbus-sha256` filename false positive). Applied-findings tracker written to
+`/tmp/cbus-docs-audit/M4c-applied.md` before reporting, per the D15 process.
+
 ## [2026-09-22 22:45:50 UTC] [Docs/M4b] second reviewer re-check on the M4b commit
 
 [Attempt #1] Same worktree (documenter had not yet moved to M4c despite the
