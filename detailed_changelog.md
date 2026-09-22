@@ -1,5 +1,57 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:42:21 UTC] [Docs/M4b] reviewer fixup on the M4b commit
+
+[Attempt #1] Same worktree (documenter had not yet moved to M4c). 1 file
+(command-reference.md), 2 rounds of edits: 7 findings, then a follow-up
+dash sweep on the new prose. Applied-findings tracker written to
+`/tmp/cbus-docs-audit/M4b-applied.md` per the new process.
+
+[What changed]
+- F1 (C38, not applied in M4b): remote tail gains the native-durable-consumer
+  refusal, quoted verbatim from the relay
+  (`relay/cmd/cbus-relay/durable_tail.go:44-46`: "alias has an active
+  different consumer; disconnect it before replacing this subscription"),
+  and its reverse case (a legacy tail attach against an alias a native
+  durable consumer already holds hits the same check).
+- F2 (C51, not applied in M4b): the Codex integration section now leads
+  with native `cbus connect` / `spawn --harness codex` as the primary path;
+  `codex`/`codex-bridge`/`codex-stop-hook` reframed as the compatibility
+  route for cases native does not cover. `hook-join`'s bullet gains its
+  skip condition (`CLAUDE_CODE_MESSAGING_SOCKET` set and harness is Claude,
+  `harness.go:88-93`).
+- F3: spawn's section intro and the `--role` bullet both said "joins and
+  arms"/"join/arm instructions"; the child's opening prompt is native
+  (`SpawnPrompt`/`SpawnPromptAliased`, `spawn.go:11-22`, the same template
+  `bootstrap` and `branch` use), corrected both spots.
+- F4: a cross-reference to §4 for the daemon-managed alias refusal pointed
+  at nothing, since the M4a fixup removed that content from §4 (it was
+  `ReserveAlias`'s, misattributed to `join`). Replaced with the literal
+  refusal string, quoted from `store.go:404`.
+- F5: correction, not a retraction of C40 (C40 was right: the relay's
+  `lastSeen` never renders `?`, always `time.Format(time.RFC3339Nano)`,
+  `main.go:1092`). The M4b text had written the opposite of what C40 said;
+  fixed the format-string example and the explanatory bullet to match C40.
+- F6: `auth status` said "Exit 0 regardless" right next to text that had
+  just said a bad host exits 1, self-contradicting; resolved in favor of
+  the correct behavior (exit 0 on a valid host, 1 on a bad one), and
+  qualified the "never prints full secrets" line against the
+  4-bytes-or-fewer full-print case documented nearby. The storage line's
+  "files under umask 077" corrected to the actual Go-side modes, directory
+  `0700` file `0600` (`cred.go:139-142`, verified).
+- F7: an unbalanced parenthesis from an earlier dash-fix (closed with a
+  bare period instead of `)` + period) restored; a stray "the doc's earlier
+  form omitted this suffix" edit-history sentence removed.
+- Follow-up: two more self-authored em dashes caught on the new F6/F3 prose
+  during the post-edit sweep and fixed; the verbatim `store.go:404` quote's
+  own dash (inside F4's fix) left untouched.
+
+[Testing Notes]
+F1 verified against `durable_tail.go`'s `attachTailWithGate`; F2 against
+`harness.go:88-93`'s `HookJoin` guard; F3 against `spawn.go:11-22`; F5
+against `main.go:1092`'s format call; F6 against `cred.go:130-144`'s
+`put`/`where`. Links and prose rules re-checked after editing.
+
 ## [2026-09-22 22:33:21 UTC] [Docs/M4b] architecture reference corrected against source-traced findings, part 2 of 3
 
 [Attempt #1] On `docs/audit-m4b`, branched from `docs/audit-m4a`, in

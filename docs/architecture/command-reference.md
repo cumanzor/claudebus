@@ -855,12 +855,11 @@ pushes it to the connected tail or holds it for replay on next connect.
   `tail` **and** by the daemon for a native relay connection
   (`daemon_relay.go:99-129`; `--help` calls it "set by native connect or a
   legacy tail"). Sessions never inherit another session's alias (markers are
-  per-session, by design: the impersonation fix. `$CBUS_ALIAS` is **not**
+  per-session, by design: the impersonation fix). `$CBUS_ALIAS` is **not**
   consulted remotely.
 - Failure → `cbus: relay send failed (<mode> <base>): <detail>`, where
   `<detail>` is either the transport error or `<http-status> <body>`
-  (`remote.go:100,105`); the doc's earlier "(<mode> <base>)"-only form
-  omitted this suffix. **Quirk:** the ack is
+  (`remote.go:100,105`). **Quirk:** the ack is
   written after the spool write, so a transport failure mid-response reports
   failure for a message that *is* queued (and possibly delivered) — a retry
   duplicates it; there is no idempotency key.
@@ -900,9 +899,15 @@ Prints the Monitor **ws arm spec** and claims this session's identity marker
 instantly under Bash — no process, no network call. Needs only the token.
 `--steal` is refused here: `--steal is local-only; a remote tail displaces on
 attach` (`main.go:244`). Alias collisions are not pre-checked because the
-relay keeps one active tail per peer, so a taken alias visibly displaces the
-other session's Monitor (last-writer-wins, enforced server-side) without
-needing a flag.
+relay keeps one active tail per peer, so a taken alias visibly displaces
+another **legacy** tail (last-writer-wins, enforced server-side) without
+needing a flag. A **native (durable) consumer already holding the alias is
+different**: the relay refuses instead of displacing, `alias has an active
+different consumer; disconnect it before replacing this subscription`
+(`relay/cmd/cbus-relay/durable_tail.go:44-46`, quoted verbatim), and the
+reverse also refuses: a legacy `tail` attach where a native durable
+consumer already holds the alias hits the same check and the same refusal
+(`old.durable != durable`).
 
 ### `cbus inbox <channel>/<alias>`
 
@@ -1008,7 +1013,7 @@ of a session.
 Thin render of the relay's `/peers`:
 
 ```
-listen|off     <ch>@<host>/<al>             queued=<n>   lastSeen=<ts|?>
+listen|off     <ch>@<host>/<al>             queued=<n>   lastSeen=<ts>
 ```
 
 - `connected:true` → `listen`. For a native relay connection, `connected`
@@ -1016,9 +1021,10 @@ listen|off     <ch>@<host>/<al>             queued=<n>   lastSeen=<ts|?>
   presence; cross-check `consumer.state` via `connection status` for the
   session itself. Channel filter (if given before the `@`) is
   applied client-side.
-- `lastSeen=?` renders only for a genuinely absent value; a peer with a
-  zero-value timestamp on the wire prints the Go zero time literally,
-  `0001-01-01T00:00:00Z`, not `?`.
+- `lastSeen` is never rendered as `?`: the Go client always formats it with
+  `time.Format(time.RFC3339Nano)` (`main.go:1092`), so a peer with no real
+  timestamp on the wire prints the Go zero-value literally,
+  `0001-01-01T00:00:00Z`, not a placeholder.
 - Empty: `no remote peers` / `no remote peers in <ch>@<host>`.
 - **Quirk (failure shape, bash era):** a transport/auth failure surfaced as
   curl's stderr **plus a python `JSONDecodeError` traceback**, exit **1**
@@ -1384,7 +1390,14 @@ dropped args, different reason underneath (point 1 above).
 
 ### Codex integration — `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`
 
-Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex mode:
+Codex CLI joins as a first-class peer (cbus-6ij.4). **The primary path is
+native**, the same as Claude: from inside an ordinary Codex CLI conversation,
+`cbus connect CHANNEL [ALIAS] --json` (§0), or launch one fresh with
+`cbus spawn ... --harness codex` (§9). The paths documented below,
+`cbus codex`, `codex-bridge` and `codex-stop-hook`, are the **compatibility
+route** for Codex modes the native path does not cover (an existing TUI you
+did not launch through `spawn`, or a plain `codex exec` worker). Two delivery
+paths within that compatibility route, by codex mode:
 
 - **`cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]`** — the
   interactive path. Stands up a per-peer `codex app-server` on a short unix socket
@@ -1411,7 +1424,11 @@ Codex CLI joins as a first-class peer (cbus-6ij.4). Two delivery paths, by codex
   read as attached rather than as a failure.
 - **`cbus hook-join`** — a harness-neutral **SessionStart** hook: auto-join
   `$CBUS_CHANNEL` (alias `$CBUS_ALIAS` or auto) under the stdin session id, silent,
-  exit 0. Serves any harness that fires a SessionStart-shaped hook.
+  exit 0. Serves any harness that fires a SessionStart-shaped hook. **Skips
+  entirely (no-op) when `CLAUDE_CODE_MESSAGING_SOCKET` is set and the
+  harness is Claude** (`harness.go:88-93`): a native Claude session joins on
+  its own first `connect`, so a legacy registration here would either block
+  that admission or open a second Monitor sink.
 - **`cbus codex-stop-hook [--wait D]`** — the **exec-worker fallback** delivery, for
   a plain `codex exec` worker where the app-server bridge is not in play but hooks
   fire. On a **Stop** event it long-polls this session's inbox(es) up to `D`
@@ -1458,8 +1475,9 @@ Credentials per host: `token` (relay bearer), `cf-id` + `cf-secret`
 the public front door; the ws `tail` leg never uses them).
 
 Storage: macOS Keychain generic passwords, service `cbus-relay-<host>`,
-account = field name; Linux: `${XDG_CONFIG_HOME:-~/.config}/cbus/<host>/<field>`
-files under `umask 077`. Secrets never enter any argv: Keychain writes via
+account = field name; Linux: `${XDG_CONFIG_HOME:-~/.config}/cbus/<host>/<field>`,
+directory `0700`, file `0600` (`cred.go:139-142`; bash used `umask 077` for
+the same effect). Secrets never enter any argv: Keychain writes via
 `security -i` on stdin, relay HTTP auth via the Go client's `net/http`
 headers, never a shelled-out `curl`.
 
@@ -1486,8 +1504,11 @@ headers, never a shelled-out `curl`.
 ### `cbus auth status [host]`
 
 Host defaults to `server`; bare `cbus auth` ≡ `cbus auth status`. Prints
-`site <host>:` then, per field, `set (…<last-4-chars>)` or `absent`. Never
-prints full secrets. **Exit 0 regardless** — probe scripts must parse text.
+`site <host>:` then, per field, `set (…<last-4-chars>)` or `absent`. Exits 0
+on a valid host, regardless of which fields are set or absent; a bad host
+exits 1 (below). A secret of 4 bytes or fewer prints in full, not masked
+(also below): "never prints full secrets" is the intent, not a guarantee
+for every stored value.
 
 **Host validation:** the Go client validates the host argument here too
 (`cbus auth status ../x` → `cbus: bad host "../x"`, rc 1); this is no
@@ -1633,8 +1654,9 @@ records the same rationale for a reimplementation.)
 
 ### `cbus spawn [window|tab|tmux|pane] [channel | <ch>@<host>] [--harness claude|codex] [--profile P] [--model M] [--name N] [--role R]`
 
-Opens a **fresh, blank-transcript** session — not a fork — that joins and arms
-the channel on its own. Go-native, no bash counterpart. Handler `runSpawn`
+Opens a **fresh, blank-transcript** session, not a fork, whose opening
+prompt tells it to `cbus connect` on its own (`SpawnPrompt`/`SpawnPromptAliased`,
+`spawn.go:11-22`, the same native template `bootstrap` and `branch` use). Go-native, no bash counterpart. Handler `runSpawn`
 (main.go:545); mechanics `client.Spawn` / `client.SpawnWithOptions`
 (spawn.go:39,50). Same terminal launch as
 `branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
@@ -1664,7 +1686,7 @@ blank transcript.
 - `--role R` reads a committed role prompt from `roles/<R>.md` — the spawn cwd's
   git repo first, then `$CBUS_DIR/roles` as the machine-global fallback (the
   `install-roles` destination, §11) — and appends its body to the child's first
-  turn **after** the join/arm instructions. It defaults `--name` to the role name.
+  turn **after** the native `cbus connect` instructions. It defaults `--name` to the role name.
   The role file's `MODEL:` line becomes the default **only for a Claude
   child** (`opts.Harness == "claude"`, `spawn.go:78-80`); a Codex spawn never
   inherits it, using `--model` or the Codex profile/default instead. An
@@ -1672,8 +1694,10 @@ blank transcript.
   alias is reserved, so an unknown
   role fails clean, listing every path it tried: `cbus: role "<R>" not found
   (tried <path>, <path>)`. Bad token → `cbus: bad role "<R>"`. (`branch` refuses
-  `--role`; see above.) A daemon-managed alias is refused the same as
-  `ReserveAlias` refuses it for `branch` (§4).
+  `--role`; see above.) A daemon-managed alias is refused: `"<ch>/<al>" is
+  daemon-managed — choose another alias or explicitly unregister this peer
+  before reserving its alias` (`store.go:404`, quoted verbatim; `ReserveAlias`
+  is the shared alias-claiming path for both `branch` and `spawn`).
 
 **Address handling:**
 
