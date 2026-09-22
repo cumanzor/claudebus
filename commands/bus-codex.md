@@ -16,8 +16,8 @@ without a special launcher or restart. For a fresh native peer, use
 `codex` manually in any terminal and connect there. The native adapter also
 supports relay channels; the wrapper below remains local-only.
 
-The user passed: "$ARGUMENTS" — optional channel (a local name; codex peers are
-local-only, there is no `@host` form here), optional `--alias <a>` (defaults to
+The user passed: "$ARGUMENTS" — optional channel (a local name; this compatibility
+wrapper is local-only, there is no `@host` form here), optional `--alias <a>` (defaults to
 `codex`; give it a real seat name like `advisor` when the user names a role), and
 optionally a **resume** form (below). Omitted channel: derive it the way
 `/bus-spawn` does — this session's own channel (the channel half of `cbus

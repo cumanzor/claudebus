@@ -19,8 +19,8 @@ see below):
 ## Native Claude and Codex subscriptions
 
 An ordinary Claude or Codex CLI session connects through its local daemon.
-Native Claude requires a build with the Claude adapter; v0.12.2 supports native
-Codex only. Configure `CBUS_SITE_<HOST>_URL` and `cbus auth` as described below,
+v0.13.0 ships both native adapters on macOS/Linux; use the matching relay release.
+Configure `CBUS_SITE_<HOST>_URL` and `cbus auth` as described below,
 then run inside each target session:
 
 ```sh

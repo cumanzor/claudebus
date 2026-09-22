@@ -2,9 +2,15 @@
 
 ## Connect an existing CLI session without restarting
 
-The experimental Codex-first daemon adapter uses the native durable queue in
-Codex CLI 0.154.0. For the same trusted-command experience as Claude Code, run
-this one-time setup from the installed cbus binary:
+cbus v0.13.0 ships native Codex CLI connections on macOS/Linux alongside
+[native Claude receive](claude.md). Codex's queue API remains experimental;
+release field checks used Codex 0.155.1 on macOS and 0.154.0 on Linux. See the
+[quick reference](../CHEATSHEET.md#codex-cli-quick-reference) for daily commands and
+the [release validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
+for tested versions and limits.
+
+For the same trusted-command experience as Claude Code, opt in once from the
+installed cbus binary:
 
 ```sh
 cbus install-codex-skills --with-permissions
@@ -24,6 +30,7 @@ and optional alias, or have the session run:
 
 ```sh
 cbus connect feature-updates advisor-main --json
+cbus list feature-updates
 cbus connection status feature-updates/advisor-main --json
 ```
 
@@ -34,6 +41,13 @@ it does not confirm the native session is online. Roles come from explicit
 assignments or an identified matching formation (`cbus formation show NAME`);
 saved roles are intended assignments. Live peer lists do not advertise roles,
 so absent role information is reported as unknown.
+
+The local roster's PID (`listenerPid` in JSON) belongs to the daemon, not the
+Codex process. `connection status --json` supplies the exact `threadId` and
+observed `consumer.pid`, `consumer.state`, `consumer.startToken` and
+`consumer.observedAt`. A retained PID or historical receipt alone is not current
+liveness. Inspect with `cbus connection status`; `cbus connect status` instead
+joins a channel literally named `status`.
 
 This starts one local cbus supervisor as needed. It registers the exact native
 `CODEX_THREAD_ID` with the caller's `HOME`, `CODEX_HOME`, working directory,
@@ -103,7 +117,25 @@ Permission errors, remote state, or a brand-new thread with no persisted rollout
 are separate failures and must not be presented as requiring a restart. No
 automatic restart or sandbox relaxation is performed.
 
+### Resume an ordinary native peer
+
+After a normal CLI exit, run `codex resume THREAD_ID` in your terminal with the
+same Codex home and profile; use the exact `threadId` from the saved connection.
+Inside that resumed conversation, run the original connect command again:
+
+```sh
+cbus connect feature-updates advisor-main --json
+```
+
+This retains the alias, inbox and delivery position. A previously interrupted
+turn still needs explicit user continuation as described above. The separate
+`cbus codex ... resume` wrapper below is not required for native connections.
+
 ### Sandbox approvals
+
+With trusted bus setup loaded, use direct `cbus ...` calls or its approved
+absolute path. If you have not opted in, use normal approval for the exact
+command; shell wrappers and compound scripts can require their own approval.
 
 The normal Codex shell sandbox can deny the daemon's Unix socket with
 `operation not permitted`, even when `$CBUS_DIR` is writable and the daemon is
@@ -218,9 +250,9 @@ There is no automatic resend action for an unknown outcome.
 
 State lives in `$CBUS_DIR/.daemon`; `daemon.log` holds supervisor diagnostics.
 The Unix socket is private to the user. This implementation supports macOS/Linux
-Codex CLI peers, with local or relay-backed bus channels. Harness adapters for
-Claude and OpenCode, managed rename, and automatic launch-at-login remain
-separate work.
+Codex CLI peers, with local or relay-backed bus channels. The daemon also ships
+[native Claude receive](claude.md). OpenCode, desktop harness clients, managed
+rename, and automatic launch-at-login remain separate work.
 Connections have independent operation lanes and a bounded shared worker pool.
 A slow sidecar does not hold the control/status lock or serialize all peers.
 Status separates desired connection/queue state, observed CLI consumer ownership,
@@ -274,12 +306,15 @@ notice outbox. Historical completions are baselined when that bridge attaches.
 
 `cbus spawn pane CHANNEL --harness codex --name worker` starts an ordinary Codex
 CLI whose opening prompt connects its own thread. Harness selection is separate
-from the existing terminal interface: `pane` prefers tmux when present, including
+from the existing terminal interface: `pane` prefers tmux when `$TMUX` is set, including
 tmux inside iTerm2; otherwise it splits the caller's iTerm2 session. `tmux` creates
 a window in the caller's own tmux session; `window` and `tab` use iTerm2. A stale
 known anchor fails instead of selecting an unrelated focused window.
 
-Use `--profile NAME` to select a Codex profile explicitly. The child gets the
+Use `--profile NAME` to select a Codex profile explicitly and `--model MODEL`
+to override its model. `--role reviewer` appends the role instructions and supplies
+an omitted name, but its Claude `MODEL:` line is not used for Codex: without
+`--model`, the Codex profile/default applies. The child gets the
 caller's Codex home, bus directory, PATH and cwd, with parent session identity and
 remote-executor variables removed. Arbitrary parent CLI flags are not inferred.
 From any other terminal, start `codex` normally and invoke `$cbus-connect` inside
@@ -315,9 +350,9 @@ compatibility ways depending on how codex is running:
   returns a block decision that codex injects as a continuation turn. Silence
   lets the stop through — a timeout is treated as a failure, never a signal.
 
-## Resuming a session onto the bus
+### Resuming through the compatibility wrapper
 
-Args pass through to codex, so an existing session joins the bus by resuming it:
+For this local-only wrapper, args pass through to codex, so an existing session joins the bus by resuming it:
 
 ```sh
 cbus codex --channel cbus-winport --alias advisor resume 01a06968-3620-7a63-a5ba-1b25c394ccbd
@@ -350,7 +385,7 @@ SIGHUP and tears the group down before exiting, so `pkill`, a closed window and 
 kill-session` are all safe (measured: zero survivors, lock released). `kill -9` is not, and
 nothing can make it so.
 
-## Launching one from inside a session
+### Launching the compatibility wrapper from another session
 
 `cbus codex` is an interactive TUI: it takes over the terminal it is called from and blocks
 until that TUI exits. A model driving a harness must not run it as a tool call, where the TUI

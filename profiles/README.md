@@ -1,8 +1,8 @@
 # Profiles
 
 A profile carries the part of a peer's guidance that depends on **what is running
-the seat**, not on what the seat does. It is appended after the role body at
-launch.
+the seat**, not on what the seat does. The orchestrator supplies this reference
+with the role briefing; cbus does not automatically inject files from this directory.
 
 ## Why this is a separate file from `roles/`
 
@@ -21,11 +21,11 @@ So the split is: **mandate in the role file, tuning in the profile.**
 
 ## Cross-harness is the sharp case
 
-The role files state the listener doctrines as universal. They are not. A codex
-peer's listener is armed by the bridge (`internal/client/codexbridge.go`), it has
-no Monitor tool, and it must not run `cbus tail`. Handing a codex peer a role
-file alone tells it to do something it cannot do, in the first two doctrines it
-reads. `codex.md` exists to correct that at the point of delivery.
+Current role files lead with native `cbus connect`. Claude and Codex use different
+native adapters; neither needs a Monitor or `cbus tail`. Older copied roles can
+still carry obsolete Monitor instructions. [codex.md](codex.md) explains the
+Codex queue, permissions and lifecycle, and separates the compatibility bridge
+from the ordinary CLI path.
 
 ## Resolution
 
