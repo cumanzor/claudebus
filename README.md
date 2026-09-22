@@ -22,7 +22,8 @@ loop entirely over the bus:
 ![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict (v0.9-era recording, before native connect)](docs/demo-fleet.gif)
 
 Claude Code and Codex CLI can connect their existing conversations through a
-local daemon, shipped since **v0.13.0**. Claude uses its per-session native messaging socket;
+local daemon: native Codex since **v0.12.0**, native Claude since **v0.13.0**.
+Claude uses its per-session native messaging socket;
 Codex uses its experimental native queue API. Release field checks used Claude
 2.1.278 and Codex 0.155.1 on macOS / 0.154.0 on Linux; see the
 [release and validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0).

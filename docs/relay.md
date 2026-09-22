@@ -19,8 +19,10 @@ see below):
 ## Native Claude and Codex subscriptions
 
 An ordinary Claude or Codex CLI session connects through its local daemon.
-Both native adapters have shipped since v0.13.0, on macOS/Linux; use a relay
-from v0.13.0 or later, since that is what serves `/tail/durable-v1`.
+Native Codex has shipped since v0.12.0 and native Claude since v0.13.0, on
+macOS/Linux; use a relay from v0.12.0 or later, the first release that
+serves `/tail/durable-v1` (the relay code is unchanged from v0.12.0 through
+v0.14.1).
 Configure `CBUS_SITE_<HOST>_URL` and `cbus auth` as described below,
 then run inside each target session:
 
