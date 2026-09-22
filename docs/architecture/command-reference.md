@@ -241,7 +241,7 @@ switch to a `run*` function).
 > `--version`/`version` are not in the bash dispatch above. They route through
 > `cmd/cbus/main.go`'s switch to `runSpawn` / `runFormation` / `runClose` /
 > `runSelfupdate` / `runInstallCommands` / `runInstallRoles` and their own
-> `run*` functions (§7, §9–§11). A
+> `run*` functions (§7, §9-§11). A
 > **hidden** `__update-check` subcommand backs the opt-in update hint (§11);
 > there is **no** public `update-check` verb — typing one hits the
 > `unknown command` default.
@@ -589,7 +589,7 @@ detection window after a silent drop are marked delivered into the void and
 are **not** replayed; and a freshly-departed peer that never received mail is
 *absent* from `cbus list @host` output rather than shown `off`. Local file-bus
 tails are unaffected by all of this. This applies to the legacy ws `tail`
-only: nothing automates its re-arm — recovery is model-driven; if the
+only: nothing automates its re-arm, recovery is model-driven; if the
 instruction fell out of context, the tail stays down until someone notices.
 A native relay subscription (`connect CHANNEL@HOST`) is daemon-owned and
 reconnects automatically; it needs no model-driven re-arm.
@@ -632,10 +632,12 @@ for hooks and scripted multi-session drivers.
      reclaim "<ch>/<alias>" from a dead peer: <err>` instead of silently
      proceeding.
 5. Truncate/create a fresh `inbox.jsonl`; write `meta.json`
-   (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host, ts}`,
-   plus `listenerStart`, `lastActivity`, `harness`, and, for a launcher-born
-   peer, `origin`/`model`; `connectionId` stays absent until a native
-   `connect` claims the alias).
+   (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host,
+   ts}`, plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
+   launcher's birth record supplied it, with `model`; `profile` and
+   `harness` are stamped too (`store.go:295`). `listenerStart` arrives only
+   at arm, and `connectionId` stays absent until a native `connect` claims
+   the alias.
 6. Broadcast `join` presence (`joined <ch> as <alias>`) to all non-dead peers.
 
 **Output (3 lines):**

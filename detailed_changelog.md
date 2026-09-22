@@ -1,5 +1,24 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:25:10 UTC] [Docs/M4a] second reviewer re-check on the M4a commit
+
+[Attempt #1] Separate worktree off `docs/audit-m4a`. 1 file
+(command-reference.md), 8 insertions(+), 6 deletions(-).
+
+[What changed]
+- R1: `join` step 5's meta field list was still a guess; the reviewer
+  measured a real scratch join and gave the actual write: `lastActivity`,
+  `origin` (`joined`, or `fresh`/`fork` from a launcher birth record, with
+  `model`), `profile` and `harness` are all stamped at join
+  (`store.go:295`, confirmed against the literal struct literal).
+  `listenerStart` arrives only at arm; `connectionId` only at a native
+  `connect`.
+- R2: one more em dash on an already-changed line (":587 before the line
+  shift, now :592") replaced with a comma.
+
+[Testing Notes]
+R1 re-verified directly against `store.go`'s `peerMeta{}` literal in `Join`.
+
 ## [2026-09-22 22:21:44 UTC] [Docs/M4a] reviewer fixup on the M4a commit
 
 [Attempt #1] Separate worktree off `docs/audit-m4a` (documenter was mid-M4b),
