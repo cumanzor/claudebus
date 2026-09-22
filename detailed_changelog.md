@@ -1,5 +1,127 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:33:21 UTC] [Docs/M4b] architecture reference corrected against source-traced findings, part 2 of 3
+
+[Attempt #1] On `docs/audit-m4b`, branched from `docs/audit-m4a`, in
+worktree `claudebus-docs`. 1 file edited (docs/architecture/command-reference.md,
+sections 5-9) plus one entry in each changelog. Second of three stacked PRs.
+
+[Motivating problem]
+Same shape as M4a: §5-§9 describe the bash-era command surface with the
+native mechanics mostly missing. 30 findings (C30-C59), split between
+reviewer-verified ([ver]) and subagent-traced, reviewer-spot-checked
+([sub]). Every [sub] claim was independently re-verified against source in
+this session before being written (call sites, exact struct literals and
+error strings quoted below); none contradicted what was filed.
+
+[What changed, by section]
+- §5 send/tail (C30-C38): send's parsing note gains `--session-id` and the
+  `--` terminator (`splitVerbArgs`, confirmed no bash `${1:?}` guard
+  remains); the listener gate gains three native rows (connected accepted
+  even post-exit, disconnected refused at `-1`, daemon down refused); the
+  from-chain gains the `CBUS_CHANNEL`/`CBUS_ALIAS` pairing and the
+  sessionless warning; wire format corrected to `encoding/json.Marshal` and
+  the 1 MiB cap; the mermaid diagram's "best-effort: re-arm skips it" note
+  fixed to match the already-correct prose three lines above it. Remote
+  send: dropped a fragile "no doc besides this one mentions --force" claim;
+  the marker is now written by the daemon too (`daemon_relay.go:99-129`),
+  not remote tail alone; the failure string's real suffix (`remote.go:100,105`)
+  replaces the truncated one. `tail`: daemon-managed refusal quoted verbatim
+  from `follow.go:72`; the dormancy marker text (`identity_follow.go:157`);
+  remote `--steal`'s exact refusal (`main.go:244`).
+- §6 presence (C39-C43): `list`'s liveness bullet and the `--json` schema
+  note gain native semantics (daemon-held listen, `listenerPid: -1` on
+  disconnect, distinct from omission); remote `list` gains the
+  `connected`-is-daemon-not-session caveat and the zero-time `lastSeen`
+  rendering; `channels`' "extra args silently dropped" duplicate (already
+  fixed once in §1) corrected here too, chasing the propagation. The
+  presence table gains three native rows (join/departed/leave text quoted
+  verbatim from `daemon_presence.go`) and a Codex compaction note; the
+  relay-presence paragraph corrected: native connections already publish
+  join/departed/leave over the durable ws (`durable_presence.go`'s
+  allowlist), only rename and compaction stay local, and legacy Phase 2 no
+  longer applies to native connections.
+- §7 lifecycle (C44-C50): `leave` documents that explicit leave removes a
+  daemon-managed registration too (`leaveSession(ch, false)`), pointing at
+  `connection disconnect` as the inbox-keeping path; the "no spool GC"
+  overclaim corrected to name `/prune`. `unregister` documents it also
+  detaches a native connection, and that a still-running legacy tail goes
+  dormant now rather than polling forever (`identity_follow.go:153`,
+  quoted). `close` gains its daemon-managed refusal, quoted verbatim from
+  `close_unix.go:42-44`. `prune` corrected end to end: grace is
+  `lastActivity`, a managed peer is never pruned (`liveness.go:144-149`),
+  a second positional is refused not silently accepted, a remote form
+  exists and is documented, and join's internal auto-prune output is
+  confirmed discarded, not echoed (`client.Join` never captures
+  `PruneChannel`'s return). `hook-exit`'s mermaid diagram and behavior list
+  rewritten off "subshell running cmd_leave" to the actual in-process
+  `leaveSession("", true)` call, including that a daemon-managed inbox
+  survives a graceful exit. `hook-compact` gains a note that native Claude
+  still goes through this hook (the daemon's own compaction observer
+  explicitly defers to it, `daemon_compaction.go:29`) while native Codex
+  uses a separate, daemon-driven mechanism instead.
+- §8 auth (C52-C53): curl corrected to `net/http` (same fact as O6/C12,
+  chased here too); host validation on `auth status` corrected (it IS
+  validated, `main.go:1130`); the short-secret masking claim corrected to
+  its literal opposite: `MaskTail` (`cred.go:160-165`) returns a value of 4
+  bytes or fewer **in full**, unmasked, rather than "masking to nothing."
+  Token rotation gains a native-connection note: the daemon re-reads the
+  stored credential fresh on every dial (`relayToken`, `daemon_relay.go:215-232`),
+  so a native connection needs no re-arm step after re-seeding.
+- §9 forking (C54-C58): handler/mechanics line references updated to
+  current source (`runBranch` main.go:505, `Branch` harness.go:210,
+  `runSpawn` main.go:545, `Spawn`/`SpawnWithOptions` spawn.go:39,50).
+  `branch` documents that a managed parent skips the legacy `Join` step
+  entirely (`harness.go:236-241`) and that the child is always told to
+  `cbus connect`, not join+arm. `spawn`'s header and flags section gain the
+  previously-undocumented `--harness`/`--profile` (including the harness
+  auto-inference from `CODEX_THREAD_ID` and the profile-requires-codex
+  refusal, both quoted from `spawn.go`); the role `MODEL:` default is
+  corrected to apply only when the child harness is Claude
+  (`spawn.go:78-80`); the daemon-managed alias refusal is noted; the
+  Output block's stale text corrected to the real string at `main.go:589`
+  ("...alias reserved...; it connects from its opening turn"). The launcher
+  environment paragraph expanded from "inherits PATH" to the actual pinned
+  set (`PATH`, absolute `HOME`, absolute `CBUS_DIR`, `CLAUDE_CONFIG_DIR`)
+  and the actual unset list (`claudeLaunchUnset`, `harness.go:381-386`),
+  naming `CLAUDE_CODE_MESSAGING_SOCKET`/`TOKEN` explicitly as the mechanism
+  behind "never copy a parent token." `bootstrap`'s prompt description
+  rewritten off the legacy join+persistent-Monitor sequence to the actual
+  native `cbus connect ... --json` prompt (`claude_native_prompt.go:5-18`,
+  the same template this documenter role itself runs under).
+- C59 (no native preface for §5-§9 overall): satisfied by the cumulative
+  per-verb native notes above rather than a separate summary section, to
+  avoid restating what each verb's own entry already says.
+
+[Out of scope, confirmed]
+The `arrange`/`scatter`/`focus` layout content that sits lexically inside
+the `## 9.` heading (Go source has no separate `## 10` boundary for it) was
+left untouched: its findings (C60-C71) are explicitly M4c's scope per the
+reviewer's own PR-split note, not §9's.
+
+[Testing Notes]
+Every [sub] claim re-verified against source before writing: `splitVerbArgs`/
+send.go/message.go for C30-C33; `follow.go`/`identity_follow.go` for C37-C38;
+`daemon_relay.go`/`main.go` for C39-C40 and the token-rotation note;
+`daemon_presence.go`/`durable_presence.go` for C42-C43; `store.go` (Leave,
+Unregister) and `close_unix.go`/`liveness.go` for C44-C48; `harness.go`
+(HookExit) and `daemon_compaction.go` for C49-C50; `cred.go` for C52;
+`harness.go` (Branch, forkReplicatedEnv) and `spawn.go` for C55-C57;
+`bootstrap_prompt.go`/`claude_native_prompt.go` for C58. Every added/changed
+line checked against the prose rules; the em-dash sweep this time explicitly
+distinguished self-authored dashes (rewritten) from dashes that are literal
+characters inside a quoted binary string (left exactly as the binary prints
+them: `follow.go:72`, `identity_follow.go:153`, `close_unix.go:42-44`,
+`close_unix.go:46`). One stray internal finding id (`M1-F1`) caught in the
+send gate table and dropped before commit, per the M4a fixup's F5 lesson.
+Links re-checked after editing.
+
+[Possible Ripple Effects]
+None found inside command-reference.md on a second pass. The stray
+`M1-F4` reference this milestone inherited from the pre-fixup base of
+`docs/audit-m4a` resolves on its own once this branch is rebased onto the
+fixed-up `docs/audit-m4a`, not edited here to avoid fighting that rebase.
+
 ## [2026-09-22 22:25:10 UTC] [Docs/M4a] second reviewer re-check on the M4a commit
 
 [Attempt #1] Separate worktree off `docs/audit-m4a`. 1 file
