@@ -904,10 +904,11 @@ another **legacy** tail (last-writer-wins, enforced server-side) without
 needing a flag. A **native (durable) consumer already holding the alias is
 different**: the relay refuses instead of displacing, `alias has an active
 different consumer; disconnect it before replacing this subscription`
-(`relay/cmd/cbus-relay/durable_tail.go:44-46`, quoted verbatim), and the
-reverse also refuses: a legacy `tail` attach where a native durable
-consumer already holds the alias hits the same check and the same refusal
-(`old.durable != durable`).
+(`relay/cmd/cbus-relay/durable_tail.go:44-46`, quoted verbatim). The check
+runs both ways: a native connect while a live legacy tail holds the alias
+gets the same 409, as does a second native consumer with a different
+consumer id. A legacy tail replacing another legacy tail still takes over
+(last writer wins).
 
 ### `cbus inbox <channel>/<alias>`
 

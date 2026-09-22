@@ -1,5 +1,27 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:45:50 UTC] [Docs/M4b] second reviewer re-check on the M4b commit
+
+[Attempt #1] Same worktree (documenter had not yet moved to M4c despite the
+dispatch assuming otherwise; applied directly, no separate worktree needed).
+1 file (command-reference.md), 5 insertions(+), 4 deletions(-).
+
+[What changed]
+- R1: F1's reverse-case sentence restated the same direction ("native
+  refuses a legacy attach" said two ways) rather than naming the two
+  genuinely distinct remaining cases. Replaced with the orchestrator's
+  exact text: the check runs both ways (native-vs-legacy either direction,
+  and a second native consumer with a different id, both refuse with the
+  same 409), while legacy-vs-legacy still takes over, last writer wins.
+  `/tmp/cbus-docs-audit/M4b-applied.md`'s F1 entry updated to match, and its
+  F2-F6 line citations bumped by the one line this edit added before them.
+
+[Testing Notes]
+Re-verified against `durable_tail.go:43-44` (`attachTailWithGate`) and
+`:76-80` (`upgradeOwnedTail`): both gate on the identical
+`old.durable != durable || (durable && old.consumer != consumer)`
+condition, confirming the bidirectional claim.
+
 ## [2026-09-22 22:42:21 UTC] [Docs/M4b] reviewer fixup on the M4b commit
 
 [Attempt #1] Same worktree (documenter had not yet moved to M4c). 1 file
