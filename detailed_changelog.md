@@ -1,5 +1,206 @@
 # Changelog (detailed)
 
+## [2026-09-22 22:09:10 UTC] [Docs/M4a] architecture reference corrected against source-traced findings, part 1 of 3
+
+[Attempt #1] On `docs/audit-m4a`, branched from `docs/audit-m3`, in worktree
+`claudebus-docs`. 2 files edited (docs/architecture/overview.md,
+docs/architecture/command-reference.md) plus one entry in each changelog.
+First of three stacked PRs on this milestone (M4a/b/c), per the reviewer's
+own PR-split recommendation given the finding volume (88 findings across a
+2318-line reference).
+
+[Motivating problem]
+overview.md and the first third of command-reference.md (preamble + §1-§4)
+are largely a 2026-07 bash-era audit with the Go port's deltas bolted on
+inconsistently: some rows were updated at cutover, most were not. 6 findings
+filed against overview.md (O2-O6 plus a ruling request on O1); 29 against
+command-reference.md's preamble/§1-§4 (C1-C29), roughly evenly split between
+findings the reviewer re-ran source for directly ([ver]) and ones a
+read-only subagent traced first, which the reviewer then spot-checked
+([sub]). Per the dispatch, every [sub] finding was independently
+re-verified against source in this session before being written; all
+confirmed, none contradicted (evidence below).
+
+[Ruling applied: D11]
+overview.md's own finding (O1, and O7-O13, filed separately) argued the
+whole document needs a rewrite to describe the native daemon architecture,
+not just line fixes. The ruling (D11, option a) scoped this milestone to a
+proper historical banner plus the six factual-error findings (O2-O6); O1 and
+O7-O13 move to M6 (a future current-architecture doc), listed in the
+findings file's "M6 coverage list."
+
+[What changed: overview.md]
+- Banner: replaced the informal "Historical scope" callout with a dated
+  banner matching the M5 banner convention, naming how-it-works.md,
+  claude.md and codex.md as the current references (previously only
+  how-it-works.md was named).
+- O2: "kept in bin/ until P3" / "remains at bin/cbus... until P3" (three
+  locations: the banner prose, the component map's Client CLI row, and the
+  STATUS-style callout) corrected to "deleted at P3 homogenization,
+  recoverable from git history": bin/ does not exist (verified: `ls bin/`
+  fails; P3 tranche 2/3 are done per compat-deletion-plan.md).
+- O3: the Follower row's `TRANSITION(P3T2)` argv-fallback clause dropped;
+  no such marker remains in the tree (grep confirmed empty) and the code
+  path it described is gone (liveness.go).
+- O4: the relay daemon row, the ASCII topology diagram, and the CF Access
+  auth table all gain `/tail/durable-v1` and `/prune` (relay
+  main.go:548-553; `/prune` confirmed `POST`-only with bearer auth,
+  main.go:476-484). The topology diagram's own `bin/cbus` label (the
+  client, not an endpoint) corrected to `cbus` while in there.
+- O5: "Five slash commands" corrected to eight, naming `/bus-codex`,
+  `/bus-layout` and `/save-formation` (confirmed: `ls commands/*.md`).
+- O6: "curl auth rides a config on stdin (`curl -K -`)" corrected: the Go
+  client uses `net/http`, never a shelled-out `curl`; `security -i` for
+  Keychain writes is unchanged and correct.
+
+[What changed: command-reference.md, preamble + TOC]
+- C1: preamble retitled "Codex CLI v1 additions" to "Native connections
+  (Claude + Codex)"; Claude-specific behavior added to the command table
+  (messaging socket vs. queue store, Windows refusal, relay-qualified
+  targets for status/reconcile/disconnect/abandon, verified against
+  connection.go's `connectionArgs`/`abandonArgs` usage strings and the
+  `disconnect` case's `asJSON` handling).
+- C2: Codex version pin corrected to 0.155.1 macOS / 0.154.0 Linux, matching
+  codex.md (already fixed in M2).
+- C5: the "historical" vs. "complete behavior reference" self-contradiction
+  (two adjacent paragraphs) reconciled: the reference documents current Go
+  behavior throughout, with `bin/cbus:N` as source anchors, not a claim that
+  the document itself is historical. TOC gains a "0." entry for the new
+  native-connections section.
+- C6: two more "kept in-repo... until P3" instances (the anchor-convention
+  paragraph and the STATUS callout) corrected to "deleted at P3
+  homogenization," matching what the STATUS callout's own later paragraph
+  already said (an internal contradiction, not just a stale fact).
+
+[What changed: command-reference.md, §1 Invocation basics]
+- C7: "Two error dialects" rewritten as "One error dialect (Go); the
+  bash-era row below is historical." Verified via `cmd/cbus/main.go:136`
+  (`die()`) and its "usage: cbus ..." call sites throughout the file: no
+  `${1:?}`-style bash guard exists in the Go client.
+- C8: exit code table's "auth status always [0]" corrected (host is
+  validated; a bad host dies rc 1); `hook-join` added as unconditional 0
+  (main.go:312-315); `codex-stop-hook` noted as 0 except a Windows phase-1
+  refusal (main.go:322-341, confirmed via its own doc comment).
+- C10: exit code table gains `connection status <target>` with no match
+  dying rc 1 (connection.go:123-125), correcting "whoami is the only
+  read-only command with a nonzero empty exit."
+- C11: env var table retitled from "(complete)" to "(not exhaustive)."
+  Added, all [ver]-confirmed by reading the cited call sites: `CBUS_ALIAS`
+  now correctly cites `send.go:67-72` and documents its pairing with
+  `CBUS_CHANNEL`; new rows for `CBUS_CHANNEL`, `CBUS_CODEX_RENDEZVOUS`,
+  `CBUS_REPO` (repo.go:20), `CBUS_UPDATE_CHECK` (update_check.go:42),
+  `CLAUDE_CODE_MESSAGING_SOCKET`/`TOKEN`; a note naming the still-untabulated
+  terminal/session vars rather than silently omitting them.
+- C12: "No other command reads stdin" corrected: `hook-join` (main.go:313)
+  and `codex-stop-hook` (main.go:337) both do; the internal curl row
+  corrected to `net/http` (same fact as O6).
+- C13: dispatch table reframed as a bash-handler-name map, not a claim that
+  `cmd_*` exists in the Go binary; `channels` and `whoami` rows corrected
+  from "extra args silently dropped" to "refused, usage error, rc 1"
+  (verified: `noExtra` calls at main.go, channels and whoami handlers); the
+  Go-native verb list gains `connect`, `connection`, `daemon`, `codex`,
+  `codex-bridge`, `hook-join`, `codex-stop-hook`, `install-codex-skills`,
+  `codex-permissions`.
+
+[What changed: command-reference.md, §2 Address grammar]
+- C14: sessionless section rewritten to match `cmd/cbus/sessionless.go`
+  exactly: the trigger is `client.SessionID()` (the whole identity chain),
+  not just `CLAUDE_CODE_SESSION_ID`; the warning text and its two-branch
+  tail (`CBUS_CHANNEL`/`CBUS_ALIAS` present vs. "may be unroutable") quoted
+  verbatim; `codex-bridge` added to the caller list (confirmed:
+  `runCodexBridge` calls `warnIfSessionless` at main.go:408).
+- C15: "empty parts skip validation" corrected: host is always validated in
+  `ParseRemote` (`addr.go:62`, `!core.ValidName(host)` with no
+  empty-string guard); only channel and alias skip validation when empty.
+- C16: the remote-iff-`@` verb list gains `prune` (`IsRemote` check at
+  main.go:993) and `connect`; notes `close` has no remote form at all.
+- C17: `ValidStoreName`'s documented formula gains the trailing-dot
+  conjunct it was missing (`internal/core/name.go:83-86`, confirmed against
+  source, with the Windows-strips-trailing-dot rationale from
+  `name_test.go`'s comment); the "no `--` terminator anywhere in the CLI"
+  claim, which self-contradicted the preamble's own delta 5, softened to
+  "not uniformly" and pointed at the one confirmed parser that has it
+  (`connect`, connection.go:83-85).
+- C18: "unknown host is not fatal" reframed as bash-era historical; the Go
+  client's actual behavior (hard error, confirmed via `endpoint.go:51-61`'s
+  own doc comment citing "the port promotes it to a hard error") stated
+  first.
+- C19: "no timeouts" reframed as bash-era historical; the Go client's 4s/20s
+  timeout (remote.go:23-29, already a documented STATUS delta) stated
+  first. "`tail @host` makes no network call" corrected: it runs the
+  bounded `/healthz` probe through `ResolveFrontDoor` (confirmed:
+  `runTailRemote` calls it at main.go:270) before printing the arm spec.
+
+[What changed: command-reference.md, §3 Monitor-arming contract]
+- C20: "ends in exec of a Python follower" corrected to the in-process Go
+  loop (confirmed: no `exec.Command` in follow.go; `follow`/`openFollow`
+  are plain functions); noted this whole section is legacy-only, `connect`
+  needs no Monitor.
+- C21: bootstrap prompt row corrected from "Monitor warning" to "native
+  now, no Monitor at all" (confirmed: `bootstrap_prompt.go`'s
+  `bootstrapNativePrompt` is entirely a `cbus connect` prompt); "all three
+  slash commands" corrected to "eight commands, only /bus-rename still
+  carries this warning" (established in M3).
+- C22: "arm the Monitor persistent" convention corrected: Claude Code
+  2.1.280's Monitor has no `persistent` option (M1-F4 mechanism, cited
+  here).
+- C23: added the daemon-managed refusal for local `tail`
+  (`"<ch>/<al> is daemon-managed — use cbus connect; tail cannot replace
+  its delivery sink, even with --steal"`, follow.go:72, quoted verbatim
+  from source).
+- C25: "nothing automates the re-arm" scoped to the legacy ws tail only;
+  native relay subscriptions (`connect CHANNEL@HOST`) are daemon-owned and
+  reconnect automatically.
+
+[What changed: command-reference.md, §4 Joining & identity]
+- C26: `cbus join` section gains a lead sentence naming it the legacy path
+  and its daemon-managed refusal (`store.go:264`, quoted verbatim).
+- C24: the 10-minute grace window corrected from "keyed on meta.json mtime"
+  to "keyed on lastActivity" (liveness.go:158-161's own comment: "the
+  bash-era mtime fallback is deleted"), and notes a daemon-managed peer is
+  never judged dead by this path (`PeerDead`, liveness.go:144-149).
+- C27: alias-claim step gains the per-peer lifecycle lock (`lockPeer`,
+  store.go:393), the daemon-managed-slot refusal, and the dead-holder
+  reclaim failure message (all quoted verbatim from store.go:393-410).
+- C28: rename section gains the native-peer refusal (store.go:585) and the
+  managed-target refusal (store.go:597), both quoted verbatim. The
+  self-contradiction over whether the old follower keeps delivering via its
+  open fd or detects the rename and stops resolved in favor of "it stops"
+  (`cbus-0r8`'s displacement mechanism), per the finding's explicit
+  direction to keep the second claim.
+- C29: Windows refusal now stated in the new preamble and the exit-code
+  table; the rest of C29 (native list/pid semantics, install-codex-skills
+  and codex-permissions body sections) is substantially covered by the
+  rewritten preamble table; a dedicated body section for those two verbs
+  remains open for a later milestone if the reviewer wants more than the
+  preamble's summary row.
+
+[Deferred to M4b/M4c or M6, not filed here]
+overview.md O1, O7-O13 (M6, current-architecture doc). command-reference.md
+§16's Quirk index still lists "Two error dialects," "unknown host not
+fatal," and other now-fixed items as live quirks; M4c's scope explicitly
+includes "quirk index pruned." §12 (slash commands) still describes
+Monitor-era command files; that section is C83/C84's target, in M4c.
+
+[Testing Notes]
+No code changed. For every C-finding tagged [sub] I re-verified the
+underlying claim against source myself before writing (die()/usage call
+sites, ParseRemote, ValidStoreName, sessionless.go, follow.go, store.go,
+liveness.go, endpoint.go, remote.go, connection.go, addr.go) rather than
+transcribing the subagent's hypothesis; none contradicted what was filed.
+Every added/changed line checked against the CLAUDE.md prose rules; a
+second pass caught and rewrote 9 newly-authored em dashes before commit;
+dashes that are literal characters inside a quoted source error string
+(e.g. follow.go:72's own message) were left untouched, since rewriting a
+verbatim quote would misrepresent what the binary actually prints. All
+relative links and the new TOC anchor verified to resolve.
+
+[Possible Ripple Effects]
+None found inside the two M4a files. §16's quirk index and §12's slash-
+command section now describe behavior this milestone already corrected
+elsewhere in the same file; both are explicitly M4c's job, not silently
+inherited drift.
+
 ## [2026-09-22 21:53:33 UTC] [Docs/M3] shipped instruction text corrected against source-traced findings
 
 [Attempt #1] On `docs/audit-m3`, branched from `docs/audit-m2`, in worktree
