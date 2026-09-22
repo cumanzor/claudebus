@@ -1,7 +1,7 @@
 # Usage
 
-These instructions use native Claude receive, which requires a cbus build with
-the Claude adapter (v0.12.2 supports native Codex only). See [Claude
+These instructions use native Claude receive, shipped in cbus v0.13.0 for macOS
+and Linux alongside native Codex receive. See [Claude
 connections](claude.md) for supported sessions, recovery and deliberate migration
 from an existing Monitor peer. Native Claude and Codex connections do not need a
 Monitor, tail process or periodic model polling; terminal choice is independent.
@@ -40,9 +40,10 @@ alias/title the same way they do on `branch`.
 `--role <r>` reads a committed role prompt from `roles/<r>.md` (the spawn
 cwd's git repo first, then `$CBUS_DIR/roles` as a machine-global fallback) and
 appends its body to the child's first turn, after the connect instructions.
-It defaults `--name` to the role name and `--model` to the file's `MODEL:`
-line; an explicit `--name`/`--model` still wins. An unknown role fails before
-any alias is reserved, listing every path it tried. `branch` refuses `--role`
+It defaults `--name` to the role name. Claude spawn also defaults `--model` to the
+file's `MODEL:` line; an explicit `--name`/`--model` still wins. Codex spawn uses
+explicit `--model`, otherwise its Codex profile/default, not the Claude role model.
+An unknown role fails before any alias is reserved, listing every path it tried. `branch` refuses `--role`
 outright — a fork inherits its parent's intent, and handing a forked peer
 someone else's role prompt is exactly the ghost-orchestrator failure
 formations exist to prevent (see below).
@@ -86,9 +87,9 @@ peers instead use `listenerPid` for their tail process.
 A successful send is submission; an exact transcript receipt confirms arrival,
 and a peer reply supplies separate evidence of action. Use
 `cbus connection status deploy/laptop --json` or
-`cbus connection reconcile deploy/laptop --json` on demand. Busy sessions process
-input after their turn; hold/refuse policy still applies. Stop future delivery
-with `cbus connection disconnect deploy/laptop`, which retains the inbox.
+`cbus connection reconcile deploy/laptop --json` on demand. Busy Claude sessions
+can receive input between foreground tool calls; hold/refuse policy still applies.
+Stop future delivery with `cbus connection disconnect deploy/laptop`, which retains the inbox.
 
 ## The global channel
 
