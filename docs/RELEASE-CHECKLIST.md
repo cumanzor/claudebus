@@ -23,7 +23,7 @@
    build-info evidence. Native Codex connect remains macOS/Linux only.
 4. Prepare the tag and release notes for review; also prepare a matching relay
    build/deployment plan when the release changes relay code or the wire contract
-   (the relay itself has been unchanged since v0.13.0). Do not publish merely
+   (the relay itself has been unchanged since v0.12.0). Do not publish merely
    because a local candidate is green. The native daemon requires
    `/tail/durable-v1`; old relay `/tail` remains compatible with Monitor clients,
    but does not provide durable client acknowledgment.

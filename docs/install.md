@@ -114,5 +114,6 @@ refuses new connects and `daemon start` instead of silently being reused:
 "running daemon is incompatible (version=... protocol=...; this binary=...);
 run cbus daemon restart to load this binary; registrations and pending mail
 are retained." `send`/`list` do not go through that check.
-Native cross-machine subscriptions also require the matching relay's
-`/tail/durable-v1` endpoint; deploying that relay is a separate release action.
+Native cross-machine subscriptions also require a relay from v0.12.0 or
+later, which serves `/tail/durable-v1`; deploying that relay is a separate
+release action.

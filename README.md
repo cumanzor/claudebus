@@ -166,8 +166,8 @@ uncertain attempts across daemon and exact-session CLI restarts. Claude socket
 writes remain unconfirmed until an exact transcript receipt; Codex queue acceptance
 is also distinct from recipient history receipt and a completed reply; inspect
 `cbus connection status` and use on-demand `reconcile` for evidence. Native relay
-subscriptions require the acknowledged-delivery endpoint in the matching relay
-release; the old Monitor WebSocket endpoint keeps its legacy semantics.
+subscriptions require the acknowledged-delivery endpoint in a relay from
+v0.12.0 or later; the old Monitor WebSocket endpoint keeps its legacy semantics.
 
 ## Docs
 
