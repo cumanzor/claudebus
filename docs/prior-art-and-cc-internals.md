@@ -1,5 +1,10 @@
 # Prior art and Claude Code internals
 
+> **Historical: durable research record, 2026-07.** No current successor; kept
+> as a fixed-point research copy, not updated for current behavior. §6
+> (2026-08-18) already supersedes §1-§2's closed-mailbox finding inline; see
+> the "superseded" notes at their own dates for the other in-place updates.
+
 Why this file exists: the decisions behind claudebus's design were made from live
 probing of Claude Code internals and a landscape survey of sibling projects — work
 done inside ephemeral session scratchpads that evaporate once those sessions end.

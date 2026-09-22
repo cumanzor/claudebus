@@ -1,5 +1,151 @@
 # Changelog (detailed)
 
+## [2026-09-22 23:30:06 UTC] [Docs/M5a] historical banners plus release/scope/readiness doc corrections
+
+[Attempt #1] On `docs/audit-m5a`, branched from `docs/audit-m4c` (after M4c's
+PR was approved and merged). 14 doc files plus Makefile edited, plus one entry
+in each changelog. First of two M5 PRs (M5b covers protocol.md separately,
+M4-class in size).
+
+[Motivating problem]
+21 findings from the M5 audit pass across the architecture-record and
+living-reference tier: banner staleness on 8 historical docs (several already
+partially bannered but contradicted by their own later content, e.g. a plan
+whose closing section says "resolved" while its opening status paragraph
+still describes the pre-resolution state), and factual drift on 3 docs kept
+deliberately living (RELEASE-CHECKLIST.md, cross-harness-daemon-scope.md,
+codex-v1-release-readiness.md) where two more releases (v0.13.0 native Claude,
+v0.14.0/v0.14.1 client-only) happened since the doc was last true. Every
+[ver]-tagged claim re-verified against source in this session before writing;
+none contradicted what was filed.
+
+[What changed, by file]
+- `docs/architecture/behavior-spec.md`: banner corrected from "STATUS
+  (2026-07-13)" reading as still-current to explicitly frozen, and its
+  `bin/cbus:N` anchor note corrected: `bin/cbus` was deleted at P3
+  homogenization (`f78fad0`), so those anchors resolve only via
+  `git show f213e26:bin/cbus`, never in the working tree (the banner
+  previously said "in-repo until P3", which read as still true). Pointer to
+  protocol.md as current behavior, M6 as the current-architecture doc. New
+  delta 11: `ValidStoreName` refuses a leading `.`/`-` or trailing `.` on top
+  of every bash-era name rule (`core/name.go:83-86`), missing from the
+  existing 10-item delta list.
+- `docs/architecture/port-map.md`: one clause added to the existing status
+  block, explicitly historical per D6, current contract is protocol.md (the
+  doc already linked protocol.md as a companion doc but did not say it
+  superseded this plan).
+- `docs/architecture/design-space.md`: new banner (none existed): analysis at
+  v0.7.0 (2026-07-21), predates the daemon/native sockets/durable relay
+  stream; its files-plus-polling-follower conclusions describe the legacy
+  transport now, current mechanics are how-it-works.md and overview.md.
+- `docs/architecture/cutover-decision-package.md`: one low-priority pointer
+  line added to protocol.md; the existing banner's bin/cbus-removal note was
+  already accurate, no correction needed there.
+- `docs/architecture/compat-deletion-plan.md`: new top banner. The file's own
+  "Plan closed (v0.7.0)" section near the bottom already correctly says all 7
+  items resolved, including item 6 (bin/cbus, bin/cc-branch.sh deleted
+  tranche 1, `f78fad0`, 2026-07-18), but the OPENING "Status (updated
+  2026-07-17)" paragraph, written before tranche 1 ran, still said those
+  files "remain in-repo as the rollback artifact" with no later correction,
+  so a reader stopping at the top got stale information contradicted by the
+  file's own later content. New banner states the current truth up front;
+  the pre-tranche paragraph is left as an accurately-labeled snapshot of that
+  point in the timeline, not deleted (it's genuine historical record, dated
+  before tranche 1).
+- `docs/architecture/commit-timeline.md`: new banner (none existed): the
+  timeline table's own last row is dated 07-18 (confirmed by reading to the
+  end of the file), so "stops at 2026-07-18" is a direct observation, not an
+  inference; points at the root changelogs and git log for later history.
+- `docs/architecture/codex-native-queue-pilot.md`: new banner per the
+  reviewer's CALL (pilot rollout gates closed or explicitly scoped out for
+  Codex v1): historical, pilot record 2026-09-17, released as Codex v1 in
+  v0.12.x, points at codex-v1-release-readiness.md and
+  cross-harness-daemon-scope.md for what remains.
+- `docs/prior-art-and-cc-internals.md`: new top banner (existing inline
+  "superseded" notes at three spots were left untouched, still correct in
+  place): durable 2026-07 research record, no current successor by design,
+  points at its own §6 (2026-08-18) as the existing supersession of the
+  §1-§2 closed-mailbox finding.
+- `docs/cost-analysis.md`: one sentence added to the existing dated first
+  line: the fleet measured (2026-08-17) predates native Claude/Codex receive
+  (v0.13.0, tagged 2026-09-21, confirmed via `git log`), so every peer
+  measured ran the legacy Monitor transport.
+- `docs/codex.md`: line 92's link text "pilot evidence and remaining gates"
+  corrected to "pilot evidence (historical)", now that the pilot doc's status
+  is settled by this milestone; line 157's "pilot evidence" link text is
+  unchanged per the ruling (already accurate as a bare evidence pointer).
+- `docs/RELEASE-CHECKLIST.md`: step 1 was Codex-only ("Complete the Codex v1
+  readiness gates") despite v0.13.0+ releases also carrying the native Claude
+  adapter; rewritten harness-neutral, naming the Claude canaries under
+  `scripts/` (`claude_cbus_canary.py`, `claude_interactive_wake_canary.py`)
+  alongside the Codex link, and states a client-only release (v0.14.0,
+  v0.14.1) skips this step. Step 2 now names the smaller client-only gate
+  actually used for those two releases (two fresh clones, vet + race, five
+  assets reproduced, per the changelog) as an alternative to the full
+  adapter-acceptance list. Steps 4 and 8's "matching relay build/deployment"
+  language made conditional on the release actually touching relay code or
+  the wire contract (the relay has been unchanged since v0.13.0, per that
+  changelog entry). Step 5 previously never named the publish command;
+  now names `git tag vX.Y.Z` then `make release CBUS_REPO=owner/repo` from a
+  clean tree, matching the Makefile's own release-target guard and the
+  v0.14.0 record's practice of building from a fresh clone.
+- `Makefile`: the `release` target's comment said "WRITTEN, NEVER RUN in this
+  effort", stale since v0.1.0 (confirmed 29 tags exist, v0.1.0 through
+  v0.14.1, via `git tag --list`); corrected to note it has run for every
+  release and point at RELEASE-CHECKLIST.md instead of the one-time quiesce
+  framing.
+- `docs/architecture/cross-harness-daemon-scope.md`: new dated status block
+  (2026-09-22) stating both first-class adapters this doc scoped have
+  shipped, Codex CLI v1 in v0.12.2, native Claude receive in v0.13.0, with
+  OpenCode and the six directed routes remaining open; the "Codex-first
+  pilot now supports" sentence corrected to reference the shipped v1, not a
+  pilot. The Claude row in the harness/candidate table replaced: the actual
+  shipped mechanism is a per-session native messaging socket bound at
+  `cbus connect`, verified against the caller's process/socket/transcript
+  identity (`connect_identity_unix.go:36`, `docs/claude.md:21-31`), not the
+  originally proposed Channels/persistent-SDK-stream candidates. The
+  "Acceptance and next step" section retitled "Acceptance: the OpenCode /
+  three-way gate" and six of its checklist items tagged with which the
+  Claude/Codex releases already covered (per codex-v1-release-readiness.md
+  and claude-native-review.md). Dropped a knowledge-repo path
+  (`claudebus/internal/topics/...`) a public reader cannot reach, replaced
+  with "private notes" (the tracker id `eb65ad39fda9f9b5` itself is kept,
+  matching this project's existing convention of citing its own tracker ids
+  in doc prose).
+- `docs/architecture/codex-v1-release-readiness.md`: new status line stating
+  the doc's v0.12.2 evidence is unchanged through v0.13.0-v0.14.1 (v0.13.0
+  added native Codex connect alongside native Claude, tested against Codex
+  0.155.1 macOS / 0.154.0 Linux per docs/codex.md:7; v0.14.0/v0.14.1 were
+  client-only). The "Intermediate evidence" disclaimer strengthened: these
+  `/tmp`/`/private/tmp` paths are provenance of what ran, mostly not
+  retained past normal temp cleanup; only one run in the v0.12.2 section
+  above has an actual retained tracker attachment (`78347441d578773e`), the
+  rest (including that section's own provenance and install-check files) are
+  the same kind of local-path-only record, a claim verified by re-reading
+  the v0.12.2 section rather than assumed.
+- `docs/usage.md`: new epoch-fence troubleshooting paragraph in the daemon
+  section, using the reviewer's AMENDED (not the original) finding: the
+  live daemon log evidence showed the refusal is a macOS device-number
+  change on the SAME inode, not a changed/truncated inbox as first assumed,
+  so the doc text states the reboot-alone cause rather than "something
+  replaced the inbox". Recovery steps (disconnect to stop retries and keep
+  the inbox; save unread mail then unregister and reconnect, or use a fresh
+  alias) and the "reconnecting alone does not clear it" claim scoped to
+  Codex connections only, per the review gate (no Linux claim, no untraced
+  Claude-reconnect claim, no "tested"/"verified" wording).
+
+[Testing Notes]
+Full verification sweep run on the complete 15-file diff (Makefile + 14
+docs): em/en-dash scan (three rounds of self-authored dashes found and fixed
+to colon/comma/semicolon, including one en-dash number range normalized to a
+plain hyphen for this repo's established convention), banned-vocabulary scan
+(clean), relative-link check across all 14 touched markdown files (51 links
+total, all resolve), stray M5-audit-finding-id scan (clean; pre-existing
+project tracker ids such as `cbus-rtt`/`cbus-6ij` were left in place,
+matching this repo's own established citation convention, distinct from this
+audit's own finding ids). Applied-findings tracker written to
+`/tmp/cbus-docs-audit/M5a-applied.md` before reporting, per the D15 process.
+
 ## [2026-09-22 23:10:29 UTC] [Docs/M4c] architecture reference corrected against source-traced findings, part 3 of 3
 
 [Attempt #1] On `docs/audit-m4c`, branched from `docs/audit-m4b`, in

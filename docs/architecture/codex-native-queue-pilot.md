@@ -2,6 +2,12 @@
 
 2026-09-17. Tracking: cbus-6ij, cbus-6ij.11; inbox failure prerequisite cbus-6ij.7.
 
+> **Historical: pilot record 2026-09-17; released as Codex v1 in v0.12.x.** This
+> pilot's rollout gates are closed or explicitly scoped out for Codex v1; see
+> [codex-v1-release-readiness.md](codex-v1-release-readiness.md) and
+> [cross-harness-daemon-scope.md](cross-harness-daemon-scope.md) for what
+> remains open.
+
 ## Decision and measured result
 
 Carlos requires joining an existing CLI without restart whenever possible, with

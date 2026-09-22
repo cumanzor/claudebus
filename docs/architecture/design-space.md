@@ -1,5 +1,10 @@
 # claudebus — store & transport design space
 
+> **Historical: analysis at v0.7.0 (2026-07-21), before the daemon, native
+> sockets and the durable relay stream.** Its conclusions about files plus a
+> polling follower describe the legacy transport; current mechanics are
+> [how-it-works.md](../how-it-works.md) and [overview.md](overview.md).
+
 Why this file exists: the store/transport choices (append-only files, a polling
 follower, mark-and-fetch truncation handling) get re-litigated every time a
 reviewer meets the codebase, because the obvious modern alternatives — a local

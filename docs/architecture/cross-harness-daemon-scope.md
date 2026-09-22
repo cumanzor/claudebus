@@ -1,8 +1,15 @@
 # Cross-harness daemon scope
 
-2026-09-17, cbus-rtt and cbus-6ij. Scope approved by Carlos in D3-D4. The full
-integration proceeds Codex CLI first; Claude Code's D2 incident stopgap remains
-separate. Adapter rollout remains gated on live acceptance.
+2026-09-17, cbus-rtt and cbus-6ij. Scope approved by Carlos in D3-D4: the full
+integration proceeds Codex CLI first, Claude Code's D2 incident stopgap kept
+separate until its own adapter landed.
+
+**Status (2026-09-22).** Both first-class adapters this doc scoped have shipped:
+Codex CLI v1 in [v0.12.2](https://github.com/cumanzor/claudebus/releases/tag/v0.12.2)
+(see [codex-v1-release-readiness.md](codex-v1-release-readiness.md)), native Claude
+Code receive in [v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
+(see [docs/claude.md](../claude.md)). OpenCode and the six directed routes below
+remain open; this doc is their live scope and adapter proposal.
 
 ## Scope rule
 
@@ -15,7 +22,7 @@ Other harnesses remain future extensions.
 
 Codex CLI includes the existing `cbus codex` terminal workflow: a per-peer
 app-server with the CLI TUI attached. A supporting app-server does not make this
-a desktop integration. The Codex-first pilot now supports no-restart connection
+a desktop integration. Shipped Codex v1 (above) supports no-restart connection
 from an ordinary local CLI through its native queue. The existing wrapper stays
 available as a compatibility path; restart/resume is only a fallback when the
 running runtime cannot accept delivery. See [docs/codex.md](../codex.md).
@@ -78,7 +85,7 @@ availability and message receipt are separate states.
 
 | Harness | Initial candidate | Important boundary |
 | --- | --- | --- |
-| Claude Code | Channels for eligible interactive sessions; persistent SDK/input stream for owned workers | Authentication/policy restrictions and exact-session idle wake need live proof |
+| Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Authentication/policy restrictions and exact-session idle wake need live proof |
 | Codex CLI | Native durable queue via a non-owning sidecar and `cbus connect`; existing wrapper remains compatible | Exact thread and local storage context; preserve TUI ownership; reconcile ambiguous enqueue because native client IDs do not deduplicate |
 | OpenCode | Session API and event stream, with a small plugin for session registration and shell identity | Runtime endpoint and session ID must both be explicit; a shared server can contain multiple sessions |
 
@@ -117,22 +124,33 @@ admission; it does not establish a per-message completion contract.
 [Prompt source](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/session/prompt.ts),
 [runner source](https://github.com/anomalyco/opencode/blob/v1.18.31/packages/opencode/src/effect/runner.ts).
 
-## Acceptance and next step
+## Acceptance: the OpenCode / three-way gate
 
-The first cross-harness pilot must include all three harnesses. Verify all six
-directed send/reply routes among them, using exact session identity, plus:
+Claude Code and Codex CLI shipped as first-class peers without OpenCode
+(status block, above), so this list is now the gate for adding OpenCode as the
+third peer and proving all six directed send/reply routes across all three
+harnesses. The two shipped adapters already covered idle delivery, busy-session
+messages, restart, resume, presence and permissions for their own two harnesses
+(`codex-v1-release-readiness.md`, `claude-native-review.md`), tagged below;
+OpenCode and the three-way combination remain open. Verify all six directed
+send/reply routes among them, using exact session identity, plus:
 
 - An unattended idle period with no housekeeping model calls, followed by a real
-  message and recipient reply.
+  message and recipient reply. (Claude/Codex: covered.)
 - Busy-session messages and bursts, with observed ordering and no lost input.
+  (Claude/Codex: covered.)
 - Adapter/daemon restart, ambiguous submission results, retry and deduplication.
+  (Claude/Codex: covered.)
 - Session exit, resume, alias replacement and stale-adapter fencing.
+  (Claude/Codex: resume covered; session-exit/alias-replacement fencing not
+  separately confirmed.)
 - Peer-visible join/leave/session-exit presence parity with Claude Code
   (`cbus-6ij.12`). Track the actual client independently of daemon lifetime and
   terminal detach/moves. Keep recurring liveness checks outside the model and
   choose how each harness surfaces real presence events explicitly.
+  (Claude/Codex: covered.)
 - Replies under each harness's intended permissions, without silently widening
-  them to make the test pass.
+  them to make the test pass. (Claude/Codex: covered.)
 - Launch/resume coverage across the three CLI harnesses on both iTerm2 and tmux,
   including tmux inside iTerm2, explicit anchors and different callers sharing
   one daemon. Check actual child cwd, environment and bus identity.
@@ -146,7 +164,7 @@ desktop-client support. No model sessions or live adapter acceptance were run as
 part of this scope update.
 
 The earlier stopgap/delivery assessment remains attached to cbus-rtt as
-`eb65ad39fda9f9b5` and in knowledge docs at
-`claudebus/internal/topics/cbus-rtt-review-2026-09-17.md`. The
+`eb65ad39fda9f9b5`, plus private notes in the internal knowledge base (not
+reachable from this repo). The
 [July exploration](multi-harness-exploration.md) is historical research, not the
 current implementation status.

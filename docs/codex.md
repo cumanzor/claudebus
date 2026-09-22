@@ -89,7 +89,7 @@ The offline lifecycle canary passed 17 checks using a scratch app-server and a
 local fake provider, including a busy turn held for 11.05 seconds and both live
 and cold resume after interruption. That source=`vscode` test establishes queue
 semantics, not desktop support or actual CLI restart acceptance. See the
-[pilot evidence and remaining gates](architecture/codex-native-queue-pilot.md).
+[pilot evidence (historical)](architecture/codex-native-queue-pilot.md).
 
 Ordinary CLI tests verify clean exit and resume by exact UUID, `--last`, name,
 and picker: the replacement process retains prior conversation input and

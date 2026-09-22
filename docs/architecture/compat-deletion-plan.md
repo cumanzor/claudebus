@@ -1,19 +1,27 @@
 # Compat-package deletion plan (homogenization / P3)
 
+> **Historical: plan executed, all 7 items resolved (v0.7.0).** Item 6's bash
+> files (`bin/cbus`, `bin/cc-branch.sh`) are deleted, tranche 1 (`f78fad0`,
+> 2026-07-18), not merely "remain in-repo as the rollback artifact" as the
+> pre-tranche status paragraph below still says when read on its own; rollback
+> is git-history recovery only. See "Plan closed (v0.7.0)" near the bottom for
+> the final disposition of every item.
+
 The Go port carries a small set of **coexistence shims** that exist ONLY so the bash
 `cbus` and the Go `cbus-go` can share one `$CBUS_DIR` and read each other as alive
 during the side-by-side window. When bash `cbus` is fully retired — the P3
 "structural liveness" homogenization, *after* every machine has cut over — these
 delete in one commit. This is the inventory.
 
-**Status (updated 2026-07-17):** cutover executed on the laptop and server — item 5's
-rename happened (the Go binary is installed as `cbus`). Items 1–4 stay until no
-bash-era follower can be armed anywhere (P3 homogenization); item 6's bash files
-(`bin/cbus`, `bin/cc-branch.sh`) remain in-repo as the rollback artifact — the
-legacy installers `install.sh` / `install-cbus-go.sh` were **retired** (`de07cbe`),
-so rollback is now a manual copy of `bin/cbus` over `~/.local/bin/cbus` (or
-git-history recovery); item 7 stays frozen. The winbox/WSL node (`cbus-dc5`) starts
-on the port directly.
+**Status (updated 2026-07-17, superseded by tranches 1-3 below):** cutover
+executed on the laptop and server, item 5's rename happened (the Go binary is
+installed as `cbus`). Items 1-4 stay until no bash-era follower can be armed
+anywhere (P3 homogenization); item 6's bash files (`bin/cbus`,
+`bin/cc-branch.sh`) remain in-repo as the rollback artifact at this point in
+the timeline: the legacy installers `install.sh` / `install-cbus-go.sh` were
+**retired** (`de07cbe`), so rollback is now a manual copy of `bin/cbus` over
+`~/.local/bin/cbus` (or git-history recovery); item 7 stays frozen. The
+winbox/WSL node (`cbus-dc5`) starts on the port directly.
 
 **Tranche 1 executed (2026-07-18):** items 3, 4 and 6 are deleted — the mtime
 fallback (unarmed grace is `lastActivity`-only; a readable meta with no parseable

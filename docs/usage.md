@@ -135,6 +135,19 @@ refuses new connects and `daemon start` rather than being silently reused; see
 [install.md](install.md) for the exact refusal text. `send`/`list` do not go
 through that check.
 
+A daemon log line `restore daemon listener: inbox changed or truncated;
+refusing to rearm an unknown epoch` (surfaced too in `cbus connection status
+CH/AL --json`) means the daemon's journaled file identity for that inbox
+(device, inode) no longer matches what it finds on disk. On macOS a reboot
+alone can cause this with the inbox intact: the volume's device number
+changes while the file (same inode) does not. `cbus connection disconnect
+CH/AL` stops the retries and keeps the inbox. To resume delivery, save any
+unread mail first (the inbox can hold undelivered lines), then `cbus
+unregister CH/AL` and connect again from that exact session, or connect under
+a fresh alias. For Codex connections, reconnecting alone does not clear it
+(the reconnect path reuses the same journal); the Claude reconnect path is
+not traced here, and Linux is not observed.
+
 ## Presence & session-end announcements
 
 Native presence follows the observed CLI session, separately from the daemon or

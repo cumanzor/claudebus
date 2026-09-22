@@ -10,7 +10,8 @@
 > landed 2026-07-19.** The cutover happened — `cbus` on the laptop and the server is the Go
 > binary (27/27 differential parity; decision record:
 > [cutover-decision-package.md](cutover-decision-package.md)). This document is
-> preserved as the planning record. Phase 3 (`cbus-8k9.4`) executed in two tranches
+> historical, preserved as the planning record; the current wire/behavior
+> contract is [protocol.md](protocol.md), not this plan. Phase 3 (`cbus-8k9.4`) executed in two tranches
 > against [compat-deletion-plan.md](compat-deletion-plan.md): tranche 1 (2026-07-18,
 > `8f79a83`) dropped the mtime grace fallback (D3) and the bash artifacts; tranche 2
 > (2026-07-19, `3865d52`..`f853ff2`) landed the `(pid, starttime)` structural identity

@@ -1,5 +1,9 @@
 # claudebus — commit timeline
 
+> **Historical: stops at 2026-07-18 (v0.3.0-era).** Later history lives in the
+> root [simple_changelog.md](../../simple_changelog.md) /
+> [detailed_changelog.md](../../detailed_changelog.md) and `git log`.
+
 Extracted from the LLM-tier architecture doc during the docs consolidation
 (knowledge -> repo fold-in). Two tables: the bash-era history through the
 Go-port cutover, and everything shipped since.

@@ -2,13 +2,16 @@
 
 Canonical as-is behavior of every command, state file, wire format, framing rule, and liveness rule. Anchors are `bin/cbus:N` unless another file is named; relay = `relay/cmd/cbus-relay/main.go`, wire = `relay/internal/wire/ws.go`, spool = `relay/internal/spool/spool.go`. HEAD `f213e26`. Behavioral oddities are tagged **quirk** (preserve or rethink in a port), not bugs to fix. Items marked *(live-verified)* were reproduced on 2026-07-12.
 
-> **STATUS (2026-07-13): bash-era reference spec — FROZEN.** This documents the bash
-> client at `f213e26`, the contract the Go port (`cmd/cbus` + `internal/client` +
-> `internal/core`, branch `go-port`) was differentially verified against (27/27
-> verbs, laptop + server). The Go binary is now installed as `cbus` on both machines;
-> `bin/cbus:N` anchors point at the retired implementation (in-repo until P3).
-> Everything below remains true of the shared contract EXCEPT the port's intended
-> deltas:
+> **STATUS (2026-07-13; re-affirmed 2026-09-22): frozen bash-era port contract
+> (`f213e26`).** This documents the bash client at that revision, the contract
+> the Go port (`cmd/cbus` + `internal/client` + `internal/core`, branch
+> `go-port`) was differentially verified against (27/27 verbs, laptop + server). The
+> Go binary is now installed as `cbus` on both machines; `bin/cbus` itself was
+> deleted at P3 homogenization (`f78fad0`), so `bin/cbus:N` anchors below
+> resolve only in git history (`git show f213e26:bin/cbus`), never in the
+> working tree. Current behavior lives in [protocol.md](protocol.md) and the
+> guides; a current architecture doc is milestone M6. Everything below remains
+> true of the shared contract EXCEPT the port's intended deltas:
 >
 > 1. Unknown relay hosts and invalid channel/alias/host names are **hard errors** (bash: a
 >    non-fatal stderr message from a die-in-substitution; `tail ch@bogus/al` even exited 0).
@@ -27,6 +30,9 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > 9. **python3 is no longer needed at runtime** (nor `tail(1)`, nor bash 3.2 compatibility).
 > 10. **Max message size 1 MiB** — local sends now reject oversize messages, matching the
 >     relay's `/send` body cap.
+> 11. **Store-name creation is tighter than the wire name check**: a leading `.` or `-`, or
+>     a trailing `.`, is refused on top of every bash-era name rule (`ValidStoreName`,
+>     `core/name.go:83-86`).
 >
 > Go-side equivalences (superseded 2026-07-19 for liveness/follower — see the dated
 > note below; current as written for the framer): local framer = `core.LocalEmit`,
