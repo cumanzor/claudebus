@@ -125,9 +125,9 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    --check reports without applying; then refreshes
                                    the installed commands + roles. Set CBUS_REPO
                                    or use a released binary (its repo is baked in)
-  cbus install-commands [--path DIR] [--force]   write the embedded /bus-* skills
-                                   to ~/.claude/commands (sha-guarded; --force
-                                   overwrites a locally-edited file)
+  cbus install-commands [--path DIR] [--force]   write the embedded slash-command
+                                   skills to ~/.claude/commands (sha-guarded;
+                                   --force overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
   cbus install-codex-skills [--path DIR] [--force] [--with-permissions]

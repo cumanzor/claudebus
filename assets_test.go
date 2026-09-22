@@ -20,6 +20,7 @@ import (
 func TestEmbedCountAndSourceMatch(t *testing.T) {
 	assertEmbed(t, Commands, "commands", []string{
 		"bus-branch.md", "bus-codex.md", "bus-formation.md", "bus-join.md", "bus-layout.md", "bus-rename.md", "bus-spawn.md",
+		"save-formation.md",
 	})
 	assertEmbed(t, Roles, "roles", []string{
 		"coder.md", "documenter.md", "orchestrator.md", "reviewer.md",

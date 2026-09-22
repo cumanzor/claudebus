@@ -113,7 +113,7 @@ func run(args []string) int {
 		return runConnection(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
-	case "install-commands": // cbus-7sg: write the embedded /bus-* skills to ~/.claude/commands
+	case "install-commands": // cbus-7sg: write the embedded slash-command skills to ~/.claude/commands
 		return runInstallCommands(args[1:])
 	case "install-roles": // cbus-7sg: write the embedded role prompts to $CBUS_DIR/roles
 		return runInstallRoles(args[1:])

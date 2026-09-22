@@ -1,5 +1,124 @@
 # Changelog (detailed)
 
+## [2026-08-24 05:56:32 UTC] [Commands/Formation] `/save-formation`, the zero-friction checkpoint
+
+[Attempt #1] on `feat/save-formation-command` off main (`28b4641`), worktree
+a separate worktree. 9 files.
+
+[Motivating problem]
+Running live formations surfaced the same two frictions. First, checkpointing the
+fleet you are currently sitting in is the common case, and `/bus-formation` makes you
+type a verb and a name to get it, because it is a router over the whole
+`save | apply | bootstrap | list | show | rm` surface. Second, and worse, a bare
+`cbus formation save` produces an envelope with real defects and says nothing useful
+about them. It records alias, sessionId, cwd, machine, and stamps origin/model only
+for launcher-born peers. It never fills rolefile/role. So a peer saved from a
+hand-joined seat lands with `role: TODO`, and a later `apply` briefs that peer with
+nothing: it comes back live, addressed, and with no idea what the effort is. The same
+save records sids that may already be stale, in which case `onStale=template` applies
+and the peer returns fresh, losing its context. None of that is visible until the
+restore, which is the worst moment to discover it.
+
+`/bus-formation` acknowledges the gap and hands it back to the operator: "point the
+user at `cbus formation show <name>` to see what still needs filling in". The
+information is available and nothing interprets it.
+
+[What shipped]
+`commands/save-formation.md`, a read-mostly command that takes no arguments in its
+common form:
+- resolves the channel from `cbus whoami` (exits 1 with "not joined in this session",
+  so the fallback chain is git repo basename sanitized to `[A-Za-z0-9._-]`, then
+  `global`), and asks rather than guessing when the session is joined to several
+- runs `cbus formation save <name> [channel]`, name defaulting to the channel
+- then runs `cbus formation show <name>` and triages per PEER, by name, not as the
+  counts cbus already prints: `role: TODO` with both fixes spelled out (point
+  `rolefile` at `$CBUS_DIR/roles/<role>.md`, or write freeform text into the peer's
+  `role` field in `$CBUS_DIR/.formations/<name>.json`), STALE sids and the
+  `onStale=template` consequence, `kept, not on the channel now` (usually a
+  deliberately-down seat, stated so an accidental drop is caught here instead of at
+  restore), `mode=template` on a peer whose transcript is present, and who the anchor
+  is, since apply launches it first and `formation resume` needs it
+- documents `--anchor tracker=<id>`. The convention is in `cbus --help` and appeared
+  in no command file, so it was effectively undiscoverable from the harness side.
+
+Safety is structural, not advisory: `allowed-tools` is `Bash(cbus:*)` plus
+`Bash(git rev-parse:*)` with no Monitor, and the body forbids apply/resume/bootstrap/rm
+and points at `/bus-formation` for them. A command that cannot arm a listener cannot
+usefully launch a peer.
+
+[Files Changed]
+- `commands/save-formation.md` (new, 79 lines): the command.
+- `assets_test.go:22`: the embed-count guard is deliberately exact ("adding or
+  removing a command without updating the expectation fails the build"), so the
+  seventh name is added. This is the one file that MUST change; everything else in
+  the install path is generic.
+- `assets.go:10`: "Commands holds commands/*.md (the /bus-* skills)" became false
+  with the first non-bus command. Reworded to name both the `/bus-*` family and
+  `/save-formation`.
+- `cmd/cbus/main.go:103`: same wording in the dispatch comment.
+- `cmd/cbus/usage.go:125`: same in the `install-commands` help line, reflowed to the
+  block's column. This line is what a user reads to decide whether the verb will touch
+  their file, so "the embedded /bus-* skills" actively misleads once it ships a
+  seventh file that is not a bus-* name.
+- `docs/install.md:28,41-42`: the same phrase, plus the "commands placed" table,
+  which listed 5 of 6 files: `bus-layout.md` shipped in v0.10.0 and was never added.
+  Fixed while editing the same table, since a table that enumerates the install set
+  and is wrong is worse than no table.
+- `CHEATSHEET.md`: three lines in the Formations section, after the
+  `/bus-formation` line.
+- changelog pair.
+
+[Notable non-change]
+`installAssets` walks `fs.ReadDir(fsys, subdir)` and writes every `*.md` it finds. It
+has no name list and no `bus-` prefix filter. So the command ships through
+`install-commands` and `selfupdate` with zero code change to the install path. The
+only thing standing between a new file in `commands/` and it being installed
+everywhere is the embed-count test, which is exactly the guard the repo wanted.
+
+[Possible Ripple Effects]
+- **Reverses an earlier finding.** Before this commit, `save-formation.md` was safe
+  from `install-commands` precisely because cbus did not know the name, so the sha
+  guard never considered it. Now it is a shipped asset: `selfupdate` calls
+  `refreshAssets`, which runs `install-commands --force`, and `--force` overwrites a
+  locally-edited file. Anyone hand-editing their installed `/save-formation` will lose
+  it on the next selfupdate. That is the same contract as every `/bus-*` file, and it
+  is now true of this one.
+- The local hand-authored copy at `~/.claude/commands/save-formation.md` was synced to
+  the repo bytes (sha `a814cba9…` both sides) so the first `install-commands` after
+  this ships reports `up-to-date` rather than `SKIPPED — differs from shipped
+  (locally edited?)`, which would otherwise look like a failed install and return
+  exit 1.
+- The shipped copy names the four roles the repo actually ships (coder, documenter,
+  orchestrator, reviewer). The hand-authored version had listed `tester`, which exists
+  in this machine's `$CBUS_DIR/roles` as a runtime-only file with no repo copy, so it
+  would have been wrong on any other machine.
+- On `~/.claude/commands` being the destination: on this machine that path is the real
+  directory behind `~/.ccs/shared/commands`, which both ccs profile command dirs
+  symlink to, so one install serves personal and work. That is a local layout, not
+  something the installer knows or depends on.
+- Branch choice: this is off `main`, not the checked-out `windows-port`, which is 16
+  commits behind and has no `commands/bus-layout.md`. Committing there would have
+  stranded the command and conflicted the test expectation on merge. The
+  `windows-port` working tree (modified liveness.go, store.go, changelogs, untracked
+  store_harness_test.go) was left completely untouched.
+
+[Testing Notes]
+- `go test ./...` green across all 9 packages, including the embed-count guard and its
+  runtime-FS canary (the served bytes equal the repo source).
+- `gofmt -l .` clean, `go vet ./...` clean.
+- Install path smoked through a scratch binary built to a temp dir, never
+  `~/.local/bin/cbus`, installing into a throwaway directory, never `~/.claude`:
+  first run installed 7 files including `save-formation.md` (exit 0), rerun reported
+  `up-to-date`, and after appending a line to the installed copy the sha guard
+  reported `SKIPPED — differs from shipped (locally edited?)`. So the new file
+  participates in the guard exactly like the six existing ones.
+- `cbus --help` re-read to confirm the reflowed `install-commands` line sits in the
+  block's column.
+- Nothing was pushed, no release cut, the installed binary at `~/.local/bin/cbus` is
+  untouched, and no real formation was saved or applied during the work.
+
+[Rebase note] Rebased onto main 2026-09-22 after v0.13.0: `bus-codex.md` had since become the seventh embedded command, so this is now the eighth.
+
 ## v0.13.0 — native Claude receive (released)
 
 - Ordinary Claude Code CLI sessions join with `cbus connect` through their own
