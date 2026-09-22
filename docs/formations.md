@@ -67,6 +67,13 @@ local store: `rm` of a committed starter is refused (delete it with `git rm`
 instead), and a `save` that inherits fields from a starter template still
 writes your local copy, never the repo file.
 
+Model selection at launch follows this order: a peer's explicit `model` in the
+formation, then its role file's `MODEL:` line, then the harness CLI's own default.
+For example, `"model": "claude-opus-5"` overrides `MODEL: fable` in
+`roles/reviewer.md`; the role still supplies the peer's instructions. Leave the
+formation's `model` empty to inherit the role default. `formation show` displays
+the saved model field; an empty field does not mean the role has no default.
+
 ## Birth records
 
 `spawn` and `branch` stamp how a peer was born — `fresh` or `fork` — plus its

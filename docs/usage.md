@@ -74,6 +74,14 @@ other listening peers and explicitly known roles. Aliases are not role evidence.
 Incoming presence updates that observed roster; no recurring roster check is
 needed. `cbus list` shows peers across channels; `cbus channels` summarizes them.
 
+For a local native connection, the roster's PID (`listenerPid` in `cbus list
+--json`) identifies the cbus daemon, so several peers can share it. To identify
+the harness session, use `cbus connection status CHANNEL/ALIAS --json`: `threadId`
+is the session ID and `consumer.pid` is the observed CLI process. Read that PID
+together with `consumer.state`, `consumer.startToken` and `consumer.observedAt`;
+a retained PID alone does not prove the session is still running. Legacy Monitor
+peers instead use `listenerPid` for their tail process.
+
 `socket-ready` means the Claude endpoint is available, not that a message arrived.
 A successful send is submission; an exact transcript receipt confirms arrival,
 and a peer reply supplies separate evidence of action. Use
