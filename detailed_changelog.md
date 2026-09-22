@@ -1,5 +1,81 @@
 # Changelog (detailed)
 
+## [2026-09-22 21:43:55 UTC] [Docs/M2] guides corrected against source-traced findings
+
+[Attempt #1] On `docs/audit-m2`, branched from `docs/audit-m1` (before its two
+review fixups), in worktree `claudebus-docs`. 7 files edited (docs/claude.md,
+docs/codex.md, docs/formations.md, docs/relay.md, docs/security.md,
+docs/claude-monitor-stopgap.md, docs/claude-native-review.md) plus one entry
+in each changelog. docs/shared-instructions.md read, no finding against it,
+untouched. Milestone 2 of 5 in the post-v0.14.1 docs audit.
+
+[Motivating problem]
+Same audit, same formation, milestone 2: the eight guide docs read in full
+against source at `fee2b2e` and the installed v0.14.1 binary (scratch
+`CBUS_DIR`, read-only or removed after use, no real-store writes, no
+subagents). 13 findings filed (F1-F13); F1-F9 and F12 accepted as written,
+F10/F11 folded into one banner-plus-correction, F13 held pending the M5
+ruling on its target doc.
+
+[What changed]
+- Version pins (M2-F1): "v0.13.0 ships/in" changed to "since v0.13.0" in
+  claude.md, codex.md, relay.md and formations.md's section heading, same
+  rule as M1-F3.
+- Relay version guidance (M2-F2): relay.md now says "a relay from v0.13.0 or
+  later (it serves `/tail/durable-v1`)" instead of "the matching relay
+  release", and quotes the actual refusal text.
+- `/tail/durable-v1` auth (M2-F3): added to security.md alongside the
+  existing `/tail` entry (see the security
+  guide) and cross-referenced from relay.md. Per the ruling, stated as
+  a requirement; I did not inspect the live CF Access configuration.
+- Daemon credential storage (M2-F4): new security.md bullet, per-session
+  native messaging credentials under `$CBUS_DIR/.daemon/claude-credentials/`
+  (mode 0600), same trust boundary as the bus directory.
+- "daemon binds 127.0.0.1" (M2-F5): corrected to "the relay" in security.md;
+  that document's one remaining use of "daemon" meant the relay, not the
+  local supervisor every other doc means by that word.
+- `formation list` (M2-F6): now says "runtime saves only" in formations.md,
+  matching CHEATSHEET.md's existing wording.
+- Missing formation features (M2-F7): `apply --mode resume|fork|template`
+  (late-bound per-run restore override), the pane self-balancing split and
+  `"split": "right"|"down"` override, `/save-formation` linked next to
+  `/bus-formation`, and `resume --brief` plus a pointer to `--help` for the
+  other resume refusal cases (gone transcript, fork-born/unattributed
+  origin, live-armed session id, wrong machine) which I did not transcribe
+  verbatim since the finding did not capture their exact text.
+- Model example (M2-F8): `"model": "claude-opus-5"`, not a real model id,
+  replaced with `claude-opus-5-5` in formations.md; docs-only, the D8 hold
+  covers commands/ and roles/, not this file.
+- Daemon restart pointer (M2-F12): one paragraph in claude.md, pointing at
+  usage.md's daemon section (M1-F8) and codex.md's existing coverage; a
+  shared daemon on a stale version/protocol refuses new connects from
+  either harness until restarted.
+- Monitor stopgap currency (M2-F9): claude-monitor-stopgap.md no longer says
+  native receive is merely "available in source" (it shipped in v0.13.0),
+  and states plainly that the persistent-Monitor mechanism was measured on
+  2.1.277 and has not been re-verified on the installed 2.1.280.
+- Historical banner and correction (M2-F10 + F11): claude-native-review.md
+  gets a dated banner ("the completed v0.13.0 acceptance record", pointing
+  at claude.md) plus a dated correction line (27 PRs merged, not 28; #37
+  was folded into #25 and closed). Record text below the banner is
+  otherwise untouched, per the ruling.
+- Held (M2-F13): docs/codex.md's "pilot evidence and remaining gates" link
+  text to architecture/codex-native-queue-pilot.md left exactly as-is; its
+  fate depends on the M5 ruling on that target doc (D6, conditional bucket).
+
+[Testing Notes]
+No code changed. Findings verified by the reviewer via source trace at
+`fee2b2e` and read-only/scratch command runs; nothing touched the real
+store or the live daemon. Every added/changed line checked against the
+CLAUDE.md prose rules (no em/en dashes, no banned vocabulary, no new
+bold-lead-in bullets); all relative links and anchors in the eight files
+verified to resolve after editing.
+
+[Possible Ripple Effects]
+None found inside the eight M2 files on a second pass. M2-F13's target
+(codex-native-queue-pilot.md) and the M4/M2 cross-references noted in the
+M5 classification draft remain open until the M5 pass rules on that doc.
+
 ## [2026-09-22 21:35:56 UTC] [Docs/M1] front-door docs corrected against source-traced findings
 
 [Attempt #1] On `docs/audit-m1`, branched from main (`fee2b2e`), in worktree

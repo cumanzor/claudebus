@@ -1,6 +1,6 @@
 # Claude Code native connections
 
-Native Claude receive ships in [cbus v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
+Native Claude receive has shipped since [cbus v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
 for terminal CLI sessions on macOS and Linux, alongside native Codex receive.
 The signed-in CCS pilot used Claude 2.1.278, with mixed Claude/Codex delivery and
 Mac–server relay checks; see the [release validation](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
@@ -36,6 +36,11 @@ Claude's hold/refuse settings remain effective; cbus does not bypass them or inf
 which policy caused an unconfirmed submission. After joining, the command instructions check the roster
 once, retain known roles and announce membership changes to the user without bus
 acknowledgments or repeated roster polling.
+
+A shared daemon that upgraded to a new version or protocol refuses new
+connects until it is restarted; see [usage.md](usage.md#the-daemon) for the
+refusal text. [Codex](codex.md#explicit-optional-reply-permissions-and-upgrades)
+covers the same daemon restart, and it applies equally here.
 
 ## Delivery and resume
 

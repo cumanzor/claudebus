@@ -2,8 +2,8 @@
 
 ## Connect an existing CLI session without restarting
 
-cbus v0.13.0 ships native Codex CLI connections on macOS/Linux alongside
-[native Claude receive](claude.md). Codex's queue API remains experimental;
+Native Codex CLI connections have shipped since cbus v0.13.0, on macOS/Linux,
+alongside [native Claude receive](claude.md). Codex's queue API remains experimental;
 release field checks used Codex 0.155.1 on macOS and 0.154.0 on Linux. See the
 [quick reference](../CHEATSHEET.md#codex-cli-quick-reference) for daily commands and
 the [release validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
