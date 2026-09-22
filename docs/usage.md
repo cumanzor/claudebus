@@ -138,8 +138,11 @@ through that check.
 A daemon log line `restore daemon listener: inbox changed or truncated;
 refusing to rearm an unknown epoch` (surfaced too in `cbus connection status
 CH/AL --json`) means the daemon's journaled file identity for that inbox
-(device, inode) no longer matches what it finds on disk. On macOS a reboot
-alone can cause this with the inbox intact: the volume's device number
+(device, inode, and the saved delivery offset) no longer matches what it
+finds on disk: same fence, same message, whether the device or inode
+changed, or the inbox is now shorter than the last delivered offset
+(`daemon_scheduler.go:42-43`). On macOS a reboot alone can cause the
+device-number case with the inbox intact: the volume's device number
 changes while the file (same inode) does not. `cbus connection disconnect
 CH/AL` stops the retries and keeps the inbox. To resume delivery, save any
 unread mail first (the inbox can hold undelivered lines), then `cbus

@@ -9,13 +9,15 @@ rejected by saved thread source metadata. Current CLI ownership and queue-store
 identity remain required; historical source labels do not establish the current
 runtime. Desktop attachment remains outside v1.
 
-**Status (2026-09-22): unchanged through v0.13.0-v0.14.1.** v0.13.0 added the
-native `cbus connect`/`spawn --harness codex` path alongside native Claude
-receive ([docs/codex.md](../codex.md)), tested against Codex 0.155.1 (macOS)
-and 0.154.0 (Linux); v0.14.0 and v0.14.1 were client-only releases that did
-not touch the Codex adapter. This doc's v0.12.2 evidence below remains the
-readiness record for the wrapper/queue path that native connect now leads
-with (`command-reference.md` §9).
+**Status (2026-09-22): unchanged through v0.13.0-v0.14.1.** Native
+`cbus connect`/`spawn --harness codex` shipped in v0.12.x, alongside this
+doc's own v0.12.2 evidence; native Claude receive followed a release later,
+in v0.13.0 ([docs/codex.md](../codex.md)), tested against Codex 0.155.1
+(macOS) and 0.154.0 (Linux); v0.14.0 and v0.14.1 were client-only releases
+that did not touch the Codex adapter. This doc's v0.12.2 evidence below
+remains the readiness record for the wrapper/queue path that native connect
+now leads with (`command-reference.md`, the "Native connections" preamble
+section).
 
 ## v0.12.2 release and installation evidence
 

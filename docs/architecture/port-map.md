@@ -13,7 +13,9 @@
 > historical, preserved as the planning record; the current wire/behavior
 > contract is [protocol.md](protocol.md), not this plan. Phase 3 (`cbus-8k9.4`) executed in two tranches
 > against [compat-deletion-plan.md](compat-deletion-plan.md): tranche 1 (2026-07-18,
-> `8f79a83`) dropped the mtime grace fallback (D3) and the bash artifacts; tranche 2
+> `8f79a83`) dropped the mtime grace fallback (D3) and the bash artifacts
+> (**correction, 2026-09-22:** `8f79a83` is not on `main`; the tranche-1 commit
+> on `main` is `f78fad0`); tranche 2
 > (2026-07-19, `3865d52`..`f853ff2`) landed the `(pid, starttime)` structural identity
 > primitive (D1) and the in-process follower, deleting COMPAT items 1-2. Full
 > pidfd/kqueue liveness — the stronger mechanism `(pid, starttime)` was scoped as a

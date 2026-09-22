@@ -30,9 +30,11 @@
 5. After release authorization, tag the tested revision (`git tag vX.Y.Z`) and
    publish from a clean tree with `make release CBUS_REPO=owner/repo` (refuses a
    dirty tree; build from a fresh clone at the tag for provenance, as the v0.14.0
-   record did). Verify downloaded bytes against the prepared hashes and run
-   install/selfupdate on Mac and server. Do not rebuild different bytes under the
-   same tag.
+   record did). `make release` publishes only the five client binaries; upload
+   the rest by hand: `gh release upload vX.Y.Z SHA256SUMS` plus any relay
+   binaries or validation files this release carries. Verify downloaded bytes
+   against the prepared hashes and run install/selfupdate on Mac and server. Do
+   not rebuild different bytes under the same tag.
 6. Verify command/role/Codex-skill refresh. Older updater binaries need one manual
    `cbus install-codex-skills` after upgrading. Preserve modified Codex skills;
    permission rule installation is always a separate explicit opt-in.

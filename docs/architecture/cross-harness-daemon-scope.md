@@ -85,7 +85,7 @@ availability and message receipt are separate states.
 
 | Harness | Initial candidate | Important boundary |
 | --- | --- | --- |
-| Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Authentication/policy restrictions and exact-session idle wake need live proof |
+| Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Idle wake and signed-in authentication/policy proved in the v0.13.0 native signed-in acceptance (35 minutes idle, unchanged transcripts, real signed-in Claude 2.1.278; `docs/claude-native-review.md`). Still open: network-loss/offline-spool injection, and a custom config root that automatic formation launch cannot recreate (§10 refuses it outright) |
 | Codex CLI | Native durable queue via a non-owning sidecar and `cbus connect`; existing wrapper remains compatible | Exact thread and local storage context; preserve TUI ownership; reconcile ambiguous enqueue because native client IDs do not deduplicate |
 | OpenCode | Session API and event stream, with a small plugin for session registration and shell identity | Runtime endpoint and session ID must both be explicit; a shared server can contain multiple sessions |
 
@@ -138,7 +138,8 @@ send/reply routes among them, using exact session identity, plus:
 - An unattended idle period with no housekeeping model calls, followed by a real
   message and recipient reply. (Claude/Codex: covered.)
 - Busy-session messages and bursts, with observed ordering and no lost input.
-  (Claude/Codex: covered.)
+  (Claude/Codex: single busy message covered; bursts and ordering not
+  measured.)
 - Adapter/daemon restart, ambiguous submission results, retry and deduplication.
   (Claude/Codex: covered.)
 - Session exit, resume, alias replacement and stale-adapter fencing.
