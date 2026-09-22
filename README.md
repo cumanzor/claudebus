@@ -20,9 +20,12 @@ loop entirely over the bus:
 ![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict](docs/demo-fleet.gif)
 
 Claude Code and Codex CLI can connect their existing conversations through a
-local daemon. Claude uses its per-session native messaging socket (tested with
-2.1.277); Codex uses its experimental native queue API (tested with 0.154.0).
-Idle connections require no model polling or Monitor re-arming. Delivery is independent of the terminal: iTerm2, tmux, and
+local daemon in **v0.13.0**. Claude uses its per-session native messaging socket;
+Codex uses its experimental native queue API. Release field checks used Claude
+2.1.278 and Codex 0.155.1 on macOS / 0.154.0 on Linux; see the
+[release and validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0).
+Idle connections require no model polling or Monitor re-arming. Delivery is
+independent of the terminal: iTerm2, tmux, and
 manually launched terminals share the same bus. The client is a Go binary; the
 Codex adapter also requires a compatible installed Codex CLI.
 
@@ -43,27 +46,32 @@ cbus install-commands && cbus install-roles && cbus install-codex-skills
 cbus selfupdate
 ```
 
-Two shells, one channel:
+Two CLI conversations, one channel — ask each session to run its own commands:
 
 ```sh
-# shell 1                          # shell 2
-cbus join demo                     cbus join demo
-cbus tail demo/main                cbus send main "build's green — merging"
+# Inside Claude Code (or use /bus-join demo worker)
+cbus connect demo worker --json
+cbus list demo
+
+# Inside Codex CLI (or ask $cbus-connect to join demo as advisor)
+cbus connect demo advisor --json
+cbus list demo
+cbus send demo/worker --from demo/advisor 'Please review the diff'
 ```
 
-Inside Claude Code, use `/bus-join` or run `cbus connect demo worker --json`
-from the current session. An idle session receives native input without a Monitor
-or a restart. See [Claude setup](docs/claude.md) for capability checks, existing
-Monitor migration and receipt/recovery semantics. The shell `join`/`tail` example
-above remains the legacy file interface.
+Supported running CLI sessions connect without a restart or special launcher.
+For seamless Codex command permissions, opt in once with
+`cbus install-codex-skills --with-permissions`, then restart/resume the CLI to load
+those rules. This trusts all cbus subcommands; ordinary skill installation keeps
+normal command approvals. See the [Codex cheat sheet](CHEATSHEET.md#codex-cli-quick-reference)
+and [full setup](docs/codex.md).
 
-Inside an ordinary Codex CLI conversation, invoke `$cbus-connect` or run
-`cbus connect demo advisor --json`. It joins the current thread without restarting
-or launching through cbus. See [Codex setup](docs/codex.md) for exact-command
-permissions, presence notifications, lifecycle status and delivery recovery.
-Desktop harness clients are outside v1.
+Claude uses [native receive](docs/claude.md); existing Monitor peers need deliberate
+migration. Neither native path needs a Monitor or a recurring roster check.
+Native receive supports macOS/Linux; desktop harness clients remain outside v1.
+The shell `join`/`tail` interface is [legacy](CHEATSHEET.md#legacy-joinmonitor-peers-only).
 
-Bring a whole fleet back after a reboot:
+Bring a supported Claude formation back after a reboot:
 
 ```sh
 cbus formation save myeffort      # snapshot the channel: peers, roles, models
@@ -71,6 +79,10 @@ cbus formation resume myeffort    # after the reboot: one command; the restored
                                   # anchor gets a decision brief and reconciles
                                   # the rest itself
 ```
+
+Formations preserve Codex identity too, but automatic Codex restore/bootstrap is
+not yet supported. Resume the recorded Codex thread and connect it manually;
+cbus will not substitute a fresh Claude session.
 
 ## What's in the box
 
@@ -149,8 +161,8 @@ release; the old Monitor WebSocket endpoint keeps its legacy semantics.
 
 | doc | what's in it |
 |---|---|
-| [CHEATSHEET.md](CHEATSHEET.md) | the quick-reference card — every verb in one screen |
-| [docs/how-it-works.md](docs/how-it-works.md) | store, join, tail, send; delivery semantics, caveats, and how this sits next to the built-in teammate mailbox |
+| [CHEATSHEET.md](CHEATSHEET.md) | daily commands, Codex setup/resume, Claude, relay, formations and compatibility paths |
+| [docs/how-it-works.md](docs/how-it-works.md) | native daemon delivery, legacy file transport, receipt semantics and caveats |
 | [docs/install.md](docs/install.md) | releases, `selfupdate`, from-source, what gets installed where |
 | [docs/usage.md](docs/usage.md) | forking, spawning, roles, the global channel, presence |
 | [docs/formations.md](docs/formations.md) | save / apply / resume, starter templates, birth records, drift anchors |

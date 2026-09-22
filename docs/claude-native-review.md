@@ -2,15 +2,19 @@
 
 The [Claude Code native receive milestone](https://github.com/cumanzor/claudebus/milestone/1)
 is merged into `main`: 28 component PRs merged, with #37 incorporated into #25.
-It is prepared for v0.13.0 and is not included in v0.12.2. Final release-artifact
-validation, signed-in/CCS field use, publication and installation are separate gates.
+[v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0) is released
+and installed on Mac and server, including the relay. Release-artifact validation and
+the signed-in CCS pilot are complete; the public
+[validation record](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
+identifies source `086bc7cec9dc106d1fcfd0d6b5379b190b0b71cc`, asset hashes and field
+limits. The component history below remains attributed to its original candidates.
 
 ## Merged review order
 
 The following preserves the completed component review sequence and its dependency
 map. The landing instructions and frozen staging references describe that review;
 they are not outstanding merge work. Historical acceptance remains attributed to
-the exact candidates below, not automatically to the eventual release assets.
+the exact candidates below, not automatically to the v0.13.0 release assets.
 
 | Group | PRs in suggested order | Review focus |
 | --- | --- | --- |
@@ -51,7 +55,7 @@ review bases where several component dependencies meet:
 | `staging/claude-native-adapters` | `accb4be` | Runtime/CLI/reservation/formation assembly used by #30 and #37. |
 | `staging/claude-native-runtime` | `3e83348` | Earlier combined runtime and documentation snapshot, not a release or merge shortcut. |
 
-## Runtime acceptance
+## Historical component runtime acceptance
 
 The following uses actual ordinary CLI processes with isolated profiles, narrow
 normal tool permissions and local scripted fake model providers. It measures the
@@ -127,7 +131,7 @@ iTerm and tmux, default and explicit profiles, relative roots and inherited
 identity removal. Those fixtures execute harmless shells; they do not claim new
 GUI placement acceptance.
 
-## Stopgap and remaining field gates
+## Optional stopgap and remaining scope
 
 The controlled Monitor comparison on 2.1.277 used the same `persistent: true`,
 two-second timeout request in both arms. With `tengu_breezy_crescent=true` it
@@ -140,11 +144,18 @@ signed-in-account before/after check remains open; default five-/30-minute limit
 were not measured by that pair. Cached/session-pinned flags read the seed, while
 blocking reads can return defaults. The workaround does not freeze every gate.
 
-Native receive still needs ordinary signed-in/CCS field use after reviewed
-installation. Legacy Monitor aliases require deliberate migration, and arbitrary
-custom configuration roots cannot be recreated by automatic formation launch.
+Native signed-in acceptance subsequently passed with Claude 2.1.278 and Codex
+0.155.1 on macOS / 0.154.0 on Linux, including a real mixed-harness Mac–server relay
+round trip. The final receiving daemon passed the busy-tool/follow-on check and
+35.0 minutes with unchanged Claude and Codex transcripts, followed by an exact
+receipt and reply in 11.92 seconds. That later field observation measures transcript
+inactivity, not exhaustive provider HTTP traffic or billing. It does not relabel
+the historical fake-provider results above as real-account evidence.
 
-Network-loss/offline-spool injection, mixed-harness cross-machine relay and actual
-terminal placement/formation UX are separate acceptance scopes. OpenCode and the
-full cross-harness route matrix remain subsequent milestones. Desktop harness
-clients remain v2; transport remains independent of iTerm2, tmux or a future host.
+Post-install acceptance also passed a manual CCS `alpha` formation with one
+reviewer in an iTerm window, including departure. Broader placement/profile/route
+coverage and network-loss/offline-spool injection remain separate scopes.
+Legacy Monitor aliases still require deliberate migration, and arbitrary custom
+configuration roots cannot be recreated by automatic formation launch. OpenCode
+and the full cross-harness route matrix remain subsequent milestones. Desktop
+harness clients remain v2; transport remains independent of the terminal host.

@@ -1,10 +1,11 @@
 # Claude Code native connections
 
-Native receive requires a cbus build containing the Claude adapter. The v0.12.2
-release supports native Codex only. Actual session-side join, receipt and reply
-passed with the interactive 2.1.277 CLI on macOS and 2.1.276 CLI on Linux, using
-isolated profiles and a local fake provider. Desktop clients and native Windows
-support remain outside v1.
+Native Claude receive ships in [cbus v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
+for terminal CLI sessions on macOS and Linux, alongside native Codex receive.
+The signed-in CCS pilot used Claude 2.1.278, with mixed Claude/Codex delivery and
+Mac–server relay checks; see the [release validation](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
+for exact assets and limits. Desktop clients and native Windows receive remain
+outside this release.
 
 ## Join from an existing session
 

@@ -3,15 +3,15 @@
 Source: this repo — `internal/client/daemon.go`, `internal/client/codexqueue.go`,
 `internal/client/codexbridge.go`, `internal/client/codexwrap.go`.
 
-Appended after your role file. Your role file's mandate holds: what your seat
-gates, how you report, what you may not authorize. What does **not** hold is the
-part of it that assumes a Claude Code harness. This file names those.
+Supplemental reference supplied by the orchestrator when needed; cbus does not
+automatically inject `profiles/*.md`. Your role's mandate holds: what your seat
+gates, how you report, what you may not authorize. Daily commands are in the
+[Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
 
-## The arming doctrines are not yours
+## Native sessions do not arm a listener
 
-Your role file opens with two doctrines about arming a listener through the
-Monitor tool and re-arming it on drop. Both describe a harness you are not
-running in.
+Current stock roles use native `cbus connect`. Ignore obsolete Monitor/re-arming
+instructions in an older copied role; use this session's native integration.
 
 You have no Monitor tool. **Do not run `cbus tail`.** For a native connection,
 `cbus connect CHANNEL [ALIAS]` registers this conversation and the daemon submits
@@ -30,47 +30,51 @@ These lifecycle semantics passed ordinary CLI clean and interrupted resume
 tests on 0.154.0 with a local fake provider. The 65-minute ordinary CLI idle test
 passed with zero recorded maintenance activity and a subsequent exact reply.
 
-If a cbus command reports a sandbox permission error, request approval for that
-exact command using the session's existing approval mechanism. Unix socket
-access can require approval even with a writable bus directory; default-home
-replies can also require write approval. Do not change sandbox or approval
-settings to connect, and do not treat a permission error as a restart signal.
+With authorized `cbus install-codex-skills --with-permissions` setup loaded, use
+direct `cbus` commands or the approved executable. It trusts all cbus subcommands
+and needs one CLI restart/resume to load the rules. Without it, request normal
+approval for the exact command; wrappers and compound scripts have their own
+approvals. Do not change general sandbox/approval settings, and do not treat a
+socket permission error as a restart signal.
 
 ## You may have been resumed onto the bus
 
-An operator can put an EXISTING codex session on a channel (`cbus codex ...
-resume <session-id>`). If that is you, the transcript above this point is your
-own earlier work, not context someone pasted in, and your bus alias may be new
-even though your history is not. `cbus whoami` is the authority on which
-channel and alias you now answer as; do not assume the seat you held before the
-resume is the seat you hold now.
+Resume a native peer with `codex resume THREAD_ID`, using the exact saved thread
+and Codex home/profile, then connect from that session with the original channel
+and alias. History and inbox position are retained. Check the returned address;
+do not assume the seat from old context. Automatic Codex formation restore is not
+yet supported. The local-only `cbus codex ... resume THREAD_ID` wrapper is a
+separate compatibility path; it is not required for native connections.
 
 ## Messages can cause model work
 
 Each bus message becomes queued input on the native path. The compatibility
 bridge may steer an active turn or start a new one. Native connections deliver
 real join/leave and completed-compaction notices, which can cause a recipient
-turn. Do not reply to presence notices. Idle liveness checks do not invoke the
-model. The compatibility bridge skips incoming presence frames.
+turn. Announce membership changes to the user, retain known roles, and update the
+roster without polling. Completed compactions update context, not membership.
+Do not reply on the bus solely for presence. Idle liveness checks do not invoke
+the model. The compatibility bridge skips incoming presence frames.
 
 When you send, prefer one complete message over a stream of fragments, within the
 size ceiling your role file names.
 
-## Repo policy does not reach you automatically
+## Shared policy
 
-A Claude peer in this formation picks up the repo's conventions from files its
-harness loads on its own. You do not. Commit format, changelog routing, tracker
-hygiene, path rules — if it binds you, it has to be in the dispatch. If a
-dispatch references repo policy you were never handed, ask for it rather than
-inferring it from what you can see in the tree.
+Honor the repository instructions loaded by your harness, including applicable
+`AGENTS.md`, plus the explicit task scope. Bus dispatch does not automatically
+transfer another peer's loaded instructions. If a referenced policy is missing,
+read the named file or ask for the missing context; do not invent its contents.
 
 The same applies in reverse: when you report, do not assume a peer knows which
 conventions you were operating under.
 
 ## Orientation
 
-There is no per-peer bus bootstrap yet. A codex peer learns the bus message
-format from the injected frames themselves, so the first frames you receive are
-also your documentation of the format. Read them as such.
+`cbus spawn ... --harness codex` supplies a native-connect opening prompt.
+`--role` adds role instructions; its Claude `MODEL:` line does not select a Codex
+model. Use explicit `--model` or the Codex profile/default. After joining, check
+the roster once. The native roster PID belongs to the daemon; `connection status`
+separately reports the observed CLI consumer identity and time.
 
 Reply on the bus.

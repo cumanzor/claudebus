@@ -1,6 +1,6 @@
 # Changelog (detailed)
 
-## v0.13.0 — native Claude receive (release candidate)
+## v0.13.0 — native Claude receive (released)
 
 - Ordinary Claude Code CLI sessions join with `cbus connect` through their own
   session socket, without a restart, wrapper, Monitor or periodic model turn.
@@ -10,7 +10,8 @@
 - Admission binds the exact process, socket, session and trusted transcript.
   A socket write is submission; only the exact persisted session/message UUID
   confirms receipt, which is separate from a reply or completed work. Uncertain
-  attempts stay recorded and are not blindly retried.
+  attempts stay recorded and are not blindly retried. Receipt detection includes
+  messages received between foreground tool calls in an active Claude turn.
 - Pending mail and receipt state survive daemon restart and normal session exit.
   Reconnect/resume retains identity; `/clear` fences the old binding even when
   the process/socket stay the same. Native connect preserves mail already queued
@@ -28,13 +29,21 @@
   for native receive. Stop sessions before reverting. Real-account effectiveness
   remains unproven, and the helper does not freeze every feature flag.
 
-[Evidence and release gates]
-The [merged review and acceptance record](docs/claude-native-review.md) separates
-fixture checks, actual CLI processes with local fake providers, and historical
-candidate hashes. It includes Mac/Linux receive, isolation, lifecycle, mixed
-Claude/Codex, isolated relay and 35-minute idle evidence. Those runs are not new
-release-asset or signed-in/CCS field proof. Final artifact reproducibility, the
-signed-in pilot, publication and staged installation remain release gates.
+[Release and validation]
+[v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0) is published
+and installed on Mac and server, including the matching relay. The seven binaries
+from source `086bc7cec9dc106d1fcfd0d6b5379b190b0b71cc` reproduced independently;
+full Go, race and vet checks and both final platform suites passed. The public
+[validation record](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
+separates controlled fake-provider cases from the signed-in CCS pilot with Claude
+2.1.278 and Codex 0.155.1 on macOS / 0.154.0 on Linux. Final clients completed a
+real Mac–server round trip. A 35-minute quiet interval left both transcripts unchanged,
+then a late message received an exact receipt and reply in 11.92 seconds; this
+measures transcript activity, not exhaustive provider HTTP traffic or billing.
+The subsequent manual CCS `alpha` formation check passed for one reviewer in
+an iTerm window, including departure; it does not cover every placement or profile.
+The [component review record](docs/claude-native-review.md) retains earlier
+candidate hashes and fake-provider results as historical evidence.
 OpenCode, desktop harness clients, native Windows receive, the full cross-harness
 route matrix and broader terminal/formation UX acceptance are outside this release.
 

@@ -53,6 +53,19 @@ cbus formation rm myeffort                # delete a saved formation
   the one it was saved as, and acting on stale intent under someone else's
   name).
 
+## Harness and profile limits in v0.13.0
+
+Automatic launch/bootstrap supports Claude peers with the default Claude config
+or a recognized CCS profile. Saved Codex peers retain their harness and backend
+identity, and an already-present peer can stay in the formation, but automatic
+Codex launch/bootstrap/resume is not supported. Resume its exact recorded thread
+with the same backend, then run `cbus connect` from that CLI session. cbus refuses
+unsupported restoration instead of substituting a fresh Claude peer.
+
+A custom Claude config root can connect natively but cannot be reproduced by the
+formation launcher; open/resume it manually. These harness limits are independent
+of terminal choice. See [Claude](claude.md) and [Codex](codex.md) for details.
+
 ## Starter templates
 
 The repo ships `formations/dev-trio.json`, a four-role starter (orchestrator,

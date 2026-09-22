@@ -1,6 +1,84 @@
 # claudebus cheat sheet
 
-## Join a channel
+For **v0.13.0**. Native Claude Code and Codex CLI receive works on macOS/Linux;
+desktop harness clients and OpenCode are outside this release.
+
+Jump to: [Codex CLI](#codex-cli-quick-reference) · [Claude CLI](#claude-cli-join-a-channel) ·
+[Relay](#cross-machine-relay-backed-channels) · [Formations](#formations--saverelaunch-a-channels-peers) ·
+[Updates](#install--update).
+
+## Codex CLI quick reference
+
+Start `codex` normally in your preferred terminal. In that conversation, ask to
+use `$cbus-connect` with a channel and alias, or have Codex run:
+
+```sh
+cbus connect myrepo advisor --json
+cbus list myrepo                    # once after joining; report peers and known roles
+```
+
+No special launcher or restart is needed for a supported running CLI. The daemon
+handles waiting; do not start a Monitor, `cbus tail`, or a polling loop.
+
+| Task | Command inside the connected Codex session |
+|---|---|
+| Send a message | `cbus send myrepo/worker --from myrepo/advisor 'Please review the diff'` |
+| Inspect this connection | `cbus connection status myrepo/advisor --json` |
+| List managed connections | `cbus connection status --json` |
+| Resolve uncertain delivery once | `cbus connection reconcile myrepo/advisor --json` |
+| Stop future delivery, retain mail/history | `cbus connection disconnect myrepo/advisor` |
+
+**One-time permissions, if wanted:** run `cbus install-codex-skills --with-permissions`
+from the installed binary. This trusts **all cbus subcommands**, including spawn,
+updates and administration, for bare `cbus` on PATH and that executable's absolute
+path. Restart/resume an existing Codex CLI once to load the rules; later channels
+need no new rule. Plain `cbus install-codex-skills` installs only the skill.
+Use direct commands: shell wrappers and compound scripts have their own approvals.
+General sandbox/approval settings stay unchanged. See [permission setup](docs/codex.md#sandbox-approvals).
+
+**Resume:** exit normally, then run `codex resume THREAD_ID` in your terminal
+using the saved connection's exact `threadId`, with the same Codex home/profile.
+Inside the resumed conversation, run `cbus connect myrepo advisor --json` again.
+Mail and delivery position are retained. If the previous turn was explicitly
+interrupted, let a new user continuation finish before expecting queued messages;
+reconnecting or an `idle` label alone does not clear that pause.
+
+**Across machines:** after [relay setup](docs/relay.md), keep `@HOST` everywhere:
+
+```sh
+cbus connect dev@server advisor --json
+cbus list dev@server
+cbus send dev@server/worker --from dev@server/advisor 'Please review the diff'
+cbus connection status dev@server/advisor --json
+```
+
+**Open a fresh peer:** `cbus spawn pane myrepo --harness codex --name worker`.
+Use `--profile NAME` for a configured Codex profile; `--model MODEL` overrides its
+model. Codex `spawn --role` supplies role instructions but does not use the role's
+Claude `MODEL:` default. `pane` splits inside tmux when `$TMUX` is set; otherwise
+it splits the caller’s iTerm2 session. `tmux` opens a window in the current tmux
+session; `window`/`tab` use iTerm2. In any other terminal, start
+`codex` yourself and connect from that conversation. Codex formation restore and
+`branch` are not supported; resume its exact thread manually.
+
+Reading the result:
+
+- `queue-ready` is queue access, `lastAccepted.state=received` is exact-thread
+  history receipt, and a reply is evidence of action. They are separate.
+- Local roster `pid` / JSON `listenerPid` identifies the **daemon**, shared by
+  peers. `connection status` exposes `threadId` and observed `consumer.pid`;
+  read it with `consumer.state`, `consumer.startToken` and `consumer.observedAt`.
+- Presence tells you who joined, left or departed. Keep known roles; aliases do
+  not establish roles. No presence acknowledgments or repeated roster reads.
+  Completed-compaction notices update context, not membership.
+- Use `connection status`, not `connect status`: the latter joins a channel
+  literally named `status`. On uncertain delivery, reconcile once; do not resend
+  blindly. A socket permission failure is not a reason to restart the session.
+
+Full details: [Codex connections](docs/codex.md). The [compatibility wrapper](#codex-compatibility-paths)
+remains available for older workflows.
+
+## Claude CLI: join a channel
 
 Peers live in **named channels**; addresses are `channel/alias`. `/bus-join`
 and `/bus-branch` default the channel to the current repo's name. `global` is
@@ -22,8 +100,7 @@ cbus connect myrepo worker --json  # from inside the target session
 cbus list myrepo                   # one roster check; retain explicitly known roles
 ```
 
-Native Claude requires a build with the Claude adapter; v0.12.2 supports native
-Codex only. `socket-ready` means an available endpoint, not receipt. No Monitor,
+v0.13.0 supports native Claude alongside Codex. `socket-ready` means an available endpoint, not receipt. No Monitor,
 tail process, periodic model task or recurring roster check is needed. See
 [Claude connections](docs/claude.md) for supported sessions and recovery. Prefer
 an explicit alias when you want a stable address; local aliases can be auto-picked.
@@ -43,10 +120,10 @@ does this for you. The child's bootstrap connects its own native session.
 `branch` forks (the child resumes your transcript); `spawn` starts blank —
 use it when a peer shouldn't inherit your history. `--role <r>` reads
 `roles/<r>.md` and appends it to the child's first turn, defaulting
-`--name`/`--model` to the file; `branch` refuses `--role` (a fork inherits
+`--name` to the role and, for Claude, `--model` to its `MODEL:` line; `branch` refuses `--role` (a fork inherits
 its parent's intent).
 
-## Talk (ask Claude, or run directly)
+## Talk (ask the connected peer, or run directly)
 
 ```sh
 cbus send fork-1 "build is green"        # bare alias = within my own channel
@@ -73,7 +150,8 @@ Incoming messages include a framed block:
 
 Reply with `cbus send <from> "..."` using the exact `from=` address, including
 `@host` for remote peers. A successful send is submission, not receipt or a reply.
-For Claude, receipt requires an exact session/message UUID in the bound transcript.
+For Claude, receipt requires exact session/message identity in a persisted native
+input record; a busy-tool receipt may be a verified queued-command attachment.
 Presence updates the observed roster and known roles; announce membership changes
 to the user without sending acknowledgments solely for presence.
 
@@ -149,24 +227,13 @@ cbus formation save myeffort --anchor tracker=item-42    # record a hand anchor 
 cbus formation resume myeffort                       # after a reboot: relaunch the ANCHOR, it reconciles the rest
 cbus formation apply myeffort --mode resume --only coder  # late-bound per-peer resume (this run only)
 
-# codex as a peer (harness-neutral bus; codex never runs `cbus tail`)
-cbus install-codex-skills                            # install $cbus-connect for ordinary CLI sessions
-cbus connect myrepo advisor --json                   # run INSIDE the existing Codex CLI; no restart
-cbus connect dev@server advisor --json                  # remote bus; requires durable-v1 relay
-cbus connection status myrepo/advisor --json         # consumer, queue and historical receipt separately
-cbus connection reconcile myrepo/advisor --json      # on-demand receipt evidence; no model turn
-cbus connection disconnect myrepo/advisor            # keep inbox/journal; stop future submissions
-cbus daemon restart                                 # explicitly load an upgraded cbus binary
-cbus codex-permissions --binary /absolute/path/cbus   # preview optional exact-path send rule
-cbus spawn pane myrepo --harness codex --name worker  # ordinary CLI in iTerm2/tmux
-cbus codex --channel myrepo                          # codex --remote TUI joined as a bus peer, bridged
-cbus codex --channel myrepo --alias advisor resume <session-id>   # bring an existing codex session onto the bus
-cbus codex --channel myrepo --alias advisor resume --last         # same, most recent session in this cwd
-cbus codex-stop-hook                                 # Stop-hook delivery for plain codex exec workers
 cbus formation list                                 # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                          # delete (starters: use git rm instead)
 ```
 
+- Automatic formation launch/bootstrap supports Claude peers. Saved Codex peers
+  retain their harness/backend identity, but must be resumed and connected
+  manually; no fresh Claude fallback is attempted.
 - `apply` only launches MISSING peers, sequential + anchor-first; convergence
   is a round-trip (nonce in, nonce back), so an unanswering peer reports
   `failed` rather than counting as up.
@@ -177,6 +244,8 @@ cbus formation rm myeffort                          # delete (starters: use git 
   direction in the file turns off tmux's auto-reflow for the whole run.
 - Connect natively to the formation's channel **before** applying — a peer can
   answer before apply returns. Check the roster once; no Monitor is needed.
+- For supported formation launches, explicit peer `model` overrides the role
+  file's `MODEL:` line; an empty model inherits it, then the CLI default.
 - A saved peer's origin (`fresh`/`fork`) and model are stamped automatically
   at `spawn`/`branch` time and picked up by `save` — no hand-edit needed for
   a launcher-born peer.
@@ -218,14 +287,22 @@ cbus selfupdate                                     # update the binary in place
 cbus selfupdate --check                             # is there a newer release?
 cbus install-commands                               # (re)write the /bus-* skills
 cbus install-roles                                  # (re)write role prompts to $CBUS_DIR/roles
+cbus install-codex-skills                           # refresh the Codex skill, preserve edited files
+cbus daemon restart                                # load the upgraded binary; retain pending mail
 export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'update available' hint
 ```
 
 - `selfupdate` verifies the download reports the tag it fetched before swapping the
-  running binary, then refreshes commands + roles. `--force` reinstalls a dev build.
+  running binary, then refreshes commands, roles and Codex skills. `--force` reinstalls a dev build.
 - install verbs are sha-guarded: a locally-edited file is skipped (with a reason)
   unless `--force`.
 - release binaries carry the repo slug; `CBUS_REPO` is only needed for a dev build.
+- `selfupdate` does not restart an existing daemon or opt you into Codex trust.
+  Restart the daemon explicitly; upgrade the relay separately for native remote receive.
+- For a private test store, export an absolute `CBUS_DIR` before launching the
+  harness, or consistently use an explicit wrapper. Changing one tool shell does
+  not change its parent session. Runtime formations live in `$CBUS_DIR/.formations`;
+  committed starters resolve from the launch checkout's `formations/`.
 
 ## Under the hood (rarely needed)
 
@@ -239,8 +316,6 @@ cbus close <ch>/<alias> [...] [--force]  # end a peer's process (SIGTERM, then
 cbus hook-exit                   # SessionEnd hook target (announces departure)
 cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus hook-join                   # SessionStart hook target (auto-joins $CBUS_CHANNEL)
-cbus codex-bridge <ch>/<al> --sock PATH  # bridge a codex app-server thread (docs/codex.md)
-cbus codex-bridge <ch>/<al> --sock PATH --thread ID --no-resume  # bridge a thread a TUI already drives
 cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ```
@@ -248,7 +323,8 @@ CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
 ## Gotchas
 
 - Native input can wake an idle peer to act/reply without human input. Busy
-  sessions wait for their turn, and harness hold/refuse policies still apply.
+  Codex sessions wait for their turn; Claude can receive between foreground tool
+  calls. Harness hold/refuse policies still apply.
 - `socket-ready`, queue acceptance, transcript receipt and a completed reply are
   different observations. Inspect status/reconcile on demand; never blindly resend
   an uncertain native attempt or treat absence of receipt as proof of rejection.
@@ -288,3 +364,18 @@ prune grace period. Monitor framing wraps lines near 440 bytes and has an
 approximately 2800-character notification ceiling. Legacy remote WebSocket
 Monitors require re-arming after disconnection and retain the old relay's loss
 window; native daemon subscriptions use durable acknowledgments instead.
+
+## Codex compatibility paths
+
+These are separate from ordinary native `connect`; the wrapper is local-only.
+Run an interactive wrapper in its own terminal, not inside a model's shell tool.
+
+```sh
+cbus codex --channel myrepo --alias advisor
+cbus codex --channel myrepo --alias advisor resume THREAD_ID
+cbus codex-bridge myrepo/advisor --sock PATH --thread THREAD_ID --no-resume
+cbus codex-stop-hook                # plain codex exec fallback only
+```
+
+The wrapper owns an app-server and bridge; quit its TUI normally so those children
+are reaped. It does not need a Monitor. See [compatibility details](docs/codex.md#existing-launch-and-bridge-compatibility).

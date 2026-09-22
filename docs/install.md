@@ -43,7 +43,7 @@ one is skipped (with a reason) unless `--force`. The commands placed are:
 | `commands/bus-join.md` | `~/.claude/commands/bus-join.md` | join a channel |
 | `commands/bus-branch.md` | `~/.claude/commands/bus-branch.md` | fork + auto-join both sides |
 | `commands/bus-spawn.md` | `~/.claude/commands/bus-spawn.md` | open a fresh session, joined to a channel |
-| `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | rename this session's alias |
+| `commands/bus-rename.md` | `~/.claude/commands/bus-rename.md` | rename a legacy peer's alias (native rename is unsupported) |
 | `commands/bus-formation.md` | `~/.claude/commands/bus-formation.md` | save/apply/bootstrap a [formation](formations.md) |
 
 Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's installed.
@@ -64,8 +64,10 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 ## Codex CLI permission and daemon setup
 
 Use `$cbus-connect` from an existing ordinary Codex CLI session. No special cbus
-launcher is required. The native adapter is currently macOS/Linux only and is
-tested against Codex CLI 0.154.0; the app-server queue surface is experimental.
+launcher is required. In v0.13.0 native Claude and Codex receive support
+macOS/Linux. Codex release field checks used 0.155.1 on macOS and 0.154.0 on Linux;
+the app-server queue surface remains experimental. See the
+[Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
 Windows retains its existing cbus functionality and explicitly refuses native
 `connect`/`daemon` in this release. Desktop harness clients are v2.
 
