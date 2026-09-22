@@ -1857,7 +1857,7 @@ space from.
 | Sizes over 100% | refused at plan time, before any **mutating** tmux call: read-only `tmux list-panes` and alias resolution still run first |
 | Cell-count size (`:80`) | refused at parse time; percentages only |
 | Already-arranged window | spec panes in the anchor's window are broken out first, so a repeat arrange is idempotent |
-| Unresolved alias | all failures reported at once, before any tmux call runs |
+| Unresolved alias | all failures reported at once, before any **mutating** tmux call |
 | `scatter` | `tmux break-pane -d -s <pane> -n <alias>` per peer (`layout_unix.go:112`); one already alone in its window is renamed and reported, not an error (`<alias>: already its own window`); a broken-out peer reports `<alias>: broken out`; an unresolved peer reports `<alias>: skipped (<reason>)` and is not fatal. Exits 1 only when **zero** peers resolved at all; any partial success (even mixed with per-peer failures) exits 0, since scatter's success is a state ("each peer has its own window"), not "every peer moved" |
 | `focus` | `select-window` then `select-pane` on the same pane id — a split and a window of its own are the same handle |
 | Not in tmux | `tmux list-panes` against the default server fails with tmux's own message, `no server running on ...`, not a cbus error. Outside tmux only loses the `$TMUX_PANE` self-resolution shortcut; the rest of resolution is unaffected by tmux's own presence |
@@ -1896,7 +1896,8 @@ The shipped starter `dev-trio` carries **four** peers despite the name —
 orchestrator, coder, reviewer, documenter — because the orchestrator anchor rides
 in the file; the name alone suggests three.
 
-**The envelope** (`Formation` / `FormationPeer`, `internal/client/formation.go:83-105`).
+**The envelope** (`Formation`, `internal/client/formation.go:56`, and
+`FormationPeer`, `:83-105`).
 Top-level:
 `schema`, `name`, `channel`, `host` (nullable), `anchorAlias`, `savedAt`,
 `savedBy`, `drift_anchors`, `payload` (opaque — carried into briefs, never
@@ -2300,8 +2301,9 @@ profile's `commands/` directory, or the plain default lands in the real
 
 ### `cbus install-codex-skills [--path DIR] [--force] [--with-permissions]`
 
-Installs each embedded Codex skill's `SKILL.md` plus a `.cbus-sha256` receipt
-into its own subdirectory (default `$CODEX_HOME/skills` if set, else
+Installs each embedded Codex skill's `SKILL.md` plus a `.cbus-installed-sha256`
+receipt (`codexSkillReceipt`, `install_codex_asset.go:11`) into its own
+subdirectory (default `$CODEX_HOME/skills` if set, else
 `~/.codex/skills`, `defaultCodexSkillsDir`, `install_assets.go:183-191`; other
 embedded files under a skill are not installed). Same sha-guard, per-file
 output, and exit-code convention as `install-commands`/`install-roles`, named
@@ -2360,8 +2362,10 @@ Each is an instruction sheet **to the model** with YAML frontmatter
 (`description`, `argument-hint`, `allowed-tools`); every file but `/bus-join`
 ends with a hard **"Do nothing else."**, a guardrail against model
 over-helpfulness that a port's skill files should keep (`/bus-join` instead
-closes on capability-failure and legacy-migration handling). Every command
-now instructs a native `cbus connect ... --json`; the sole holdover is
+closes on capability-failure and legacy-migration handling). Every launcher
+and join command now instructs a native `cbus connect ... --json`
+(`/bus-layout`, `/save-formation` and `/bus-rename`'s legacy branch have no
+join step to native-ize); the sole Monitor holdover is
 `/bus-rename`, which still carries the `Monitor` tool for its legacy-peer
 fallback path (`commands/*.md` frontmatter).
 
@@ -2777,8 +2781,10 @@ client; they remain for the homogenization/port record.
 9. **(bash era)** An unknown relay host used to die silently mid `$(...)`
    command substitution (a non-fatal stderr message, `die-in-substitution`);
    with stored creds, `tail ch@bogus/al` exited 0 with a broken spec and a
-   live marker. The Go client has no such substitution boundary to swallow
-   an error inside: a bad host surfaces as an ordinary dial/DNS error.
+   live marker. The Go client refuses before ever dialing: `SiteURL` returns
+   `UnknownHostError` for a host with no built-in or env-var override,
+   `unknown relay host "<h>" (set CBUS_SITE_<H>_URL)` (`endpoint.go:61-71`),
+   the same host-validation gate §2 documents.
 10. `whoami` exits 1 when empty (unlike `list`/`channels`). `auth status`
     "always exits 0" was the bash-era claim; the Go client exits 1 on a bad
     host (§8, `auth status`).
@@ -2871,11 +2877,13 @@ client; they remain for the homogenization/port record.
 35. Owner detection needs a session-process ancestor within 16 hops. This was
     `claude`/`claude-*`-only in an earlier stage of the Go port; the shipped
     client accepts `claude`/`claude-*`, `grok`/`xai-grok-pager`, `opencode`,
-    or `codex` (`marker.go:102-107`); otherwise liveness degrades to
-    pid-only. Identity is matched against **argv[0]'s basename**, not kernel
-    `comm` (kept only as a fallback): the bun-compiled CLI's `comm`/`ucomm`
-    is its version string, not `claude`, so every Go-era registration
-    recorded `ownerPid: null` until this was fixed (`cbus close` exposed it,
+    or `codex` (`isHarnessComm`, `marker.go:115-121`); otherwise liveness
+    degrades to pid-only. `ownerFromPid`'s ancestor walk checks each
+    process's kernel `comm` first, falling back to **argv[0]'s basename**
+    only when `comm` does not match (`marker.go:76-83`): the bun-compiled
+    CLI's `comm`/`ucomm` is its version string, not `claude`, so every
+    Go-era registration recorded `ownerPid: null` until this was fixed
+    (`cbus close` exposed it,
     a null `ownerPid` read as "already gone" and skipped signalling a live
     peer entirely).
 36. `window`/`tab`/`pane` (iTerm2 branch) forking is iTerm2-only AppleScript;
