@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"syscall"
 	"time"
@@ -36,6 +37,15 @@ func checkDaemonCompatibility(h daemonHealth) error {
 
 func daemonAbsent(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// daemonExiting reports a probe cut off by a daemon that is shutting down: its server
+// closes connections accepted just before the listener went away. Only meaningful
+// after a stop was sent, and never proof of exit on its own; the lock decides.
+func daemonExiting(ctx context.Context, err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		(errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
 }
 
 func restartDaemon() error {
@@ -71,7 +81,7 @@ func restartDaemonWith(ctx context.Context, health func(context.Context) (daemon
 			if original.PID == 0 || current.PID != original.PID || current.Start != original.Start {
 				return errors.New("daemon instance changed during restart; replacement was not stopped; inspect cbus daemon status")
 			}
-		} else if !daemonAbsent(err) {
+		} else if !daemonAbsent(err) && !daemonExiting(ctx, err) {
 			return fmt.Errorf("confirm daemon shutdown: %w", err)
 		} else {
 			available, err := lockAvailable()

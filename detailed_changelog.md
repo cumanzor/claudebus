@@ -1,5 +1,33 @@
 # Changelog (detailed)
 
+## [2026-09-22 20:20:04 UTC] [Client/Daemon] restart survives the exiting daemon's EOF, and the v0.14.0 release
+
+[Attempt #1] `05feade` on `fix/daemon-restart-eof` off main (`7b18fb2`). 2 files.
+
+[Motivating problem]
+Installing v0.14.0 on the server, `cbus daemon restart` printed `confirm daemon shutdown: Get "http://cbus/health": EOF` and exited. The old daemon had stopped and no replacement was started, so the server had no daemon until `cbus daemon start` was run by hand. `restartDaemonWith` (`cmd/cbus/daemon_upgrade.go`) polls `/health` after `/stop`; the old daemon's `srv.Shutdown` closes connections accepted just before its listener closed, so a probe in that window reads EOF. `daemonAbsent` only recognised ENOENT and ECONNREFUSED, and every other error ended the restart. The code is unchanged since v0.13.0, so v0.13.0 had the same race.
+
+[What changed]
+- `daemonExiting(ctx, err)`: EOF, `io.ErrUnexpectedEOF`, ECONNRESET, EPIPE, and `context.DeadlineExceeded` from the per-probe 2s timeout while the outer 15s deadline is still open.
+- In the confirmation loop only, those errors fall through to the lock check exactly like absence. The lock stays the authority: held means keep polling until the deadline, free means start.
+- `daemonAbsent` is unchanged, so `ensureDaemon` still never launches beside a daemon that answers with an unexpected error.
+
+[Testing Notes]
+- `TestDaemonRestartStartsAfterExitingProbe` (EOF, unexpected EOF, reset, probe timeout), `TestDaemonRestartExitingProbeWaitsForLock`, `TestDaemonRestartUnknownProbeErrorDoesNotStart`. Reverting the loop condition fails the first two on their aimed assertions with the field message verbatim.
+- Live on macOS, scratch `CBUS_DIR` under a short `/tmp` path (the scratchpad path exceeded the 104-byte unix socket limit and gave `connect: invalid argument` for both binaries on the first attempt, so that run measured nothing), 100 restart cycles per binary, counting a cycle ok only when restart exits 0 AND status reports a running daemon: v0.14.0 88 ok / 12 left without a daemon, all `confirm daemon shutdown: ... EOF`; fixed build 100 ok / 0. The live Mac daemon (pid 44099) was not touched.
+- `go test -race ./...` green with the Claude session env unset, vet clean darwin/linux/windows, four-target compile.
+
+[v0.14.0 release record]
+- Tag `v0.14.0` at `7b18fb2` (merge of #50), lightweight like earlier tags.
+- Candidate: two fresh clones of the local repo at `7b18fb2`, tag created only inside them; `go vet`, `go test -race ./...` green; `make dist CBUS_REPO=cumanzor/claudebus` in both, five binaries byte-identical. Stamps `v0.14.0`, `vcs.revision=7b18fb2`, `vcs.modified=false`. Read-only field smoke against the real store (`list`, `formation list`), `:80` refused, `install-commands` into a temp dir placed 8 files.
+- Published with `make release` from a fresh clone of origin at the tag; its dist matched the candidate; title and notes set by `gh release edit`, `SHA256SUMS` uploaded; downloaded assets pass `shasum -c`.
+- Mac: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-darwin-arm64` (`cbe8ccbc...`), `bus-codex.md` and `bus-layout.md` refreshed, both CCS profiles see them via `~/.ccs/shared/commands -> ~/.claude/commands`. Daemon NOT restarted: six live Claude peers (partner-mobile, mobile-authfix) and the daemon code is identical.
+- Server: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-linux-amd64` (`67d8d42a...`), `save-formation.md` installed. `cbus daemon restart` hit the EOF bug above; `cbus daemon start` brought up v0.14.0 (pid 313557, protocol 3), confirmed from a second ssh session, 2 connections retained, relay connected.
+- Relay not redeployed: `relay/`, `internal/wire`, `internal/core` unchanged since v0.13.0.
+
+[Possible Ripple Effects]
+A daemon that hangs mid-shutdown without releasing its lock now makes restart wait out the 15s deadline instead of failing on the first cut-off probe; the error is then the existing "daemon shutdown was not confirmed; no replacement started".
+
 ## [2026-08-28 05:02:27 UTC] [Client/Resume] surface precheck before the launch-intent claim
 
 [Attempt #1] Committed on `fix/resume-surface-precheck`, branched from main: the fix is
