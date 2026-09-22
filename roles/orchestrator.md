@@ -121,9 +121,9 @@ window, with no other file and no channel history.
     routinely spans several model generations at once, and tuning that helps one
     seat is wrong for the next: the mandate lives in the role file, the
     model-specific part in `profiles/<target>.md`. This matters most across
-    harnesses — a codex peer's listener is armed by the bridge, so the arming
-    doctrines every role file states are Claude-harness facts, not universal
-    ones.
+    harnesses: a codex peer is fed by the daemon (or the wrapper's bridge, on
+    the compatibility path), and has no Monitor; harness-specific connection
+    facts live in `profiles/`.
 16. Own the effort record, not only the tracker. The record is the effort
     item's context field: Now / Decisions / Findings / Open / Pointers, about
     6KB, rewritten in place (read, merge, write). Open the item at kickoff

@@ -2,9 +2,10 @@
 
 Source: https://claude.com/blog/a-field-guide-to-claude-fable-finding-your-unknowns
 
-Appended after your role file. The role file is your mandate; this is tuning for
-the model running it. Where they conflict, the role file wins and you flag the
-conflict.
+Sent by the orchestrator with your role file; cbus does not automatically
+inject `profiles/*.md`. The role file is your mandate; this is tuning for
+the model running it. Where they conflict, the role file wins and you flag
+the conflict.
 
 ## The bottleneck is unclarified unknowns
 

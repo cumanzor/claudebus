@@ -1,6 +1,6 @@
 ---
 description: Save, inspect, or relaunch a cbus formation — a channel's saved peer topology
-argument-hint: "save <name> | show <name> | apply <name> [--channel ch] [--dry-run] | bootstrap <name> <alias> | list | rm <name>"
+argument-hint: "save <name> | show <name> | apply <name> [--channel ch] [--dry-run] [--only a,b] [--mode resume|fork|template] | resume <name> [--brief TEXT] | bootstrap <name> <alias> | list | rm <name>"
 allowed-tools: Bash(cbus:*)
 ---
 
@@ -10,7 +10,7 @@ reboot, to hand a whole fleet to a successor, or to stamp out an equivalent one.
 
 The user passed: "$ARGUMENTS" — first word is the verb, second is usually the
 formation name. Run the matching `cbus formation` command and report its output.
-Do not add verbs: the surface is exactly `save | apply | bootstrap | list | show | rm`.
+Do not add verbs: the surface is exactly `save | apply | resume | bootstrap | list | show | rm`.
 
 **save `<name>` [channel]** — capture this channel's peers. Channel defaults to
 this session's own. It records only what the bus knows (alias, sessionId, cwd,
@@ -30,7 +30,9 @@ first. Preconditions worth checking before you run it:
 - **Prefer `--dry-run` first** and show the user the plan. It launches nothing and
   builds the plan exactly as a real apply does.
 - `--only a,b` narrows it; `--wait <dur>` sets how long to wait for each peer to
-  answer (default 90s, `0` = launch and return).
+  answer (default 90s, `0` = launch and return). `--mode resume|fork|template`
+  overrides a peer's restore mode for this run only, without editing the saved
+  file, and composes with `--only`.
 
 Apply opens terminal windows. Unless the user clearly asked for the launch, run
 `--dry-run` and let them confirm before the real one.
@@ -52,6 +54,18 @@ from the role files. Retarget a starter to the effort's channel with
 prints its source line, so relay it when a shadow is in play. `rm` and `save`
 touch the runtime store only — `rm` of a committed starter is refused (remove it
 via git), and a `save` that inherits a starter still writes runtime, never the repo.
+
+**resume `<name>` [--brief TEXT]**: the reboot recovery path. Relaunches just
+the anchor peer, right directory and profile, resuming its own transcript. The
+restored anchor wakes to a decision brief (the saved roster, which peers are
+still resumable, and the `apply` commands to bring them back as themselves or
+fresh) and acts on it, confirmed with the user. `--brief TEXT` adds an effort
+brief to that kickoff, the same as on `apply`. A guard refuses a double-resume
+while the anchor is booting, and a formation that is already running refuses
+with directions to the live seat; other refusal cases (a gone transcript, a
+fork-born or unattributed anchor origin, a live-armed session id, or resuming
+from the wrong machine) are listed under formation resume in `cbus --help`,
+relayed verbatim, the same as an `apply` refusal.
 
 **bootstrap `<name> <alias>` [--brief TEXT]** — print ONE peer's first-turn prompt
 for the user to paste by hand. This is the path for a peer `apply` will not launch

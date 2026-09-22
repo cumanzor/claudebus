@@ -155,7 +155,7 @@ proceeds meanwhile, so the answer does not also have to be a release.
 
 If you are nearing your context limit, say so at a milestone boundary — write the
 handoff, carry the process rules into it and not just the technical spec, and
-leave your listener armed until a successor displaces it.
+stay connected; hand the alias over through the orchestrator.
 
 ## Anti-patterns
 

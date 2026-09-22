@@ -36,9 +36,9 @@ formation name, second bare word is the channel, and flags pass through to
    `+N new` and `N kept, not on the channel now`.
 
    Drift anchors: the convention is `--anchor tracker=<id>`, which links the
-   effort's tracker item so a later apply can diff what moved. `git_head` is
-   machine-owned and stamped for you. If the effort has a tracker epic and the
-   envelope carries no `tracker` anchor yet, offer to add it.
+   effort's tracker item for cross-reference. `git_head` is machine-owned,
+   stamped for you, and the only anchor `apply` diffs. If the effort has a tracker
+   epic and the envelope carries no `tracker` anchor yet, offer to add it.
 
 3. **Show and triage.** Run `cbus formation show <name>` and surface the things
    that bite on restore. Report them per peer, by name, not as a count.

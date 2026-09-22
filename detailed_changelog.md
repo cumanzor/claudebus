@@ -1,5 +1,96 @@
 # Changelog (detailed)
 
+## [2026-09-22 21:53:33 UTC] [Docs/M3] shipped instruction text corrected against source-traced findings
+
+[Attempt #1] On `docs/audit-m3`, branched from `docs/audit-m2`, in worktree
+`claudebus-docs`. 10 files edited (commands/bus-join.md, commands/bus-rename.md,
+commands/bus-branch.md, commands/bus-formation.md, commands/save-formation.md,
+profiles/opus5.md, profiles/fable5.md, roles/coder.md, roles/orchestrator.md,
+skills/codex/cbus-connect/SKILL.md) plus one entry in each changelog.
+Milestone 3 of 5. Unlike M1/M2, these files ship inside the `cbus` binary
+(`go:embed`); a fix here reaches machines only on the next release.
+
+[Motivating problem]
+Same audit: commands/*.md (8), roles/*.md (4), profiles/*.md (4) and
+skills/codex/cbus-connect/SKILL.md read in full against source at `fee2b2e`
+and the installed v0.14.1 binary. 9 findings filed (F1-F9); F1-F8 accepted as
+written, F9 dropped by ruling (a real gap in doctrine item 10 for a departed
+native session, but item 10 is core/byte-identical across all four roles and
+the ruling chose not to touch it this pass). A rider surfaced during the M4
+review of command-reference.md also routed here: save-formation.md's drift
+anchor overclaim (M4 finding, applies to an M3 file).
+
+[What changed]
+- Busy-session wording (M3-F1): commands/bus-join.md said "consume after the
+  current turn," which is the Codex behavior; this file is the Claude
+  command, corrected to "can receive input between tool calls," matching
+  M1-F6.
+- Monitor persistence (M3-F2): commands/bus-rename.md dropped "persistent,"
+  added the `timeout_ms` expiry/re-arm cost and a pointer to
+  docs/claude-monitor-stopgap.md, same class as M1-F4.
+- Connect-first requirement (M3-F3): commands/bus-branch.md now states the
+  preceding connect is required, not merely implied, and names the fallback
+  (a legacy registration plus a Monitor hint that must not be followed) when
+  it is skipped. The M1 carry-back for docs/usage.md and CHEATSHEET.md was
+  already folded into the M1 commit at kickoff, not reopened here.
+- Formation surface (M3-F4): commands/bus-formation.md's argument-hint and
+  verb list gain `resume`; a new `resume` section documents it (decision
+  brief, `--brief`, refusal cases relayed verbatim like `apply`'s); the
+  `apply` bullet gains `--mode resume|fork|template`.
+- Local-row liveness (M3-F5): skills/codex/cbus-connect/SKILL.md's "local
+  rows indicate listening" corrected to "local rows show the daemon
+  connection, not confirmed native-session liveness," matching the relay-row
+  hedge already in the same sentence, and pointing at `connection status`'s
+  `consumer.state`.
+- Codex arming doctrine (M3-F6): roles/orchestrator.md process rule 15 no
+  longer says a codex peer's listener is armed by the bridge; native Codex
+  is fed by the daemon, the bridge is the compatibility path only. Process
+  rule 15, not a Standing doctrines item, so outside the byte-identical
+  block.
+- Coder handoff wording (M3-F7): roles/coder.md's Escalation section no
+  longer tells a handing-off coder to "leave your listener armed"; native
+  peers stay connected, the alias hands over through the orchestrator. Also
+  outside the doctrine block (Escalation, not Standing doctrines).
+- Profile injection (M3-F8): profiles/opus5.md and profiles/fable5.md said
+  "Appended after your role file," implying an automatic mechanism; corrected
+  to "Sent by the orchestrator with your role file; cbus does not
+  automatically inject `profiles/*.md`," matching profiles/codex.md's and
+  profiles/README.md's existing wording.
+- Dropped (M3-F9): roles/*.md doctrine item 10's "a local send to a vanished
+  alias dies loud" is now only half-true (a local send to a native alias
+  whose session exited is accepted silently, same mechanism as M1-F1). Not
+  touched: item 10 is core and byte-identical across all four role files by
+  ruling; recorded here as known, not fixed.
+- M4 rider: commands/save-formation.md's drift-anchor sentence claimed a
+  later `apply` can "diff what moved" from any `--anchor`; `apply` only
+  diffs `git_head` (`formation_plan.go:370-386`). Minimal fix: the sentence
+  now says `git_head` is the only anchor `apply` diffs, and a `tracker` anchor
+  is for cross-reference.
+
+[Held, not filed (D8)]
+commands/bus-branch.md/bus-spawn.md's `--model` value list and the "opus is
+temporarily pinned" text, roles/coder.md and roles/orchestrator.md's
+`MODEL: claude-opus-4-8` pins, and profiles/README.md:15-17's generation
+names (which disagree with the pins above) are all model-identity text held
+for Carlos's model test, per the earlier D8 gate. Not touched.
+
+[Testing Notes]
+No code changed. Findings verified by the reviewer via source trace at
+`fee2b2e` and read-only command runs (`--help`, Monitor tool schema,
+`claude --version`); no subagents. After editing, I independently re-hashed
+the "Standing doctrines" items 1-10 across all four role files (same split
+method the reviewer used: split "## Standing doctrines" on `^N. `, sha256
+each item) and confirmed all four are still byte-identical to each other,
+matching the reviewer's baseline prefixes. Every added/changed line checked
+against the CLAUDE.md prose rules; two new em dashes caught and rewritten in
+the new `resume` section before commit, pre-existing dashes on lines I
+otherwise touched left as-is per the "do not restyle" carve-out.
+
+[Possible Ripple Effects]
+None found inside the ten M3 files. profiles/README.md:15-17's generation
+names remain in tension with the role-file MODEL: pins (both held under D8);
+that contradiction is unresolved, not created by this commit.
+
 ## [2026-09-22 21:43:55 UTC] [Docs/M2] guides corrected against source-traced findings
 
 [Attempt #1] On `docs/audit-m2`, branched from `docs/audit-m1` (before its two
