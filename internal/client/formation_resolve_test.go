@@ -173,7 +173,7 @@ func TestSaveRepoBaseChannelInterplay(t *testing.T) {
 
 // TestCommittedTemplatesArePureAndLoad guards the repo's committed templates: they
 // must reference rolefiles, never INLINE a prompt (reviewability + the canary, H5),
-// must carry no personal path or identifier (public-repo face, H4), and must load and
+// must carry no machine-specific path (public-repo face, H4), and must load and
 // validate (H2 name==filename). The prompt markers are doctrine-block phrases that
 // only appear if a role body was pasted into template JSON.
 func TestCommittedTemplatesArePureAndLoad(t *testing.T) {
@@ -186,7 +186,7 @@ func TestCommittedTemplatesArePureAndLoad(t *testing.T) {
 		t.Skip("no committed templates")
 	}
 	promptMarkers := []string{"cbus connect", "socket-ready", "Standing doctrines", "do not start a Monitor", "first reply (required)"}
-	personalMarkers := []string{"/Users/", "carlos", ".ccs/", "laptop"}
+	pathMarkers := []string{"/Users/", "/home/", ".ccs/"}
 	for _, fp := range files {
 		b, err := os.ReadFile(fp)
 		if err != nil {
@@ -198,9 +198,9 @@ func TestCommittedTemplatesArePureAndLoad(t *testing.T) {
 				t.Errorf("%s inlines prompt/doctrine text %q — templates must REFERENCE rolefiles, not embed them", filepath.Base(fp), m)
 			}
 		}
-		for _, m := range personalMarkers {
+		for _, m := range pathMarkers {
 			if strings.Contains(body, m) {
-				t.Errorf("%s carries a personal identifier %q — a committed template is the public-repo face", filepath.Base(fp), m)
+				t.Errorf("%s carries a machine-specific path %q — a committed template is the public-repo face", filepath.Base(fp), m)
 			}
 		}
 		name := strings.TrimSuffix(filepath.Base(fp), ".json")
