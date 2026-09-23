@@ -30,7 +30,7 @@
 > - [overview.md](../legacy/overview.md) — system topology, design pillars, security model
 > - [command-reference.md](../../architecture/command-reference.md) — every subcommand, flag, output string, and exit code
 > - [protocol.md](../../architecture/protocol.md) — on-disk formats, wire protocol, framing contract
-> - [../prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the research that shaped the design
+> - [prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the research that shaped the design
 >
 > Two ground rules frame everything below:
 >

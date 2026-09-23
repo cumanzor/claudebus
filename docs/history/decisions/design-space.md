@@ -18,7 +18,7 @@ only summarized here:
   (displacement gate, `--steal`, dormancy)
 - [protocol.md](../../architecture/protocol.md) §4 (frame grammar, Monitor constraints) and §13
   (constants & invariants)
-- [../prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) §3
+- [prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) §3
   (harness constraints) and §4 (decision log, incl. the relay's Maildir spool
   and the "no Maildir in the local bus" ruling)
 - [overview.md](../legacy/overview.md) §5 (founding decisions)

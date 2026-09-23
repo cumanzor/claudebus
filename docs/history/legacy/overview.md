@@ -21,7 +21,7 @@
 > - [command-reference.md](../../architecture/command-reference.md) — every subcommand, flag, output string, and exit code
 > - [protocol.md](../../architecture/protocol.md) — on-disk formats, wire protocol, framing contract
 > - [port-map.md](../decisions/port-map.md) — what a port to a real language must preserve, and why
-> - [../prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the landscape survey and the
+> - [prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the landscape survey and the
 >   Claude Code internals probes that justified building this at all (the design research, summarized
 >   and kept as the historical record)
 > - [design-space.md](../decisions/design-space.md) — why append-only files + a polling follower beat

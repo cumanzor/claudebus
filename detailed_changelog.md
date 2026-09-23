@@ -22,9 +22,10 @@ on the full tree.
 
 ## [2026-09-23 03:08:42 UTC] [Docs/M7] reorganize docs/ into living references and dated history
 
-[Attempt #1] Branch `docs/audit-m7` off `docs/audit-m6`. 24 files/dirs
-moved via `git mv` (all renames, similarity 96-100%), 15 files edited for
-link/path updates only, 0 content changes beyond path tokens.
+[Attempt #1] Branch `docs/audit-m7` off `docs/audit-m6`. 25 files moved
+via `git mv` (14 docs, 5 evidence, 6 media; all renames, similarity
+96-100%), 16 files edited for link/path updates only (14 non-changelog
+plus the changelog pair), 0 content changes beyond path tokens.
 
 [Motivating problem]
 docs/architecture/ had accumulated both the living wire/behavior contract
@@ -66,9 +67,11 @@ own outbound links, and every stationary file's inbound links to it). This
 touched README.md, docs/RELEASE-CHECKLIST.md, docs/architecture/{command-
 reference,cross-harness-daemon-scope,current-architecture,protocol}.md,
 docs/{claude,codex,formations,how-it-works,install}.md, commands/bus-
-rename.md, and the moved files' own internal cross-references (most
-visibly overview.md, which alone had 18 links needing new relative
-depth). README's three demo image links now point at docs/media/. Two
+rename.md, and the moved files' own internal cross-references: 12 of the
+25 moved files had at least one outbound link rewritten (the rest moved
+with no cross-references, or none pointing at another repo doc), most
+visibly overview.md, which alone had 18 links needing new relative depth.
+README's three demo image links now point at docs/media/. Two
 non-markdown path comments were updated: scripts/monitor-stopgap.sh:2 and
 cmd/cbus/jsonout_test.go:213 (both cite a moved doc by path in a code
 comment). Two bare `port-map`/`behavior-spec` comments elsewhere in
@@ -92,7 +95,8 @@ commit's tree regardless of what main's layout looks like today, so none
 of them needed or received any change.
 
 [Files Changed]
-24 renames (listed above) + 15 edits (link/path tokens only): README.md,
+25 renames (listed above) + 16 edits (link/path tokens only, 14
+non-changelog plus the changelog pair): README.md,
 commands/bus-rename.md, docs/RELEASE-CHECKLIST.md,
 docs/architecture/{command-reference,cross-harness-daemon-scope,current-
 architecture,protocol}.md, docs/{claude,codex,formations,how-it-works,
