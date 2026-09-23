@@ -282,7 +282,7 @@ declined-with-rationale alternatives:
   chosen in the WS-leg ████████ recorded in `cbus-foc`'s context: app-level
   token in the subprotocol ████ a █████████ query param, because query tokens
   leak into CF edge/relay access logs and a subprotocol rides in a header
-  instead; a private-network VPN was considered and kept only as a documented fast-path
+  instead; a private network was considered and kept only as a documented fast-path
   alternative because the always-on host was intermittently offline at recon
   time █████ failing the always-armed-receive-leg availability bar). `POST /send` and
   `/tail` are guarded differently by design; see
@@ -319,10 +319,10 @@ failure mode. This is a direct application of the ███ gap identified in §
 - The full server recon (host facts, port table, systemd template, the WS-header
   constraint in raw form): `██████████████████████████` from the same family
   of sessions, folded into `cbus-foc`'s tracker context.
-- `tracker epic cbus-foc --project claudebus` — networked relay epic (server), 4
+- The tracker epic `cbus-foc` — networked relay epic (server), 4
   subtasks, 2 closed (`.1` relay daemon, `.2` durable delivery + deploy), 2 open
   (`.3` cbus client remote support, `.4` end-to-end tunnel test).
-- `tracker epic cbus-oq9 --project claudebus` — local orchestration & GUI epic
+- The tracker epic `cbus-oq9` — local orchestration & GUI epic
   (cross-CCS-profile test matrix, windowing identity + `cbus focus`, split-pane
   fork targets, `cbus list --json`, menubar GUI), all 5 subtasks open.
 - █████████ ████████ ██████ ███ ████████████ ███ █ ████████████ ██████ ███ █████

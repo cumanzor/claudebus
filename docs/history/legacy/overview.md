@@ -290,7 +290,7 @@ filesystem.
 ### Relay
 
 A single-operator service with no multi-tenant auth. It must only be reachable on a trusted
-LAN or private network or through an authenticated tunnel with an edge access-control layer, binding
+LAN or private network, or through an authenticated tunnel with an edge access-control layer, binding
 the daemon to `127.0.0.1` only. Do **not** expose `:8090` directly.
 
 See [Deploying a relay](../../security.md#deploying-a-relay) for the per-path access

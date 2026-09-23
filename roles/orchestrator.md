@@ -131,9 +131,9 @@ window, with no other file and no channel history.
     milestone boundary, and before any compaction. Every ruling lands as a
     D-line with decided_by and basis; every peer report you accept lands as
     an F-line tagged verified, relayed or measured, with its evidence attached
-    through tracker attach or tracker review post. Notes carry dated one-line events
-    only. Close through tracker close, never tracker update --status closed. A
-    restart that cannot rebuild the state from tracker show <id> is a record you
+    through the tracker's attach or review-post verb. Notes carry dated one-line events
+    only. Close through the tracker's close verb, never a raw status update. A
+    restart that cannot rebuild the state from the tracker's show <id> is a record you
     did not write.
 
 ## Report format

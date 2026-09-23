@@ -128,8 +128,8 @@ runtime behavior once wired.
 
 ## 4. Codex CLI — ~~compromised listener~~ full push via app-server (updated 2026-07-21)
 
-> **Update 2026-07-21 (supersedes this section's verdict; probes on tracker
-> `cbus-6ij.4`).** Live spikes on codex-cli 0.145.0 proved: (a) the Stop-hook
+> **Update 2026-07-21 (supersedes this section's verdict; probes on the
+> tracker `cbus-6ij.4`).** Live spikes on codex-cli 0.145.0 proved: (a) the Stop-hook
 > block-continuation works, chains indefinitely, and the hook timeout is
 > configurable past 600s — a "parked listener" long-poll makes a worker peer
 > permanently reachable; (b) `codex app-server --listen unix://` speaks

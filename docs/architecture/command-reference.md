@@ -360,8 +360,8 @@ forked child's CLI as a flag.
   would be unable to name its target.
 - **A derived channel is sanitized, not rejected.** `branch`/`spawn`'s
   git-basename default (`branchChannelFromGit`) strips leading dots and dashes
-  rather than refusing outright, so a repo in a dotfiles directory keeps working
-  instead of hard-failing with no lever but an explicit channel every call;
+  rather than refusing outright, so a repo in a dotfiles directory keeps
+  working instead of hard-failing with no lever but an explicit channel every call;
   falls back to `global` if nothing survives the strip.
 
 ### Reserved / conventional names

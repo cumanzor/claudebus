@@ -12,7 +12,7 @@ permission and collaboration procedures remain in their skills and commands.
 - Commit coherent checked steps. Use one PR per milestone and GitHub milestones
   to group the effort. Name dependencies explicitly for stacked PRs; do not later
   combine reviewed milestones into one oversized commit.
-- Keep the internal effort record in tracker when working in the maintained project:
+- Keep the internal effort record in the tracker when working in the maintained project:
   one epic with direct milestone children, each with Now, Decisions, Findings,
   Open and Pointers. Update at milestone boundaries and before compaction. Use
   dated one-line notes for events; attach longer evidence. Keep internal IDs out

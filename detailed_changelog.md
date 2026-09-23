@@ -166,8 +166,8 @@ appeared. The
 cost-analysis notes keep their method and their per-seat findings but
 state the cross-profile comparison as a ratio ("close to even") instead
 of absolute per-profile totals, and drop one absolute dollar figure that
-had already been superseded by a percentage in the same sentence. a
-password manager reference in command-reference.md now matches the elided field
+had already been superseded by a percentage in the same sentence. The
+password-manager reference in command-reference.md now matches the elided field
 form already used in the cheat sheet and the relay guide. The deployment
 guidance in the README, the security guide, and one historical doc now
 states its access-control requirements generically (an authenticated
@@ -560,7 +560,7 @@ loss. Section 11 (spool): rewrote the write mechanism end to end against
 current source, wrong filename format, a real fsync where the doc said
 none, os.Link replacing os.Rename, prune now able to remove a whole peer
 dir; added the native .durable-owners/.durable-events paths and the
-dashboard external-reader compatibility note from spool.go's own header
+a dashboard external-reader compatibility note from spool.go's own header
 comment. Section 12: unknown-host non-fatal corrected to a hard error;
 added that native connections resolve the front door once and refuse
 redirects; added two missing credential-table rows (prune, native connect);
@@ -3926,10 +3926,10 @@ spawn a worker and immediately want to talk to it.
 
 `f7f370a` -- spool layout is a compatibility surface:
 - `relay/internal/spool/spool.go` -- 4-line comment appended to the package doc:
-  the dashboard's formations sweep reads `{new,cur}` dir mtimes (read-only, never
+  a dashboard's formations sweep reads `{new,cur}` dir mtimes (read-only, never
   content) as a peer-activity signal, so restructuring the Maildir layout blinds
   those readers. Claim VERIFIED before committing against the server's deployed
-  `dashboard/cc_sessions/activity.py:107-115`: iterates
+  dashboard's `cc_sessions/activity.py:107-115`: iterates
   `spool/<channel>/<peer>/`, appends the `cur` and `new` dir mtimes to its candidate
   set, newest wins; its own header says "Read-only, mtimes only, never parse". The
   LOCAL dashboard checkout (April 2026, feature/tracker-binding) predates that
@@ -3943,7 +3943,7 @@ spawn a worker and immediately want to talk to it.
 - The skill's fresh-channel layout promise (parent=main, child=fork-N) depends on
   join-before-spawn ordering; reordering the steps silently changes who gets `main`.
 - The spool comment constrains future relay refactors: renaming/merging `{new,cur}`
-  now carries a documented external-reader cost (the dashboard degrades to
+  now carries a documented external-reader cost (a dashboard degrades to
   inbox-mtime-only for relay-armed peers, silently).
 - Merge note: main's command-reference.md is heavily restructured (v0.9.x docs era),
   but its §/bus-spawn body is byte-identical to this branch's pre-edit text, so the
@@ -3954,7 +3954,7 @@ spawn a worker and immediately want to talk to it.
 - Claims audited against source rather than executed: join usage refusal
   (main.go:741), pickAlias main/fork-N (store.go:62), spawnDefaultAddress fallback
   chain (spawn.go:139-146 + branchChannelFromGit, harness.go:247), whoami output
-  shape `channel/alias` + exit 1 on empty (main.go:687-707), the dashboard reader
+  shape `channel/alias` + exit 1 on empty (main.go:687-707), dashboard reader
   (server activity.py, over ssh).
 - Not exercised: a live /bus-spawn invocation through a real session (the skill text
   is model-directed prose; its first live run is the real test -- watch the omitted-
@@ -4029,8 +4029,8 @@ refusal + forked-1 all fired).
 
 ## [2026-08-09 21:55:00 UTC] [Transcript/Fix] bare-shell resume of profiled formations
 
-[Attempt #1] `fb948f8`, ships as v0.9.1. Found by the session-resume URL handler work
-(cbus-phh): the full-launch field test refused a warm formation through the real
+[Attempt #1] `fb948f8`, ships as v0.9.1. Found by the session-resume URL
+handler work (cbus-phh): the full-launch field test refused a warm formation through the real
 LaunchServices door, and the coder traced it to transcriptRoots rather than the
 handler.
 
@@ -4219,7 +4219,7 @@ anchor — was entirely manual even though everything after the anchor is automa
 ## [2026-08-05 02:45:05 UTC] [Formation/Save] repeatable --anchor key=value on save
 
 [Attempt #1] `c1ef5fa` — trk-7m1.6, the one claudebus-side subtask of the
-dashboard formations-page epic.
+dashboard's formations-page epic.
 
 [Motivating problem]
 The formations page links an envelope to its tracker epic via `drift_anchors.tracker`
@@ -5167,7 +5167,7 @@ investigating a different M4 fixture failure).
 
 Built by the `winport` formation (orchestrator, coder, reviewer, tester,
 documenter). Rulings D62-D68, plus D11/D38 (carried since M1, closed here) and
-D59 (carried since M4). Full record on `cbus-que.8`; successor tracker items `cbus-que.10`
+D59 (carried since M4). Full record on `cbus-que.8`; successor items `cbus-que.10`
 (follower/cursor timeout cluster, independent of this fix), `cbus-que.11` (cmd/cbus
 windows accounting, first execution), `cbus-que.12` (transient-read handles).
 
@@ -5773,7 +5773,7 @@ phantom-channel finding and the codex silent-bridge-death gap were shaped like.
 - `formation apply --dry-run` refusing wholly (D45) means there is currently no way
   to preview a formation launch plan on windows even read-only. Loosening that later
   needs a new ruling, not a quiet reversal.
-- cross-platform container-runtime gate WAIVED for M3 by the orchestrator: no
+- Linux container runtime cross-platform gate WAIVED for M3 by the orchestrator: no
   process-state code changed this milestone (dispatch, refusal strings, one build
   tag), which is the class that gate exists to catch. Recorded not-run-not-claimed.
 - Doc-embed scope correction found during the class-C rebuild-confirm: doc edits
@@ -6072,7 +6072,7 @@ a codex peer at all.
   confirming the embed snapshot picked up the edited role files.
 - No behavior change to verify at runtime: no Go source was touched.
 
-## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id (trk-mec.2)
+## [2026-07-24 05:06:40 UTC] [Feat] durable channel ledger + formation_run_id
 
 [Attempt #1] `0d41228`
 
@@ -7016,8 +7016,8 @@ channel selector, formation `Validate`, and the remote marker tree are
 untouched, so `cbus unregister <ch>/.foo` — the only cleanup path for a legacy
 bad name — can still name its target. A DERIVED channel is sanitized rather
 than rejected: `branchChannelFromGit` strips leading dots and dashes, so a repo
-in a dotfiles directory keeps deriving a channel instead of hard-failing with no lever
-but an explicit channel every call.
+in a dotfiles directory keeps deriving a channel instead of hard-failing with
+no lever but an explicit channel every call.
 
 M5.2a (`cae64d0`) pins the rendered bytes of `list`, `active`, and `channels`
 in a byte-level golden test — the rig M5.2b's refactor needed, since "the
@@ -7578,7 +7578,7 @@ punch list's cited line ranges for that file. Caught in the orchestrator's
 spot-check, not by re-auditing -- reworded consistently with the other two
 fixes: relay-generated `join`/`departed` cross since ijx.5 phase 1;
 client-originated `POST /send` presence and `compact-pre`/`compact-post`
-stay local-only. Swept the rest of the repo + docs-repo tier for any other
+stay local-only. Swept the rest of the repo + the docs-repo tier for any other
 surviving copies of this claim after the fix; found none live (only this
 entry's own new text and historical changelog rows describing what was true
 when written, which stay as-is).
@@ -7639,7 +7639,7 @@ internal/core/frame.go, relay/cmd/cbus-relay/main.go, cmd/cbus/usage.go):
   own header, and left both out of descending order. simple_changelog.md was
   independently verified fully ordered; not touched.
 
-Docs-repo tier (<docs-repo>/, direct edits, no git):
+Docs-repo tier (direct edits, no git):
 - index.md + architecture.md: re-pointed orphaned pre-rebase SHAs `d52a264`/
   `058ea28` (not ancestors of main) to their on-main equivalents `f246e3b`
   (feat: pane target) / `ff7ceef` (fix: tmux<3.1 retry etc.); corrected a
@@ -7660,7 +7660,7 @@ Docs-repo tier (<docs-repo>/, direct edits, no git):
 - README.md, commands/bus-formation.md (repo, this commit)
 - docs/architecture/{command-reference,protocol,overview}.md (repo, this commit)
 - detailed_changelog.md, simple_changelog.md (repo, mechanical-fix commit)
-- <docs-repo>/{index,architecture,behavior-spec,port-map}.md
+- The docs repo's index.md, architecture.md, behavior-spec.md and port-map.md
   (direct edit, no git)
 
 [Possible Ripple Effects]
@@ -8120,8 +8120,7 @@ found") reaches the caller instead of being swallowed as a bare exit status.
   CHEATSHEET.md, docs/architecture/command-reference.md §9 (mechanism line,
   both target headings, target-validation prose + pane's precondition, the
   tokenizer-quirk paragraph's dispatch note, quirk index item 36 rewritten
-  for the corrected tab behavior). docs-repo
-  (`<docs-repo>/`) intentionally NOT touched — the
+  for the corrected tab behavior). The docs repo intentionally NOT touched — the
   feature is unmerged on this branch; a deferred-patch note (exact file,
   section, one-line change) was handed to the lead for post-merge
   application instead of documenting unshipped behavior as canon.
@@ -8207,9 +8206,9 @@ finding (C1) scoped to tests only, no impact on documented behavior.
   table, stdin table, and quirk index (#11) updated
 - `README.md`, `CHEATSHEET.md` — one-line verb mentions + presence paragraph
   extended
-- `<docs-repo>/architecture.md` (direct-edit) — new
+- The docs repo's architecture.md (direct-edit) — new
   "Compaction" data-flow subsection + 3 design-decision rows
-- `<docs-repo>/index.md` (direct-edit) — new paragraph in
+- The docs repo's index.md (direct-edit) — new paragraph in
   "Shipped since cutover"
 
 [Possible Ripple Effects]
@@ -8238,10 +8237,10 @@ Closing entry for the docs-refresh effort (cbus-yle). Covers the promotion
 assessment, its resulting port commit + fold, and the effort's full ledger.
 
 **Promotion assessment.** With both tiers refreshed (M1-M3), the question was
-what docs-repo content (`<docs-repo>/`, direct-edit) had no
+what docs-repo content (direct-edit) had no
 repo-tier counterpart and deserved a repo home for a human reader. The
-standing prior was that the 11 design-decision WHY rows added to docs-repo
-architecture.md were the strongest candidates — repo docs tend to state
+standing prior was that the 11 design-decision WHY rows added to the docs
+repo's architecture.md were the strongest candidates — repo docs tend to state
 decisions but not why. Checked each of the 11 individually against
 command-reference.md/overview.md/protocol.md by grep rather than trusting the
 prior's count: 7 were already duplicated (M1-M3 had independently documented
@@ -8260,7 +8259,7 @@ the refresh's own M1-M3 work, not left for a separate promotion pass.
 
 **Port commit `e2c7832`** wrote the 3 ruled whys into `command-reference.md`
 §10/§14. **F5, on the formations plan-before-launch rationale**: the
-originating claim — first written into docs-repo architecture.md by the
+originating claim — first written into the docs repo's architecture.md by the
 documenter, faithfully paraphrased into the orchestrator's routing message,
 transcribed by the coder into the port commit — read "a refusal can't strand
 a half-launched fleet," implying a refusal halts the launch sequence. Wrong:
@@ -8277,7 +8276,7 @@ three"), and the coder adopted a new standing rule — verify a mechanism claim
 against the actual code path before writing it, especially a claim received
 as a paraphrase of a paraphrase — which the reviewer confirmed matches its
 own rule 9. The documenter independently found and fixed the same wrong
-framing at its origin: docs-repo architecture.md's design-decision row and
+framing at its origin: the docs repo's architecture.md design-decision row and
 index.md's formations paragraph both carried the "strand a half-launched
 fleet" claim and both are corrected in this same pass, so the error doesn't
 survive anywhere it was written.
@@ -8302,11 +8301,11 @@ installers.
 [Files Changed]
 - `docs/architecture/command-reference.md` — 3 promoted whys (`e2c7832`); F5
   correction + n7 reword (`8779444`).
-- `<docs-repo>/port-map.md` (direct-edit) — §4.12 tokenizer
+- The docs repo's port-map.md (direct-edit) — §4.12 tokenizer
   wording tightened, 2 mentions.
-- `<docs-repo>/architecture.md` (direct-edit) — F5's wrong
+- The docs repo's architecture.md (direct-edit) — F5's wrong
   framing corrected at its origin (design-decision row).
-- `<docs-repo>/index.md` (direct-edit) — same F5 correction
+- The docs repo's index.md (direct-edit) — same F5 correction
   in the formations paragraph.
 
 [Possible Ripple Effects]
@@ -8374,10 +8373,10 @@ this same M2 pass). Reworded in `bdc2249`: what's actually still open is ijx.5
 phase 2 — client-originated `leave`/`rename` and offline catch-up.
 
 The docs-repo tier held its own mirror of both findings rather than writing
-ahead of this fold: F3 against docs-repo port-map.md's M10/Phase-2 rows (ruled
+ahead of this fold: F3 against the docs repo's port-map.md M10/Phase-2 rows (ruled
 NOT a mirror — those rows correctly describe the P2-era installer's real
 hook-wiring check, an era D29 protects, distinct from the repo tier's "met by
-the release flow" claim) and F4 against docs-repo behavior-spec.md §5's
+the release flow" claim) and F4 against the docs repo's behavior-spec.md §5's
 "Remote presence does not exist" line (a genuine mirror, true as of its 2026-
 07-12 freeze date but misleading in present tense — annotated
 `[SUPERSEDED 2026-07-16: cbus-ijx.5 shipped...]` in place rather than rewritten,
@@ -8394,7 +8393,7 @@ consistent with the frozen-tier treatment already applied to port-map.md §0).
   reframe (`33b4565`); F3 fold drops the hook-wiring claim (`bdc2249`).
 - `docs/architecture/overview.md` — F4 fold rewords the presence row
   (`bdc2249`).
-- `<docs-repo>/behavior-spec.md` (direct-edit tier) — F4's
+- The docs repo's behavior-spec.md (direct-edit tier) — F4's
   mirror sentence annotated `[SUPERSEDED 2026-07-16: ...]` in place, same pass.
 
 [Possible Ripple Effects]
@@ -8466,7 +8465,7 @@ docs" section linking `overview.md`/`command-reference.md`/`protocol.md`/
 First milestone of the docs-refresh effort (cbus-yle): the `docs/architecture/`
 tier had gone stale against everything shipped 2026-07-14 through 07-18 (spawn
 family, formations, birth-records, distribution, terminal coupling), same gap
-list the docs-repo tier (`<docs-repo>/`) was refreshed against
+list the docs-repo tier was refreshed against
 in parallel. Three commits, two APPROVED outright, one CONDITIONAL, both
 findings folded into this entry per the hold-for-verdict rule rather than
 written separately.
@@ -8994,7 +8993,7 @@ M3 (selfupdate) is released in parallel and held for its own verdict.
 [Attempt #1]
 
 First milestone of the distribution effort (gh releases, selfupdate, and
-embedded installs — the tracker pattern): ddf7527, approved clean with no
+embedded installs — the tracker CLI's own pattern): ddf7527, approved clean with no
 conditions.
 
 Adds a cross-compile Makefile that builds the unix matrix only — darwin and
@@ -10229,7 +10228,7 @@ as an unknown HTML tag and stripped — so full-block chars are the portable tri
 
 [Testing Notes]
 - Doc-only; no build/test impact. Verified: zero remaining occurrences of the
-  targeted sibling names/handles, `SendMessage`, `trk-xk1`, or `scratchpad/` paths
+  targeted sibling names/handles, `SendMessage`, or `scratchpad/` paths
   in the tip; CCS-as-runtime references (README + §2 + §5) intact; §3 and §5 (`## 3.`,
   `## 5.`) section titles preserved.
 
@@ -10569,7 +10568,7 @@ actually be true when written.
   stamp: item 5 (self-id rename) done at cutover; items 1-4/6/7 remain
   until P3 fleet homogenization.
 
-[Files Changed — docs-repo, direct edits, no git]
+[Files Changed — docs repo, direct edits, no git]
 
 - `index.md`: cutover-executed note after the audit line; Key Facts
   table's Client/Client-install rows rewritten for the Go binary; Doc
@@ -10824,7 +10823,7 @@ separately (`618d171`) before this fix landed. Phase 2 now stands at
   good faith when writing `f393158`.
   - This mischaracterization was independently caught and corrected in
     the docs (both `docs/architecture/port-map.md` here, commit
-    `618d171`, and the docs-repo canonical copy) **before** this code fix
+    `618d171`, and the docs repo's canonical copy) **before** this code fix
     landed — the doc correction and this code fix converged on the same
     true rationale from two directions (a documentation audit and a
     live reviewer probe) without one causing the other.
@@ -11992,7 +11991,7 @@ hunt: quirks are documented with a preserve-or-rethink disposition, not fixed.
   verbs side-by-side → P2 local transport/follower per-machine cutover → P3
   post-homogenization semantics → P4 wire-touching relay work), Go
   recommendation (shared framer package makes frame parity compile-time).
-- `<docs-repo>/{index,architecture,behavior-spec,port-map}.md`
+- The docs repo's index.md, architecture.md, behavior-spec.md and port-map.md
   (new, canonical LLM tier) — dense, file:line-anchored mirror incl. the
   shipped-docs drift register and consolidated quirk registry.
 - `simple_changelog.md`, `detailed_changelog.md` — this entry.
