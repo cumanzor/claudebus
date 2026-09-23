@@ -413,11 +413,14 @@ example.**
    is ALSO set and both pass `core.ValidStoreName`, `from` becomes
    `$CBUS_CHANNEL/$CBUS_ALIAS` instead, a routable address rather than a bare,
    ambiguous alias;
-5. `<hostname -s>-$PPID` — **unroutable** fallback (no inbox exists; receivers must
-   not reply to it).
+5. `<label>-$PPID` — **unroutable** fallback (no inbox exists; receivers must
+   not reply to it). `<label>` is `$CBUS_HOST` when set, else the system
+   hostname (both take the part before the first dot; an invalid
+   `$CBUS_HOST` is refused before any send runs, at every verb's entry
+   gate, see command-reference.md's environment variables table).
 
 Remote send `from`: explicit `--from` → this session's identity marker
-(`<ch>@<host>/<alias>`) → `hostname-$PPID`. Remote never consults local registrations
+(`<ch>@<host>/<alias>`) → `<label>-$PPID`. Remote never consults local registrations
 or `CBUS_ALIAS`. *quirk — the two fallback chains differ deliberately.*
 
 ### 3.2 Presence events
@@ -469,7 +472,7 @@ detach after a grace window. Client-originated `leave`/`rename` over the wire (w
 would need `kind` on the inbound `sendReq`) stay Phase 2.
 
 Empty `from` defaults to `"unknown"` on the relay (main.go:175-177) — a different
-"unroutable sender" spelling than the client's `hostname-PID`. *quirk.*
+"unroutable sender" spelling than the client's `<label>-PID`. *quirk.*
 
 ---
 

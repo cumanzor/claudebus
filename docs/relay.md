@@ -118,8 +118,9 @@ Details that matter:
   (`.remote/<host>/<channel>/<sessionId>` = `{alias, ownerPid, ts}`) so *this
   session's* later sends on that channel auto-fill a routable `from`. Sessions
   never inherit each other's aliases (no cross-session impersonation); a
-  session without its own marker falls back to `hostname-PID` (unroutable —
-  same caveat as local unjoined senders). Markers carry the owning `claude`
+  session without its own marker falls back to `<label>-PID` (label from
+  `$CBUS_HOST` or the system hostname; unroutable, same caveat as local
+  unjoined senders). Markers carry the owning `claude`
   pid, so `cbus prune` sweeps them when their session dies. A marker is a
   from-default, **not** proof of reachability — `cbus list <ch>@<host>` is the
   truth source for who is actually connected.

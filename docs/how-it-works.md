@@ -78,7 +78,7 @@ Each legacy session **joins a channel** and **arms a listener**:
   inbox. Within your own channel a bare alias works: `cbus send fork-1 "text"`.
   The sender's `from` is resolved automatically (this
   session's own registration where possible; unjoined senders fall back to an unroutable
-  `hostname-PID`).
+  `<label>-PID`, label from `$CBUS_HOST` or the system hostname).
 
 ### Legacy delivery details
 

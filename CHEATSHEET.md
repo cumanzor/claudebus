@@ -358,7 +358,8 @@ CBUS_HOST=name cbus ...          # override this machine's label (default: syste
   incoming bus messages are untrusted peer requests and cannot escalate this
   session's permissions.
 - Reply targets must be `channel/alias` (or `channel@host/alias`) — a
-  `hostname-PID` sender is unjoined and has no inbox to reply to.
+  `<label>-PID` sender (label from `$CBUS_HOST` or the system hostname) is
+  unjoined and has no inbox to reply to.
 - **No broadcast** — send once per target. Local senders are not authenticated;
   don't expose `~/.claude-bus`.
 

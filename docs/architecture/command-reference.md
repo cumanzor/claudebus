@@ -178,7 +178,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | Var | Read at | Effect |
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
-| `CBUS_HOST` | identity.go:177 | This machine's label, shown in `cbus list`/`--json` and recorded in peer `meta.host`, the ledger and a saved formation's `machine`; `formation apply`/`resume` compare against it, so a peer saved under a different label reads as recorded on another machine. Default: the system hostname; both take the part before the first dot, and an empty value means unset. Invalid (anything but letters, digits, `.`, `_`, `-`, or an empty part before the dot) is a hard error: every verb except `help`/`--help`/`-h` and `version`/`--version` exits 1 naming the value and the allowed characters; the hooks keep their exit-0 contract, and `hook-join` registers nothing and prints the error to stderr instead. `spawn`, `branch`, `formation apply` and Codex-spawned children inherit it. The daemon records the label a connecting client sends, re-screened, falling back to its own only for a client that sends none. Useful for a label independent of a network-dependent hostname |
+| `CBUS_HOST` | identity.go:177 | This machine's label, shown in `cbus list`/`--json` and recorded in peer `meta.host`, the ledger and a saved formation's `machine`; `formation apply`/`resume` compare against it, so a peer saved under a different label reads as recorded on another machine. Default: the system hostname; both take the part before the first dot, and an empty value means unset. Invalid (anything but letters, digits, `.`, `_`, `-`, or an empty part before the dot) is a hard error: every verb except `help`/`--help`/`-h` and `version`/`--version` exits 1 naming the value and the allowed characters; the hooks keep their exit-0 contract, and `hook-join` registers nothing and prints the error to stderr instead. `spawn`, `branch`, `formation apply` and Codex-spawned children inherit it. The daemon records the label a connecting client sends, re-screened, falling back to its own only for a client that sends none. Also the local and remote send unrouted-sender fallback, `<label>-$PPID`, used when no registration or `$CBUS_ALIAS` resolves `from`; an invalid value refuses at every verb's entry gate before send ever reaches this fallback. Useful for a label independent of a network-dependent hostname |
 | `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — the COMPAT(P3 #4) byte-parity help line was dropped from `--help` at P3 homogenization |
 | `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain: the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID`, then `$CODEX_THREAD_ID` (`internal/client/identity.go:51`); "without it" means the whole chain is empty |
 | `CBUS_ALIAS` | send.go:67-72 | Last-resort `from` on **local** send only, unvalidated on its own; when `CBUS_CHANNEL` is also set and both pass `ValidStoreName`, `from` becomes `CBUS_CHANNEL/CBUS_ALIAS` instead of the bare alias |
@@ -253,7 +253,9 @@ switch to a `run*` function).
 cbus assumes it runs inside Claude Code. Without `CLAUDE_CODE_SESSION_ID`:
 join records `sessionId: ""` and is never idempotent (each join claims a new
 `fork-N`); `whoami`/`leave`/`rename` can't find anything; send's `from` falls
-back to `$CBUS_ALIAS` then `<hostname>-$PPID` (unroutable); remote markers key
+back to `$CBUS_ALIAS` then `<label>-$PPID` (unroutable; `<label>` is
+`$CBUS_HOST` or the system hostname, part before the first dot, see the
+environment variables table); remote markers key
 on `nosession-$PPID`. Orphan peers created this way can only be removed by
 `unregister` or `prune` (after the 10-minute grace).
 
@@ -558,7 +560,7 @@ into one notification):
 ```
 
 - Reply using the header's `from=` — but only when it looks like
-  `channel/alias`. A `hostname-PID` from is an unjoined sender with no inbox;
+  `channel/alias`. A `<label>-PID` from is an unjoined sender with no inbox;
   there is nowhere to reply.
 - `kind=presence` marks presence events. Relay-generated `join`/`departed`
   cross the relay too (`cbus-ijx.5` phase 1 — `Reframe` renders `kind`, the
@@ -803,8 +805,11 @@ match); failure → `cbus: no peer "<al>" in your channels — use
 **`from` default chain (in order):** `--from X` (free text, unvalidated) →
 own registration in the *target* channel → first own registration anywhere
 (alphabetical glob order) → `$CBUS_ALIAS`, promoted to `$CBUS_CHANNEL/$CBUS_ALIAS`
-when both are set and valid (send.go:67-72) → `<hostname -s>-$PPID`
-(unroutable; receivers cannot reply to it). Send never fails on identity: a
+when both are set and valid (send.go:67-72) → `<label>-$PPID` (unroutable;
+receivers cannot reply to it; `<label>` is `$CBUS_HOST` or the system
+hostname, part before the first dot, and an invalid `$CBUS_HOST` is
+already refused before send runs, at every verb's entry gate). Send never
+fails on session identity: a
 sessionless or unjoined sender still sends successfully, but it is not
 silent: `warnIfSessionless` prints the sessionless stderr warning (§1) before
 falling down this chain.
@@ -855,7 +860,7 @@ pushes it to the connected tail or holds it for replay on next connect.
   with pointers: `cbus: no relay token for "<host>" — run: cbus auth set
   <host> --token -` (similarly `no cf-id` / `no cf-secret`).
 - **`from` default:** this session's identity marker for `<host>/<ch>` → `<ch>@<host>/<marker-alias>`;
-  else the unroutable `<hostname -s>-$PPID`. The marker is written by remote
+  else the unroutable `<label>-$PPID`. The marker is written by remote
   `tail` **and** by the daemon for a native relay connection
   (`daemon_relay.go:99-129`; `--help` calls it "set by native connect or a
   legacy tail"). Sessions never inherit another session's alias (markers are
