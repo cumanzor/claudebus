@@ -10,7 +10,7 @@ import (
 
 // buildCbus builds the real cbus binary to a temp path and returns it. It is the ONE
 // place the suite shells out to the toolchain, so the D8 disposition lives here: on a
-// host with no go toolchain (the winbox gate binary) every caller skips uniformly with one
+// host with no go toolchain (the Windows gate binary) every caller skips uniformly with one
 // reason that names D8 and the host. A missing toolchain is a SKIP; a toolchain that is
 // present but fails to build is a hard failure, never a skip.
 func buildCbus(t *testing.T) string {

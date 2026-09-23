@@ -18,7 +18,7 @@ import (
 // file until it notices the rotation.
 //
 // That last clause is measured on the TARGET VOLUME, not claimed for windows generally:
-// on winbox NTFS a held handle carrying all three flags blocked neither a remove nor a
+// on the Windows machine's NTFS a held handle carrying all three flags blocked neither a remove nor a
 // 50-iteration rm+recreate loop, 8/8. Where a filesystem instead leaves the name in
 // delete-pending until the last handle closes, the remove still succeeds but a recreate
 // at the same path can fail until the follower lets go. The follower survives either way

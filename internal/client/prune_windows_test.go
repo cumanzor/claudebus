@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestPruneDoesNotSkipADeadPeerInSilence pins the messageless silent-skip, which winbox
-// measured as the FIRST thing a held handle blocks. PruneChannel claims a dead peer by
+// TestPruneDoesNotSkipADeadPeerInSilence pins the messageless silent-skip, which the Windows
+// machine measured as the FIRST thing a held handle blocks. PruneChannel claims a dead peer by
 // renaming its dir aside, removes it, and then says three things that all assert the
 // peer is gone: a "pruned" message, a terminal LedgerLeave, and a "departed" broadcast.
 //
@@ -22,7 +22,7 @@ import (
 // FILE_SHARE_DELETE.
 //
 // A clean pass was never a live outcome here, and that is worth stating because it looks
-// like one: the winbox POSIX-delete datum was measured for a handle CARRYING the delete
+// like one: the Windows POSIX-delete datum was measured for a handle CARRYING the delete
 // flag, and this fixture deliberately omits it. Different mask, different question. At
 // this mask something always blocks; only which half is in doubt.
 //

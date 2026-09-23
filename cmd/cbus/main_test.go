@@ -97,8 +97,30 @@ func TestAuthStatusBadHost(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	store := client.NewFileCredStore()
-	if rc := runAuthStatus(store, []string{"bad/host"}); rc == 0 {
-		t.Error("auth status with a bad host should fail (closed gap)")
+	if rc := runAuthStatus(store, []string{"bad/host"}); rc != 1 {
+		t.Errorf("auth status with a bad host: rc = %d, want 1 (closed gap)", rc)
+	}
+}
+
+// TestAuthStatusRequiresHost pins that there is no default host: a bare status is a
+// usage error that prints nothing about any site.
+func TestAuthStatusRequiresHost(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	store := client.NewFileCredStore()
+	var rc int
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() { rc = runAuthStatus(store, nil) })
+	})
+	if rc != 1 {
+		t.Errorf("auth status with no host: rc = %d, want 1", rc)
+	}
+	if !strings.Contains(stderr, "usage: cbus auth status <host>") {
+		t.Errorf("auth status with no host: stderr = %q, want the usage line", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("auth status with no host printed site state: %q", stdout)
 	}
 }
 

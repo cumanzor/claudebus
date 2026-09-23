@@ -37,7 +37,7 @@ import (
 //   - LIFT == LIVE: captured the real `cbus tail` follower under a hermetic
 //     CBUS_DIR=$(mktemp -d) — join scratch/x, append corpus.jsonl to its inbox,
 //     first-arm replay, bounded stdout capture — and compared to corpus.golden.
-//     Result: IDENTICAL (6861 B, 56 lines). Proves the lift is faithful to the live
+//     Result: IDENTICAL (6861 B, 56 lines, before the corpus recipient was renamed). Proves the lift is faithful to the live
 //     follower (no env/encoding/locale drift). This bounded capture is the ONLY
 //     sanctioned Bash use of the local tail — test-harness only, never in a session
 //     (a session must arm it via the Monitor tool).

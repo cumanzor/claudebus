@@ -1113,7 +1113,7 @@ func runAuth(args []string) int {
 	case "status":
 		return runAuthStatus(store, args)
 	default:
-		return die("usage: cbus auth set <host> ... | cbus auth status [host]")
+		return die("usage: cbus auth set <host> ... | cbus auth status <host>")
 	}
 }
 
@@ -1162,14 +1162,14 @@ func runAuthSet(store *client.CredStore, args []string, stdin io.Reader) int {
 	return 0
 }
 
-// runAuthStatus: cbus auth status [host] — masked credential state. Unlike the
+// runAuthStatus: cbus auth status <host> — masked credential state. Unlike the
 // bash client it validates the host (closing the auth-status validation gap;
 // documented C-delta).
 func runAuthStatus(store *client.CredStore, args []string) int {
-	host := "server"
-	if len(args) > 0 {
-		host = args[0]
+	if len(args) == 0 {
+		return die("usage: cbus auth status <host>")
 	}
+	host := args[0]
 	if !core.ValidName(host) {
 		return die("bad host %q", host)
 	}

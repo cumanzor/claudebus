@@ -12,7 +12,7 @@ import (
 // hold on BOTH platforms, and the whole point of the sentinel is that the caller cannot
 // tell which one it is running on. These are the LAPTOP HALVES — they exercise two
 // handles inside one process. The two-PROCESS exclusion case and the real
-// holder-dies-without-unlocking case need a process boundary and belong to the winbox
+// holder-dies-without-unlocking case need a process boundary and belong to the Windows
 // gate, not here.
 
 func openLockFile(t *testing.T, path string) *os.File {

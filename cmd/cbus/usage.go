@@ -227,7 +227,7 @@ remote (relay-backed) channels — address form <channel>@<host>/<alias>:
                                    (channel-scoped; omit <ch> to sweep the host)
   cbus leave <ch>@<host>           drop THIS session's legacy identity marker
   cbus auth set <host> [--token V] [--cf-id V] [--cf-secret V]   (V='-'=stdin)
-  cbus auth status [host]          credential state, masked
+  cbus auth status <host>          credential state, masked
 
   aliases are explicit — pick a short hostname/role (e.g. laptop, server). endpoint
   autodetects: loopback :8090 on the relay host, else the public CF hostname.
