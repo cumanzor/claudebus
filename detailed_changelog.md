@@ -4,7 +4,7 @@
 
 [Attempt #1] Branch `republish-docs`, same worktree. 14 files: AGENTS.md,
 CHEATSHEET.md, one commands file, docs/architecture/command-reference.md,
-docs/formations.md, docs/relay.md, docs/security.md, three docs/history
+docs/formations.md, docs/relay.md, docs/security.md, four docs/history
 records, one role file's process rules (not its shared doctrine block),
 and both changelogs.
 
