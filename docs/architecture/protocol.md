@@ -8,8 +8,9 @@ relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 > port; the bash-era contract below is unchanged and remains authoritative for what
 > it still covers: the port was differentially verified against it (27/27). Since
 > the last affirmation the Go client has grown a whole native (daemon-mediated)
-> delivery path for Claude and Codex that this document does not describe at all;
-> those gaps are tracked separately (native contract gaps, below §13). `bin/cbus:N`
+> delivery path for Claude and Codex; that path is documented in §14-§16 below
+> (daemon control plane, harness wire protocols, durable relay transport).
+> `bin/cbus:N`
 > anchors reference the retired bash implementation, which was deleted at P3
 > homogenization (`f78fad0`) and now resolves only in git history
 > (`git show f213e26:bin/cbus`), never in the working tree; anchors should be read
@@ -1482,8 +1483,9 @@ Routes (`(*busDaemon).handler`, `daemon.go:241-328`):
 | `POST /abandon` | `AbandonRequest`, ≤4096 bytes | the connection's snapshot (`daemon.go:312-323`) |
 | anything else | (none) | `404` (`daemon.go:324-325`) |
 
-`ReadHeaderTimeout: 5s` is the only server-level timeout (§13); each route's
-own `MaxBytesReader` cap above is the only body-size limit, and there is no
+`ReadHeaderTimeout: 5s` (`daemon.go:208`) is the only server-level timeout
+(§13 tabulates the relay's own, separate, HTTP server); each route's own
+`MaxBytesReader` cap above is the only body-size limit, and there is no
 separate body-read deadline.
 
 ### 14.2 Connection journal
@@ -1555,9 +1557,13 @@ capped at `claudeCredentialMaxBytes = 4096` bytes (`claude_credentials.go:16`).
 **The token crosses the control socket exactly once**, on `/connect`:
 `connectWireRequest{ConnectRequest, ClaudeToken}`'s `claudeToken` field
 (`json:"claudeToken,omitempty"`, `daemon_connect_request.go:9`). It never
-appears in any other route's request or response, is never logged, and is
-not present in the connection journal at all (§14.2's `ConnectionState` has
-no token field).
+appears in any other route's request or response. `connectWireRequest`
+itself overrides `String()`/`GoString()` to `"cbus connect request
+(capability redacted)"` (`daemon_connect_request.go:12-13`), so an
+accidental `%v`/`%#v` log of the whole request struct cannot print the raw
+token; and the connection journal never holds the token at all, only a
+`credentialRef` string (`ClaudeConnectionConfig`, `claude_queue.go:9`),
+distinct from `ConnectionState` (§14.2), which has no token field either.
 
 ## 15. Native contract: harness wire protocols
 
@@ -1576,19 +1582,25 @@ Frames exchanged over the per-session unix socket captured at connect
   refuses `"Claude socket envelope exceeds the byte limit"`
   (`claude_socket.go:58-59,66-67`).
 - **Receipt rule**: no socket-level ack; the client tails the session's own
-  transcript instead (`claude_socket.go:140-168`). A row counts as a
-  receipt when either:
-  - `row.session_id == sessionID && row.type == "user" && row.uuid ==
-    messageUUID` (the ordinary case), or
+  transcript instead (`claude_socket.go:140-168`). A complete
+  (newline-terminated; a trailing partial line is never a row) transcript
+  row counts as a receipt when its `sessionId` equals the bound session
+  AND either:
+  - `type` is `"user"` and `uuid` equals the message UUID (the ordinary
+    case), or
   - the session was busy when the message arrived and Claude persisted it
-    as a `queued_command` attachment instead of a user row:
-    `row.type == "attachment" && row.isSidechain == false &&
-    row.attachment.type == "queued_command" &&
-    row.attachment.source_uuid == messageUUID &&
-    row.attachment.commandMode == "prompt" && row.attachment.isMeta ==
-    true && row.attachment.origin.kind == "peer"` (`claude_socket.go:145-166`).
-  - A bare queue/dequeue record, matching neither shape, is not receipt
-    evidence on its own.
+    as a `queued_command` attachment instead of a user row: `type` is
+    `"attachment"`, `isSidechain` is present and `false` (this requirement
+    applies only to this attachment case), and
+    `attachment.{type,source_uuid,commandMode,isMeta,origin.kind}` equal
+    `"queued_command"`, the message UUID, `"prompt"`, `true`, `"peer"`
+    respectively (`claude_socket.go:145-166`).
+  - The Go fields matching `sessionId`/`type`/`uuid`/`isSidechain` are
+    untagged except `isSidechain` and `attachment.source_uuid`, so
+    `encoding/json` matches the rest case-insensitively against the
+    transcript's own camelCase keys; none of them is `session_id`. A bare
+    queue/dequeue record, matching neither shape, is not receipt evidence
+    on its own.
 
 ### 15.2 Codex queue sidecar
 
@@ -1600,7 +1612,8 @@ only `PATH`, `TMPDIR`/`TMP`/`TEMP`, `SYSTEMROOT`/`WINDIR`/`COMSPEC`/`PATHEXT`,
 environment; `CODEX_HOME`, `HOME`/`USERPROFILE`, `CODEX_SQLITE_HOME` are set
 explicitly from the connection's own config; `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1`
 is always forced, so a queue-only sidecar can never adopt persisted remote-
-control state (`codexQueueConfigEnv`, `codexqueue.go:102-133`).
+control state (`codexQueueConfigEnv`, `codexqueue.go:102-135`, the forced
+setting itself at `:135`).
 
 Wire protocol: newline-delimited JSON-RPC-shaped requests over stdio,
 `{"id":<n>,"method":"<m>","params":<p>}` (`codexQueue.write`/`call`,
@@ -1618,26 +1631,43 @@ the allowlist itself, not a convention the caller has to honor.
 
 Shares §10's handshake and frame-layer mechanics; layered on top:
 
-- **Ready handshake**: immediately after the ws upgrade, the relay sends
-  one text frame, `{"type":"ready","protocol":"cbus-relay-durable/v1"}`,
-  before anything else. The daemon reads it with a 5s deadline and aborts
-  the connection if it is missing, malformed, or names a different
-  protocol string (`"relay lacks durable-v1 ready handshake; upgrade the
-  relay before connecting"`, `daemon_relay.go:262-269`).
+- **Ready handshake** (relay → daemon): immediately after the ws upgrade,
+  the relay sends one text frame,
+  `{"type":"ready","protocol":"cbus-relay-durable/v1"}`, before anything
+  else. The daemon reads it with a 5s deadline and aborts the connection if
+  it is missing, malformed, or names a different protocol string
+  (`"relay lacks durable-v1 ready handshake; upgrade the relay before
+  connecting"`, `daemon_relay.go:262-269`).
 - **Message** (relay → daemon): `{"type":"message","spoolId":"<name>","message":<raw stored JSON, unmodified>}`
   (`durable_tail.go:225-230`).
-- **Ack** (daemon → relay): `{"type":"ack","spoolId":"<id>"}`
-  (`daemon_relay.go:469`), which is what `markDelivered` (§10.7) gates the
-  `new/`→`cur/` transition on.
-- **Presence/client frame** (daemon → relay, `durableClientFrame`,
-  `durable_tail.go:131-138`):
-  `{"type":"<join|departed|leave>","spoolId":"...","eventId":"...","event":"...","text":"...","ts":"..."}`,
-  the shape §16.2's `acceptDurablePresence` validates.
-- **Strict decode, both directions**: every durable frame unmarshals into a
-  typed struct with no permissive fallback; a frame that fails to parse or
-  fails its own field validation is rejected outright, never passed
-  through degraded (contrast §4.4's legacy `Reframe`, whose all-or-nothing
-  gate serves a different purpose on plain chat lines).
+- **Ack** (daemon → relay): `{"type":"ack","spoolId":"<id>"}`. Accepted only
+  when it also carries no `eventId`/`event`/`text`/`ts` (a presence-shaped
+  ack is rejected outright) and its `spoolId` matches the one currently
+  outstanding (`durable_tail.go:271-273`); a valid ack is what
+  `markDelivered` (§10.7) gates the `new/`→`cur/` transition on.
+- **Presence** (daemon → relay): `{"type":"presence","eventId":"<id>","event":"<join|departed|leave>","text":"<t>","ts":"<RFC3339>"}`,
+  no `spoolId` (`writeRelayFrame(conn, relayFrame{Type: "presence", ...})`,
+  `daemon_relay.go:494`; the relay refuses a presence frame that carries a
+  `spoolId`, `durable_tail.go:281-283`), the shape §16.2's
+  `acceptDurablePresence` validates.
+- **Presence-ack** (relay → daemon): `{"type":"presence-ack","eventId":"<id>"}`,
+  the relay's acknowledgment of an accepted presence frame
+  (`durable_tail.go:288-289`).
+- Ack and presence share one wire type, `durableClientFrame`
+  (`durable_tail.go:131-138`, `{"type","spoolId","eventId","event","text","ts"}`,
+  all but `type` optional), which is why an ack carrying stray presence
+  fields is rejected: the decoder cannot tell which frame kind was meant.
+- **Strict decode is one-sided**: only the **relay**, decoding a client
+  frame, is strict: `json.NewDecoder(...).DisallowUnknownFields()` plus a
+  second `Decode` that must hit `io.EOF`, refusing any trailing bytes or
+  unknown field (`durable_tail.go:261-266`). **The daemon, decoding relay
+  frames, is not**: `json.Unmarshal` into `relayFrame`/the ready struct
+  tolerates unknown fields (`daemon_relay.go:265,453`), and correctness
+  instead comes from validating the fields that matter afterward: the
+  ready frame's `type`/`protocol` (above), and a message frame's `to`
+  (must equal this connection's own `channel/alias`), non-empty `from` and
+  `text`, and a `kind` that is empty or exactly `"presence"`
+  (`appendRelay`, `daemon_relay.go:529-538`).
 - Limits: consumer identity ≤128 bytes (§1.1/§13); presence `eventId`
   ≤256 bytes with no CR/LF/NUL; presence `text` ≤16 KiB (§16.2).
 

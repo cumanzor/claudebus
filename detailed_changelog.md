@@ -1,5 +1,35 @@
 # Changelog (detailed)
 
+## [2026-09-23 01:07:53 UTC] [Docs/M5b3] reviewer fixup on the M5b3 commit
+
+[Attempt #1] Separate worktree (`/tmp/cbus-docs-m5d-fixup`, documenter was
+already on m6). 1 file (protocol.md), 5 fixes.
+
+[What changed]
+- F1: section 16.1's presence/ack frame shapes were wrong; corrected to the
+  actual `relayFrame`/`durableClientFrame` shapes, and added the
+  presence-ack server response frame this doc had missed entirely.
+- F2: "strict decode, both directions" was wrong; only the relay's client-
+  frame decode is strict (DisallowUnknownFields plus an EOF check); the
+  daemon's own decode of relay frames tolerates unknown fields and
+  validates specific fields afterward instead.
+- F3: the status banner still pointed at "native contract gaps, below
+  section 13" from before sections 14-16 existed; now points at them
+  directly.
+- F4: three citation/claim fixes: ReadHeaderTimeout now cites daemon.go:208
+  (section 13's row is the relay's separate server); the Codex env citation
+  extended to include the forced remote-control-disable line; the "never
+  logged" token claim replaced with what the code actually shows (a
+  redacting String()/GoString() and a journal that holds only a credential
+  reference, never the token).
+- F5: the Claude socket receipt rule corrected to the transcript's actual
+  camelCase keys (not session_id), the session-id check's scope (both
+  cases, not just the plain-row case), and that "isSidechain present and
+  false" applies only to the attachment case.
+
+[Testing Notes]
+Dash/vocab sweeps clean. M5d-applied.md updated.
+
 ## [2026-09-23 00:57:52 UTC] [Docs/M5b3] native contract gaps A-H added to protocol.md, part 3 of 3
 
 [Attempt #1] On `docs/audit-m5d`, branched from `docs/audit-m5c`. 1 file
