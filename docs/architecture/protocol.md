@@ -1452,3 +1452,210 @@ Invariants a port must preserve (or change with eyes open):
     and raw bash `${1:?usage…}` with script path + line number. **Go client: one
     dialect, `cbus: …`, everywhere**: the bash dialect no longer exists to unify
     against.
+
+---
+
+## 14. Native contract: daemon control plane
+
+Everything below in §14-16 is Go-client-only surface with no bash-era
+counterpart; the doc has no earlier section to correct against, so these
+are written fresh as contract, not narrative.
+
+### 14.1 Control API
+
+Transport: HTTP/1.1 over a unix socket at `$CBUS_DIR/.daemon/control.sock`
+(mode 0600), one daemon per store, singleton-enforced by an flock on
+`$CBUS_DIR/.daemon/lock` (`RunDaemon`, `daemon.go:164-206`). Every request
+carrying a non-empty `Origin` header refuses `403 browser requests are not
+supported`: this is local process IPC only (`daemon.go:244-246`).
+
+Routes (`(*busDaemon).handler`, `daemon.go:241-328`):
+
+| Route | Request | Response |
+|---|---|---|
+| `GET /health` | none | `{"running":true,"pid":<pid>,"start":"<procStartTime>","protocol":<n>,"version":"<v>"}`; `DaemonProtocolVersion` is `3` (`daemon.go:110,248-250`) |
+| `POST /stop` | optional `{"pid":<n>,"start":"<s>"}`, ≤4096 bytes | if both fields are set and either mismatches this daemon's own pid/start: `409 daemon instance changed; nothing stopped`; else `{"stopping":true}`, then the context is cancelled (`daemon.go:252-269`) |
+| `POST /connect` | `connectWireRequest{ConnectRequest, ClaudeToken}`, ≤64 KiB | the new connection's full snapshot (`daemon.go:271-282`) |
+| `GET /connections` | none | `statusSnapshots()` for every managed connection (`daemon.go:283-284`) |
+| `POST /disconnect` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | `{"disconnected":true}` (`daemon.go:285-297`) |
+| `POST /reconcile` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | the reconciled connection's snapshot (`daemon.go:298-311`) |
+| `POST /abandon` | `AbandonRequest`, ≤4096 bytes | the connection's snapshot (`daemon.go:312-323`) |
+| anything else | (none) | `404` (`daemon.go:324-325`) |
+
+`ReadHeaderTimeout: 5s` is the only server-level timeout (§13); each route's
+own `MaxBytesReader` cap above is the only body-size limit, and there is no
+separate body-read deadline.
+
+### 14.2 Connection journal
+
+One file per managed connection, `$CBUS_DIR/.daemon/connections/<id>.json`
+(§2's layout), written through `durableJSON` (§2.2: temp write, fsync,
+rename, then a directory fsync). `ConnectionState` itself
+(`daemon.go:39-66`) is fully `json`-tagged: `id`, `harness`, `channel`,
+`alias`, `threadId`, `config`, `claude`, `recordedVersion`, `state`,
+`error`, `listenerError`, `accepted`, `lastQueueId`, `dev`, `ino`, `offset`,
+`pending`, `lastAccepted`, `abandoned`, `resolutions`, `rolloutPath`,
+`consumer`, `presenceSequence`, `presenceOutbox`, `relay`, `relayStatus`,
+`compaction`.
+
+**Compatibility hazard**: several of its embedded struct types carry NO
+`json` tags at all, so Go's default (the exact exported field name) is what
+actually lands on disk:
+
+- `CodexQueueConfig` (`codexqueue.go:19-28`): `Binary`, `Home`, `Cwd`,
+  `SQLiteHome`, `UserHome`, `BindingSource`, `RuntimeVersion`,
+  `RuntimePID`, `RuntimeStartToken`.
+- `ClaudeConnectBinding` (`claudeconnect_identity.go:20-30`): `SessionID`,
+  `UserHome`, `ConfigHome`, `Cwd`, `TranscriptPath`, `TranscriptDev`,
+  `TranscriptIno`, `TranscriptSize`, `TranscriptOffset`, `Endpoint`.
+- `claudeEndpoint` (`claude_endpoint.go:8-13`): `Socket`, `PID`,
+  `StartToken`, `Dev`, `Ino`.
+
+A reader or a port must know this going in: the on-disk keys for these
+three types are their Go field names verbatim (`"Binary"`, `"SessionID"`,
+`"PID"`, capitalized, not camelCased), not the lowerCamelCase convention
+the rest of the journal uses. Renaming any of these fields silently changes
+the on-disk shape with no compiler warning, since nothing declares this
+part of the wire contract explicitly.
+
+### 14.3 Managed peer lifecycle addenda
+
+Most of this lifecycle is already documented where it naturally belongs:
+meta.json's native field values (§2.2), the native remote marker (§2.4),
+and `PeerDead`'s managed-peer exemption (§6.1). Two pieces worth stating
+together, precisely:
+
+**meta.json across the connection lifecycle.** Connect:
+`listenerPid: null, ownerPid: null` (`daemon.go:722`'s `peerMeta` literal).
+Arm (the daemon registers itself as the live listener):
+`listenerPid: <daemon's own pid>`, `listenerStart: <daemon's own
+procStartTime>`, `ownerPid: null` (`daemon.go:796-798`). Disconnect:
+`listenerPid: -1`, `listenerStart: ""` (cleared, not merely left stale),
+`ownerPid: null` (`daemon.go:836`). `ownerPid` is never anything but null
+across this whole lifecycle; the observed CLI process pid lives in the
+connection journal as `consumer.pid` instead (§2.2).
+
+**Epoch fence, exact text.** `rearmLoaded` refuses to re-arm a connection
+whose journaled `(dev, ino)` no longer matches the inbox file on disk, or
+whose recorded `offset` exceeds the file's current size:
+`"inbox changed or truncated; refusing to rearm an unknown epoch"`
+(`daemon_scheduler.go:42-43`); the same check guards delivery with
+`"inbox changed or truncated; refusing to replay an unknown epoch"`
+(`daemon.go:865-868`). The refusal is stored as `listenerError` in the
+connection state, visible via `cbus connection status ... --json`.
+
+### 14.4 Claude credential store
+
+Directory `$CBUS_DIR/.daemon/claude-credentials/` (0700, §2's layout). One
+file per binding, named `<bindingUUID>.token` (0600), created `O_EXCL` so
+an existing reference is never silently overwritten
+(`storeClaudeCredential`, `claude_credentials.go:21-33`). A stored token is
+capped at `claudeCredentialMaxBytes = 4096` bytes (`claude_credentials.go:16`).
+
+**The token crosses the control socket exactly once**, on `/connect`:
+`connectWireRequest{ConnectRequest, ClaudeToken}`'s `claudeToken` field
+(`json:"claudeToken,omitempty"`, `daemon_connect_request.go:9`). It never
+appears in any other route's request or response, is never logged, and is
+not present in the connection journal at all (§14.2's `ConnectionState` has
+no token field).
+
+## 15. Native contract: harness wire protocols
+
+### 15.1 Claude messaging socket
+
+Frames exchanged over the per-session unix socket captured at connect
+(`claude_socket.go`), both capped against `claudeMaxLine = 1 MiB`
+(`claude_socket.go:34`):
+
+- **Auth** (client → Claude, sent first):
+  `{"type":"auth","token":"<token>"}` (`claude_socket.go:61`).
+- **Message** (client → Claude):
+  `{"type":"user","session_id":"<sid>","uuid":"<uuid>","message":{"role":"user","content":"<text>"}}`
+  (`claude_socket.go:62-64`). Both the raw token/payload and each frame's
+  full marshaled-plus-newline length are checked before send; oversize
+  refuses `"Claude socket envelope exceeds the byte limit"`
+  (`claude_socket.go:58-59,66-67`).
+- **Receipt rule**: no socket-level ack; the client tails the session's own
+  transcript instead (`claude_socket.go:140-168`). A row counts as a
+  receipt when either:
+  - `row.session_id == sessionID && row.type == "user" && row.uuid ==
+    messageUUID` (the ordinary case), or
+  - the session was busy when the message arrived and Claude persisted it
+    as a `queued_command` attachment instead of a user row:
+    `row.type == "attachment" && row.isSidechain == false &&
+    row.attachment.type == "queued_command" &&
+    row.attachment.source_uuid == messageUUID &&
+    row.attachment.commandMode == "prompt" && row.attachment.isMeta ==
+    true && row.attachment.origin.kind == "peer"` (`claude_socket.go:145-166`).
+  - A bare queue/dequeue record, matching neither shape, is not receipt
+    evidence on its own.
+
+### 15.2 Codex queue sidecar
+
+Launch: `codex app-server --stdio` (plus `-c sqlite_home="<json-quoted
+path>"` when a non-default SQLite home is pinned) (`codexQueueArgs`,
+`codexqueue.go:91-99`). Environment is allowlisted, not inherited wholesale:
+only `PATH`, `TMPDIR`/`TMP`/`TEMP`, `SYSTEMROOT`/`WINDIR`/`COMSPEC`/`PATHEXT`,
+`LANG`/`LANGUAGE`/`LC_ALL`/`LC_CTYPE` pass through from the daemon's own
+environment; `CODEX_HOME`, `HOME`/`USERPROFILE`, `CODEX_SQLITE_HOME` are set
+explicitly from the connection's own config; `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1`
+is always forced, so a queue-only sidecar can never adopt persisted remote-
+control state (`codexQueueConfigEnv`, `codexqueue.go:102-133`).
+
+Wire protocol: newline-delimited JSON-RPC-shaped requests over stdio,
+`{"id":<n>,"method":"<m>","params":<p>}` (`codexQueue.write`/`call`,
+`codexqueue.go:217-268`). **The method allowlist is enforced client-side
+before any request is written**: only `initialize`, `thread/read`,
+`thread/queue/list`, `thread/queue/add`, `thread/items/list` are permitted;
+anything else refuses locally with `codex queue method "<m>" is not
+permitted` and never reaches the subprocess (`codexqueue.go:253-257`). No
+method in this set can start or resume a recipient thread; that boundary is
+the allowlist itself, not a convention the caller has to honor.
+
+## 16. Native contract: durable relay transport
+
+### 16.1 durable-v1 WS protocol
+
+Shares §10's handshake and frame-layer mechanics; layered on top:
+
+- **Ready handshake**: immediately after the ws upgrade, the relay sends
+  one text frame, `{"type":"ready","protocol":"cbus-relay-durable/v1"}`,
+  before anything else. The daemon reads it with a 5s deadline and aborts
+  the connection if it is missing, malformed, or names a different
+  protocol string (`"relay lacks durable-v1 ready handshake; upgrade the
+  relay before connecting"`, `daemon_relay.go:262-269`).
+- **Message** (relay → daemon): `{"type":"message","spoolId":"<name>","message":<raw stored JSON, unmodified>}`
+  (`durable_tail.go:225-230`).
+- **Ack** (daemon → relay): `{"type":"ack","spoolId":"<id>"}`
+  (`daemon_relay.go:469`), which is what `markDelivered` (§10.7) gates the
+  `new/`→`cur/` transition on.
+- **Presence/client frame** (daemon → relay, `durableClientFrame`,
+  `durable_tail.go:131-138`):
+  `{"type":"<join|departed|leave>","spoolId":"...","eventId":"...","event":"...","text":"...","ts":"..."}`,
+  the shape §16.2's `acceptDurablePresence` validates.
+- **Strict decode, both directions**: every durable frame unmarshals into a
+  typed struct with no permissive fallback; a frame that fails to parse or
+  fails its own field validation is rejected outright, never passed
+  through degraded (contrast §4.4's legacy `Reframe`, whose all-or-nothing
+  gate serves a different purpose on plain chat lines).
+- Limits: consumer identity ≤128 bytes (§1.1/§13); presence `eventId`
+  ≤256 bytes with no CR/LF/NUL; presence `text` ≤16 KiB (§16.2).
+
+### 16.2 Durable presence journal
+
+Mostly covered already: the journal's role in fanout (§3.2/§8), the
+relay's presence-origination split (§8), and the spool-level file ids it
+uses (§11). The validation gate itself, as contract
+(`acceptDurablePresence`, `durable_presence.go:35-43`):
+
+- `eventId`: required, ≤256 bytes, no CR/LF/NUL.
+- `text`: required, ≤16 KiB.
+- `event`: **exact three-value allowlist**, `"join"`, `"departed"`, or
+  `"leave"`; anything else refuses `"invalid durable presence event"`.
+- `ts`: must parse as RFC3339, else refuses `"invalid durable presence
+  timestamp"`.
+
+On-disk paths: `.durable-events/` (the journal itself) and
+`.durable-owners/<sha256(key)hex>.json` (per-key ownership records, §9.8),
+both siblings of the per-peer Maildir tree under the spool root (§11's
+layout).

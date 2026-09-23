@@ -1,5 +1,40 @@
 # Changelog (detailed)
 
+## [2026-09-23 00:57:52 UTC] [Docs/M5b3] native contract gaps A-H added to protocol.md, part 3 of 3
+
+[Attempt #1] On `docs/audit-m5d`, branched from `docs/audit-m5c`. 1 file
+edited (docs/architecture/protocol.md, three new sections). Third of three
+stacked PRs (D16 split): M5b1 store/local, M5b2 relay contract, M5b3 native
+contract gaps (this commit).
+
+[Motivating problem]
+protocol.md, the living wire/state contract (D13), had zero coverage of the
+native daemon's own control plane, harness wire protocols, and durable
+transport internals, findings tracked as gaps A-H rather than numbered P
+items since there was no prior text to correct. Written as contract per the
+orchestrator's instruction: precise and sourced, not narrative.
+
+[What changed]
+Section 14 (daemon control plane): 14.1 the full control API surface, every
+route's request/response shape and body cap, read directly from the
+handler; 14.2 the connection journal's format plus a compatibility hazard
+(three embedded structs with no json tags, so on-disk keys are bare Go
+field names); 14.3 the meta.json lifecycle across connect/arm/disconnect
+and the epoch-fence refusal text, both quoted verbatim from source; 14.4
+the Claude credential store's layout and the one place its token crosses
+the control socket. Section 15 (harness protocols): 15.1 the Claude
+messaging socket's auth/message frames and its transcript-based receipt
+rule, including the busy-session attachment case; 15.2 the Codex sidecar's
+launch command, environment allowlist, and its client-side JSON-RPC method
+allowlist. Section 16 (durable transport): 16.1 the durable-v1 ready/
+message/ack/presence frame shapes and its strict-decode posture; 16.2 the
+durable presence journal's exact validation gate.
+
+[Testing Notes]
+Dash/vocab/stray-id sweeps clean (one table-cell em dash used as a
+placeholder replaced with "(none)"). Applied-findings tracker at
+`/tmp/cbus-docs-audit/M5d-applied.md`.
+
 ## [2026-09-23 00:53:32 UTC] [Docs/M5b2] re-check fixup on the M5b2 commit
 
 [Attempt #1] Separate worktree (`/tmp/cbus-docs-m5c-recheck`, documenter was
