@@ -6,45 +6,55 @@ previous repository and may not resolve.
 
 ## [2026-09-23 21:19:48 UTC] [Docs/H7] document CBUS_HOST
 
-[Attempt #1] Branch `republish`, worktree `claudebus-demo`. Docs for the
-feature landed in `10586f3` (coder, same branch). 4 files: CHEATSHEET.md,
+[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. Docs for
+the feature landed in `10586f3` and a follow-up validation-rule change in
+`5d89602` (coder, same branch). 6 files: CHEATSHEET.md,
 docs/architecture/command-reference.md, docs/architecture/protocol.md,
-docs/usage.md.
+docs/usage.md, docs/how-it-works.md, docs/relay.md.
 
 [What changed]
 Documented the new `CBUS_HOST` environment variable everywhere the machine
 label it governs already appears in the docs. Added a row to
 command-reference.md's environment variables table covering its default
-(the system hostname, both taking the part before the first dot), its
-validated character set and the exact refusal every non-exempt verb takes
-on an invalid value, which verbs are exempt (help, version, the hooks),
-hook-join's stderr-only failure path, child inheritance through spawn,
-branch and formation apply, and the daemon's re-screened accept-or-fallback
-behavior on connect. Threaded a shorter pointer to that row into every
-place the label itself already appears: the `join` verb's meta.json field
-list, the `cbus list --json` example's top-level and per-peer `host`
-fields, `formation save`'s per-peer facts bullet (with a note that apply
-and resume compare against the recorded value), CHEATSHEET's env-var
-quick reference, docs/usage.md's daemon section (what a connecting client
-sends and what the daemon does with it), and protocol.md's peer meta
-field table (the `host` field's source column, which previously stated
-only the bash-era `hostname -s` behavior). Left the several existing
-mentions of the unrelated unrouted remote-send fallback identity format
-elsewhere in these docs untouched, since the task's fact list did not
-name that mechanism and those lines document a format, not this field's
-provenance.
+(the system hostname, both taking the part before the first dot), the
+validated character set (letters, digits, `.`, `_`, `-`; not starting
+with `.` or `-`; not ending with `.`; checked on both the full value and
+the part before the first dot) and the exact refusal every non-exempt
+verb takes on an invalid value, which verbs are exempt (help, version,
+the hooks), hook-join's stderr-only failure path, child inheritance
+through spawn, branch and formation apply, the daemon's re-screened
+accept-or-fallback behavior on connect, and that it also governs the
+local and remote send unrouted-sender fallback (`<label>-$PPID`),
+refused at every verb's entry gate before a send would ever reach it.
+Threaded a shorter pointer to that row into every place the label itself
+already appears: the `join` verb's meta.json field list, the `cbus list
+--json` example's top-level and per-peer `host` fields, `formation
+save`'s per-peer facts bullet (with a note that apply and resume compare
+against the recorded value), CHEATSHEET's env-var quick reference,
+docs/usage.md's daemon section (what a connecting client sends and what
+the daemon does with it), protocol.md's peer meta field table (the
+`host` field's source column, which previously stated only the bash-era
+`hostname -s` behavior), and every existing mention of the unrouted
+send-fallback identity format in command-reference.md, protocol.md,
+CHEATSHEET.md, docs/how-it-works.md and docs/relay.md, all of which now
+name the label instead of stating it is always the system hostname. Left
+the same pattern in docs/history/**'s frozen bash-era records and in
+both changelogs' own historical entries untouched, since those describe
+what was true when written.
 
 [Testing Notes]
-Traced every fact against the coder's commit directly:
+Traced every fact against the coder's commits directly:
 `internal/client/identity.go`'s `HostLabel`/`screenHostLabel`/`shortLabel`
-for the default, the dot-split rule and the exact validated character set;
+for the default, the dot-split rule and the validated character set (the
+stricter store-name rule as of the coder's follow-up commit);
 `cmd/cbus/main.go`'s `hostLabelGated` for the exempt-verb list and the
 `die()`-prefixed error text; `internal/client/harness.go`'s `HookJoin` for
 the hook-join stderr-only path; `internal/client/daemon_connect_request.go`
-for the daemon's re-screen-or-fallback behavior; and
-`internal/client/formation_plan.go`'s strict-equality machine comparison
-for the apply/resume claim. Link checker reports zero unresolved links. No
-em or en dash in any added line.
+for the daemon's re-screen-or-fallback behavior; `internal/client/send.go`
+and `identity.go`'s `RemoteFromDefault` for the send-fallback consumer;
+and `internal/client/formation_plan.go`'s strict-equality machine
+comparison for the apply/resume claim. Link checker reports zero
+unresolved links. No em or en dash in any added line.
 
 ## [2026-09-23 18:25:25 UTC] [Docs/R4] retire the pre-native-connect demo recordings
 
