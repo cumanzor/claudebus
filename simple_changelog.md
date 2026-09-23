@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-09-23 18:25:25 UTC] [Docs/R4] Removed the three outdated pre-native-connect demo recordings and their README/formations-doc image lines (the source recipes that built them stay in the repo for a future re-record), and dropped a leftover local filesystem path from one changelog entry.
+
 [2026-09-23 18:13:50 UTC] [Docs/R3] Generalized the example tool-inventory names across the docs, commands and both changelogs: the author's issue tracker, its saved-anchor CLI convention, a retired documentation-repo tier, and a formations-reading dashboard now read as generic placeholder terms everywhere a doc named one, alongside a password manager, a private network and a Linux container runtime replacing their respective examples, including two runnable credential-seed blocks.
 
 [2026-09-23 17:49:40 UTC] [Docs/R2] Generalized the example machine names across the docs and both changelogs: the author's server, laptop and Windows machine now read as generic placeholder names everywhere a doc named one, including the site environment variable and CLI examples. Also documented that `cbus auth status` now requires its host argument explicitly, printing a usage error and exiting nonzero without one.

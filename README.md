@@ -6,21 +6,6 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
-The recordings below are from v0.9 (committed 2026-08-10): they show the legacy join/tail flow, which native connect has since replaced.
-
-![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers (v0.9-era recording, before native connect)](docs/media/demo-live.gif)
-
-The original Monitor integration below shows the file-bus exchange at the CLI
-level. Native CLI connections now let the daemon handle waiting:
-
-![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness (v0.9-era recording, before native connect)](docs/media/demo.gif)
-
-And a whole fleet driving itself — one prompt in, then the orchestrator spawns
-its coder and reviewer with `cbus spawn pane` and runs a task → review → verdict
-loop entirely over the bus:
-
-![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict (v0.9-era recording, before native connect)](docs/media/demo-fleet.gif)
-
 Claude Code and Codex CLI can connect their existing conversations through a
 local daemon: native Codex since **v0.12.0**, native Claude since **v0.13.0**.
 Claude uses its per-session native messaging socket;

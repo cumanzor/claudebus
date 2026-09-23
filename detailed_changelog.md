@@ -1,5 +1,34 @@
 # Changelog (detailed)
 
+## [2026-09-23 18:25:25 UTC] [Docs/R4] retire the pre-native-connect demo recordings
+
+[Attempt #1] Branch `republish-docs`, same worktree. 7 files: README.md,
+docs/formations.md, both changelogs, and the three retired recordings
+under docs/media/ (removed).
+
+[What changed]
+The three demo recordings under docs/media/ show the legacy join/tail flow
+from before native connect shipped, and the follow-up to re-record them
+against the current flow is tracked separately, not done here. Removed all
+three, kept the three source recipes that built them so a future re-record
+has something to start from, and removed the image line and its
+surrounding lead-in prose in the two docs that embedded them (README.md's
+three, docs/formations.md's one) rather than leave dangling references or
+prose pointing at "the recording below" with nothing below it.
+README.md's flow now goes straight from the opening description into the
+still-current native-connect paragraph that immediately followed the
+removed block. Also dropped a local filesystem path from one existing
+changelog entry, per the same generalize-everywhere pass as R1-R3, keeping
+its branch name, base commit and file count.
+
+[Testing Notes]
+Repo-wide search (not just *.md) for the three removed filenames confirms
+no other reference survives outside the two changelog entries that
+describe the original M7 file move as history (left untouched, since it
+is a past-tense fact about a git rename, not a live link). Link checker
+reports zero unresolved links. A search for the dropped filesystem path
+confirms zero remaining instances anywhere in scope.
+
 ## [2026-09-23 18:13:50 UTC] [Docs/R3] generalize example tool-inventory names
 
 [Attempt #1] Branch `republish-docs`, same worktree. 14 files: AGENTS.md,
@@ -2032,8 +2061,8 @@ one rule, so it is what got built.
 
 ## [2026-08-24 05:56:32 UTC] [Commands/Formation] `/save-formation`, the zero-friction checkpoint
 
-[Attempt #1] on `feat/save-formation-command` off main (`28b4641`), worktree
-a separate worktree. 9 files.
+[Attempt #1] on `feat/save-formation-command` off main (`28b4641`), a separate
+worktree. 9 files.
 
 [Motivating problem]
 Running live formations surfaced the same two frictions. First, checkpointing the
