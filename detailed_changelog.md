@@ -1,5 +1,9 @@
 # Changelog (detailed)
 
+This project moved to a new repository in 2026-09. Commit hashes, pull
+request and milestone links in entries dated before the move refer to the
+previous repository and may not resolve.
+
 ## [2026-09-23 18:25:25 UTC] [Docs/R4] retire the pre-native-connect demo recordings
 
 [Attempt #1] Branch `republish-docs`, same worktree. 7 files: README.md,
