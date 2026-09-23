@@ -1,5 +1,60 @@
 # Changelog (detailed)
 
+## [2026-09-23 01:23:06 UTC] [Docs/M6] current architecture doc, final milestone of the post-v0.14.1 docs audit
+
+[Attempt #1] On `docs/audit-m6`, branched from `docs/audit-m5d` at e16b82e.
+New file (docs/architecture/current-architecture.md, 223 lines) plus three
+inbound-link edits and the changelog pair.
+
+[Motivating problem]
+M1-M5 fixed the existing docs against the actual Go client, daemon and
+relay, but none of them told the whole current story in one place; a new
+session had to piece the system together from protocol.md's wire-level
+detail and command-reference.md's per-verb detail. M6 is that narrative
+map.
+
+[What changed]
+current-architecture.md, 11 sections: components (a diagram plus CLI,
+daemon, native Claude/Codex adapters, legacy join/tail, relay, spool,
+formations, each with source citations); how a message travels locally
+and cross-machine (native push-and-receipt vs legacy append-and-poll,
+legacy best-effort /send vs durable /tail/durable-v1 with its delivery-id
+dedup); daemon lifecycle and version fence (start-on-demand, the
+singleton flock, the incompatible-daemon refusal text quoted verbatim,
+and restart fencing by (pid, start) identity, citing the commit that
+closed a real restart-abandonment bug); the connection journal, stated as
+a known defect (three embedded config structs carry no json tags); the
+native meta lifecycle and epoch fence, with the macOS-reboot false
+positive stated as a known defect and a pointer to usage.md's recovery
+steps; the send gate and liveness rules; a native-vs-legacy presence
+table; the credential store; a full native-vs-legacy per-verb behavior
+table; four known defects with no fix claim and no tracker ids; and a
+pointer table naming which doc owns which contract. Every load-bearing
+claim cites a Go file:func, verified fresh against source in this
+session. Sections with an exact wire-level contract already written
+(M5's native gaps A-H) link to protocol.md sections 14-16 instead of
+restating it.
+
+Inbound links added: overview.md's historical banner, README.md's docs
+table, and how-it-works.md's intro, all pointing at the new doc.
+
+[Files Changed]
+- docs/architecture/current-architecture.md (new, 223 lines)
+- docs/architecture/overview.md (+2/-1, banner pointer)
+- README.md (+1, docs table row)
+- docs/how-it-works.md (+4, intro pointer)
+
+[Testing Notes]
+Dash/vocab/stray-tracker-id sweeps clean on the full diff. All 13
+markdown links in the new doc resolve; all 10 file:line citations
+re-verified against current source. Coverage mapped in
+/tmp/cbus-docs-audit/M6-applied.md against both M4-findings.md coverage
+lists, M5's native gaps A-H, and the epoch-fence guidance; a few items
+deferred with stated reasons (uncertain-attempt/abandon workflow and
+durable-v1 auth detail, already owned by how-it-works.md/protocol.md; the
+launcher env scrub and env var inventory, command-reference.md's
+territory).
+
 ## [2026-09-23 01:07:53 UTC] [Docs/M5b3] reviewer fixup on the M5b3 commit
 
 [Attempt #1] Separate worktree (`/tmp/cbus-docs-m5d-fixup`, documenter was

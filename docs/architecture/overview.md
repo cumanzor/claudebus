@@ -3,7 +3,8 @@
 > **Historical: the Monitor receive loop below describes the legacy interface
 > (dated 2026-09-22).** For current native Claude/Codex operation, start with
 > [how-it-works.md](../how-it-works.md), [claude.md](../claude.md) and
-> [codex.md](../codex.md).
+> [codex.md](../codex.md). For the current system's full architecture, see
+> [current-architecture.md](current-architecture.md).
 >
 > Audience: a developer browsing this repo. This document describes the system as
 > audited at HEAD `f213e26` (2026-07-12), when the client was the bash `bin/cbus` —

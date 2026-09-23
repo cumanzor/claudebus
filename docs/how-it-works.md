@@ -1,5 +1,10 @@
 # How it works
 
+For the full system map (components, message flow, daemon lifecycle,
+presence, credential store), see
+[current-architecture.md](architecture/current-architecture.md). This page
+covers the join-time behavior a session needs to know.
+
 ## Native sessions
 
 Ordinary Claude and Codex CLI sessions run `cbus connect CHANNEL [ALIAS] --json`
