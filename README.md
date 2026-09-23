@@ -6,21 +6,23 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
-![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers](docs/demo-live.gif)
+The recordings below are from v0.9 (committed 2026-08-10): they show the legacy join/tail flow, which native connect has since replaced.
+
+![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers (v0.9-era recording, before native connect)](docs/demo-live.gif)
 
 The original Monitor integration below shows the file-bus exchange at the CLI
 level. Native CLI connections now let the daemon handle waiting:
 
-![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness](docs/demo.gif)
+![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness (v0.9-era recording, before native connect)](docs/demo.gif)
 
 And a whole fleet driving itself — one prompt in, then the orchestrator spawns
 its coder and reviewer with `cbus spawn pane` and runs a task → review → verdict
 loop entirely over the bus:
 
-![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict](docs/demo-fleet.gif)
+![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict (v0.9-era recording, before native connect)](docs/demo-fleet.gif)
 
 Claude Code and Codex CLI can connect their existing conversations through a
-local daemon in **v0.13.0**. Claude uses its per-session native messaging socket;
+local daemon, shipped since **v0.13.0**. Claude uses its per-session native messaging socket;
 Codex uses its experimental native queue API. Release field checks used Claude
 2.1.278 and Codex 0.155.1 on macOS / 0.154.0 on Linux; see the
 [release and validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0).
@@ -39,11 +41,13 @@ Codex adapter also requires a compatible installed Codex CLI.
 
 ```sh
 # from source
-go build -o ~/.local/bin/cbus ./cmd/cbus
+go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
+  -o ~/.local/bin/cbus ./cmd/cbus
 cbus install-commands && cbus install-roles && cbus install-codex-skills
 
 # or bootstrap from a release (see docs/install.md), then stay current with
 cbus selfupdate
+cbus daemon restart   # loads the new binary; a stale daemon refuses new connects
 ```
 
 Two CLI conversations, one channel — ask each session to run its own commands:
@@ -93,7 +97,8 @@ cbus will not substitute a fresh Claude session.
   `cbus spawn --role coder` opens a fresh peer briefed from a committed role
   file — [docs/usage.md](docs/usage.md)
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
-  fresh fleets from starter templates; there's a three-peer fleet demo at the
+  fresh fleets from starter templates, or checkpoint the current channel with
+  `/save-formation`; there's a three-peer fleet demo at the
   top of the doc — [docs/formations.md](docs/formations.md)
 - **Harness-neutral peers** — ordinary Claude Code and Codex CLI sessions connect
   from inside their conversation. Existing `cbus codex` launches remain supported;
@@ -147,7 +152,13 @@ What's left for cbus is an **open** boundary rather than a wider one: a file and
 CLI usable by anything that can write a line, peers that aren't Claude Code, a relay
 you own and can inspect, and a mailbox and ledger you can read with `cat`.
 
-A send to a peer whose listener died is refused unless you pass `--force`.
+A send to a peer whose listener died is refused unless `--force`: a legacy
+listener that exited, a disconnected native peer, or any native peer while
+the daemon is down. (A legacy peer that joined but never armed still accepts
+mail.) For a connected native peer, listen means the daemon holds the
+connection, not that the CLI session is running; session presence is
+`consumer.state` in `cbus connection status CH/AL --json`, and mail to a
+departed native session queues for its resume.
 Legacy join/tail registrations have their existing restart and inbox-reset
 semantics. Managed native connections retain their inbox, delivery cursor and
 uncertain attempts across daemon and exact-session CLI restarts. Claude socket
@@ -170,6 +181,9 @@ release; the old Monitor WebSocket endpoint keeps its legacy semantics.
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
+| [docs/claude-monitor-stopgap.md](docs/claude-monitor-stopgap.md) | the opt-in legacy Monitor workaround, for sessions still on that transport |
+| [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |
+| [docs/claude-native-review.md](docs/claude-native-review.md) | native Claude receive milestone: review, acceptance evidence and release validation |
 | [docs/architecture/](docs/architecture/) | the deep end: system overview, full command reference, wire protocol, port map |
 
 ## License

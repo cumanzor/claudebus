@@ -1,7 +1,7 @@
 # Usage
 
-These instructions use native Claude receive, shipped in cbus v0.13.0 for macOS
-and Linux alongside native Codex receive. See [Claude
+These instructions use native Claude receive, shipped since cbus v0.13.0 for
+macOS and Linux alongside native Codex receive. See [Claude
 connections](claude.md) for supported sessions, recovery and deliberate migration
 from an existing Monitor peer. Native Claude and Codex connections do not need a
 Monitor, tail process or periodic model polling; terminal choice is independent.
@@ -16,7 +16,9 @@ Monitor, tail process or periodic model polling; terminal choice is independent.
 `/bus-branch` first connects the parent natively, then runs
 `cbus branch <target> [channel]`. When running that CLI command directly, connect
 the parent first with `cbus connect CHANNEL [ALIAS] --json` and check
-`cbus list CHANNEL` once. The branch command preserves the managed parent,
+`cbus list CHANNEL` once. On an unconnected parent, `branch` falls back to a
+legacy registration and prints a Monitor-arming hint; do not follow that hint,
+connect natively instead. The branch command preserves the managed parent,
 reserves the child alias and forks into an iTerm2 or tmux terminal with the
 canonical bootstrap turn. The child connects its own session natively and
 reports back with `cbus send`. Neither side arms a Monitor. Any background-task
@@ -43,6 +45,9 @@ appends its body to the child's first turn, after the connect instructions.
 It defaults `--name` to the role name. Claude spawn also defaults `--model` to the
 file's `MODEL:` line; an explicit `--name`/`--model` still wins. Codex spawn uses
 explicit `--model`, otherwise its Codex profile/default, not the Claude role model.
+A `--model` string passes through to the CLI unchanged: an alias such as `opus`
+floats to whatever that CLI currently resolves it to, while a role's `MODEL:`
+line is a pinned id, so the two can diverge.
 An unknown role fails before any alias is reserved, listing every path it tried. `branch` refuses `--role`
 outright — a fork inherits its parent's intent, and handing a forked peer
 someone else's role prompt is exactly the ghost-orchestrator failure
@@ -72,8 +77,12 @@ Then from either side, ask Claude to send:
 
 After connecting, each session checks `cbus list deploy` once and reports the
 other listening peers and explicitly known roles. Aliases are not role evidence.
-Incoming presence updates that observed roster; no recurring roster check is
-needed. `cbus list` shows peers across channels; `cbus channels` summarizes them.
+For a native peer, listening means the daemon holds the connection, not that
+its CLI session is running; session presence is `consumer.state` in
+`cbus connection status CHANNEL/ALIAS --json`, and mail to a departed native
+session queues for its resume. Incoming presence updates that observed roster;
+no recurring roster check is needed. `cbus list` shows peers across channels;
+`cbus channels` summarizes them.
 
 For a local native connection, the roster's PID (`listenerPid` in `cbus list
 --json`) identifies the cbus daemon, so several peers can share it. To identify
@@ -103,8 +112,28 @@ manages those connections; do not add a Monitor for each membership.
 ## More than two
 
 A channel is an N-way registry, not a pair. Every session that joins the same
-channel can message every other; aliases are auto-assigned and recycled
-(`main`, then `fork-1`, `fork-2`, … reusing freed slots).
+channel can message every other; aliases are auto-assigned, and for legacy
+join peers, recycled (`main`, then `fork-1`, `fork-2`, … reusing freed slots).
+A native alias is held (its inbox retained) until an explicit `leave`/`unregister`,
+even after disconnect; `cbus prune` skips native peers and only sweeps legacy ones.
+
+## The daemon
+
+`connect` starts the daemon on demand; it is not installed as a login service.
+There is one daemon per `$CBUS_DIR`, shared by every peer using that store.
+Its socket is `$CBUS_DIR/.daemon/control.sock` and its log is
+`$CBUS_DIR/.daemon/daemon.log`.
+
+```sh
+cbus daemon status [--json]   # pid, version, protocol
+cbus daemon restart           # load a new binary; pending mail is retained
+cbus daemon stop              # stop it; the next connect starts a fresh one
+```
+
+A daemon whose version or protocol differs from the binary, even by a patch,
+refuses new connects and `daemon start` rather than being silently reused; see
+[install.md](install.md) for the exact refusal text. `send`/`list` do not go
+through that check.
 
 ## Presence & session-end announcements
 
