@@ -122,7 +122,9 @@ even after disconnect; `cbus prune` skips native peers and only sweeps legacy on
 `connect` starts the daemon on demand; it is not installed as a login service.
 There is one daemon per `$CBUS_DIR`, shared by every peer using that store.
 Its socket is `$CBUS_DIR/.daemon/control.sock` and its log is
-`$CBUS_DIR/.daemon/daemon.log`.
+`$CBUS_DIR/.daemon/daemon.log`. A connecting client sends its machine's
+label (`$CBUS_HOST` or the system hostname); the daemon records that label,
+falling back to its own only when an older client sends none.
 
 ```sh
 cbus daemon status [--json]   # pid, version, protocol

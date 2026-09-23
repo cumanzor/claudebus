@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-23 21:19:48 UTC] [Docs/H7] Documented CBUS_HOST, which overrides this machine's label everywhere it is recorded (cbus list/--json, peer meta, the ledger, a saved formation's machine field), with a default of the system hostname and a validated character set enforced on every non-hook verb. Covers the CHEATSHEET and command-reference environment tables, the join and formation save/apply/resume verb notes, the daemon connect note, and the peer meta field table.
+
 [2026-09-23 18:25:25 UTC] [Docs/R4] Removed the three outdated pre-native-connect demo recordings and their README/formations-doc image lines (the source recipes that built them stay in the repo for a future re-record), and dropped a leftover local filesystem path from one changelog entry.
 
 [2026-09-23 18:13:50 UTC] [Docs/R3] Generalized the example tool-inventory names across the docs, commands and both changelogs: the author's issue tracker, its saved-anchor CLI convention, a retired documentation-repo tier, and a formations-reading dashboard now read as generic placeholder terms everywhere a doc named one, alongside a password manager, a private network and a Linux container runtime replacing their respective examples, including two runnable credential-seed blocks.

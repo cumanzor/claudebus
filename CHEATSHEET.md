@@ -341,6 +341,7 @@ cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces
 cbus hook-join                   # SessionStart hook target (auto-joins $CBUS_CHANNEL)
 cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)
+CBUS_HOST=name cbus ...          # override this machine's label (default: system hostname)
 ```
 
 ## Gotchas

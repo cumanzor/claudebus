@@ -178,6 +178,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | Var | Read at | Effect |
 |---|---|---|
 | `CBUS_DIR` | bin/cbus:16 | State root (default `~/.claude-bus`) |
+| `CBUS_HOST` | identity.go:177 | This machine's label, shown in `cbus list`/`--json` and recorded in peer `meta.host`, the ledger and a saved formation's `machine`; `formation apply`/`resume` compare against it, so a peer saved under a different label reads as recorded on another machine. Default: the system hostname; both take the part before the first dot, and an empty value means unset. Invalid (anything but letters, digits, `.`, `_`, `-`, or an empty part before the dot) is a hard error: every verb except `help`/`--help`/`-h` and `version`/`--version` exits 1 naming the value and the allowed characters; the hooks keep their exit-0 contract, and `hook-join` registers nothing and prints the error to stderr instead. `spawn`, `branch`, `formation apply` and Codex-spawned children inherit it. The daemon records the label a connecting client sends, re-screened, falling back to its own only for a client that sends none. Useful for a label independent of a network-dependent hostname |
 | `CBUS_PYTHON` | bin/cbus:17 (bash era) | Python interpreter for the retired bash client (default `python3`). **The Go client ignores it** — the COMPAT(P3 #4) byte-parity help line was dropped from `--help` at P3 homogenization |
 | `CLAUDE_CODE_SESSION_ID` | :93, :189, :432, :685 | Session identity. Without it, `whoami`/`leave`/`rename`/send-from-defaults/`branch` cannot find "self" (see [sessionless degradation](#sessionless-degradation)). The Go client resolves identity through a chain: the `--session-id` flag override, then `$CBUS_SESSION_ID`, then `$CLAUDE_CODE_SESSION_ID`, then `$GROK_SESSION_ID`, then `$CODEX_THREAD_ID` (`internal/client/identity.go:51`); "without it" means the whole chain is empty |
 | `CBUS_ALIAS` | send.go:67-72 | Last-resort `from` on **local** send only, unvalidated on its own; when `CBUS_CHANNEL` is also set and both pass `ValidStoreName`, `from` becomes `CBUS_CHANNEL/CBUS_ALIAS` instead of the bare alias |
@@ -634,7 +635,8 @@ for hooks and scripted multi-session drivers.
      proceeding.
 5. Truncate/create a fresh `inbox.jsonl`; write `meta.json`
    (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host,
-   ts}`, plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
+   ts}`, where `host` is `$CBUS_HOST` or the system hostname (see the
+   environment variables table), plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
    launcher's birth record supplied it, with `model`; `profile` and
    `harness` are stamped too (`store.go:295`). `listenerStart` arrives only
    at arm, and `connectionId` stays absent until a native `connect` claims
@@ -978,6 +980,9 @@ of a session.
 }
 ```
 
+- The top-level and per-peer `host` are this machine's label: `$CBUS_HOST`
+  when set, else the system hostname (both take the part before the first
+  dot; see the environment variables table).
 - **Every level is an object, never a bare array** — a level can gain sibling
   keys later without breaking a consumer; peers are objects with named keys so
   windowing identity (window/pane/term — not yet landed) arrives as purely
@@ -1925,7 +1930,10 @@ this session's own registration (`not joined to a channel in this session — pa
 one` if none; `joined to <N> channels (<list>) — pass one` if several).
 
 - **The store records the session facts per peer**: `sessionId`, `cwd`,
-  `machine`, the `profile` the session stamped about itself at join (refreshes
+  `machine` (this machine's `$CBUS_HOST` or system hostname label; `apply`
+  and `resume` compare a peer's recorded `machine` against it, so a peer
+  saved under a different label reads as recorded on another machine), the
+  `profile` the session stamped about itself at join (refreshes
   like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
   skipped with a note), and the birth-record `origin`/`model` **when the
   launcher recorded them** (§9 / protocol.md birth records). It fills a blank
