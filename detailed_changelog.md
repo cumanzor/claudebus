@@ -1,5 +1,25 @@
 # Changelog (detailed)
 
+## [2026-09-23 01:35:31 UTC] [Docs/M6] re-check fixup on the M6 commit
+
+[Attempt #1] Same worktree, still on `docs/audit-m6`. 1 file
+(current-architecture.md), 2 fixes.
+
+[What changed]
+- R1: the presence event-allowlist row's legacy column overclaimed a
+  relay-generated `leave`; the relay only ever self-generates `join`/
+  `departed` from ws attach/detach, and client-originated presence
+  (join/leave/rename/compact broadcasts) never crosses the relay at all,
+  since `POST /send` carries no `kind` field for it to ride on.
+- R2: the unregister row's native column omitted that it broadcasts
+  `departed` ("unregistered") for every peer, managed included, the same
+  as the legacy column already said; this was already true in the code,
+  just missing from the doc.
+
+[Testing Notes]
+Dash/vocab/stray-tracker-id sweeps clean. All 16 link occurrences
+re-checked and resolve. M6-applied.md updated with a RE-CHECK section.
+
 ## [2026-09-23 01:31:54 UTC] [Docs/M6] reviewer fixup on the M6 commit
 
 [Attempt #1] Same worktree, still on `docs/audit-m6`. 1 file

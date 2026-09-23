@@ -167,7 +167,7 @@ expiry or prune (protocol.md §6.1, §7).
 | `listen`/`off` means | the daemon holds the connection | a process is (or isn't) alive at the recorded pid |
 | `consumer.state` | the harness session's own observed state (`cbus connection status`) | not applicable |
 | `join`/`departed`/`leave` origin | daemon-decided, sent as explicit frames the relay journals (durable) or a one-time legacy-to-durable handoff (protocol.md §10.3, §16.2) | relay-generated from ws attach/detach, or client-broadcast on join/leave/rename (protocol.md §8, §9.2) |
-| Event allowlist | `join`/`departed`/`leave`: the only three that cross the relay for a durable connection (`acceptDurablePresence`, `durable_presence.go:35-43`) | `join`/`departed`/`leave` only, relay-generated from ws attach/detach or client-broadcast |
+| Event allowlist | `join`/`departed`/`leave`: the only three that cross the relay for a durable connection (`acceptDurablePresence`, `durable_presence.go:35-43`) | `join`/`departed` only, relay-generated from ws attach/detach (`main.go:131`, `durable_tail.go:59,66`); client presence stays local, since `POST /send` carries no `kind` field it could ride on |
 
 Compaction presence (`compact-pre`/`compact-post`) and `rename` never cross
 the relay for either native or legacy peers; they are always local
@@ -194,7 +194,7 @@ Exact output strings live in command-reference.md; this is the shape.
 | `tail` (arm) | refused, points at `cbus connect` (see command-reference.md for the exact text) | arms the in-process follower |
 | `list` | `listenerPid` = daemon pid while armed, `-1` on disconnect | `listenerPid` = follower pid or null |
 | `leave` | broadcasts `leave` presence, then removes the registration (`leaveSession`, `store.go:461-515`) | same: broadcasts `leave`, removes the peer dir |
-| `unregister` | detaches the connection; the journal entry survives with state `detached` (`daemon_scheduler.go:37-39`) | unconditional removal, broadcasts `departed` (`Unregister`, `store.go:518-543`) |
+| `unregister` | detaches the connection (journal entry survives with state `detached`, `daemon_scheduler.go:37-39`) and broadcasts `departed` ("unregistered") for every peer, managed included (`store.go:540`) | unconditional removal, broadcasts `departed` (`Unregister`, `store.go:518-543`) |
 | `close` | refused, points at `cbus connection disconnect` (see command-reference.md for the exact text) | SIGTERMs the owning process |
 | `prune` | never reaped (`PeerDead` exemption, §6) | reaped once past grace |
 | `hook-exit` | preserves the registration | removes it (graceful SessionEnd) |
