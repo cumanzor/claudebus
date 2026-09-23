@@ -9,24 +9,22 @@ docs/history/legacy/claude-monitor-stopgap.md,
 docs/history/acceptance/claude-native-review.md.
 
 [What changed]
-Every place a doc named a specific CCS profile (the two example
-profiles' launch commands, `CLAUDE_CONFIG_DIR`/`profile=` env values, a
-quoted profile-name formation check) now says `alpha`/`beta`
-instead, matching the naming a parallel pass is applying on the code
-side. The generic phrase "CCS profile" and placeholder forms like
-`<profile>` were already generic and needed no change. Cross-checked the
-full-history sweep's CCS-profile-name group against every markdown file
-in scope; every TIP-present occurrence it listed for a doc file is
-accounted for above.
+Every place a doc named a specific CCS profile, launch commands, env
+values, quoted formation-check mentions, and bare-word pairings alike,
+now uses the two example profile names instead, matching the naming a
+parallel pass is applying on the code side. The generic phrase "CCS
+profile" and placeholder forms were already generic and needed no
+change. Cross-checked the full-history sweep's CCS-profile-name group
+against every markdown file in scope; every TIP-present occurrence it
+listed for a doc file is accounted for above.
 
 [Testing Notes]
 Dash/vocab sweep clean on every changed line. Repo-wide link checker
-reports zero unresolved links. A word-boundary grep for every CCS-profile
-form named in the mapping table (launch commands,
-quoted names, inline-code names, the profile= env value,
-instance directory paths, and related) returns zero hits
-across README, CHEATSHEET, AGENTS/CLAUDE.md, docs/**, commands/, roles/,
-profiles/, skills/, and both changelogs.
+reports zero unresolved links. A word-boundary grep for the old profile
+names, in every form the mapping table lists (quoted, backtick-quoted,
+inside env values, inside launch commands, and as a bare-word pairing),
+returns zero hits across README, CHEATSHEET, AGENTS/CLAUDE.md, docs/**,
+commands/, roles/, profiles/, skills/, and both changelogs.
 
 ## [2026-09-23 16:27:36 UTC] [Docs/M10] point historical records to the security guide for relay deployment
 
@@ -2052,7 +2050,7 @@ everywhere is the embed-count test, which is exactly the guard the repo wanted.
   would have been wrong on any other machine.
 - On `~/.claude/commands` being the destination: on this machine that path is the real
   directory behind `~/.ccs/shared/commands`, which both ccs profile command dirs
-  symlink to, so one install serves personal and work. That is a local layout, not
+  symlink to, so one install serves both profiles. That is a local layout, not
   something the installer knows or depends on.
 - Branch choice: this is off `main`, not the checked-out `windows-port`, which is 16
   commits behind and has no `commands/bus-layout.md`. Committing there would have
