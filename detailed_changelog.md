@@ -1,5 +1,43 @@
 # Changelog (detailed)
 
+## [2026-09-23 01:31:54 UTC] [Docs/M6] reviewer fixup on the M6 commit
+
+[Attempt #1] Same worktree, still on `docs/audit-m6`. 1 file
+(current-architecture.md), 8 fixes.
+
+[What changed]
+- F1: the durable-delivery dedup claim was misattributed to the relay's
+  `WriteNamed` idempotency; corrected to the actual client-side (daemon)
+  dedup on a matching inbox `relayId`, with `WriteNamed` named separately
+  as the mechanism serving `/send` ingest and presence fanout replay.
+- F2: the branch/spawn/bootstrap row was wrong; the child is always told
+  to `cbus connect`, native or not, and the "legacy" column was actually
+  describing the parent's own registration fallback in `Branch`.
+- F3: relabeled the presence event-allowlist row (what crosses the relay,
+  not a native/legacy split) and named native Codex's own local
+  `compact-post` emission alongside the shared `hook-compact` path.
+- F4: the daemon socket path limit was called "measured" when nothing was
+  measured in this doc, and had the wrong byte counts; corrected to
+  source-traced with the right macOS/Linux limits, pointing at the actual
+  measured fact already in CHEATSHEET.md.
+- F5: replaced the intro's measured-vs-source-traced framing (nothing was
+  measured) with the ruled wording: anchored to a Go symbol or a named
+  contract section.
+- F6: send is not receipt-confirmed at push time (Claude waits on a
+  transcript receipt, Codex on a reconcile); unregister keeps a detached
+  journal entry rather than "nothing"; leave broadcasts presence before
+  removing the registration.
+- F7: added a missing "uncertain delivery, reconcile, abandon" pointer
+  row. Also: the env var inventory gap from M4-C11 is an open item, not a
+  deferral; command-reference.md's env table is still not exhaustive.
+- F8: five mermaid node labels used literal `\n`, which mermaid does not
+  render as a line break; changed to `<br/>`.
+
+[Testing Notes]
+Dash/vocab/stray-tracker-id sweeps clean. All 16 link occurrences in the
+file re-checked and resolve. M6-applied.md updated with a VERDICT
+section.
+
 ## [2026-09-23 01:23:06 UTC] [Docs/M6] current architecture doc, final milestone of the post-v0.14.1 docs audit
 
 [Attempt #1] On `docs/audit-m6`, branched from `docs/audit-m5d` at e16b82e.

@@ -10,9 +10,9 @@ page for the shape of the system. [overview.md](overview.md),
 historical records of the bash-era system and its 2026-07 port; this doc
 describes what replaced them.
 
-Every load-bearing claim below either names the Go symbol it traces to, or
-is explicitly marked measured (an instrument run in this session) versus
-source-traced (read, not executed). Anywhere the two conflict, trust
+Every load-bearing claim below is anchored to a Go symbol, or to the
+protocol.md or command-reference.md section that carries it; nothing here
+was measured. Anywhere this page and those contracts conflict, trust
 protocol.md's numbered sections; this page is the map, not the contract.
 
 ## 1. Components
@@ -20,14 +20,14 @@ protocol.md's numbered sections; this page is the map, not the contract.
 ```mermaid
 flowchart LR
     CLI["cbus CLI"] -->|local send/list| Store[("$CBUS_DIR peer tree")]
-    CLI -->|connect/status| Daemon["daemon\n.daemon/control.sock"]
-    Daemon --> Claude["Claude messaging\nsocket"]
-    Daemon --> Codex["Codex queue\nsidecar (app-server)"]
-    Daemon -->|durable-v1| Relay["relay\nHTTP + WS"]
+    CLI -->|connect/status| Daemon["daemon<br/>.daemon/control.sock"]
+    Daemon --> Claude["Claude messaging<br/>socket"]
+    Daemon --> Codex["Codex queue<br/>sidecar (app-server)"]
+    Daemon -->|durable-v1| Relay["relay<br/>HTTP + WS"]
     CLI -.legacy join/tail.-> Store
     CLI -.legacy remote.-> Relay
     Relay --> Spool[("Maildir spool")]
-    CLI -->|save/apply| Formations[("saved formations\n.formations/*.json")]
+    CLI -->|save/apply| Formations[("saved formations<br/>.formations/*.json")]
 ```
 
 - **CLI (`cbus`)**: one static binary, every verb (`cmd/cbus`).
@@ -64,9 +64,14 @@ the peer's flock, refuse if armed-and-dead (unless `--force`), append the
 JSON line to `inbox.jsonl`. What happens next depends on how the recipient
 receives:
 
-- **Native recipient**: the daemon already holds the connection; delivery
-  is push-based into the harness's own socket/sidecar (§15), confirmed by
-  a receipt observation, not a fire-and-forget append.
+- **Native recipient**: the daemon already holds the connection and pushes
+  into the harness's own socket/sidecar (§15), not a fire-and-forget
+  append, but the push itself is not receipt. A Claude submission stays
+  pending until its exact transcript receipt appears; Codex sidecar
+  acceptance is likewise not receipt until `connection reconcile` finds it
+  in history. An unresolved uncertain attempt blocks later mail to that
+  peer until it is resolved or abandoned (protocol.md §15,
+  [codex.md](../codex.md)).
 - **Legacy recipient**: the append is all that happens; a Monitor-armed
   `cbus tail` follower notices the new line and frames it (protocol.md
   §4-§5).
@@ -80,9 +85,12 @@ receives:
   (protocol.md §9.2, §10.7).
 - **Durable**: the daemon dials `/tail/durable-v1`, completes the ready
   handshake, and receives messages it must explicitly ack before the relay
-  marks them delivered; a delivery-id check on both the relay's spool
-  ingest and the daemon's own inbox write prevents a retried delivery from
-  duplicating (protocol.md §9.8, §10.7, §16.1).
+  marks them delivered. Retried-delivery dedup is client-side: the daemon
+  skips re-appending a frame whose spool id already matches an inbox
+  line's `relayId` (`daemon_relay.go:592-599`). The relay's own
+  `WriteNamed` idempotency (protocol.md §11) is a separate mechanism that
+  serves `/send` ingest and durable-presence fanout replay, not this path
+  (protocol.md §9.8, §10.7, §16.1).
 
 ## 3. Daemon lifecycle & version fence
 
@@ -91,12 +99,13 @@ Started on demand by `ensureDaemon` (`connection.go:306-313`), which probes
 polls for up to 5s before giving up (`ensureDaemonWith`,
 `connection.go:318-338`). One process per store, singleton-enforced by an
 flock on `.daemon/lock` (protocol.md §14.1). `daemon.log` under `.daemon/`
-records what the daemon itself printed; unix socket paths under
-`$CBUS_DIR` are bounded near 103 bytes (`sockaddr_un.sun_path`), which is
-why `$CBUS_DIR` needs to stay short on some filesystems
-(`sunPathMax`, `codexwrap.go:30-32`, measured against the Codex wrapper's
-own socket; the daemon's own control socket is subject to the same OS
-limit).
+records what the daemon itself printed. Every unix socket under
+`$CBUS_DIR`, including the daemon's own control socket, is source-traced
+to the OS's `sockaddr_un.sun_path` limit: 104 bytes including the NUL on
+macOS, 108 on Linux (`sunPathMax`, `codexwrap.go:30-32`). A store path
+that runs past it fails to dial with `connect: invalid argument`, a fact
+already measured against the daemon control socket in
+[CHEATSHEET.md](../../CHEATSHEET.md).
 
 **Version fence**: `checkDaemonCompatibility` (`daemon_upgrade.go:31-36`)
 refuses to use a running daemon whose reported protocol number or version
@@ -158,10 +167,13 @@ expiry or prune (protocol.md §6.1, §7).
 | `listen`/`off` means | the daemon holds the connection | a process is (or isn't) alive at the recorded pid |
 | `consumer.state` | the harness session's own observed state (`cbus connection status`) | not applicable |
 | `join`/`departed`/`leave` origin | daemon-decided, sent as explicit frames the relay journals (durable) or a one-time legacy-to-durable handoff (protocol.md §10.3, §16.2) | relay-generated from ws attach/detach, or client-broadcast on join/leave/rename (protocol.md §8, §9.2) |
-| Event allowlist | exactly `join`/`departed`/`leave` (`acceptDurablePresence`, `durable_presence.go:35-43`) | same three plus `rename`/`compact-pre`/`compact-post`, local-only |
+| Event allowlist | `join`/`departed`/`leave`: the only three that cross the relay for a durable connection (`acceptDurablePresence`, `durable_presence.go:35-43`) | `join`/`departed`/`leave` only, relay-generated from ws attach/detach or client-broadcast |
 
 Compaction presence (`compact-pre`/`compact-post`) and `rename` never cross
-the relay in either transport; they stay local (protocol.md §8).
+the relay for either native or legacy peers; they are always local
+(protocol.md §8). Native Codex emits `compact-post` itself on observed
+compaction (`daemon_compaction.go:98`); native Claude and legacy peers
+alike go through `cbus hook-compact pre|post`.
 
 ## 8. Credential store
 
@@ -178,17 +190,17 @@ Exact output strings live in command-reference.md; this is the shape.
 
 | Verb | Native peer | Legacy peer |
 |---|---|---|
-| `send` | delivered via the harness socket/sidecar, receipt-confirmed | appended to inbox; delivered on next tail read |
+| `send` | pushed into the harness socket/sidecar; pending until an exact transcript receipt (Claude) or a history reconcile (Codex) | appended to inbox; delivered on next tail read |
 | `tail` (arm) | refused, points at `cbus connect` (see command-reference.md for the exact text) | arms the in-process follower |
 | `list` | `listenerPid` = daemon pid while armed, `-1` on disconnect | `listenerPid` = follower pid or null |
-| `leave` | removes the registration | broadcasts `leave`, removes the peer dir |
-| `unregister` | detaches the connection, keeps nothing | unconditional removal, broadcasts `departed` |
+| `leave` | broadcasts `leave` presence, then removes the registration (`leaveSession`, `store.go:461-515`) | same: broadcasts `leave`, removes the peer dir |
+| `unregister` | detaches the connection; the journal entry survives with state `detached` (`daemon_scheduler.go:37-39`) | unconditional removal, broadcasts `departed` (`Unregister`, `store.go:518-543`) |
 | `close` | refused, points at `cbus connection disconnect` (see command-reference.md for the exact text) | SIGTERMs the owning process |
 | `prune` | never reaped (`PeerDead` exemption, §6) | reaped once past grace |
 | `hook-exit` | preserves the registration | removes it (graceful SessionEnd) |
 | `hook-compact` | native Claude routes through it; Codex has its own separate compaction path | broadcasts `compact-pre`/`compact-post`, local only |
 | `rename` | refused, not supported for a managed alias | renames in place, re-arms |
-| `branch`/`spawn`/`bootstrap` | child told to `cbus connect` on its own opening turn | child told to join and arm |
+| `branch`/`spawn`/`bootstrap` | the child is always told to `cbus connect` on its own opening turn (`bootstrap_prompt.go:12-15`, `spawn.go:11-22`); there is no legacy child prompt | describes the *parent's own* registration: a `branch` parent that is not already daemon-managed falls back to a legacy `Join` for itself (`harness.go:237-248`) |
 
 ## 10. Known defects (current behavior, not a fix commitment)
 
@@ -218,6 +230,7 @@ Exact output strings live in command-reference.md; this is the shape.
 | Native daemon control API, connection journal, credential store | protocol.md §14 |
 | Claude socket and Codex sidecar protocols | protocol.md §15 |
 | Durable-v1 relay transport and presence journal | protocol.md §16 |
+| Uncertain delivery, reconcile, abandon | [how-it-works.md](../how-it-works.md), protocol.md §14.1 |
 | Every command, flag, and exact output string | [command-reference.md](command-reference.md) |
 | Operator recovery steps (daemon, epoch fence, migration) | [usage.md](../usage.md), [install.md](../install.md) |
 | Bash-era system and the 2026-07 port (historical) | [overview.md](overview.md), [design-space.md](design-space.md), [port-map.md](port-map.md) |
