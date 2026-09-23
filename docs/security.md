@@ -13,15 +13,15 @@ design is honest about that line.
 - **Cross-machine relay — keep it off the open internet.** The relay is a single-operator
   service with **no multi-tenant auth**. It must only be reachable either (a) on a trusted
   LAN or private network, or (b) through an **authenticated tunnel with service-token keys**, binding
-  the relay to `127.0.0.1` and fronting it with an edge access-control layer.
-  `POST /send` sits behind a CF Access **service token** *and* the relay's own bearer (a request
-  must clear both edge and origin); `GET /tail` and the daemon's native `GET /tail/durable-v1`
-  each require a CF Access **bypass** scoped to that path only (neither client can send Access
+  the relay to `127.0.0.1` and fronting it with an edge access-control layer. `POST /send`
+  must sit behind that layer's own service token *and* the relay's own bearer (a request has
+  to clear both edge and origin); `GET /tail` and the daemon's native `GET /tail/durable-v1`
+  each need a bypass scoped to that path only (neither client can send the edge layer's own
   headers), with auth carried in `Sec-WebSocket-Protocol: bearer.cbus.<token>` as their only
   authentication. All keys live in the macOS Keychain / `0600`
   files via `cbus auth` — never in code, argv, or the repo. Do **not** expose `:8090` directly:
-  without the tunnel + Access in front, anyone reaching it with the bearer can read/inject on
-  any channel.
+  without the tunnel and edge layer in front, anyone reaching it with the bearer can
+  read/inject on any channel.
 - **Identity is a convenience, not a credential.** `from` is spoofable (local and remote). The
   session-scoped remote marker prevents *accidental* cross-session impersonation, but it is not
   auth. `cbus list <ch>@<host>` reports who's actually connected; a marker is only a from-default.

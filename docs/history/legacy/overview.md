@@ -66,8 +66,8 @@ Design pillars, stated up front in the README and held throughout:
   unrelated work doesn't share an address space. `global` is reserved *by convention* as the
   machine-wide orchestrator bus.
 - **Bespoke by design.** A personal, single-operator tool wired to one specific setup (a small
-  always-on home server reachable through an authenticated tunnel). It is here to be *read*, not packaged for others to
-  deploy.
+  always-on home server reachable through an authenticated tunnel). It is here to be *read*, not
+  packaged for others to deploy.
 
 ### Why not the built-in teammate mailbox?
 

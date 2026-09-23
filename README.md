@@ -33,7 +33,8 @@ manually launched terminals share the same bus. The client is a Go binary; the
 Codex adapter also requires a compatible installed Codex CLI.
 
 > **Scope — bespoke by design.** A personal, single-operator tool wired to one
-> specific setup (a small always-on home server reachable through an authenticated tunnel). It's here to
+> specific setup (a small always-on home server reachable through an authenticated
+> tunnel). It's here to
 > be *read* — an honest write-up of the architecture and tradeoffs — not packaged
 > for others to deploy. Read [docs/security.md](docs/security.md) before pointing
 > any of it at a network.

@@ -1,5 +1,44 @@
 # Changelog (detailed)
 
+## [2026-09-23 04:12:12 UTC] [Docs/M8] generalize examples and deployment notes
+
+[Attempt #1] Branch `docs/audit-m8` off `docs/audit-m7`, kept local (not
+pushed). 11 files: README.md, security.md, codex.md, command-reference.md,
+three docs/history/ files, the changelog pair, and one Go test comment.
+
+[What changed]
+Example channel and formation names used throughout the guides and the
+changelog history are now generic, applied consistently (the same old
+name maps to the same new name everywhere it appeared, including
+changelog entry text for this one category, by explicit call). The
+cost-analysis notes keep their method and their per-seat findings but
+state the cross-profile comparison as a ratio ("close to even") instead
+of absolute per-profile totals, and drop one absolute dollar figure that
+had already been superseded by a percentage in the same sentence. a
+password manager reference in command-reference.md now matches the elided field
+form already used in the cheat sheet and the relay guide. The deployment
+guidance in the README, the security guide, and one historical doc now
+states its access-control requirements generically (an authenticated
+tunnel with a scoped access check, per the security guide)
+instead of naming one specific provider or describing one operator's own
+setup as the example. One historical doc's account-layout line and one
+changelog line were generalized to a placeholder profile segment for the
+same reason. A test comment in internal/client/formation_resume_test.go
+was updated to match the new generic name; no test logic changed.
+
+[Testing Notes]
+Dash/vocab sweep clean on every changed line. Repo-wide link checker
+reports zero unresolved links. `go vet ./internal/client/...` clean,
+`gofmt -l` empty on the one touched Go file, and its package's test suite
+passes unchanged (comment-only edit).
+
+[Open item]
+A small number of Go unit test fixtures elsewhere in internal/client use
+the same two words this pass generalized, as CCS profile-path segments
+that flow into asserted command output; correcting them touches test
+assertions in five files well beyond this pass's file list, so they were
+left as they were pending a decision on whether that is in scope.
+
 ## [2026-09-23 03:10:45 UTC] [Docs/M7] describe the new docs layout in the README
 
 [Attempt #1] Same branch, `docs/audit-m7`, second commit. 1 file

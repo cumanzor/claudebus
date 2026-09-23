@@ -283,8 +283,8 @@ declined-with-rationale alternatives:
   token in the subprotocol ████ a █████████ query param, because query tokens
   leak into CF edge/relay access logs and a subprotocol rides in a header
   instead; a private-network VPN was considered and kept only as a documented fast-path
-  alternative because the always-on host was intermittently offline at recon time █████
-  failing the always-armed-receive-leg availability bar). `POST /send` keeps
+  alternative because the always-on host was intermittently offline at recon
+  time █████ failing the always-armed-receive-leg availability bar). `POST /send` keeps
   the stronger CF Access █████████████ ██████ `/tail`'s bypass-scoped token
   compromise only allows eavesdropping a channel, not injecting ████ one — a
   deliberate asymmetry, since the write path is the one that injects
