@@ -26,9 +26,10 @@ relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 > structural, `(pid, starttime)` via `procStartTime`; the `TRANSITION(P3T2)` argv
 > fallback this once needed is itself deleted (P3 tranche 3, 2026-07-19/20,
 > `9a3a075`), so there is no argv-identity branch left at all. Ancestor-owner identity
-> (§2.2, §2.4) now matches argv[0]'s basename first, against the multi-harness set
-> `claude`/`claude-*`/`codex`/`grok`/`xai-grok-pager`/`opencode` (`isHarnessComm`,
-> `marker.go:115-121`), kernel `comm` kept only as a fallback: the bun-compiled
+> (§2.2, §2.4) now checks each ancestor's kernel `comm` FIRST against the
+> multi-harness set `claude`/`claude-*`/`codex`/`grok`/`xai-grok-pager`/`opencode`
+> (`isHarnessComm`, `marker.go:115-121`), falling back to argv[0]'s basename only
+> when `comm` does not match (`ownerFromPid`, `marker.go:76-83`): the bun-compiled
 > binary's kernel `comm` is its version string, not `claude`.
 
 Conventions:
@@ -77,7 +78,7 @@ rule above narrows what a NEW name can be):
 | No length cap | The only de-facto bound is filesystem `NAME_MAX` (~255 B), and only where a directory gets created. |
 | All-digit names are legal | Bash-era only: the client's `jset` coerced digit-strings to JSON ints, so `cbus rename 42` stored `"alias": 42` as a number (bin/cbus:76). The Go client always writes string aliases and its readers tolerate either shape (an old int-coerced value still parses), so this is a historical read compatibility note, not a live write path. |
 | Leading-dot names pass `ValidName` | `.remote`-style names are accepted by the wire check but invisible to every `*/` glob the client uses (list/channels/prune/broadcast), and `.remote` collides with the marker tree. The Go client's store-creation rule (above) refuses a leading `.` on any NEW name, closing this for names it creates; a name written some other way and only ever read still goes through `ValidName` alone. |
-| Leading-hyphen names pass `ValidName` | `-a`, `--active`, `--force` etc. are legal names. There is no `--` end-of-options terminator anywhere in the CLI, so channels named `-a`/`--active` can never be used as a `list` filter (bin/cbus:583-587). The store-creation rule refuses a leading `-` on any NEW name; existing names keep working. |
+| Leading-hyphen names pass `ValidName` | `-a`, `--active`, `--force` etc. are legal names. Bash era: there was no `--` end-of-options terminator anywhere in the CLI, so channels named `-a`/`--active` could never be used as a `list` filter (bin/cbus:583-587). **The Go client has one**: `--` ends flag parsing and everything after is positional (`flags.go:49-52`, `connection.go:83-85`). The store-creation rule refuses a leading `-` on any NEW name; existing names keep working. |
 
 `/` and `@` are structural separators and can never appear inside a name.
 
@@ -166,7 +167,9 @@ $CBUS_DIR/
 │   ├── claude-credentials/    # per-connection Claude messaging tokens (0700 dir, 0600 files)
 │   └── remote/<connId>/       # remote peer state for a native cross-machine connection
 ├── .peer-locks/                # Go client only: per-peer flock files (0700 dir, 0600 files)
-├── .ledger/                    # Go client only: formation restore/resume event ledger
+├── .ledger/<channel>.jsonl     # Go client only: peer lifecycle ledger, one file per
+│                               #   channel, append-only join/leave/rename/spawn/
+│                               #   resume/restore/rebind events (ledger.go:28-36)
 ├── .formations/<name>.json     # Go client only: saved formation envelopes
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
@@ -199,9 +202,13 @@ took the port suggestion**: `writeMeta` (`store.go:74-84`) always writes a
 `.meta.tmp.<pid>` sibling then `os.Rename`s it over `meta.json`, atomic on the
 same filesystem; there is no in-place rewrite path left. The daemon's own
 JSON state (`connections/<id>.json` etc.) goes through `durableJSON`
-(`daemon.go:389-`), a `CreateTemp` + `Sync` + `Close` + `Rename`, fsync included
-before the atomic swap, stronger than the plain client write, since a daemon
-crash between write and rename must never leave a torn connection record.
+(`daemon.go:389-414`): `CreateTemp` + `Write` + `Sync` + `Close` + `Rename`,
+then the containing directory is itself opened and `Sync`'d after the rename,
+fsync included both before AND after the atomic swap, stronger than the plain
+client write, since a daemon crash between write and rename must never leave
+a torn connection record. A daemon-managed peer's own `meta.json` goes through
+this exact same path (`writeDaemonMeta`, `daemon.go:416-422`), not the plain
+`writeMeta` above.
 
 | Field | Type | Written | Meaning |
 |---|---|---|---|
@@ -210,14 +217,14 @@ crash between write and rename must never leave a torn connection record.
 | `sessionId` | string, `""` if unset | join | `$CLAUDE_CODE_SESSION_ID` of the joining session, the key `resolve_self` matches on. Go client only: `"reserved"` is a placeholder value (`ReserveAlias`), not a real session, and is a distinct sentinel from `""` unset |
 | `cwd` | string | join | `$PWD` at join |
 | `listenerPid` | null → int | join = null; set to the arming shell's `$$` at tail arm (bin/cbus:501) | pid of the exec'd follower; never cleared, only overwritten. **Go client, native connect:** set to the daemon's own pid while a managed connection is armed, and to `-1` on disconnect (never null again once a peer has ever connected natively) |
-| `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor session process (empty → null). **Go client, native connect:** always null; a managed peer's owner is derived on demand from the daemon's own connection record, never stamped into meta |
+| `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor session process (empty → null). **Go client, native connect:** always null in meta.json; the observed CLI process pid lives in the connection journal instead, as `consumer.pid`, shown by `cbus connection status` (`connection.go:171-172`), never stamped into meta |
 | `host` | string | join | `hostname -s` (fallback `hostname`) |
 | `ts` | string | join | join time, UTC ISO-8601; never refreshed as a field |
-| `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3), refreshed on send/arm/activity; absent on bash-written metas. Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
+| `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas. Written at join (`store.go:291-295`), native connect (`daemon.go:722`), and tail arm (`follow.go:192`); also refreshed by `touchActivity` when a session's own registration is the anchor or target of `arrange`/`scatter`/`focus` (`layout.go:340`, `store.go:863-883`, skipped for a daemon-managed peer since the daemon owns its grace). **`send` does NOT write it.** Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
 | `origin` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: `fresh` (spawn) / `fork` (branch) / `joined` (plain join); absent = unknown / hand-maintained |
 | `model` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the model the child was launched on; absent = unknown |
 | `listenerStart` | string, `omitempty` | Go client only; set at tail arm alongside `listenerPid` | the structural identity witness, `procStartTime` of the listener pid at arm time; a listener whose current start time no longer matches this value is treated as dead outright (pid recycling guard), replacing the bash-era argv-string check |
-| `profile` | string, `omitempty` | Go client only; stamped at join/connect | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude` |
+| `profile` | string, `omitempty` | Go client only; stamped at join ONLY (`store.go:295`) | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude`. Native connect does not set this meta field at all (`daemon.go:722`'s `peerMeta` literal has no `Profile:`); a managed peer's profile is instead derived on demand from the connection binding's `ConfigHome` when something needs it (`formation_harness.go`, command-reference.md §10) |
 | `harness` | string, `omitempty` | Go client only; stamped at join/connect | `claude` / `codex` / `grok` / `opencode`; empty on legacy templates predating harness identity, in which case `claude` is assumed |
 | `connectionId` | string, `omitempty` | Go client only; stamped on native connect | the key into `.daemon/connections/<connectionId>.json`; present iff this peer is daemon-managed |
 
@@ -810,7 +817,8 @@ under the same per-peer `flock` sends and joins take (§2.6); an unreadable
 is reclaimable ("unreadable metadata is not evidence that an inbox is
 reclaimable"); and since `PeerDead` (§6.1) reads any daemon-managed peer as
 never dead, **a native peer is never reaped by prune at all**: it is removed
-only through `leave`/`unregister`/`connection disconnect`, not this path. Remote
+only through `leave`/`unregister`, not this path (a mere `connection
+disconnect` keeps the registration and inbox, §6.1 and §7.3). Remote
 `/prune` is a separate relay-side endpoint, covered in §9.
 
 ### 7.2 Remote marker sweep

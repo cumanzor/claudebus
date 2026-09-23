@@ -1,182 +1,79 @@
 # Changelog (detailed)
 
+## [2026-09-23 00:26:22 UTC] [Docs/M5b1] reviewer fixup on the M5b1 commit
+
+[Attempt #1] Separate worktree (`/tmp/cbus-docs-m5b-fixup`, documenter was
+already on m5c). 1 file (protocol.md), 8 fixes.
+
+[What changed]
+- F1: the status banner's owner-identity check order was backwards (argv[0]
+  first); corrected to comm-first, argv[0] fallback (`marker.go:76-83`), the
+  same class of error the M4c review caught in command-reference.md's quirk
+  35. Only one copy existed in this file.
+- F2: leading-hyphen row's "-- terminator" claim scoped to bash era; the Go
+  client has one (`flags.go:49-52`, `connection.go:83-85`).
+- F3: ownerPid row corrected: always null for a managed peer; the observed
+  pid lives in the connection journal as `consumer.pid`, not derived from
+  meta.
+- F4: lastActivity writers named precisely (join, native connect, tail arm,
+  arrange/scatter/focus's touchActivity); send does not write it.
+- F5: profile is stamped at join only; native connect does not set the
+  meta.json field, a managed peer's profile comes from the connection
+  binding instead.
+- F6: layout diagram's `.ledger/` corrected to one file per channel
+  (`<channel>.jsonl`), with its actual 7 event kinds named.
+- F7: dropped `connection disconnect` from the "removed only through" list
+  in section 7 (disconnect keeps the registration and inbox).
+- Follow-up (same fixup, before commit): section 2.2's durableJSON
+  description gains the directory fsync after rename, and that a managed
+  peer's own meta.json goes through this same durable path
+  (`writeDaemonMeta`, `daemon.go:416-422`).
+
+[Testing Notes]
+Dash/vocab sweeps clean. M5b1-applied.md updated.
+
 ## [2026-09-23 00:16:22 UTC] [Docs/M5b1] protocol.md store/local contract corrected against source, part 1 of 3
 
 [Attempt #1] On `docs/audit-m5b`, branched from `docs/audit-m5a`. 1 file edited
-(docs/architecture/protocol.md, sections 1-8) plus one entry in each
-changelog. First of three stacked PRs (D16 split ruling): M5b1 = store/local
-(this commit), M5b2 = relay contract (P19's clause + P25-P35), M5b3 = native
-contract gaps A-H as new subsections.
+(docs/architecture/protocol.md, sections 1-8). First of three stacked PRs
+(D16 split): M5b1 = store/local (this commit), M5b2 = relay contract, M5b3 =
+native contract gaps A-H.
 
 [Motivating problem]
-protocol.md is the LIVING wire/on-disk contract (D13), but it is still almost
-entirely the f213e26 bash-era document with a few port-delta notes bolted onto
-the top banner. 24 findings (P1-P24) across sections 1-8, most `[sub]`
-(subagent-traced, reviewer spot-checked). Every claim independently
-re-verified against actual Go source in this session before being written;
-none contradicted what was filed, though several needed more precise line
-citations or a narrower claim than the finding's own summary.
+protocol.md is the LIVING wire/on-disk contract (D13), but sections 1-8 were
+still almost entirely the f213e26 bash-era document. 24 findings (P1-P24),
+each re-verified against actual Go source before writing.
 
-[What changed, by section]
-- Header banner (P1): "in-repo until P3" corrected to state `bin/cbus` was
-  actually deleted at P3 homogenization (`f78fad0`) and its anchors resolve
-  only via `git show f213e26:bin/cbus`; the `TRANSITION(P3T2)` argv fallback
-  the banner described as still scoped to pre-P3 binaries is itself long
-  deleted (compat-deletion-plan tranche 3, `9a3a075`); `isClaudeName`
-  corrected to the shipped `isHarnessComm` multi-harness set
-  (`marker.go:115-121`).
-- Anchor style (P2): no wholesale anchor retrofit attempted (out of budget for
-  a 1000+ line document); every new citation in this commit pairs a Go symbol
-  with file:line, and untouched bash-era anchors are left as the banner's own
-  guidance already frames them.
-- Names (P3): added the Go-only `ValidStoreName` store-creation rule
-  (`core/name.go:83-86`, no leading `.`/`-`, no trailing `.`) alongside the
-  wire-level `ValidName` check, the durable-v1 128-byte consumer cap
-  (`durable_tail.go:148`), and corrected the all-digit-alias-coercion property
-  to a historical bash-only note (Go always writes string aliases).
-- Addresses (P4): corrected "empty parts are skipped" for host specifically;
-  `internal/client/addr.go:47-69`'s `ParseRemote` validates host
-  unconditionally, unlike channel and alias, so `cbus list ch@` hard-errors
-  rather than being accepted.
-- On-disk state opening (P5): the "no explicit chmod/umask" claim is now
-  scoped to the bash-era peer tree; the Go daemon's own private state is
-  explicitly chmodded (`.daemon/` 0700, `control.sock` 0600, `.peer-locks/`
-  0700/0600, a daemon-created inbox 0600, `claude-credentials/` 0700/0600),
-  each mode verified against its own source line.
-- Layout diagram (P6): added every native path the ASCII tree omitted
-  entirely: `.daemon/` and its `connections/`, `claude-credentials/`,
-  `remote/<connId>/` subtree; `.peer-locks/`; `.ledger/`; `.formations/`;
-  `.sock/`; `roles/` (noted as NOT dot-prefixed, a collision risk with a
-  literally-named "roles" channel); per-peer `.cursor`; the channel-scoped
-  `.launch-intent-<alias>.json` marker. Every path format checked against its
-  defining source line.
-- meta.json write mechanism (P7): "python json.dump, in-place non-atomic"
-  corrected to the Go client's `writeMeta` (`store.go:74-84`, temp+rename,
-  atomic) and the daemon's own `durableJSON` (`daemon.go:389-`, temp+fsync+
-  rename, stronger than the plain client write).
-- meta.json field table (P8): `sessionId` row gains the `"reserved"`
-  placeholder sentinel; `listenerPid`/`ownerPid` rows gain their native
-  values (daemon pid while armed then `-1` on disconnect; always null for a
-  managed peer); four missing fields added (`listenerStart`, `profile`,
-  `harness`, `connectionId`); the mtime-based grace paragraph replaced with
-  the `lastActivity`-only correction (`liveness.go:158-171`, dropped at P3
-  homogenization per `compat-deletion-plan.md` item 3).
-- inbox.jsonl (P9): added the daemon-managed rejoin/rename refusals
-  (`store.go:264,404,585,597`) and the unconditional `.cursor` deletion at
-  join (`store.go:289`); replaced "no locking" with the actual per-peer
-  `flock` held across `LocalSend`'s whole gate-check-then-append
-  (`send.go:23-37`) and the `core.MaxMessageBytes` 1 MiB cap
-  (`message.go:100`).
-- Remote identity markers (P10): added the native remote-connect marker,
-  keyed by `threadId` instead of `sessionId`, carrying an extra
-  `connectionId` field, and rewritten by the daemon on every change while the
-  connection stays online (`writeRemoteIdentity`, `daemon_relay.go:98-136`,
-  full shape and permissions verified).
-- Credential store (P11): curl-K description replaced with the Go client's
-  direct `net/http` header setting; the "auth status does not validate host"
-  claim corrected (it does, exits 1 on a bad host); added the daemon's
-  per-dial relay-token read (`relayToken`, `daemon_relay.go:215-236`, 4096
-  byte cap, forbidden CR/LF/space/comma/tab, never cached or journaled).
-- Atomicity primitives (P12): "no flock and no lockfile anywhere" corrected
-  to the client's per-peer `flock`, the daemon's singleton lock, and the
-  relay's per-channel/alias `sync.Mutex` (`hub.tailGate`,
-  `durable_tail.go:23-33`); the three named "known non-atomic spots" marked
-  closed, cross-referenced to the P7/P9 fixes that closed them.
-- Message format example (P13): the illustrative python-spaced JSON example
-  is now explicitly labeled bash-era; added that the Go client's
-  `json.Marshal` (`send.go:77`) is fully compact and HTML-escapes
-  `<`/`>`/`&`; corrected the key-order claim after checking `core.Message`'s
-  actual field order (it happens to match `from,to,ts,text`, but that is
-  struct declaration order, not a wire guarantee).
-- from resolution (P14): explicit empty `--from` is now documented as a hard
-  error (`main.go:169,208`); `$CBUS_ALIAS` alone still resolves to a bare
-  alias exactly as before, but `$CBUS_CHANNEL`+`$CBUS_ALIAS` together (both
-  passing `ValidStoreName`) now resolve to a full routable address
-  (`send.go:60-77`, read precisely rather than assumed).
-- Presence events (P15): added `eventId` format
-  (`cbus-presence-<connId>-<seq>`, `daemon_presence.go:202`), the `relayId`
-  field on relay-delivered local inbox lines (`daemon_relay.go:549,592-597`),
-  the durable-crosses-the-relay/rename-stays-local distinction, and folded
-  the legacy-vs-durable key-order note into the existing parse-don't-
-  byte-match rule.
-- Local framer and divergence matrix (P16): section 4.3's numbered mechanics
-  marked historical, with a note that `core.LocalEmit` and `core.Reframe`
-  (both in `internal/core/frame.go`) now share one package, quoting
-  `LocalEmit`'s own doc comment on the exact byte-parity domain. Section
-  4.5's table rewritten with a 4th column for actual current behavior per
-  degenerate input, every row re-verified directly against the two
-  functions' source (not inferred from the P1 banner's high-level summary):
-  found that `LocalEmit` adopted `Reframe`'s strict all-or-nothing gate for
-  every case except one deliberate divergence, missing `from`/`to` still
-  renders `?` locally (pointer fields distinguish nil from empty) versus
-  empty string on the relay (plain string fields cannot).
-- Arm sequence (P17): "no collision or ownership check at arm time" replaced
-  with the current daemon-managed refusal and `--steal` collision gate, both
-  quoted verbatim from source (`follow.go:72,110`), plus the dormancy marker
-  text a displaced follower now emits instead of silently double-delivering
-  (`identity_follow.go:147-157`). Step 3's "exec the python follower with
-  inbox path in argv" trimmed to a pointer at the banner, which already
-  covers the in-process/structural-identity replacement, avoiding a
-  duplicate explanation.
-- Replay semantics (P18): "re-arm seeks EOF, never replayed" corrected to the
-  durable per-peer `.cursor` sidecar (`internal/client/cursor.go`, design
-  decision D4) that resumes from an exact recorded offset instead of the old
-  byte-0-or-EOF tri-state, closing `cbus-8no`; the mermaid diagram's re-arm
-  transition labeled bash-era.
-- Liveness predicates (P20): `find_owner_pid`'s comm-heuristic paragraph
-  replaced with a pointer at the banner's `isHarnessComm` correction (P1);
-  added `MetaListenerAlive`/`listenerIdentityHolds`'s structural
-  `(pid, starttime)` witness with its zombie guard (`liveness.go:94-137`);
-  added `PeerDead`'s unconditional `false` for any peer with a non-empty
-  `ConnectionID` (`liveness.go:146-158`, read directly, not inferred); added
-  that "listen" for a native peer in `cbus list` means the daemon holds the
-  connection, not that a specific CLI process is alive.
-- Send gate (P21): the armed-then-died row corrected to reference the P18
-  cursor fix (no longer "may never deliver"); two new rows for native
-  `disconnected` (`ListenerPid == -1`) and daemon-process-down states, both
-  traced to the same `pidAlive` check as the legacy row, not separate code.
-- Prune (P22): added that the Go `PruneChannel` (`store.go:664-`) reap dance
-  runs under the same per-peer flock as sends/joins, that an unreadable
-  `meta.json` aborts a reap rather than being read as reclaimable evidence,
-  and that a native peer is never reaped at all (a direct consequence of
-  P20's `PeerDead` finding, cross-referenced rather than re-derived). The
-  hook-exit row gains the Go client's managed-registration preservation
-  (`harness.go`) and a corrected "install.sh no longer exists" note; two new
-  rows added for `connection disconnect` and `close`.
-- Presence event table (P23): three new native rows (`join`/`departed`/
-  `leave`) with their exact daemon-generated text quoted verbatim
-  (`daemon_presence.go:97,179,186`), plus a note on Codex's own
-  compact-post path and the daemon's eventId-based fanout dedup.
-- Relay presence bullet (P24): split into the legacy ws-lifecycle-generated
-  path (now naming the tunable `-presence-grace` flag, `main.go:526`) and
-  the durable client-driven path (`acceptDurablePresence`,
-  `durable_presence.go`, which accepts and journals `join`/`departed`/
-  `leave` frames the daemon itself decides to send, never inferring them
-  from ws attach/detach); added that the relay now lives in the root
-  `claudebus` module, not a separate zero-dependency one (verified via
-  `go.mod` and the relay's own `claudebus/internal/core` imports).
-- P19 (legacy-vs-durable consumer conflict, 409 refusal) and part of P20 (the
-  durable path's pong-staleness/no-relay-generated-departed sub-clause) are
-  **not applied in this commit**: both are relay-side behavior and belong
-  with the rest of the relay contract landing in M5b2, not the store/local
-  half. Noted explicitly in the applied-findings tracker, not silently
-  dropped.
+[What changed]
+Header banner corrected (bin/cbus deleted at f78fad0, anchors resolve only in
+git history; TRANSITION(P3T2) itself long deleted; isHarnessComm replaces
+isClaudeName). Section 1: added the Go-only ValidStoreName store-creation
+rule, the durable-v1 consumer cap, and that host (unlike channel/alias) is
+validated unconditionally. Section 2: added the full native on-disk layout
+(.daemon/, .peer-locks/, .ledger/, .formations/, .sock/, roles/, per-peer
+.cursor, launch-intent marker), corrected chmod claims, meta.json's write
+path (atomic temp+rename, not python's dump) and field table (4 new native
+fields, lastActivity-not-mtime grace), per-peer flock replacing "no locking"
+on sends, the native remote-marker shape, and net/http replacing curl-K.
+Section 3: CBUS_CHANNEL/CBUS_ALIAS pairing, native presence shapes, JSON
+encoding corrections. Section 4: framer divergence matrix rewritten against
+current LocalEmit/Reframe source, finding one deliberate remaining
+divergence (missing from/to). Section 5: current daemon-managed/--steal
+refusals replacing "no collision check"; durable .cursor replacing "seek
+EOF, never replayed". Section 6: structural (pid, listenerStart) liveness
+witness; PeerDead always false for a managed peer. Section 7: per-peer-locked
+pruning, natives never reaped, two new removal-path rows. Section 8: native
+presence event rows with exact daemon text, legacy-vs-durable presence
+origination split.
+
+P19 (relay consumer-conflict 409) and part of P20 (durable pong-staleness)
+are relay-side and deferred to M5b2, not applied here.
 
 [Testing Notes]
-Three full dash-sweep passes across the whole diff (the doc's own pre-existing
-prose uses em dashes heavily, and several fixes extended sentences that
-already carried one): every self-authored em/en dash replaced with a
-comma/colon/semicolon, while every dash inside a verbatim-quoted Go error
-string (`follow.go:72,110`, `identity_follow.go:147`, truncated quotes from
-`store.go:264` and `close_unix.go`) was left untouched, since those strings
-literally contain an em dash in source. Banned-vocabulary scan clean.
-protocol.md has no markdown links to check. Stray-audit-id scan clean; the
-"P3" hits are all the project's own pre-existing "P3 homogenization"/"P3
-tranche" phase names, unrelated to this audit's own P1-P35 finding numbers,
-which never appear in the doc text itself. Applied-findings tracker written
-to `/tmp/cbus-docs-audit/M5b1-applied.md` before reporting, per the D15
-process, with P19 and part of P20 explicitly marked deferred rather than
-silently omitted.
+Dash/vocab/stray-id sweeps clean (dashes inside verbatim Go error strings
+preserved, not counted). protocol.md has no markdown links. Applied-findings
+tracker at `/tmp/cbus-docs-audit/M5b1-applied.md`, deferred items noted
+explicitly.
 
 ## [2026-09-22 23:30:06 UTC] [Docs/M5a] historical banners plus release/scope/readiness doc corrections
 
