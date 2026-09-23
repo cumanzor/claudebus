@@ -1,5 +1,12 @@
 # Compat-package deletion plan (homogenization / P3)
 
+> **Historical: plan executed, all 7 items resolved (v0.7.0).** Item 6's bash
+> files (`bin/cbus`, `bin/cc-branch.sh`) are deleted, tranche 1 (`f78fad0`,
+> 2026-07-18), not merely "remain in-repo as the rollback artifact" as the
+> pre-tranche status paragraph below still says when read on its own; rollback
+> is git-history recovery only. See "Plan closed (v0.7.0)" near the bottom for
+> the final disposition of every item.
+
 The Go port carries a small set of **coexistence shims** that exist ONLY so the bash
 `cbus` and the Go `cbus-go` can share one `$CBUS_DIR` and read each other as alive
 during the side-by-side window. When bash `cbus` is fully retired — the P3

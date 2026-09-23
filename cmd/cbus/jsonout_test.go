@@ -210,7 +210,7 @@ func TestChannelsJSONCounts(t *testing.T) {
 // A torn meta.json keeps its peer, with blank fields — the semantic that separates
 // ScanStore from ChannelRoster, which drops it. Reachable history rather than
 // invention: the bash client rewrote meta.json in place with a non-atomic json.dump,
-// so a reader could see it truncated (docs/architecture/port-map.md row 5), and a
+// so a reader could see it truncated (docs/history/decisions/port-map.md row 5), and a
 // damaged file survives from that era. Hiding such a peer is how a user loses track
 // of a session, so list has always shown it with "?" columns.
 func TestListJSONKeepsATornMetaPeer(t *testing.T) {

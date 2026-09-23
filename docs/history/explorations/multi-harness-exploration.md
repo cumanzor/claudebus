@@ -4,7 +4,7 @@
 > **Claude Code, Codex CLI, and OpenCode** as first-class peers. Harness desktop
 > clients are deferred to v2. Terminal independence is required: preserve iTerm2
 > and tmux, with room for future hosts such as Herdr. See
-> [the current scope and adapter proposal](cross-harness-daemon-scope.md).
+> [the current scope and adapter proposal](../../architecture/cross-harness-daemon-scope.md).
 > The July exploration below is retained as historical research; its capability
 > tables and proposed work are not the current implementation status or scope.
 
@@ -178,7 +178,7 @@ that an idle interactive Codex session cannot be woken.** Revisit the app-server
 bridge only if that limitation bites.
 
 > Built and landed (cbus-6ij.4): `cbus codex` / `codex-bridge` / `hook-join` /
-> `codex-stop-hook` — see the Codex integration entry in [command-reference.md](command-reference.md).
+> `codex-stop-hook` — see the Codex integration entry in [command-reference.md](../../architecture/command-reference.md).
 
 ## 5. Comparison
 

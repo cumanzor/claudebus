@@ -8,6 +8,7 @@
 > until P3, since removed — recover it from git history), not `./install.sh` — see
 > the corrected procedure below. Installer
 > references elsewhere in this package describe the P2.6 readiness state as recorded.
+> Current wire/behavior contract: [protocol.md](../../architecture/protocol.md).
 
 Prepared at P2.6 (cutover **readiness**; zero cutover executed). This is the summary
 that decided the per-machine binary swap. It was prepared pre-cutover; the cutover has

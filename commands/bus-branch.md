@@ -12,10 +12,13 @@ The user passed: "$ARGUMENTS" — first word is the target (window | tab | tmux 
 pane; ask via AskUserQuestion ONLY if empty), optional second word is the channel name.
 
 First connect this session with `cbus connect CHANNEL [ALIAS] --json` using
-`/bus-join` guidance, so the parent already has a native listener. Then:
+`/bus-join` guidance; this is required, not optional. Skipping it leaves
+`branch` falling back to a legacy registration and printing a Monitor-arming
+hint on the parent, which must not be followed: connect natively instead.
+Then:
 
-1. Run `cbus branch <target> [channel]` — one shot: joins this session to the
-   channel (idempotent; channel auto-derives from the git repo name if omitted),
+1. Run `cbus branch <target> [channel]`, one shot: uses this session's native
+   connection (channel auto-derives from the git repo name if omitted),
    reserves the child's alias, forks the conversation with the canonical
    bootstrap prompt, and prints BOTH addresses (parent + reserved child). The
    child's session title is its alias (picker + terminal title, and the tmux

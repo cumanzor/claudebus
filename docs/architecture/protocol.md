@@ -4,10 +4,17 @@ This is the wire and on-disk compatibility contract for claudebus, written to be
 precise enough to reimplement **either side**: the bash client (`bin/cbus`), the Go
 relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 
-> **STATUS (2026-07-13):** the production client is the Go port; the contracts below
-> are unchanged and remain authoritative — the port was differentially verified
-> against them (27/27). `bin/cbus:N` anchors reference the retired bash
-> implementation (in-repo until P3). Port deltas touching this spec: remote HTTP
+> **STATUS (2026-07-13; re-affirmed 2026-09-22):** the production client is the Go
+> port; the bash-era contract below is unchanged and remains authoritative for what
+> it still covers: the port was differentially verified against it (27/27). Since
+> the last affirmation the Go client has grown a whole native (daemon-mediated)
+> delivery path for Claude and Codex; that path is documented in §14-§16 below
+> (daemon control plane, harness wire protocols, durable relay transport).
+> `bin/cbus:N`
+> anchors reference the retired bash implementation, which was deleted at P3
+> homogenization (`f78fad0`) and now resolves only in git history
+> (`git show f213e26:bin/cbus`), never in the working tree; anchors should be read
+> as pinning behavior, not a live file. Port deltas touching this spec: remote HTTP
 > calls now time out at 4 s/20 s (§9.2's "no timeout" quirk — fixed); unknown hosts
 > and invalid names are hard errors (§12.1's non-fatal quirk — fixed); local sends
 > enforce the 1 MiB cap client-side (matching §9.2); a `--` flag terminator exists
@@ -17,11 +24,14 @@ relay (`relay/`), or both. It documents behavior **as-is** at HEAD `f213e26`.
 > tie-breaks now deliberate). The follower is an in-process Go loop with no re-exec
 > and no argv identity (P3 tranche 2, 2026-07-19) — §5.1's "inbox path in argv"
 > invariant no longer holds for peers this binary arms. Listener identity is
-> structural, `(pid, starttime)` via `procStartTime`; a `TRANSITION(P3T2)` argv
-> fallback applies only to peers armed by a pre-P3 binary and is scoped to one
-> release. Ancestor-owner identity (§2.2, §2.4) now matches argv[0]'s basename first
-> (`isClaudeName`), `comm` kept only as a fallback — the bun-compiled binary's
-> kernel `comm` is its version string, not `claude`.
+> structural, `(pid, starttime)` via `procStartTime`; the `TRANSITION(P3T2)` argv
+> fallback this once needed is itself deleted (P3 tranche 3, 2026-07-19/20,
+> `9a3a075`), so there is no argv-identity branch left at all. Ancestor-owner identity
+> (§2.2, §2.4) now checks each ancestor's kernel `comm` FIRST against the
+> multi-harness set `claude`/`claude-*`/`codex`/`grok`/`xai-grok-pager`/`opencode`
+> (`isHarnessComm`, `marker.go:115-121`), falling back to argv[0]'s basename only
+> when `comm` does not match (`ownerFromPid`, `marker.go:76-83`): the bun-compiled
+> binary's kernel `comm` is its version string, not `claude`.
 
 Conventions:
 
@@ -32,7 +42,7 @@ Conventions:
   transports (local `command` source, remote `ws:` source).
 
 Related docs: `README.md` (user-facing overview — note several of its claims lag this
-spec; where they conflict, this spec follows the code), `docs/prior-art-and-cc-internals.md`
+spec; where they conflict, this spec follows the code), `docs/history/explorations/prior-art-and-cc-internals.md`
 (design rationale and the measured harness constraints).
 
 ---
@@ -47,19 +57,29 @@ One validation rule is shared verbatim by client and relay:
 ^[A-Za-z0-9._-]+$    and not literally "." or ".."
 ```
 
-- Client: `valid_name` (bin/cbus:24). Applied to channels, aliases, and relay host names.
+- Client: `valid_name` (bin/cbus:24; Go: `core.ValidName`). Applied to channels,
+  aliases, and relay host names.
 - Relay: `validName` (relay/cmd/cbus-relay/main.go:33-37). Applied to `channel` and
   `alias` in `/send` and `/tail`. This is what makes names safe to use directly as
-  spool path segments (no traversal).
+  spool path segments (no traversal). The durable-v1 `/tail` upgrade additionally
+  caps `consumer` (the durable identity string) at 128 bytes and runs it through the
+  same `ValidStoreName` gate as the store-creation rule below
+  (`durable_tail.go:148`).
+- **Go client only, store-creation rule** (`ValidStoreName`, `core/name.go:83-86`):
+  tighter than the wire `ValidName` above. A channel or alias being *created*
+  (join, connect, spawn, formation restore) additionally refuses a leading `.` or
+  `-`, or a trailing `.`, on top of every `ValidName` rule. Reading/addressing an
+  existing name still only needs `ValidName` to pass.
 
-Properties of the rule (all as-is):
+Properties of the rule (all as-is for the bash-era wire check; the store-creation
+rule above narrows what a NEW name can be):
 
 | Property | Detail |
 |---|---|
 | No length cap | The only de-facto bound is filesystem `NAME_MAX` (~255 B), and only where a directory gets created. |
-| All-digit names are legal | But the client's `jset` coerces digit-strings to JSON ints, so `cbus rename 42` stores `"alias": 42` as a number (bin/cbus:76). *quirk — preserve or rethink in port.* |
-| Leading-dot names pass | `.remote`-style names are accepted but invisible to every `*/` glob the client uses (list/channels/prune/broadcast), and `.remote` collides with the marker tree. *quirk — a port should reject leading dots.* |
-| Leading-hyphen names pass | `-a`, `--active`, `--force` etc. are legal names. There is no `--` end-of-options terminator anywhere in the CLI, so channels named `-a`/`--active` can never be used as a `list` filter (bin/cbus:583-587). *quirk.* |
+| All-digit names are legal | Bash-era only: the client's `jset` coerced digit-strings to JSON ints, so `cbus rename 42` stored `"alias": 42` as a number (bin/cbus:76). The Go client always writes string aliases and its readers tolerate either shape (an old int-coerced value still parses), so this is a historical read compatibility note, not a live write path. |
+| Leading-dot names pass `ValidName` | `.remote`-style names are accepted by the wire check but invisible to every `*/` glob the client uses (list/channels/prune/broadcast), and `.remote` collides with the marker tree. The Go client's store-creation rule (above) refuses a leading `.` on any NEW name, closing this for names it creates; a name written some other way and only ever read still goes through `ValidName` alone. |
+| Leading-hyphen names pass `ValidName` | `-a`, `--active`, `--force` etc. are legal names. Bash era: there was no `--` end-of-options terminator anywhere in the CLI, so channels named `-a`/`--active` could never be used as a `list` filter (bin/cbus:583-587). **The Go client has one**: `--` ends flag parsing and everything after is positional (`flags.go:49-52`, `connection.go:83-85`). The store-creation rule refuses a leading `-` on any NEW name; existing names keep working. |
 
 `/` and `@` are structural separators and can never appear inside a name.
 
@@ -83,7 +103,11 @@ is remote **iff it contains `@` anywhere** in `$1` (checked by `send`, `tail`, `
 
 - Channel = everything before the first `@`; the remainder splits at the first `/`
   into host / alias.
-- Each **present** part is validated; empty parts are skipped. In practice:
+- Channel and alias are validated only when present, empty skips (bash-era). **Host
+  is the one part validated unconditionally, empty or not**: this holds in the Go
+  client's `ParseRemote` too (`internal/client/addr.go:47-69`): unlike channel and
+  alias, host has no `!= ""` guard before its `ValidName` check, so `cbus list ch@`
+  (empty host) fails as `bad host ""`, a hard error, not a skip. In practice:
   - `send`/`tail` require only a non-empty **alias** (bin/cbus:239, 274). An empty
     channel (`@server/al`) is accepted client-side, produces `channel:""` on the wire,
     and the relay rejects it with 400 — except `tail`, which still writes a
@@ -91,7 +115,8 @@ is remote **iff it contains `@` anywhere** in `$1` (checked by `send`, `tail`, `
     channel level, i.e. the legacy-marker shape swept unconditionally by the next
     full prune). *quirk — a port should require a non-empty channel here.*
   - `leave` is the only remote command that requires a channel (bin/cbus:653).
-  - `list` legitimately allows an empty channel (`cbus list @server` = whole host).
+  - `list` legitimately allows an empty channel (`cbus list @server` = whole host); the
+    host itself must still be present and valid.
 - `cmd_list_remote` reads **only `$1`**; every trailing argument is silently
   discarded, so there is no active-only remote listing by any argument order
   (bin/cbus:296; `cbus active <ch>@<host>` is structurally dead because dispatch
@@ -109,10 +134,16 @@ is remote **iff it contains `@` anywhere** in `$1` (checked by `send`, `tail`, `
 
 ## 2. Local on-disk state (`$CBUS_DIR`)
 
-State root: `$CBUS_DIR`, default `~/.claude-bus` (bin/cbus:16). Created lazily. No
-explicit chmod/umask on bus files — any same-user process can read/append any inbox.
-There is no per-peer ACL; this is the documented "trust boundary, not a security
-boundary" stance.
+State root: `$CBUS_DIR`, default `~/.claude-bus` (bin/cbus:16). Created lazily. The
+bash-era peer tree (`<channel>/<alias>/{meta.json,inbox.jsonl}`) has no explicit
+chmod/umask: any same-user process can read/append any inbox, and there is no
+per-peer ACL; this is the documented "trust boundary, not a security boundary"
+stance and still holds for that tree. The Go client's own daemon-private state does
+chmod explicitly: `.daemon/` 0700, `.daemon/control.sock` 0600, `.peer-locks/`
+0700 (lock files 0600 within it), a daemon-created `inbox.jsonl` 0600
+(`daemon_reservation.go:34`), and `claude-credentials/` 0700 with 0600 token files
+(`claude_credentials.go`). None of that narrows the original peer-tree stance;
+it is a second, separate, actually-private area alongside it.
 
 ### 2.1 Layout
 
@@ -121,12 +152,31 @@ $CBUS_DIR/
 ├── <channel>/
 │   ├── <alias>/
 │   │   ├── meta.json          # peer registration record
-│   │   └── inbox.jsonl        # append-only mailbox, one JSON object per line
-│   └── .reap.<pid>.<alias>/   # prune temp — dot-prefixed so */ globs never see it
-└── .remote/
-    └── <host>/
-        └── <channel>/
-            └── <sessionId>    # remote identity marker (one small JSON file)
+│   │   ├── inbox.jsonl        # append-only mailbox, one JSON object per line
+│   │   └── .cursor            # Go client only: durable per-peer replay offset (cursor.go)
+│   ├── .reap.<pid>.<alias>/   # prune temp (dot-prefixed so */ globs never see it)
+│   └── .launch-intent-<alias>.json   # Go client only: the resume/apply launch claim marker
+├── .remote/
+│   └── <host>/
+│       └── <channel>/
+│           └── <sessionId>    # remote identity marker (one small JSON file)
+├── .daemon/                   # Go client only: the native daemon's own private state
+│   ├── control.sock           # unix socket, HTTP/1.1 control API (0600)
+│   ├── lock                   # daemon singleton lock
+│   ├── daemon.log             # daemon-side log (0600)
+│   ├── connections/<id>.json  # ConnectionState journal, one per managed connection
+│   ├── claude-credentials/    # per-connection Claude messaging tokens (0700 dir, 0600 files)
+│   └── remote/<connId>/       # remote peer state for a native cross-machine connection
+├── .peer-locks/                # Go client only: per-peer flock files (0700 dir, 0600 files)
+├── .ledger/<channel>.jsonl     # Go client only: peer lifecycle ledger, one file per
+│                               #   channel, append-only join/leave/rename/spawn/
+│                               #   resume/restore/rebind events (ledger.go:28-36)
+├── .formations/<name>.json     # Go client only: saved formation envelopes
+├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
+└── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
+                                 # prompts; a channel literally named "roles" would
+                                 # collide with this path (unverified whether anything
+                                 # guards against it)
 ```
 
 The dot-prefix idiom is load-bearing: every enumeration in the client is a `*/` glob
@@ -145,28 +195,49 @@ Legacy shapes still recognized:
 
 ### 2.2 `meta.json`
 
-Written whole at join via python `json.dump(..., indent=2)` (bin/cbus:428-433). Field
-patches (`jset`) rewrite the file **in place, non-atomically** — a concurrent read
-mid-write sees truncated JSON, which `jget` swallows as "field absent" (self-healing on
-the next read; *quirk — a port should write-temp-then-rename*).
+Bash-era: written whole at join via python `json.dump(..., indent=2)`
+(bin/cbus:428-433). Field patches (`jset`) rewrite the file **in place,
+non-atomically**: a concurrent read mid-write sees truncated JSON, which `jget`
+swallows as "field absent" (self-healing on the next read). **The Go client
+took the port suggestion**: `writeMeta` (`store.go:74-84`) always writes a
+`.meta.tmp.<pid>` sibling then `os.Rename`s it over `meta.json`, atomic on the
+same filesystem; there is no in-place rewrite path left. The daemon's own
+JSON state (`connections/<id>.json` etc.) goes through `durableJSON`
+(`daemon.go:389-414`): `CreateTemp` + `Write` + `Sync` + `Close` + `Rename`,
+then the containing directory is itself opened and `Sync`'d after the rename,
+fsync included both before AND after the atomic swap, stronger than the plain
+client write, since a daemon crash between write and rename must never leave
+a torn connection record. A daemon-managed peer's own `meta.json` goes through
+this exact same path (`writeDaemonMeta`, `daemon.go:416-422`), not the plain
+`writeMeta` above.
 
 | Field | Type | Written | Meaning |
 |---|---|---|---|
 | `alias` | string | join; rewritten by rename | alias within the channel (digit-only aliases stored as int — quirk §1.1) |
 | `channel` | string | join | channel name (redundant with the path) |
-| `sessionId` | string, `""` if unset | join | `$CLAUDE_CODE_SESSION_ID` of the joining session — the key `resolve_self` matches on |
+| `sessionId` | string, `""` if unset | join | `$CLAUDE_CODE_SESSION_ID` of the joining session, the key `resolve_self` matches on. Go client only: `"reserved"` is a placeholder value (`ReserveAlias`), not a real session, and is a distinct sentinel from `""` unset |
 | `cwd` | string | join | `$PWD` at join |
-| `listenerPid` | null → int | join = null; set to the arming shell's `$$` at tail arm (bin/cbus:501) | pid of the exec'd follower; never cleared, only overwritten |
-| `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor `claude` process (empty → null) |
+| `listenerPid` | null → int | join = null; set to the arming shell's `$$` at tail arm (bin/cbus:501) | pid of the exec'd follower; never cleared, only overwritten. **Go client, native connect:** set to the daemon's own pid while a managed connection is armed, and to `-1` on disconnect (never null again once a peer has ever connected natively) |
+| `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor session process (empty → null). **Go client, native connect:** always null in meta.json; the observed CLI process pid lives in the connection journal instead, as `consumer.pid`, shown by `cbus connection status` (`connection.go:171-172`), never stamped into meta |
 | `host` | string | join | `hostname -s` (fallback `hostname`) |
 | `ts` | string | join | join time, UTC ISO-8601; never refreshed as a field |
-| `lastActivity` | string, `omitempty` | Go client only | D3 grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas |
+| `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas. Written at join (`store.go:291-295`), native connect (`daemon.go:722`), and tail arm (`follow.go:192`); also refreshed by `touchActivity` when a session's own registration is the anchor or target of `arrange`/`scatter`/`focus` (`layout.go:340`, `store.go:863-883`, skipped for a daemon-managed peer since the daemon owns its grace). **`send` does NOT write it.** Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
 | `origin` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: `fresh` (spawn) / `fork` (branch) / `joined` (plain join); absent = unknown / hand-maintained |
 | `model` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the model the child was launched on; absent = unknown |
+| `listenerStart` | string, `omitempty` | Go client only; set at tail arm alongside `listenerPid` | the structural identity witness, `procStartTime` of the listener pid at arm time; a listener whose current start time no longer matches this value is treated as dead outright (pid recycling guard), replacing the bash-era argv-string check |
+| `profile` | string, `omitempty` | Go client only; stamped at join ONLY (`store.go:295`) | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude`. Native connect does not set this meta field at all (`daemon.go:722`'s `peerMeta` literal has no `Profile:`); a managed peer's profile is instead derived on demand from the connection binding's `ConfigHome` when something needs it (`formation_harness.go`, command-reference.md §10) |
+| `harness` | string, `omitempty` | Go client only; stamped at join/connect | `claude` / `codex` / `grok` / `opencode`; empty on legacy templates predating harness identity, in which case `claude` is assumed |
+| `connectionId` | string, `omitempty` | Go client only; stamped on native connect | the key into `.daemon/connections/<connectionId>.json`; present iff this peer is daemon-managed |
 
-**The file's mtime is protocol state**: the 10-minute never-armed grace (§6.2) is
-`find <meta> -mmin +10`, and the `jset` at arm time refreshes mtime. Any tooling that
-touches meta.json resets the grace clock. *quirk.*
+**Bash era: the file's mtime was protocol state.** The 10-minute never-armed grace
+(§6.2) was `find <meta> -mmin +10`, and `jset` at arm time refreshed mtime, so any
+tooling touching meta.json reset the grace clock. **The Go client dropped the mtime
+fallback entirely at P3 homogenization** (`compat-deletion-plan.md` item 3,
+2026-07-18): `unarmedGraceElapsed` (`liveness.go:158-171`) judges the same
+10-minute window purely from the `lastActivity` field above; a meta with no
+parseable `lastActivity` reads as already past grace (pre-port relics become
+prunable on sight, they never get a mtime-based reprieve). Touching the file with
+no `lastActivity` bump no longer resets anything.
 
 **Birth records (Go client).** `spawn` / `branch` stamp `origin` and `model` into the
 peer's meta **before the child boots** — the launcher knows how a session was born; the
@@ -200,13 +271,25 @@ One JSON object per line, appended with a single `printf '%s\n' >>` (O_APPEND,
 bin/cbus:483, 346). Created **empty** at join (`: > inbox.jsonl`, bin/cbus:427) — the
 truncate-at-join is what makes first-arm replay exact. An explicit-alias rejoin over a
 dead peer does `rm -rf` + recreate, **destroying the dead peer's queued inbox**
-(bin/cbus:423-427; *quirk — same for rename's name reclaim*).
+(bin/cbus:423-427; *quirk: same for rename's name reclaim*). **Go client:** a
+daemon-managed peer refuses both an explicit-alias rejoin and a rename outright
+(`"<ch>/<al>" is daemon-managed — ...`, `store.go:264,404,585,597`) rather than
+destroying a managed inbox this way; join also unconditionally deletes any
+`.cursor` sidecar for the alias (`store.go:289`), since a join starts a new
+delivery epoch and a stale cursor keyed to a reused inode would silently skip
+messages sent before the first arm.
 
 Message line format: see §3.
 
-Append atomicity is assumed, not enforced: one `printf` of a chat-sized line lands as
-one write; there is no locking. *quirk — a port should lock or use a daemon for very
-large messages.*
+Append atomicity was assumed, not enforced, in the bash client: one `printf` of a
+chat-sized line landed as one write with no locking. **The Go client added a
+per-peer flock**: `LocalSend` (`send.go:23-37`) takes the same `lockPeer(ch, al)`
+held across store writes for the whole gate-check-then-append, so a concurrent
+send and a concurrent prune/rename on the same peer serialize instead of racing.
+Every send, local or relay-stored, is capped at `core.MaxMessageBytes` (1 MiB,
+`message.go:100`), closing the bash-era "very large message" gap the original
+port note flagged. *quirk (bash era, closed): a bare `printf` append with no
+lock or size cap.*
 
 ### 2.4 Remote identity markers
 
@@ -227,6 +310,16 @@ large messages.*
   inherits another's alias.
 - A marker is a **from-default, not proof of reachability** — `cbus list @<host>`
   (relay `/peers`) is the truth source.
+- **Go client, native remote connect**: `cbus connect ch@host ...` writes into this
+  same `.remote/<host>/<channel>/` directory too, keyed by `<threadId>` instead of
+  `<sessionId>`, with an extended shape:
+  `{"alias","ownerPid","ts","connectionId"}` (`writeRemoteIdentity`,
+  `daemon_relay.go:98-136`; dir created 0700, file 0600 via `durableJSON`'s
+  `os.CreateTemp` default). The daemon rewrites the marker any time the alias,
+  owner pid or connection id changes while the connection stays online (checked
+  against the existing file, a no-op write when nothing changed): a legacy
+  marker is written once at arm and never touched again, but a native one tracks
+  the live connection for as long as it holds it.
 
 ### 2.5 Credential store
 
@@ -239,17 +332,37 @@ Per host, three fields: `token`, `cf-id`, `cf-secret`.
 
 `cbus auth set` strips **all** whitespace from values and supports `V='-'` = read
 whole stdin — at most one stdin-fed credential per invocation, since each `-` drains
-stdin (bin/cbus:750-752). At use time, auth headers are rendered as a curl config
-piped to `curl -K -` so credentials never enter any argv (bin/cbus:225-235). The
-message payload itself IS in curl's argv — only credentials are protected. *quirk.*
+stdin (bin/cbus:750-752). Bash era: auth headers were rendered as a curl config
+piped to `curl -K -` so credentials never entered any argv (bin/cbus:225-235); the
+message payload itself WAS in curl's argv, only credentials were protected. **The
+Go client uses `net/http` directly** (`remote.go`) and sets auth headers in
+process, so no credential or payload ever touches an argv on this path at all.
 
-`cbus auth status` does **not** validate its host argument (the only unvalidated path
-into `auth_get`; on Linux a `../` host path-traverses the credential dir, read-only,
-4-char mask). *quirk — a port should validate like `auth set`.*
+Bash era: `cbus auth status` did **not** validate its host argument (the only
+unvalidated path into `auth_get`; on Linux a `../` host path-traverses the
+credential dir, read-only, 4-char mask). **The Go client validates the host**
+like every other command: `auth status ../x` refuses with a bad-host error, rc 1.
+
+**Go client, native relay dial:** the daemon reads the stored relay token fresh
+on every dial, never caching it across reconnects (`relayToken`,
+`daemon_relay.go:215-236`, called from `dialDurableRelay` each time a relay
+connection is established); the token is capped at 4096 bytes and rejected if it
+contains CR, LF, space, comma or tab. The token is never written to the
+connection journal or any log line: it exists in memory for the dial and in the
+credential store, nowhere else.
 
 ### 2.6 Atomicity primitives
 
-There is no flock and no lockfile anywhere. Correctness rests on:
+Bash era: there was no flock and no lockfile anywhere. **The Go client and relay
+both added real locking**: the client takes a per-peer `flock` in `.peer-locks/`
+around every store mutation (`peerlock.go`, §2's layout above) and a singleton
+`.daemon/lock` guards one daemon per store; the relay serializes each
+channel/alias's durable-tail state behind an in-process `sync.Mutex`
+(`hub.tailGate`, `durable_tail.go:23-33`). The three bash-era "known non-atomic
+spots" below are all closed in the Go client: `writeMeta` is temp+rename
+(§2.2), join's explicit-alias reclaim path takes the peer lock before its
+rm+recreate, and `LocalSend` holds the same peer lock across its gate check and
+append (§2.3). Bash-era correctness otherwise still rested on:
 
 | Primitive | Used for | Anchor |
 |---|---|---|
@@ -261,8 +374,9 @@ There is no flock and no lockfile anywhere. Correctness rests on:
 | `2>/dev/null \|\| continue` on presence appends | a peer dir vanishing mid-broadcast can't abort under `set -e` | bin/cbus:344-346 |
 | `${CBUS_DIR:?}` in `rm -rf` paths | unset CBUS_DIR can never expand to `rm -rf /...` | bin/cbus:666, 695 |
 
-Known non-atomic spots (as-is): `jset`/join meta writes (no temp+rename); explicit-alias
-join is check-then-rm-then-mkdir (TOCTOU); local send's final append is unguarded (a
+Known non-atomic spots, bash era (all three closed in the Go client, above):
+`jset`/join meta writes (no temp+rename); explicit-alias join is
+check-then-rm-then-mkdir (TOCTOU); local send's final append is unguarded (a
 concurrent prune between gate and append kills the command with a raw bash error).
 
 ---
@@ -275,16 +389,30 @@ concurrent prune between gate and append kills the command with a raw bash error
 {"from": "<ch/alias or fallback>", "to": "<channel>/<alias>", "ts": "<UTC ISO-8601>", "text": "<verbatim text>"}
 ```
 
-Built via env→python `json.dumps` (bin/cbus:480-482), so arbitrary quotes, newlines,
-and unicode in the text survive intact. Key order is insertion order
-(`from,to,ts,text`).
+The spacing above is illustrative python `json.dumps` (bin/cbus:480-482) output,
+which the bash client actually wrote. **The Go client writes the same fields via
+`json.Marshal`** (`send.go:77`), which is fully compact (no spaces after `:`/`,`)
+and HTML-escapes `<`, `>` and `&` as `<`/`>`/`&` by Go's own
+default. `core.Message`'s field order (`internal/core/message.go:22-30`)
+happens to marshal `from,to,ts,text` too, but that is a property of one
+struct's declaration order, not a wire guarantee any future change is bound
+to: **a reader must parse the JSON, never byte-match a line against an
+example.**
 
 `from` resolution (local send), first match wins:
 
-1. explicit `--from X` — **unvalidated free text** (any bytes, any length);
+1. explicit `--from X`, **unvalidated free text** (any bytes, any length). **Go
+   client:** an explicitly EMPTY `--from` is now a hard error
+   (`--from: value must not be empty`, `main.go:169,208`), not silently treated
+   as unset;
 2. sender's own registration in the **target** channel;
 3. sender's first registration anywhere (alphabetical glob order);
-4. `$CBUS_ALIAS` env (undocumented elsewhere; unvalidated);
+4. `$CBUS_ALIAS` env (undocumented elsewhere; unvalidated in the bash client).
+   **Go client** (`send.go:68-73`): `CBUS_ALIAS` alone still resolves to the bare
+   alias string (no channel prefix) exactly as before; but when `$CBUS_CHANNEL`
+   is ALSO set and both pass `core.ValidStoreName`, `from` becomes
+   `$CBUS_CHANNEL/$CBUS_ALIAS` instead, a routable address rather than a bare,
+   ambiguous alias;
 5. `<hostname -s>-$PPID` — **unroutable** fallback (no inbox exists; receivers must
    not reply to it).
 
@@ -305,6 +433,21 @@ Same shape plus two fields (bin/cbus:341-343):
 See §8 for semantics. Note `event` is stored but **never rendered** by the framer —
 only `kind=` reaches the frame header; the event type is inferable only from the text.
 *quirk.*
+
+**Go client additions to the presence shape** (all additive, no bash-era field
+removed): a daemon-originated presence line carries an `eventId` formatted
+`cbus-presence-<connectionId>-<sequence>` (`daemon_presence.go:202`), used for
+de-duplication across a fanout; a message delivered through the native relay
+path into a local inbox carries a `relayId` field tying it back to its spool
+identity for the same reason (`daemon_relay.go:549,592-597`); and a native
+payload appends operator guidance text to certain presence events (the actual
+event text still renders as the `text` field above). **Durable presence
+crosses the relay**: connection-lifecycle `join`/`departed`/`leave` are
+generated by the daemon and cross machines over the durable ws
+(`durable_presence.go`); `rename` does not, and stays local-only. The exact
+key order the legacy in-process fanout writes differs cosmetically from the
+durable path's own struct order; both are valid JSON and neither order is
+part of the contract (§3.1's parse-don't-byte-match rule applies here too).
 
 ### 3.3 Relay stored line (spool file content)
 
@@ -382,7 +525,17 @@ frame-time sanitization is the defense-in-depth floor for a port.*
 
 ### 4.3 Local framer (the tail follower, bin/cbus:515-577)
 
-Per completed inbox line:
+**Historical (bash/python follower).** The numbered mechanics below describe the
+retired python process. **The Go client's local follower calls `core.LocalEmit`**
+(`internal/core/frame.go:150-186`), the in-process counterpart to the relay's
+`core.Reframe` (§4.4): both now share one package, and a doc comment on
+`LocalEmit` itself states the exact parity: on the "golden" domain (every field
+present as a string, non-empty text, no `kind`) `bash emit() bytes == LocalEmit(line)
+== Reframe(line)+"\n"` verbatim; `LocalEmit` differs from `Reframe` in exactly two
+byte-visible ways, keeping `kind=` in the header (relay now does too, since
+`cbus-ijx.5`, so this is no longer a real divergence) and appending the stdout
+line terminator `Reframe` has no reason to add. See the corrected §4.5 matrix
+below for degenerate-input behavior. Per completed inbox line, historically:
 
 1. `rstrip("\n")`; if the result is empty the line is **silently dropped** — not
    framed, not passed through (bin/cbus:532-535). Whitespace-only lines survive and
@@ -432,18 +585,25 @@ for well-formed `from` values; long/multiline `from` is untested.
 ### 4.5 Framer divergence matrix (degenerate inputs)
 
 Every tool-authored line populates all four fields as strings, so these fire only on
-foreign-written lines (hand-appended inbox lines, hand-placed spool files):
+foreign-written lines (hand-appended inbox lines, hand-placed spool files). The
+bash/python columns below are historical; **the Go client's `LocalEmit` and
+`Reframe` now share the same strict gate** (`internal/core/frame.go`), so most
+rows that used to diverge are now identical:
 
-| Input line | Local `emit()` | Relay `reframe()` |
-|---|---|---|
-| `text:""` (key present, empty) | **framed** (one empty body line) | **passthrough** (raw JSON) |
-| `text` key missing | passthrough | passthrough (different gate, same outcome) |
-| `from`/`to` missing, text ok | framed, `from=? to=?` | framed, `from= to=` (empty) |
-| `text:123` (non-string) | framed, body `123` (coerced) | **passthrough** (unmarshal error) |
-| `text:null` | framed, body `None` (Python repr) | **passthrough** |
-| `from:123`, text ok | framed, `from=123` | **passthrough** (any non-string field aborts) |
-| non-dict JSON | passthrough | passthrough |
-| `kind` present, text ok | framed, header `+ kind=<v>` | framed, header `+ kind=<v>` (identical to local since `cbus-ijx.5`) |
+| Input line | bash `emit()` (historical) | bash relay `reframe()` (historical) | Go `LocalEmit`/`Reframe` today |
+|---|---|---|---|
+| `text:""` (key present, empty) | framed (one empty body line) | passthrough (raw JSON) | **both passthrough**: `LocalEmit` adopted the relay's strict gate (`err != nil \|\| m.Text == nil \|\| *m.Text == ""`) |
+| `text` key missing | passthrough | passthrough | both passthrough (unchanged outcome) |
+| `from`/`to` missing, text ok | framed, `from=? to=?` | framed, `from= to=` (empty) | **still diverges, deliberately**: `LocalEmit` unmarshals into `*string` fields so nil (missing) renders `?`, distinct from present-but-empty; `Reframe` unmarshals into plain `string` fields where missing and empty both read `""`. This is the one difference the shared-package refactor kept on purpose |
+| `text:123` (non-string) | framed, body `123` (coerced) | passthrough (unmarshal error) | both passthrough: `LocalEmit`'s `Text *string` field fails the same unmarshal `text:123` fails against `Reframe`'s `Text string` |
+| `text:null` | framed, body `None` (Python repr) | passthrough | both passthrough: `m.Text == nil` after unmarshaling `null` into a `*string` |
+| `from:123`, text ok | framed, `from=123` | passthrough (any non-string field aborts) | both passthrough: `LocalEmit`'s `From *string` fails to unmarshal a JSON number the same way `Reframe`'s `From string` does |
+| non-dict JSON | passthrough | passthrough | both passthrough (unchanged) |
+| `kind` present, text ok | framed, header `+ kind=<v>` | framed, header `+ kind=<v>` (identical to local since `cbus-ijx.5`) | both framed, both render `kind=<v>` (unchanged, already unified pre-Go-port) |
+
+Net effect: the Go port closed every historical local/relay divergence except the
+deliberate missing-vs-empty `from`/`to` distinction, which `LocalEmit` needs to
+keep rendering `?` for a genuinely absent field.
 
 *quirk — a port unifying the framers must pick each tie-break deliberately; the
 `text:null → "None"` body is an artifact nobody would spec.*
@@ -463,22 +623,28 @@ a follower that never exits, so a Bash invocation blocks the session forever.
    `unregister` or manual `rm -rf` removes it). *quirk.*
 2. Record `listenerPid = $$` and `ownerPid = find_owner_pid` into meta (best-effort,
    `|| true`).
-3. `exec` the python follower **with the inbox path in argv**. `exec` means the
-   follower inherits `$$` — the recorded pid IS the Monitor-managed process, so when
-   the Monitor stops, liveness flips to "off" with no trap needed; and the argv
-   fingerprint is what the liveness check greps for (§6.1). **A port must keep the
-   inbox path (or equivalent) visible in the listener's process identity, or change
-   the liveness check in lockstep.**
+3. Bash era: `exec` the python follower **with the inbox path in argv**; see the
+   top-of-document status block for how the Go client replaced this (in-process
+   loop, structural `(pid, starttime)` identity, no argv fingerprint at all).
 
-There is **no collision or ownership check at arm time** — no "already listening"
-refusal (unlike join/rename, which refuse names taken by a live listener) and no
-sessionId comparison. Arming the same address twice leaves two live followers
-delivering every message twice, with metadata pinned to the newest pid only; the relay
-transport, by contrast, *displaces* (§10.5). *quirk — the sharpest local/remote
-asymmetry; a port must pick one policy.* A stale follower also survives its peer dir's
-deletion: it polls the dead path, and if any session later rejoins the same address it
-reopens the new inode and shadow-receives the new peer's traffic. *quirk — kill this
-in a port.*
+Bash era: there was **no collision or ownership check at arm time**: no "already
+listening" refusal (unlike join/rename, which refuse names taken by a live
+listener) and no sessionId comparison; arming the same address twice left two live
+followers delivering every message twice, the sharpest local/remote asymmetry
+against the relay transport's *displaces* policy (§10.5). **The Go client closed
+this.** `ArmLocalTail` (`follow.go:41-110`) refuses a daemon-managed peer outright
+(`"<ch>/<al>" is daemon-managed — use cbus connect; tail cannot replace its
+delivery sink, even with --steal`, `follow.go:72`, no `--steal` override exists
+for this case), and refuses a second legacy tail on an already-armed alias unless
+`--steal` (`"<ch>/<al>" is already being tailed (listener pid <p>) — use --steal
+to take over"`, `follow.go:110`); a displaced follower detects the takeover via
+the same `(pid, starttime)` structural identity check the rest of liveness uses,
+and exits with a dormancy marker rather than silently double-delivering:
+`◀ cbus tail ended: displaced by another listener — it holds the tail now;
+re-arm with --steal to take it back` (`identity_follow.go:147-157`). The old
+stale-follower-survives-deletion hazard is closed the same way: a reopen whose
+identity no longer matches goes dormant instead of shadow-receiving a new peer's
+traffic.
 
 ### 5.2 Replay semantics
 
@@ -488,20 +654,28 @@ stateDiagram-v2
     Joined --> ArmedReplay: first tail arm — prev pid null, read from byte 0
     ArmedReplay --> Live: caught up
     Live --> ListenerDead: Monitor stopped / window closed / crash
-    ListenerDead --> ArmedFromEnd: re-arm — prev pid recorded, seek EOF
+    ListenerDead --> ArmedFromEnd: re-arm (bash era), prev pid recorded, seek EOF
     ArmedFromEnd --> Live
     ListenerDead --> Pruned: peer_dead — prune reap + departed broadcast
-    Joined --> Pruned: never armed for over 10 min (mtime grace expired)
+    Joined --> Pruned: never armed for over 10 min (lastActivity grace expired)
 ```
 
 - **First arm** (meta never recorded a `listenerPid`): read from byte 0 — replays the
   whole inbox. Combined with join's truncate, this guarantees nothing sent between
   join and first arm is lost; `cbus send` accepts joined-but-unarmed peers for exactly
   this reason.
-- **Re-arm** (any previous pid recorded, alive or dead): seek to EOF — messages
-  appended while the listener was dead are **never replayed**. This is why
-  `send --force` into a dead-listener inbox is best-effort. *quirk — the remote path
-  has the opposite semantics (spool replays); tracked asymmetry.*
+- **Re-arm, bash era**: seek to EOF; messages appended while the listener was dead
+  were **never replayed**, which made `send --force` into a dead-listener inbox
+  best-effort at best (`cbus-8no`).
+- **Re-arm, Go client**: a durable per-peer `.cursor` sidecar (`internal/client/cursor.go`,
+  D4) replaces the tri-state byte-0-or-EOF decision with an exact recorded read offset.
+  Every re-arm resumes from precisely where the last one left off, including messages
+  queued via `--force` into what used to be a dead gap: `cbus-8no` is closed. The
+  cursor lives beside the peer, never in meta.json (meta is whole-struct
+  read-modify-written elsewhere, which would race a cursor field against every other
+  field) and is local-only: the wire, the relay and remote tail are untouched, remote
+  replay is still the relay's own affair (§10). `cbus --help` documents this replay
+  behavior for the shipped client.
 - The `'+1'` / `'0'` start tokens are vestigial `tail -n` spellings; the follower only
   tests `== "0"`. A port should use an honest enum.
 - Post-rename re-arm intentionally follows from the end (rename preserves meta).
@@ -550,22 +724,37 @@ pre-checked: the relay's single-active-tail rule makes them self-evident (§10.5
 
 **`find_owner_pid`** (bin/cbus:44-53): walk `$PPID` upward, max 16 hops, stop at pid 1;
 first ancestor whose `comm` basename matches `claude` or `claude-*` is the owner. No
-match → no ownerPid → liveness degrades gracefully to pid+argv only. *quirk — the
-comm-name heuristic breaks under renamed binaries / exotic launchers; the semantics to
-preserve are: (a) listener death detectable without cleanup code, (b) crash-orphaned
-listeners count as dead, (c) pid recycling cannot fake liveness.*
+match → no ownerPid → liveness degrades gracefully to pid+argv only. This is
+bash-era; see the top-of-document status block for the Go client's multi-harness
+`isHarnessComm` replacement.
 
-**`peer_dead`** (bin/cbus:316-323) — the prune/broadcast/send-gate predicate:
+**Go client: `MetaListenerAlive`** (`liveness.go:94-105`) replaces the pid-recycling
+guard with a **structural identity witness**: `listenerIdentityHolds`
+(`liveness.go:118-137`) rejects a zombie process outright (exited but unreaped,
+which would otherwise byte-match a stale `kill -0` check), requires a recorded
+`listenerStart`, and compares it to the CURRENT `procStartTime` of that pid: any
+mismatch, including "no witness recorded" or "probe cannot answer," reads dead.
+There is no argv-grep fallback left; the old `TRANSITION(P3T2)` shim that once
+provided one is itself deleted.
 
-- never-armed (`listenerPid` null): dead only if meta.json **mtime > 10 minutes**
-  (`find -mmin +10`) — the grace window that stops join's auto-prune from sweeping a
-  sibling mid-setup;
-- armed-ever: dead iff `!meta_listener_alive`.
+**Go client: `PeerDead`** (`liveness.go:146-158`) is the prune/broadcast/send-gate
+predicate: **a daemon-managed peer (`ConnectionID != ""`) reads NOT dead
+unconditionally**, regardless of listener state: a managed peer's inbox survives
+listener outages and is removed only by an explicit `leave`/`unregister` (a mere
+`connection disconnect` retains it). A legacy (non-managed) armed-ever peer is
+dead iff `!MetaListenerAlive`; a never-armed peer falls to the `lastActivity`
+grace window (§2.2), not mtime.
 
-Where each is used: `meta_listener_alive` → send gate, list listen/off column,
-channels live count, alias-takeover refusals. `peer_dead` → prune reaping and the
-presence-broadcast recipient filter (deliberately the same rule as the send path, so
-joined-but-unarmed peers still receive presence).
+Bash era, `peer_dead` (bin/cbus:316-323): never-armed dead only past mtime
+**10 minutes** (`find -mmin +10`); armed-ever dead iff `!meta_listener_alive`.
+Where each is used: the listener-alive predicate → send gate, list listen/off
+column, channels live count, alias-takeover refusals; `peer_dead`/`PeerDead` →
+prune reaping and the presence-broadcast recipient filter (deliberately the same
+rule as the send path, so joined-but-unarmed peers still receive presence). For a
+native peer, "listen" in `cbus list` means **the daemon holds the connection**,
+not that any particular CLI process is alive: the daemon itself is the thing
+being asked about, and a peer that never connects natively never has this
+question apply to it at all.
 
 ### 6.2 The send gate
 
@@ -575,7 +764,9 @@ joined-but-unarmed peers still receive presence).
 |---|---|
 | joined, never armed | accepted unconditionally (first arm replays) |
 | listener alive | accepted |
-| armed-then-died | refused: `not listening; use --force to queue anyway`; with `--force`, warns and queues **best-effort** (re-arm seeks EOF — may never deliver) |
+| armed-then-died | refused: `not listening; use --force to queue anyway`; with `--force`, warns and queues **best-effort**. Bash era, this could be lost forever (re-arm sought EOF); **Go client**, the durable `.cursor` (§5.2) delivers it on the next re-arm, so `--force` here is no longer a gamble |
+| native, disconnected (`ListenerPid == -1`) | same row as armed-then-died: `MetaListenerAlive` reads a `-1` pid as not alive, so the gate refuses identically, `--force` queues the same way |
+| native, daemon process itself down | same row again: the daemon's own pid is what `listenerPid` names while armed, so a dead daemon reads as a dead listener through the identical `pidAlive` check, no separate code path |
 
 `--force` on remote targets is **accepted and ignored** — the spool always queues
 (bin/cbus:244). *quirk — surface parity, no remote effect.*
@@ -621,6 +812,16 @@ The claim-then-verify makes `departed` fire **at most once** across concurrent
 reapers, and removal-before-broadcast means the reaped peer can never receive its own
 event. Legacy v1 entries: whole channel dir removed when dead.
 
+**Go client** (`PruneChannel`, `store.go:664-`): the reap dance now runs entirely
+under the same per-peer `flock` sends and joins take (§2.6); an unreadable
+`meta.json` aborts that peer's reap early rather than being read as evidence it
+is reclaimable ("unreadable metadata is not evidence that an inbox is
+reclaimable"); and since `PeerDead` (§6.1) reads any daemon-managed peer as
+never dead, **a native peer is never reaped by prune at all**: it is removed
+only through `leave`/`unregister`, not this path (a mere `connection
+disconnect` keeps the registration and inbox, §6.1 and §7.3). Remote
+`/prune` is a separate relay-side endpoint, covered in §9.
+
 ### 7.2 Remote marker sweep
 
 Runs **only** on a bare `cbus prune` (no channel argument) via `prune_remote_markers`
@@ -636,7 +837,9 @@ never touches `.remote/`. *quirk — docs elsewhere overstate this.*
 | `cbus leave [ch]` | for each of this session's registrations: broadcast `leave`, then `rm -rf` the peer dir |
 | `cbus leave <ch>@<host>` | delete this session's marker only; **relay untouched** — queued mail keeps accumulating and is inherited by whoever next arms that alias |
 | `cbus unregister <ch>/<al>` | unconditional `rm -rf` of any peer (no liveness/ownership check), broadcast `departed` ("unregistered") |
-| `cbus hook-exit` | SessionEnd hook: reads `{session_id}` from **stdin JSON** (env fallback), runs `leave` for that session silenced and never-failing (always exit 0). Local channels only; graceful exits only — hard kills rely on the prune `departed` backstop. Wiring is manual per host (`~/.claude/settings.json` SessionEnd → `cbus hook-exit`; install.sh does not do it). |
+| `cbus hook-exit` | SessionEnd hook: reads `{session_id}` from **stdin JSON** (env fallback), runs `leave` for that session silenced and never-failing (always exit 0). Local channels only; graceful exits only, hard kills rely on the prune `departed` backstop. **Go client: preserves a daemon-managed registration** (`leaveSession(ch, preserveManaged=true)`, `harness.go`), only a legacy peer is actually removed here. Wiring is manual per host (`~/.claude/settings.json` SessionEnd → `cbus hook-exit`; `install.sh` no longer exists to do it, retired and deleted, §14 of `command-reference.md`) |
+| `cbus connection disconnect <ch>/<al>` (Go client only) | detaches a native connection but **keeps the registration and inbox**; the peer reads `off` until reconnected. Distinct from every row above, none of which have a "keep everything, just stop delivering" mode |
+| `cbus close <ch>/<al>` (Go client only) | SIGTERMs the peer's owning process (a legacy peer only; refuses a daemon-managed one outright, `"daemon-managed peer — use cbus connection disconnect ..."`) and sweeps its terminal surface; registrations are untouched here, the graceful exit path (hook-exit) or the prune backstop removes them |
 
 ---
 
@@ -659,6 +862,16 @@ against concurrently vanishing peers.
 | `departed` | `cbus unregister` | removed alias | =from | `unregistered` |
 | `compact-pre` | `cbus hook-compact pre` (PreCompact hook) | own alias | =from | `about to compact[ (manual\|auto)], in-context state will be lost` |
 | `compact-post` | `cbus hook-compact post` (PostCompact hook) | own alias | =from | `compacted[ (manual\|auto)], in-context state was reset` |
+| `join` (Go client, native) | daemon observes the managed CLI session transition to `online` | own alias | =from | `CLI session connected (or resumed)` (`daemon_presence.go:179`) |
+| `departed` (Go client, native) | daemon observes the managed CLI session exit | own alias | =from | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:186`) |
+| `leave` (Go client, native) | `cbus connection disconnect` (explicit, while the consumer was online) | own alias | =from | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:97`) |
+
+**Go client additions**: a Codex peer also fires `compact-post` from its own
+observed compaction path, not just Claude's PreCompact/PostCompact hooks. Every
+daemon-fired event above carries the `eventId` de-dup key from §3.2 and is
+subject to the daemon's own fanout epoch bookkeeping, so a peer that misses a
+daemon restart mid-broadcast does not receive a duplicate on the daemon's next
+attempt.
 
 Receiver rendering (local frame): `◀ cbus msg from=<ch>/<al> to=<ch>/<you> ts=<iso>
 kind=presence` + text + end marker.
@@ -678,13 +891,22 @@ Properties to preserve or consciously rethink:
   an arbitrary hook payload can't write text into every peer's inbox, and an
   absent/unrecognized trigger just drops the parenthetical. PostCompact's
   `compact_summary` (unbounded conversation content) is never carried.
-- **Relay presence (cbus-ijx.5)**: the relay now renders `kind` and GENERATES
-  join/departed from the ws lifecycle (attach → join; detach + ~90s grace → departed),
+- **Relay presence, legacy `/tail` (cbus-ijx.5)**: the relay renders `kind` and
+  GENERATES join/departed from the ws lifecycle (attach → join; detach + grace
+  → departed, grace tunable via `-presence-grace`, default in `main.go:526`),
   fanned to connected peers via the spool. Semantics differ from local: it is
   connection-presence, not registration, so `/peers` is the state truth source and the
   pushed events are edge notifications. Header text is honest to that (`connected as
-  <alias>` / `departed (connection lost)`). Client-originated `leave`/`rename` and
-  durable offline catch-up are Phase 2.
+  <alias>` / `departed (connection lost)`).
+- **Relay presence, durable `/tail/durable-v1` (Go client)**: a different, CLIENT-
+  driven model, not relay-generated from ws lifecycle: the daemon itself decides
+  when to send `join`/`departed`/`leave` (§8's native rows, above) and the relay's
+  job is to accept, journal and fan those frames out durably
+  (`acceptDurablePresence`, `durable_presence.go`), never to infer them from
+  attach/detach on its own. A durable consumer never gets the legacy
+  auto-generated variant. The relay itself is now in the root module
+  (`claudebus`, importing `internal/core`/`internal/wire` directly), not a
+  separate zero-dependency module as originally built.
 - `departed`/`leave` events carry an unroutable `from` (the subject's dir is gone) —
   receivers must treat presence `from=` as informational, not a reply target.
 - Presence lines persist in inboxes like any message: they replay on first arm
@@ -714,8 +936,10 @@ HTTP 401 handshake refusal, *not* a 1006 close — a failure shape the documente
 re-arm doctrine doesn't cover. *quirk — a port should support old+new token grace or
 SIGHUP reload.* `ReadHeaderTimeout: 5s`; no other server timeouts.
 
-Routes: `/send`, `/tail`, `/peers`, `/healthz`. The relay is one flat namespace keyed
-`channel/alias` — "host" exists only client-side as *which relay to talk to*.
+Routes: `/send`, `/tail`, `/tail/durable-v1`, `/peers`, `/prune`, `/healthz`
+(`main.go:548-553`); the last two are Go-client additions, covered in §9.7 and
+§9.8 below. The relay is one flat namespace keyed `channel/alias`: "host"
+exists only client-side as *which relay to talk to*.
 
 ### 9.2 `POST /send`
 
@@ -738,9 +962,11 @@ Semantics to know when porting the client:
   write leaves the client with `relay send failed` for a message that IS queued —
   and there is no idempotency key (server-minted id, server ts), so a retry is a new
   message. *quirk — auto-retrying ports must add an idempotency key first.*
-- The bash client's send/list curls have **no timeout** (only the 0.3 s healthz probe
-  is bounded) — a black-holed request wedges the Bash tool call. *quirk — a port
-  should set explicit connect/total timeouts, paired with the idempotency story.*
+- Bash era: the client's send/list curls had **no timeout** (only the 0.3 s healthz
+  probe was bounded), so a black-holed request wedged the Bash tool call. **The Go
+  client sets explicit timeouts**: 4 s to establish a connection (including TLS),
+  20 s total per request (`connectTimeout`/`totalTimeout`, `remote.go:23-24`),
+  applied to every remote HTTP call through `newHTTPClient`.
 
 ### 9.3 `GET /peers`
 
@@ -777,10 +1003,12 @@ Check order matters and is observable:
    (**before auth** — an unauthenticated probe can distinguish bad-name from bad-token);
 2. subprotocol token (§10.1) → else plain HTTP `401 unauthorized` (a failed handshake,
    not a ws close);
-3. `wire.Upgrade` — on any pre-hijack failure (non-GET, missing upgrade headers, bad
-   version/key) the handler logs and returns without writing: the client sees an
-   implicit **`200 OK` empty body**. *quirk — any stock ws library in a port will
-   return 400/426 here instead; nothing in-repo depends on the 200.*
+3. `validTailUpgrade` (non-GET, missing upgrade headers, bad version/key) → else
+   `400 valid WebSocket GET required` (`main.go:333-335`). This was, at `f213e26`,
+   a pre-hijack failure the handler logged and returned from without writing,
+   leaving the client an implicit `200 OK` empty body; the shipped Go relay
+   checks explicitly and refuses with a real 400 before ever attempting the
+   hijack.
 
 On success: 101 with the matched subprotocol echoed; per-connection
 `WriteTimeout = 10s`; the connection is hijacked into the ws protocol (§10).
@@ -806,6 +1034,50 @@ the tail path only allows eavesdropping a channel; the write path (which injects
 instructions into live sessions) keeps the stronger double guard. The relay never sees
 or checks CF headers.
 
+### 9.7 `POST /prune` (Go client addition)
+
+Bearer auth, `POST` only, optional `?channel=` (must pass `validName`, else
+`400 bad channel`) scoping the sweep to one channel. Per peer key: kept if it
+has any queued mail (`len(new/) > 0`) or a live tail attached; otherwise
+removed if it also has no unfinished presence recipient
+(`hasUnfinishedPresenceRecipient`) (`handlePrune`, `main.go:470-519`).
+Removal takes that key's `tailGate` mutex (§10.5) and calls `store.Remove`,
+which deletes the whole peer dir, `tmp`/`new`/`cur` alike, not just `cur/`.
+Response: `{"pruned":["<channel>/<alias>", ...]}` (`core.PruneResponse`),
+sorted, of the keys actually removed. This is the client-facing counterpart
+to the "spool dirs are never deleted" limitation noted throughout §9 and §11
+below: the relay itself never GCs on its own, an operator (or the local
+`cbus prune`'s remote form) has to ask for it.
+
+### 9.8 `GET /tail/durable-v1` (Go client addition, durable ack transport)
+
+A second, parallel upgrade path to §9.5's legacy `/tail`, sharing the same
+`ws.Upgrade`/handshake mechanics but adding an application-level consumer
+identity and stop-and-wait acknowledgment on top. Pre-hijack failures on
+**both** endpoints refuse the same way: `400 valid WebSocket GET required`
+(`main.go:334`, `durable_tail.go:158`), as §9.5 now describes.
+`validTailUpgrade` and this endpoint arrived in the same commit (`7b223c3`,
+v0.12.0), so durable-v1 never lacked the check; only the legacy `/tail`,
+which predates that commit, had the window where an unchecked pre-hijack
+request got the implicit 200.
+
+**Legacy-vs-durable consumer conflict.** Both endpoints share one hub keyed
+by `channel/alias`, and `attachTailWithGate`/`upgradeOwnedTail`
+(`durable_tail.go:40-90`) enforce a single active tail per key: attaching
+when a different tail already holds the key, where either side is durable
+or the durable consumer strings differ, refuses `409 Conflict` with `alias
+has an active different consumer; disconnect it before replacing this
+subscription` (`durable_tail.go:44-46,80-82`). Two legacy attaches on the
+same key still displace each other as §10.5 describes (last writer wins,
+no conflict); the 409 fires only when durability or consumer identity would
+otherwise be silently overwritten.
+
+**Ownership record.** Every successful upgrade, legacy or durable alike,
+writes an ownership record under `.durable-owners/<sha256(key)>.json`
+(`recordTailOwner`, `durable_owner.go:18-36`, called from the shared
+`upgradeOwnedTail`): a legacy `/tail` connection gets one too, not just
+durable-v1 subscribers.
+
 ---
 
 ## 10. WS tail protocol
@@ -821,10 +1093,17 @@ containing the token `upgrade`; `Sec-WebSocket-Version: 13` exactly;
 `HTTP/1.1 101 Switching Protocols`, `Sec-WebSocket-Accept: base64(SHA1(key + GUID))`,
 plus `Sec-WebSocket-Protocol: <echo>` when a subprotocol was selected.
 
-The in-repo client (`wire.Dial`, used by the `wstail` debug tool) is TCP-only — no
-TLS — so it works only against loopback; the real remote consumer is the Monitor
-`ws:` source through the CF tunnel. A `Dial`-side port offering a subprotocol must
-verify the server echoed it exactly.
+The in-repo debug client (`wire.Dial`, used by the `wstail` tool) is TCP-only, no
+TLS, so it works only against loopback. **The daemon itself uses a different,
+newer entry point**: `wire.DialContext` (`internal/wire/ws.go:117-145`; the
+legacy `Dial` sits just above it at `:107`. The package moved here from
+`relay/internal/wire`, which is now a thin re-export shim so the daemon and
+relay share one implementation.) `DialContext` parses the URL scheme
+and, for `wss`, wraps the connection in real TLS (`tls.Client`,
+`MinVersion: tls.VersionTLS12`) before the handshake: this is what lets a
+native remote connection reach the public front door over the CF tunnel
+without going through loopback at all. A `Dial`-side port offering a
+subprotocol must verify the server echoed it exactly.
 
 ### 10.2 Frame layer
 
@@ -833,7 +1112,7 @@ verify the server echoed it exactly.
 | Opcodes | `OpText 0x1`, `OpClose 0x8`, `OpPing 0x9`, `OpPong 0xA` — no binary (0x2), no continuation (0x0) |
 | Fragmentation | rejected (`!fin` or opcode 0 → connection error); RSV bits rejected |
 | Masking | direction enforced: client→server MUST mask, server→client MUST NOT |
-| Max frame | **1 MiB — read-side only.** `WriteFrame` has no size check, so the relay can emit frames its own reader would reject: a `/send` body near the 1 MiB cap reframes into an OpText frame larger than 1 MiB, which a contract-enforcing client (including `wstail`) drops the connection on — after `MarkDelivered`, so the message is deterministically lost. *quirk — a port must pick a side; lowering the ingress cap is the only fix without a poison-pill hazard.* |
+| Max frame | Was **1 MiB, read-side only, at `f213e26`** (`WriteFrame` had no size check, so a `/send` body near the 1 MiB cap could reframe into an OpText frame larger than what a contract-enforcing reader accepted, dropped after `MarkDelivered`, a deterministic loss). **`maxFrame` is 2 MiB today** (`internal/wire/ws.go:35`), the source comment quoted verbatim: `Allows the 1 MiB bus message plus a protocol envelope.` Not independently measured end to end in this session; the size relationship strongly implies the hazard is closed, but no test exercising a near-cap message through the durable-v1 path was run to confirm it. |
 | Control frames | payload ≤ 125 B (read-side) |
 | Close | best-effort **empty close frame (no status code, no reason)**, then TCP close |
 
@@ -849,6 +1128,18 @@ Constants: `pingEvery = 30s`, `pongGrace = 90s` (main.go:29-30).
   `since(lastPong) > 90s` at a 30 s tick → detection lands **90–120 s** after the last
   frame. The reader goroutine's per-frame read deadline is `pongGrace + pingEvery` =
   120 s.
+
+**Durable-v1 has no equivalent pong-staleness sweep.** Its reader
+(`durable_tail.go:181`) sets the same 120 s per-frame read deadline
+(`pongGrace + pingEvery`) but there is no separate 30 s-tick liveness check
+layered on top: a durable connection's only liveness signal is that read
+deadline firing. A durable detach also does not trigger the legacy
+relay-generated `departed`-after-grace path (§8): durable presence is
+daemon-originated instead (§8's native rows). The only `departed` the relay
+itself enqueues on this path is a one-time legacy-to-durable handoff at
+attach, settling a pending legacy presence before switching to
+consumer-reported presence (`attachTailWithGate`, `durable_tail.go:53-60`),
+not an ongoing substitute for detach detection.
 
 ### 10.4 Delivery loop
 
@@ -945,6 +1236,29 @@ the re-arm-seeks-EOF rule (§5.2) and prune's inbox destruction on reclaim (§2.
 plus the send-gate race where a >10-min-old never-armed peer accepts mail yet is
 prunable (send-then-prune can discard it silently).
 
+**The sleep window above is specific to the legacy path. §9.8's durable-v1
+transport closes it** with an explicit stop-and-wait acknowledgment instead of
+the fire-and-hope `WriteFrame`: `markDelivered` (`durable_tail.go:106-114`)
+takes the same per-key `tailGate` mutex the upgrade path uses and refuses to
+mark a message delivered if the subscription was displaced in the meantime
+(`"subscription displaced before acknowledgment"`), so a black-holed
+connection can never silently advance a message to `cur/` on its behalf.
+Two separate dedup mechanisms sit on either side of the wire, not one:
+**relay-side spool ingest** (`WriteNamed`, §11) treats a write of a name
+that already exists in `new/`/`cur/` as idempotent when the bytes match,
+refusing only a genuine collision; its callers are ordinary `Store.Write`
+for `/send` and the durable presence fanout replay
+(`durable_presence.go:113`). **Client-side delivery dedup** is a different
+check entirely: the daemon scans its own inbox for an existing line whose
+`relayId` already matches the incoming frame's spool id, and if the bytes
+agree, skips re-appending it (refusing only if the same id names different
+bytes, `"relay ID repeated with different message bytes"`,
+`daemon_relay.go:592-599`). Together the two mean a retried durable
+delivery cannot become a duplicate on either the relay's spool or the
+client's inbox. The HTTP-ingress-retry and delivery-replay duplication
+points above are unaffected either way; only the silent sleep-window LOSS
+is what durable-v1 addresses.
+
 ---
 
 ## 11. Maildir spool
@@ -960,35 +1274,56 @@ prunable (send-then-prune can discard it silently).
 
 ```mermaid
 stateDiagram-v2
-    [*] --> tmp: Write — file created 0644, name UnixNano.seq.json
-    tmp --> new: os.Rename (atomic same-fs) — message is queued
-    tmp --> [*]: rename failed — tmp file removed
-    new --> cur: MarkDelivered (rename) after ws WriteFrame returned
-    cur --> cur: retained forever — nothing reads or deletes cur/
+    [*] --> tmp: WriteNamed, CreateTemp, Write, Sync (fsync)
+    tmp --> new: os.Link (atomic same-fs), message is queued
+    tmp --> [*]: tmp file always removed after Link, success or failure
+    new --> cur: MarkDelivered (rename) after ack (durable-v1) or WriteFrame (legacy)
+    cur --> cur: retained forever, nothing reads cur/ back; prune (§9.7) can delete the whole peer dir
 ```
+
+Bash-era description below, corrected in place: this was written against an
+earlier version of `spool.go` that used `os.Rename` and no fsync; the shipped
+Go relay (`relay/internal/spool/spool.go`) does neither.
 
 | Aspect | Contract |
 |---|---|
-| Filename | `fmt.Sprintf("%d.%06d.json", time.Now().UnixNano(), seq.Add(1))` — wall-clock nanos + a **process-lifetime** atomic counter. Names sort lexicographically = enqueue order. The `id` in the `/send` response is this filename. |
-| Write | to `tmp/` then `os.Rename` into `new/` — crash-safe by construction (invisible / queued / delivered, never torn). **No fsync** — process-crash-safe, not power-loss-safe (deliberate). |
-| ListNew | reads `new/`, regular files only, `sort.Strings`; missing dir → empty list, no error (and **no dir creation** — only `Write` creates peer dirs). |
-| MarkDelivered | rename `new/<name>` → `cur/<name>`. |
+| Filename | `fmt.Sprintf("%d.%06d.%x.json", time.Now().UnixNano(), seq.Add(1), random)` (`spool.go:81`): wall-clock nanos plus a **process-lifetime** atomic counter plus 8 random bytes. Names still sort lexicographically = enqueue order. The `id` in the `/send` response is this filename. |
+| Write | `WriteNamed` (`spool.go:87-123`): `CreateTemp` in `tmp/`, `Write`, then `f.Sync()` (an actual fsync, contrary to the bash-era "no fsync" note below), close, then **`os.Link`** (not `Rename`) the tmp file into `new/`, then remove the tmp file. Idempotent by name: if `new/` or `cur/` already holds that exact name, matching bytes is treated as success (a safe retry), differing bytes refuses ("spool id already names different bytes"), which is what makes a durable-v1 retry (§9.8, §10.7) safe rather than a duplicate. |
+| ListNew | reads `new/`, regular files only, `sort.Strings`; missing dir → empty list, no error (and **no dir creation**, only `Write`/`WriteNamed` creates peer dirs). |
+| MarkDelivered | rename `new/<name>` → `cur/<name>`; on durable-v1 this only happens after the gated ack described in §10.7. |
 | Peers | walks `<root>/*/*`, returns queued counts (= `len(new/)`). |
-| Ordering caveats | a backwards clock step can reorder across the step; `seq` resets per process (uniqueness across restart rests on UnixNano alone). |
+| Prune | `Store.Remove(channel, alias)` (`spool.go:267-`): renames the whole peer dir aside, re-verifies `new/` is still empty (mail that raced in aborts the removal and restores the dir), then `RemoveAll`s it, `tmp`/`new`/`cur` together, not just `cur/`. Called from `POST /prune` (§9.7). |
+| Ordering caveats | a backwards clock step can reorder across the step; `seq` resets per process (the random suffix, not just UnixNano, is what makes a name unique across a restart). |
 
-**There is no retention or GC anywhere** — verified both by code absence (the only
-`os.Remove` in the package is failed-rename cleanup) and live on the server (no cron, no
-systemd timer; delivered mail from every channel ever used still present in `cur/`):
+Native additions living under the spool root, siblings of the per-peer
+`<channel>/<alias>/` dirs: `.durable-owners/<sha256(key)>.json`, the
+ownership record §9.8 writes on every tail upgrade; `.durable-events/`, the
+durable presence journal (§8) `acceptDurablePresence` reads and writes.
+Presence fanout to a specific durable recipient uses its own spool id,
+`<base-id-minus-.json>.recipient.<sha256(consumer)hex>.json`
+(`presenceRecipientSpoolID`, `durable_owner.go:56-61`), distinct from the
+plain message id a legacy recipient shares.
 
-- `cur/` grows forever; `tmp/` orphans from a crash are never swept;
-- peer/channel dirs are never deleted, so dead test channels appear in `/peers` (and
-  `cbus list @host`) **forever**;
+**There is still no retention or GC by default**: `/prune` (§9.7) exists but
+is never called automatically:
+
+- `cur/` of any live or pending peer grows forever regardless: `/prune` only
+  removes a peer wholesale, and skips any peer with queued mail or a live
+  tail entirely (`n > 0 || connected[key]`, `main.go:502-504`), so it can
+  never selectively clear just the delivered history of a peer still in
+  use; `tmp/` orphans from a crash between `Write` and the final
+  `os.Remove` are not separately swept;
+- peer/channel dirs accumulate in `/peers` (and `cbus list @host`) until
+  pruned;
 - `cbus leave <ch>@<host>` never contacts the relay, so mail keeps queueing for a
   departed alias, and **whoever next arms that alias inherits the backlog** —
   including a different session or machine.
 
-*quirk — preserve or add retention + a relay-side leave/GC verb in a port; declining
-fsync and retention was a reviewed, deliberate v1 decision.*
+`spool.go`'s own header comment (`spool.go:9-11`) flags a compatibility
+constraint worth preserving in a port: an external reader (an operator
+dashboard) reads the `{new,cur}` directory mtimes, read-only, as a
+peer-activity signal; the layout and those mtimes are a compatibility
+surface a port must keep, restructuring it blinds that reader.
 
 ---
 
@@ -1002,20 +1337,30 @@ fsync and retention was a reviewed, deliberate v1 decision.*
 - Env override/extension: `CBUS_SITE_<HOST>_URL`, where `<HOST>` is the host
   uppercased, every non-`[A-Z0-9]` mapped to `_`, then **one** trailing `_` stripped
   (`my-nas` → `CBUS_SITE_MY_NAS_URL`; distinct hosts can collide on one var). *quirk.*
-- Unknown host: the `die` fires inside a command substitution, so it is a **non-fatal
-  stderr message** — the command continues with `mode=public base=""` and terminates
-  later on missing credentials (two stacked errors) or, with credentials stored,
-  `tail` **exits 0 with a scheme-less broken arm spec and still writes the identity
-  marker**. *quirk — a port with real error propagation should hard-fail before
-  claiming identity.*
+- Unknown host, bash era: the `die` fired inside a command substitution, so it was a
+  **non-fatal stderr message**: the command continued with `mode=public base=""` and
+  terminated later on missing credentials (two stacked errors) or, with credentials
+  stored, `tail` **exited 0 with a scheme-less broken arm spec and still wrote the
+  identity marker**. **The Go client hard-fails immediately**: `SiteURL` returns a
+  real `UnknownHostError` (`endpoint.go:55-70`) the moment the host is unresolvable,
+  quoted verbatim: `unknown relay host "<h>" (set CBUS_SITE_<H>_URL)`. Nothing runs
+  after it, no scheme-less arm spec, no identity marker written on a bad host.
 
 ### 12.2 Front-door probe
 
 `relay_base` (bin/cbus:148-155): GET `${CBUS_RELAY_LOCAL_URL:-http://127.0.0.1:8090}/healthz`
 with `curl -m 0.3`; body exactly `ok` → mode `local` (loopback URL, **no CF Access
-headers**); else mode `public` (site URL + CF Access in the HTTP legs). Runs on every
-remote operation (~0.3 s latency cost off-relay). Trust-by-port: anything answering
-`ok` on loopback:8090 is believed. *quirk.*
+headers**); else mode `public` (site URL + CF Access in the HTTP legs). This bash-era
+probe ran fresh on every remote operation (~0.3 s latency cost off-relay).
+Trust-by-port: anything answering `ok` on loopback:8090 is believed. *quirk.*
+
+**Go client** (`ResolveFrontDoor`, `endpoint.go:86-95`): the same local-vs-public
+logic, but for a **native** connection the daemon resolves it once at connect time
+and reuses that result for the connection's lifetime, rather than re-probing per
+operation. The probe (`probeLocalOK`, `endpoint.go:97-115`) additionally refuses to
+follow HTTP redirects (`CheckRedirect: return http.ErrUseLastResponse`) so a 3xx
+response off-loopback can never be chased to an "ok"-serving host and wrongly
+select local mode.
 
 `ws_url` string-swaps `https://`→`wss://`, `http://`→`ws://`; **any other scheme
 yields an empty string** with no error. *quirk.*
@@ -1027,12 +1372,18 @@ yields an empty string** with no error. *quirk.*
 | `cbus tail <ch>@<host>/<al>` (arm spec) | required | never (ws leg is subprotocol-only) |
 | `cbus send <ch>@<host>/<al>` | required | public mode only |
 | `cbus list [<ch>]@<host>` | required | public mode only |
+| `cbus prune [<ch>]@<host>` (Go client) | required | public mode only |
+| `cbus connect <ch>@<host> ...` (Go client, native) | required | never; the daemon's
+  durable-v1 dial is token-only regardless of mode, no CF headers on that leg |
 
 Missing credentials die with pointer messages to `cbus auth set <host> --… -`.
-Failure surfaces differ: remote send/tail wrap errors in `cbus: …`; `list @host`
-failures surface as curl stderr + a python `JSONDecodeError` traceback, **exit 1**
-(python's, never curl's code — the renderer is the rightmost pipeline command).
-*quirk.*
+Bash era: failure surfaces differed by command; remote send/tail wrapped errors in
+`cbus: …`, `list @host` failures surfaced as curl stderr plus a python
+`JSONDecodeError` traceback, exit 1 (python's, never curl's code, since the
+renderer was the rightmost pipeline command). **The Go client's `list` failures are
+now a single formatted error**: `relay list failed (<mode> <base>): status <N>` for
+a bad HTTP status, or `relay list failed (<mode> <base>): <err>` for a transport
+error (`remote.go:163,167`), no traceback, one dialect.
 
 ---
 
@@ -1049,14 +1400,16 @@ behavior and silently mis-frame if the harness changes.
 | Body wrap | 440 bytes | bin/cbus:522, main.go:239 | UTF-8-byte-aware, never splits a codepoint |
 | `wsFrameSafe` | 2800 bytes | main.go:204 | relay ⚠truncated threshold (header-less total — §4.4) |
 | Follower poll | 0.2 s | bin/cbus:564 | inbox idle poll interval |
-| Unarmed-peer grace | 10 min | bin/cbus:319 | meta.json mtime, `find -mmin +10` |
+| Unarmed-peer grace | 10 min, still; keyed on **`lastActivity`** in the Go client, not mtime (§2.2) | bin/cbus:319; Go: `liveness.go:158-171` | grace window before a never-armed peer is prunable |
 | Loopback probe timeout | 0.3 s | bin/cbus:150 | front-door autodetect |
+| Remote HTTP connect / total timeout (Go client) | 4 s / 20 s | `remote.go:23-24` | bounds every remote HTTP call (§9.2) |
 | `pingEvery` | 30 s | main.go:29 | server ping cadence + drain backstop |
 | `pongGrace` | 90 s | main.go:30 | staleness threshold (detection 90–120 s) |
 | Reader deadline | 120 s | main.go:283 | pongGrace + pingEvery |
 | Conn WriteTimeout | 10 s | main.go:271 | bounds each ws write incl. teardown close |
 | `/send` body cap | 1 MiB | main.go:163 | MaxBytesReader |
-| ws `maxFrame` | 1 MiB | ws.go:32 | **read-side only** (§10.2) |
+| ws `maxFrame` | **2 MiB today** (was 1 MiB, read-side only, at `f213e26`) | `internal/wire/ws.go:35` | allows the 1 MiB bus message plus a protocol envelope, per the source comment verbatim (§10.2) |
+| durable-v1 consumer length | 128 bytes | `durable_tail.go:148` | max length of the `consumer` identity string |
 | Control-frame payload | 125 B | ws.go:260-262 | read-side only |
 | ReadHeaderTimeout | 5 s | main.go:419 | only HTTP server timeout |
 | Owner walk depth | 16 hops | bin/cbus:46 | claude-ancestor search |
@@ -1064,28 +1417,275 @@ behavior and silently mis-frame if the harness changes.
 
 Invariants a port must preserve (or change with eyes open):
 
-1. **Join truncates the inbox; first arm replays from byte 0; re-arm seeks EOF.** The
-   first/re distinction keys on whether meta ever recorded a `listenerPid`.
-2. **The listener's process identity carries the inbox path** (argv today) and the
-   recorded pid IS the Monitor-managed process — the whole liveness scheme hangs on
-   both.
+1. **Bash era: join truncates the inbox; first arm replays from byte 0; re-arm seeks
+   EOF.** The first/re distinction keyed on whether meta ever recorded a
+   `listenerPid`. **Go client: replay is cursor-based** (§5.2): a durable per-peer
+   `.cursor` sidecar records an exact read offset, and every re-arm resumes from it;
+   there is no EOF-seeking branch left.
+2. **Bash era: the listener's process identity carried the inbox path** (argv) and
+   the recorded pid WAS the Monitor-managed process. **Go client: identity is
+   structural** (§6.1): `(pid, starttime)` via `procStartTime`, no argv fingerprint
+   anywhere; the whole liveness scheme now hangs on that tuple instead.
 3. **Presence targets `!peer_dead`, the same rule as the send gate** — anything else
-   reintroduces "unarmed peers miss presence forever".
+   reintroduces "unarmed peers miss presence forever". Holds for the Go client's
+   `PeerDead` too, with the addition that a daemon-managed peer always reads
+   not-dead (§6.1).
 4. **Frame constants and the one-write-per-frame batching** — fragmenting a frame
    across Monitor notifications breaks the receive contract the skills teach.
-5. **Relay stored lines are byte-compatible with local inbox lines** (modulo key
-   order and the missing `kind`) — the client needs no translation layer.
+5. **Bash era: relay stored lines were byte-compatible with local inbox lines**
+   (modulo key order and the missing `kind`). **Go client: relay-generated and
+   daemon-generated presence lines also carry `kind` and, for durable/native
+   presence, an `eventId`** (§3.2, §8) that a translation layer must preserve for
+   de-duplication, not just pass through.
 6. **hub: mutex-held close-then-replace attach; per-message `done` check;
    pointer-compared detach; ErrNotExist-tolerant read/mark; 1-buffered level-triggered
    notify with write-before-signal.** These six together make displacement safe over
    the Maildir spool.
 7. **Token stays subprotocol-safe** (no `=` `,` `/` space) and rides in the ws
    subprotocol, never a query param.
-8. **spool write is tmp→rename; MarkDelivered is the only new/→cur transition;
-   `ListNew` order is filename order.**
+8. **Bash era: spool write was tmp→rename.** **Go client: spool write is
+   tmp→`os.Link`** (§11), not rename, kept idempotent by delivery id; MarkDelivered
+   is still the only new/→cur transition, `ListNew` order is still filename order.
 9. **`cbus tail` is two different verbs**: local = blocking Monitor event source;
    remote = instant print-the-spec command with a marker side effect. A port should
    consider separating them.
-10. **Errors funnel to exit 1** across the client (two dialects today: `cbus: …` from
-    `die`, and raw bash `${1:?usage…}` with script path + line number — unify in a
-    port, and never reproduce the `${:?}` rendering).
+10. **Bash era: errors funneled to exit 1 across two dialects**, `cbus: …` from `die`
+    and raw bash `${1:?usage…}` with script path + line number. **Go client: one
+    dialect, `cbus: …`, everywhere**: the bash dialect no longer exists to unify
+    against.
+
+---
+
+## 14. Native contract: daemon control plane
+
+Everything below in §14-16 is Go-client-only surface with no bash-era
+counterpart; the doc has no earlier section to correct against, so these
+are written fresh as contract, not narrative.
+
+### 14.1 Control API
+
+Transport: HTTP/1.1 over a unix socket at `$CBUS_DIR/.daemon/control.sock`
+(mode 0600), one daemon per store, singleton-enforced by an flock on
+`$CBUS_DIR/.daemon/lock` (`RunDaemon`, `daemon.go:164-206`). Every request
+carrying a non-empty `Origin` header refuses `403 browser requests are not
+supported`: this is local process IPC only (`daemon.go:244-246`).
+
+Routes (`(*busDaemon).handler`, `daemon.go:241-328`):
+
+| Route | Request | Response |
+|---|---|---|
+| `GET /health` | none | `{"running":true,"pid":<pid>,"start":"<procStartTime>","protocol":<n>,"version":"<v>"}`; `DaemonProtocolVersion` is `3` (`daemon.go:110,248-250`) |
+| `POST /stop` | optional `{"pid":<n>,"start":"<s>"}`, ≤4096 bytes | if both fields are set and either mismatches this daemon's own pid/start: `409 daemon instance changed; nothing stopped`; else `{"stopping":true}`, then the context is cancelled (`daemon.go:252-269`) |
+| `POST /connect` | `connectWireRequest{ConnectRequest, ClaudeToken}`, ≤64 KiB | the new connection's full snapshot (`daemon.go:271-282`) |
+| `GET /connections` | none | `statusSnapshots()` for every managed connection (`daemon.go:283-284`) |
+| `POST /disconnect` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | `{"disconnected":true}` (`daemon.go:285-297`) |
+| `POST /reconcile` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | the reconciled connection's snapshot (`daemon.go:298-311`) |
+| `POST /abandon` | `AbandonRequest`, ≤4096 bytes | the connection's snapshot (`daemon.go:312-323`) |
+| anything else | (none) | `404` (`daemon.go:324-325`) |
+
+`ReadHeaderTimeout: 5s` (`daemon.go:208`) is the only server-level timeout
+(§13 tabulates the relay's own, separate, HTTP server); each route's own
+`MaxBytesReader` cap above is the only body-size limit, and there is no
+separate body-read deadline.
+
+### 14.2 Connection journal
+
+One file per managed connection, `$CBUS_DIR/.daemon/connections/<id>.json`
+(§2's layout), written through `durableJSON` (§2.2: temp write, fsync,
+rename, then a directory fsync). `ConnectionState` itself
+(`daemon.go:39-66`) is fully `json`-tagged: `id`, `harness`, `channel`,
+`alias`, `threadId`, `config`, `claude`, `recordedVersion`, `state`,
+`error`, `listenerError`, `accepted`, `lastQueueId`, `dev`, `ino`, `offset`,
+`pending`, `lastAccepted`, `abandoned`, `resolutions`, `rolloutPath`,
+`consumer`, `presenceSequence`, `presenceOutbox`, `relay`, `relayStatus`,
+`compaction`.
+
+**Compatibility hazard**: several of its embedded struct types carry NO
+`json` tags at all, so Go's default (the exact exported field name) is what
+actually lands on disk:
+
+- `CodexQueueConfig` (`codexqueue.go:19-28`): `Binary`, `Home`, `Cwd`,
+  `SQLiteHome`, `UserHome`, `BindingSource`, `RuntimeVersion`,
+  `RuntimePID`, `RuntimeStartToken`.
+- `ClaudeConnectBinding` (`claudeconnect_identity.go:20-30`): `SessionID`,
+  `UserHome`, `ConfigHome`, `Cwd`, `TranscriptPath`, `TranscriptDev`,
+  `TranscriptIno`, `TranscriptSize`, `TranscriptOffset`, `Endpoint`.
+- `claudeEndpoint` (`claude_endpoint.go:8-13`): `Socket`, `PID`,
+  `StartToken`, `Dev`, `Ino`.
+
+A reader or a port must know this going in: the on-disk keys for these
+three types are their Go field names verbatim (`"Binary"`, `"SessionID"`,
+`"PID"`, capitalized, not camelCased), not the lowerCamelCase convention
+the rest of the journal uses. Renaming any of these fields silently changes
+the on-disk shape with no compiler warning, since nothing declares this
+part of the wire contract explicitly.
+
+### 14.3 Managed peer lifecycle addenda
+
+Most of this lifecycle is already documented where it naturally belongs:
+meta.json's native field values (§2.2), the native remote marker (§2.4),
+and `PeerDead`'s managed-peer exemption (§6.1). Two pieces worth stating
+together, precisely:
+
+**meta.json across the connection lifecycle.** Connect:
+`listenerPid: null, ownerPid: null` (`daemon.go:722`'s `peerMeta` literal).
+Arm (the daemon registers itself as the live listener):
+`listenerPid: <daemon's own pid>`, `listenerStart: <daemon's own
+procStartTime>`, `ownerPid: null` (`daemon.go:796-798`). Disconnect:
+`listenerPid: -1`, `listenerStart: ""` (cleared, not merely left stale),
+`ownerPid: null` (`daemon.go:836`). `ownerPid` is never anything but null
+across this whole lifecycle; the observed CLI process pid lives in the
+connection journal as `consumer.pid` instead (§2.2).
+
+**Epoch fence, exact text.** `rearmLoaded` refuses to re-arm a connection
+whose journaled `(dev, ino)` no longer matches the inbox file on disk, or
+whose recorded `offset` exceeds the file's current size:
+`"inbox changed or truncated; refusing to rearm an unknown epoch"`
+(`daemon_scheduler.go:42-43`); the same check guards delivery with
+`"inbox changed or truncated; refusing to replay an unknown epoch"`
+(`daemon.go:865-868`). The refusal is stored as `listenerError` in the
+connection state, visible via `cbus connection status ... --json`.
+
+### 14.4 Claude credential store
+
+Directory `$CBUS_DIR/.daemon/claude-credentials/` (0700, §2's layout). One
+file per binding, named `<bindingUUID>.token` (0600), created `O_EXCL` so
+an existing reference is never silently overwritten
+(`storeClaudeCredential`, `claude_credentials.go:21-33`). A stored token is
+capped at `claudeCredentialMaxBytes = 4096` bytes (`claude_credentials.go:16`).
+
+**The token crosses the control socket exactly once**, on `/connect`:
+`connectWireRequest{ConnectRequest, ClaudeToken}`'s `claudeToken` field
+(`json:"claudeToken,omitempty"`, `daemon_connect_request.go:9`). It never
+appears in any other route's request or response. `connectWireRequest`
+itself overrides `String()`/`GoString()` to `"cbus connect request
+(capability redacted)"` (`daemon_connect_request.go:12-13`), so an
+accidental `%v`/`%#v` log of the whole request struct cannot print the raw
+token; and the connection journal never holds the token at all, only a
+`credentialRef` string (`ClaudeConnectionConfig`, `claude_queue.go:9`),
+distinct from `ConnectionState` (§14.2), which has no token field either.
+
+## 15. Native contract: harness wire protocols
+
+### 15.1 Claude messaging socket
+
+Frames exchanged over the per-session unix socket captured at connect
+(`claude_socket.go`), both capped against `claudeMaxLine = 1 MiB`
+(`claude_socket.go:34`):
+
+- **Auth** (client → Claude, sent first):
+  `{"type":"auth","token":"<token>"}` (`claude_socket.go:61`).
+- **Message** (client → Claude):
+  `{"type":"user","session_id":"<sid>","uuid":"<uuid>","message":{"role":"user","content":"<text>"}}`
+  (`claude_socket.go:62-64`). Both the raw token/payload and each frame's
+  full marshaled-plus-newline length are checked before send; oversize
+  refuses `"Claude socket envelope exceeds the byte limit"`
+  (`claude_socket.go:58-59,66-67`).
+- **Receipt rule**: no socket-level ack; the client tails the session's own
+  transcript instead (`claude_socket.go:140-168`). A complete
+  (newline-terminated; a trailing partial line is never a row) transcript
+  row counts as a receipt when its `sessionId` equals the bound session
+  AND either:
+  - `type` is `"user"` and `uuid` equals the message UUID (the ordinary
+    case), or
+  - the session was busy when the message arrived and Claude persisted it
+    as a `queued_command` attachment instead of a user row: `type` is
+    `"attachment"`, `isSidechain` is present and `false` (this requirement
+    applies only to this attachment case), and
+    `attachment.{type,source_uuid,commandMode,isMeta,origin.kind}` equal
+    `"queued_command"`, the message UUID, `"prompt"`, `true`, `"peer"`
+    respectively (`claude_socket.go:145-166`).
+  - The Go fields matching `sessionId`/`type`/`uuid`/`isSidechain` are
+    untagged except `isSidechain` and `attachment.source_uuid`, so
+    `encoding/json` matches the rest case-insensitively against the
+    transcript's own camelCase keys; none of them is `session_id`. A bare
+    queue/dequeue record, matching neither shape, is not receipt evidence
+    on its own.
+
+### 15.2 Codex queue sidecar
+
+Launch: `codex app-server --stdio` (plus `-c sqlite_home="<json-quoted
+path>"` when a non-default SQLite home is pinned) (`codexQueueArgs`,
+`codexqueue.go:91-99`). Environment is allowlisted, not inherited wholesale:
+only `PATH`, `TMPDIR`/`TMP`/`TEMP`, `SYSTEMROOT`/`WINDIR`/`COMSPEC`/`PATHEXT`,
+`LANG`/`LANGUAGE`/`LC_ALL`/`LC_CTYPE` pass through from the daemon's own
+environment; `CODEX_HOME`, `HOME`/`USERPROFILE`, `CODEX_SQLITE_HOME` are set
+explicitly from the connection's own config; `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1`
+is always forced, so a queue-only sidecar can never adopt persisted remote-
+control state (`codexQueueConfigEnv`, `codexqueue.go:102-135`, the forced
+setting itself at `:135`).
+
+Wire protocol: newline-delimited JSON-RPC-shaped requests over stdio,
+`{"id":<n>,"method":"<m>","params":<p>}` (`codexQueue.write`/`call`,
+`codexqueue.go:217-268`). **The method allowlist is enforced client-side
+before any request is written**: only `initialize`, `thread/read`,
+`thread/queue/list`, `thread/queue/add`, `thread/items/list` are permitted;
+anything else refuses locally with `codex queue method "<m>" is not
+permitted` and never reaches the subprocess (`codexqueue.go:253-257`). No
+method in this set can start or resume a recipient thread; that boundary is
+the allowlist itself, not a convention the caller has to honor.
+
+## 16. Native contract: durable relay transport
+
+### 16.1 durable-v1 WS protocol
+
+Shares §10's handshake and frame-layer mechanics; layered on top:
+
+- **Ready handshake** (relay → daemon): immediately after the ws upgrade,
+  the relay sends one text frame,
+  `{"type":"ready","protocol":"cbus-relay-durable/v1"}`, before anything
+  else. The daemon reads it with a 5s deadline and aborts the connection if
+  it is missing, malformed, or names a different protocol string
+  (`"relay lacks durable-v1 ready handshake; upgrade the relay before
+  connecting"`, `daemon_relay.go:262-269`).
+- **Message** (relay → daemon): `{"type":"message","spoolId":"<name>","message":<raw stored JSON, unmodified>}`
+  (`durable_tail.go:225-230`).
+- **Ack** (daemon → relay): `{"type":"ack","spoolId":"<id>"}`. Accepted only
+  when it also carries no `eventId`/`event`/`text`/`ts` (a presence-shaped
+  ack is rejected outright) and its `spoolId` matches the one currently
+  outstanding (`durable_tail.go:271-273`); a valid ack is what
+  `markDelivered` (§10.7) gates the `new/`→`cur/` transition on.
+- **Presence** (daemon → relay): `{"type":"presence","eventId":"<id>","event":"<join|departed|leave>","text":"<t>","ts":"<RFC3339>"}`,
+  no `spoolId` (`writeRelayFrame(conn, relayFrame{Type: "presence", ...})`,
+  `daemon_relay.go:494`; the relay refuses a presence frame that carries a
+  `spoolId`, `durable_tail.go:281-283`), the shape §16.2's
+  `acceptDurablePresence` validates.
+- **Presence-ack** (relay → daemon): `{"type":"presence-ack","eventId":"<id>"}`,
+  the relay's acknowledgment of an accepted presence frame
+  (`durable_tail.go:288-289`).
+- Ack and presence share one wire type, `durableClientFrame`
+  (`durable_tail.go:131-138`, `{"type","spoolId","eventId","event","text","ts"}`,
+  all but `type` optional), which is why an ack carrying stray presence
+  fields is rejected: the decoder cannot tell which frame kind was meant.
+- **Strict decode is one-sided**: only the **relay**, decoding a client
+  frame, is strict: `json.NewDecoder(...).DisallowUnknownFields()` plus a
+  second `Decode` that must hit `io.EOF`, refusing any trailing bytes or
+  unknown field (`durable_tail.go:261-266`). **The daemon, decoding relay
+  frames, is not**: `json.Unmarshal` into `relayFrame`/the ready struct
+  tolerates unknown fields (`daemon_relay.go:265,453`), and correctness
+  instead comes from validating the fields that matter afterward: the
+  ready frame's `type`/`protocol` (above), and a message frame's `to`
+  (must equal this connection's own `channel/alias`), non-empty `from` and
+  `text`, and a `kind` that is empty or exactly `"presence"`
+  (`appendRelay`, `daemon_relay.go:529-538`).
+- Limits: consumer identity ≤128 bytes (§1.1/§13); presence `eventId`
+  ≤256 bytes with no CR/LF/NUL; presence `text` ≤16 KiB (§16.2).
+
+### 16.2 Durable presence journal
+
+Mostly covered already: the journal's role in fanout (§3.2/§8), the
+relay's presence-origination split (§8), and the spool-level file ids it
+uses (§11). The validation gate itself, as contract
+(`acceptDurablePresence`, `durable_presence.go:35-43`):
+
+- `eventId`: required, ≤256 bytes, no CR/LF/NUL.
+- `text`: required, ≤16 KiB.
+- `event`: **exact three-value allowlist**, `"join"`, `"departed"`, or
+  `"leave"`; anything else refuses `"invalid durable presence event"`.
+- `ts`: must parse as RFC3339, else refuses `"invalid durable presence
+  timestamp"`.
+
+On-disk paths: `.durable-events/` (the journal itself) and
+`.durable-owners/<sha256(key)hex>.json` (per-key ownership records, §9.8),
+both siblings of the per-peer Maildir tree under the spool root (§11's
+layout).

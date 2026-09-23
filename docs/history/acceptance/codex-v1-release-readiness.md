@@ -9,6 +9,16 @@ rejected by saved thread source metadata. Current CLI ownership and queue-store
 identity remain required; historical source labels do not establish the current
 runtime. Desktop attachment remains outside v1.
 
+**Status (2026-09-22): unchanged through v0.13.0-v0.14.1.** Native
+`cbus connect`/`spawn --harness codex` shipped in v0.12.x, alongside this
+doc's own v0.12.2 evidence; native Claude receive followed a release later,
+in v0.13.0 ([docs/codex.md](../../codex.md)), tested against Codex 0.155.1
+(macOS) and 0.154.0 (Linux); v0.14.0 and v0.14.1 were client-only releases
+that did not touch the Codex adapter. This doc's v0.12.2 evidence below
+remains the readiness record for the wrapper/queue path that native connect
+now leads with (`command-reference.md`, the "Native connections" preamble
+section).
+
 ## v0.12.2 release and installation evidence
 
 - All five client assets reproduced byte-for-byte from independent clean source
@@ -76,7 +86,13 @@ They verify real CLI execution and transport mechanics without paid inference;
 they do not establish live-model reasoning quality. Raw transcripts stay local.
 Tracker attachments contain aggregate outcomes and hashes only.
 
-Intermediate evidence (paths are local to this development workspace):
+Intermediate evidence (paths are local to this development workspace, under
+`/tmp` or `/private/tmp`; most are not retained past the machine's normal temp
+cleanup and are provenance of what ran, not reachable artifacts). Of the
+evidence in the "v0.12.2 release and installation evidence" section above,
+only the final-asset acceptance run has a retained tracker attachment
+(`78347441d578773e`, review `fe7debe4410e4d0c`); its provenance and
+install-check files are the same kind of local-path-only record as below:
 
 - Permissions: `/private/tmp/cbus-cli-canary-0unj_hbm` is an earlier permission
   fixture, **not proof that an allow rule was necessary**. The controlled pair
@@ -111,7 +127,7 @@ must not cause periodic model turns.
 ### Historical publication boundary
 
 At this snapshot, the remaining gates preceded
-[the release checklist](../RELEASE-CHECKLIST.md). No release, tag, global
+[the release checklist](../../RELEASE-CHECKLIST.md). No release, tag, global
 installation, user config change or production relay restart had yet been
 performed. A coordinated relay upgrade was required for native remote
 subscriptions; local connections did not depend on it. This is historical,

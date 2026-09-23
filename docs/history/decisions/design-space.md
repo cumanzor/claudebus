@@ -1,5 +1,10 @@
 # claudebus — store & transport design space
 
+> **Historical: analysis at v0.7.0 (2026-07-21), before the daemon, native
+> sockets and the durable relay stream.** Its conclusions about files plus a
+> polling follower describe the legacy transport; current mechanics are
+> [how-it-works.md](../../how-it-works.md) and [protocol.md](../../architecture/protocol.md).
+
 Why this file exists: the store/transport choices (append-only files, a polling
 follower, mark-and-fetch truncation handling) get re-litigated every time a
 reviewer meets the codebase, because the obvious modern alternatives — a local
@@ -9,14 +14,14 @@ v0.7.0 (2026-07-20/21), so the next reviewer starts from the conclusions instead
 of re-deriving them. The mechanisms themselves are specified elsewhere and are
 only summarized here:
 
-- [behavior-spec.md](behavior-spec.md) §8.6 (cursor/resume) and §8.7
+- [behavior-spec.md](../legacy/behavior-spec.md) §8.6 (cursor/resume) and §8.7
   (displacement gate, `--steal`, dormancy)
-- [protocol.md](protocol.md) §4 (frame grammar, Monitor constraints) and §13
+- [protocol.md](../../architecture/protocol.md) §4 (frame grammar, Monitor constraints) and §13
   (constants & invariants)
-- [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) §3
+- [prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) §3
   (harness constraints) and §4 (decision log, incl. the relay's Maildir spool
   and the "no Maildir in the local bus" ruling)
-- [overview.md](overview.md) §5 (founding decisions)
+- [overview.md](../legacy/overview.md) §5 (founding decisions)
 
 ## 1. Three constraints pin the design
 

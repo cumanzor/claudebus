@@ -2,8 +2,8 @@
 
 ## Connect an existing CLI session without restarting
 
-cbus v0.13.0 ships native Codex CLI connections on macOS/Linux alongside
-[native Claude receive](claude.md). Codex's queue API remains experimental;
+Native Codex CLI connections have shipped since cbus v0.12.0, on macOS/Linux,
+and [native Claude receive](claude.md) followed in v0.13.0. Codex's queue API remains experimental;
 release field checks used Codex 0.155.1 on macOS and 0.154.0 on Linux. See the
 [quick reference](../CHEATSHEET.md#codex-cli-quick-reference) for daily commands and
 the [release validation](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
@@ -89,7 +89,7 @@ The offline lifecycle canary passed 17 checks using a scratch app-server and a
 local fake provider, including a busy turn held for 11.05 seconds and both live
 and cold resume after interruption. That source=`vscode` test establishes queue
 semantics, not desktop support or actual CLI restart acceptance. See the
-[pilot evidence and remaining gates](architecture/codex-native-queue-pilot.md).
+[pilot evidence (historical)](history/acceptance/codex-native-queue-pilot.md).
 
 Ordinary CLI tests verify clean exit and resume by exact UUID, `--last`, name,
 and picker: the replacement process retains prior conversation input and
@@ -154,7 +154,7 @@ mail. A subsequent 65-minute idle test also passed against default
 reply. That reply used the existing `cbus send` allow rule, which permits that
 command outside the command sandbox. No global setting or rule changed. Fresh
 installations need an explicit permission setup; do not infer that an unapproved
-workspace sandbox can write the default bus. See the [pilot evidence](architecture/codex-native-queue-pilot.md).
+workspace sandbox can write the default bus. See the [pilot evidence](history/acceptance/codex-native-queue-pilot.md).
 
 ### Explicit optional reply permissions and upgrades
 

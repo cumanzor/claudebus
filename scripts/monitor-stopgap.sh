@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opt-in helper for docs/claude-monitor-stopgap.md: seed a NEW dedicated Claude Code config
+# opt-in helper for docs/history/legacy/claude-monitor-stopgap.md: seed a NEW dedicated Claude Code config
 # dir with a GrowthBook snapshot whose tengu_breezy_crescent is false, so Monitor keeps
 # `persistent`. Never writes into an existing config, never copies credentials, and reverts
 # only what it can prove it wrote.

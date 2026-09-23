@@ -19,7 +19,10 @@ see below):
 ## Native Claude and Codex subscriptions
 
 An ordinary Claude or Codex CLI session connects through its local daemon.
-v0.13.0 ships both native adapters on macOS/Linux; use the matching relay release.
+Native Codex has shipped since v0.12.0 and native Claude since v0.13.0, on
+macOS/Linux; use a relay from v0.12.0 or later, the first release that
+serves `/tail/durable-v1` (the relay code is unchanged from v0.12.0 through
+v0.14.1).
 Configure `CBUS_SITE_<HOST>_URL` and `cbus auth` as described below,
 then run inside each target session:
 
@@ -31,7 +34,11 @@ cbus connection disconnect dev@server/laptop         # stop delivery, retain loc
 ```
 
 No Monitor, tail or periodic model polling is needed. This requires the relay's
-`/tail/durable-v1` endpoint; an older server is refused before consuming messages.
+`/tail/durable-v1` endpoint; an older server is refused before consuming
+messages: "durable relay unavailable; server must support /tail/durable-v1
+(upgrade the relay)". The daemon dials that endpoint with only the bearer
+subprotocol and no CF Access headers, the same constraint as legacy `/tail`
+below; see [security.md](security.md) for the resulting auth requirement.
 
 The durable stream sends a stable message ID with the raw bus message. The
 daemon acknowledges only after an atomic, synchronized local inbox append;

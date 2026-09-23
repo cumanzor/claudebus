@@ -2,33 +2,49 @@
 
 ## Current release procedure
 
-1. Complete the [Codex v1 readiness gates](architecture/codex-v1-release-readiness.md)
-   against one frozen source revision. Keep raw canary artifacts local and attach
-   aggregate outcomes plus hashes to the tracker. A build hash identifies bytes;
-   a version label alone does not.
+1. Complete the acceptance gates for every adapter the release touches: the
+   [Codex v1 readiness gates](history/acceptance/codex-v1-release-readiness.md) for Codex,
+   and the Claude canaries under `scripts/` (e.g. `claude_cbus_canary.py`,
+   `claude_interactive_wake_canary.py`) for the native Claude adapter, against one
+   frozen source revision. Keep raw canary artifacts local and attach aggregate
+   outcomes plus hashes to the tracker. A build hash identifies bytes; a version
+   label alone does not. A client-only release with no adapter or protocol change
+   (v0.14.0 and v0.14.1 were both client-only) skips this step.
 2. Review and commit the complete change, then build from a clean checkout of that
-   exact revision. Run Go tests/vet/race checks, ordinary CLI, native queue,
-   presence, permissions, compaction, resume, terminal and relay acceptance.
-   Document the tested Codex version and any platform exclusions explicitly.
+   exact revision. A release that changed an adapter runs Go tests/vet/race checks,
+   ordinary CLI, native queue, presence, permissions, compaction, resume, terminal
+   and relay acceptance, and documents the tested Codex version and any platform
+   exclusions explicitly. A client-only release runs the smaller gate instead: two
+   fresh clones, `go vet` plus the race suite, and the five assets reproduced
+   byte-identically (the v0.14.0 record).
 3. Build **five client binaries**: Darwin amd64/arm64, Linux amd64/arm64 and Windows
    amd64 (`.exe`). Keep SHA256SUMS alongside them. Verify a second clean build
    reproduces the assets before publication; preserve the source revision and
    build-info evidence. Native Codex connect remains macOS/Linux only.
-4. Prepare the tag, release notes and matching relay build/deployment plan for
-   review. Do not publish merely because a local candidate is green. The native
-   daemon requires `/tail/durable-v1`; old relay `/tail` remains compatible with
-   Monitor clients, but does not provide durable client acknowledgment.
-5. After release authorization, tag/publish the exact tested revision. Verify
-   downloaded bytes against the prepared hashes and run install/selfupdate on Mac
-   and server. Do not rebuild different bytes under the same tag.
+4. Prepare the tag and release notes for review; also prepare a matching relay
+   build/deployment plan when the release changes relay code or the wire contract
+   (the relay itself has been unchanged since v0.12.0). Do not publish merely
+   because a local candidate is green. The native daemon requires
+   `/tail/durable-v1`; old relay `/tail` remains compatible with Monitor clients,
+   but does not provide durable client acknowledgment.
+5. After release authorization, tag the tested revision (`git tag vX.Y.Z`) and
+   publish from a clean tree with `make release CBUS_REPO=owner/repo` (refuses a
+   dirty tree; build from a fresh clone at the tag for provenance, as the v0.14.0
+   record did). `make release` publishes only the five client binaries; upload
+   the rest by hand: `gh release upload vX.Y.Z SHA256SUMS` plus any relay
+   binaries or validation files this release carries. Verify downloaded bytes
+   against the prepared hashes and run install/selfupdate on Mac and server. Do
+   not rebuild different bytes under the same tag.
 6. Verify command/role/Codex-skill refresh. Older updater binaries need one manual
    `cbus install-codex-skills` after upgrading. Preserve modified Codex skills;
    permission rule installation is always a separate explicit opt-in.
 7. Restart an existing daemon explicitly with the new executable; verify reported
    version/protocol, retained connection epoch and pending messages. An old pilot
    without process fencing needs explicit stop, confirmed exit, then start.
-8. Deploy the exact matching relay build only after its separate review/approval;
-   check remote connect/send/reply and reconnect against that running endpoint.
+8. When the release changed relay code, deploy the exact matching relay build only
+   after its separate review/approval, and check remote connect/send/reply and
+   reconnect against that running endpoint. A client-only release has nothing to
+   deploy here.
 
 ## Historical first-release ledger
 

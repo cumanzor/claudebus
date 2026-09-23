@@ -58,7 +58,7 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 > **Legacy installers — retired.** `install.sh` (bash-client restore) and
 > `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
 > releases and `cbus selfupdate` shipped, and the bash client itself was deleted at
-> P3 homogenization (see [compat-deletion-plan](architecture/compat-deletion-plan.md)).
+> P3 homogenization (see [compat-deletion-plan](history/decisions/compat-deletion-plan.md)).
 > All of it is recoverable from git history if ever needed; the supported path is
 > releases plus `cbus selfupdate`.
 
@@ -71,8 +71,9 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 ## Codex CLI permission and daemon setup
 
 Use `$cbus-connect` from an existing ordinary Codex CLI session. No special cbus
-launcher is required. Since v0.13.0, native Claude and Codex receive support
-macOS/Linux. Codex release field checks used 0.155.1 on macOS and 0.154.0 on Linux;
+launcher is required. Native Codex receive has shipped since v0.12.0 and native
+Claude receive since v0.13.0, both on macOS/Linux. Codex release field checks
+used 0.155.1 on macOS and 0.154.0 on Linux;
 the app-server queue surface remains experimental. See the
 [Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
 Windows retains its existing cbus functionality and explicitly refuses native
@@ -113,5 +114,6 @@ refuses new connects and `daemon start` instead of silently being reused:
 "running daemon is incompatible (version=... protocol=...; this binary=...);
 run cbus daemon restart to load this binary; registrations and pending mail
 are retained." `send`/`list` do not go through that check.
-Native cross-machine subscriptions also require the matching relay's
-`/tail/durable-v1` endpoint; deploying that relay is a separate release action.
+Native cross-machine subscriptions also require a relay from v0.12.0 or
+later, which serves `/tail/durable-v1`; deploying that relay is a separate
+release action.

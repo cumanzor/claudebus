@@ -1,7 +1,9 @@
 # Optional stopgap for legacy Monitor peers
 
-Status: temporary and opt-in, pinned to Claude Code 2.1.277. The mechanism is
-measured with a local fake provider; real-account field proof remains open.
+Status: temporary and opt-in, measured on Claude Code 2.1.277 with a local
+fake provider. Not re-verified on a later Claude Code version (currently
+installed: 2.1.280); do not assume the mechanism still holds until it is.
+Real-account field proof also remains open.
 
 Around 2026-09-14 Claude Code stopped granting `persistent` to the Monitor tool. Every cbus
 listener now expires at its `timeout_ms`, capped at 30 minutes, and each expiry costs two API
@@ -12,8 +14,8 @@ This document describes a stopgap intended to restore `persistent` for eligible 
 `scripts/monitor-stopgap.sh` performs the one step that is fiddly. Read the limits before
 using it. The stopgap is not the plan of record: cross-session messaging over each session's
 Unix socket inbox is the durable path, it needs none of the gates below, and it makes this
-document unnecessary for peers using the native receive path now available in source.
-Use [native Claude connections](claude.md) for that path; this helper is only for
+document unnecessary for peers using the native receive path shipped in v0.13.0.
+Use [native Claude connections](../../claude.md) for that path; this helper is only for
 sessions deliberately retaining the legacy Monitor transport.
 
 ## What actually changed

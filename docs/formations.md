@@ -1,6 +1,6 @@
 # Formations
 
-![a three-peer dev fleet driving itself: the orchestrator joins, spawns coder and reviewer with cbus spawn pane, dispatches a task over the bus, routes the result to review, and announces the verdict](demo-fleet.gif)
+![a three-peer dev fleet driving itself: the orchestrator joins, spawns coder and reviewer with cbus spawn pane, dispatches a task over the bus, routes the result to review, and announces the verdict](media/demo-fleet.gif)
 
 *A dev fleet driving itself: the orchestrator's first prompt is the only human
 input — it spawns its coder and reviewer as panes with `cbus spawn pane`, waits
@@ -20,7 +20,7 @@ cbus formation show myeffort              # inspect it — stale sids, TODO role
 cbus formation apply myeffort --dry-run   # preview the relaunch plan
 cbus formation apply myeffort             # relaunch the peers that are missing
 cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt
-cbus formation list                       # every saved formation
+cbus formation list                       # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                # delete a saved formation
 ```
 
@@ -38,11 +38,19 @@ cbus formation rm myeffort                # delete a saved formation
   `--only a,b` narrows it; `--channel <ch>` retargets a formation (including a
   starter template, see below) at a different channel for one run without
   touching the file; `--brief TEXT` adds an effort brief to every kickoff;
-  `--wait <dur>` sets how long to wait for each peer's answer (default 90s).
+  `--wait <dur>` sets how long to wait for each peer's answer (default 90s);
+  `--mode resume|fork|template` overrides a peer's restore mode for this run
+  only, without editing the saved file, and composes with `--only`.
 - **`bootstrap`** prints one peer's first-turn prompt for you to paste by
   hand — the path for a peer `apply` won't launch itself (recorded on another
   machine; cross-machine launch isn't in v1) or for previewing a brief before
   opening a fleet.
+- A `pane`-target peer's split chains off the largest pane made so far
+  (applier plus this run's created panes), a self-balancing grid instead of
+  always splitting the applier. A peer's `"split": "right"|"down"` in the
+  saved file (hand-edited; `save` never writes it) forces that divider, and
+  any declared direction in the file turns off tmux's auto-reflow for the
+  whole run.
 - Three restore modes decide *how* a peer comes back, and the modes never
   cross: a session resumed as itself continues its own transcript; a forked
   peer is told plainly that it is not the original and must not act on
@@ -53,7 +61,7 @@ cbus formation rm myeffort                # delete a saved formation
   the one it was saved as, and acting on stale intent under someone else's
   name).
 
-## Harness and profile limits in v0.13.0
+## Harness and profile limits
 
 Automatic launch/bootstrap supports Claude peers with the default Claude config
 or a recognized CCS profile. Saved Codex peers retain their harness and backend
@@ -82,7 +90,7 @@ writes your local copy, never the repo file.
 
 Model selection at launch follows this order: a peer's explicit `model` in the
 formation, then its role file's `MODEL:` line, then the harness CLI's own default.
-For example, `"model": "claude-opus-5"` overrides `MODEL: fable` in
+For example, `"model": "claude-opus-5-5"` overrides `MODEL: fable` in
 `roles/reviewer.md`; the role still supplies the peer's instructions. Leave the
 formation's `model` empty to inherit the role default. `formation show` displays
 the saved model field; an empty field does not mean the role has no default.
@@ -102,7 +110,11 @@ always does.
 `commands/bus-formation.md` wraps all of this in one slash command —
 `/bus-formation save myeffort`, `/bus-formation apply dev-trio --channel
 myeffort --dry-run`, and so on — for driving formations from inside a Claude
-Code session rather than shelling out directly.
+Code session rather than shelling out directly. `/save-formation` is the
+no-argument sibling: it resolves the channel from `cbus whoami`, saves, then
+names the peers whose `role: TODO`, stale sid, or `mode: template` would bite
+on the next `apply`. It only saves and reports; it never applies, resumes,
+bootstraps or removes.
 
 ## Coming back after a reboot
 
@@ -111,9 +123,13 @@ fresh shell on the machine that saved the formation. It relaunches just the
 anchor session (right directory, right profile, resuming its own transcript),
 and the restored anchor wakes to a decision brief: the saved roster, which
 peers are still resumable, and the `apply` commands to bring them back as
-themselves or fresh — its call, confirmed with you. A guard refuses
-double-resumes while the anchor is booting, and a formation that is already
-running refuses with directions to the live seat.
+themselves or fresh: its call, confirmed with you. `--brief TEXT` adds an
+effort brief to the anchor's resume kickoff, the same way it does on `apply`.
+A guard refuses double-resumes while the anchor is booting, and a formation
+that is already running refuses with directions to the live seat; other
+refusal cases (a gone transcript, a fork-born or unattributed anchor origin,
+a live-armed session id, or resuming from the wrong machine) are documented,
+listed under formation resume in `cbus --help`.
 
 ## Anchors and integrations
 

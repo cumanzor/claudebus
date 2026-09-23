@@ -1,5 +1,10 @@
 # Prior art and Claude Code internals
 
+> **Historical: durable research record, 2026-07.** No current successor; kept
+> as a fixed-point research copy, not updated for current behavior. §6
+> (2026-08-18) already supersedes §1-§2's closed-mailbox finding inline; see
+> the "superseded" notes at their own dates for the other in-place updates.
+
 Why this file exists: the decisions behind claudebus's design were made from live
 probing of Claude Code internals and a landscape survey of sibling projects — work
 done inside ephemeral session scratchpads that evaporate once those sessions end.
@@ -304,7 +309,7 @@ failure mode. This is a direct application of the ███ gap identified in §
 
 ## 5. Pointers
 
-- [architecture/design-space.md](architecture/design-space.md) — the forward-looking
+- [design-space.md](../decisions/design-space.md) — the forward-looking
   companion to §3/§4: the constraint analysis for the store/transport choices and the
   rejected alternatives (local ws broker, p2p ws, RPC/IPC, SQLite, Redis), captured
   from a v0.7.0-era design review.
@@ -380,7 +385,7 @@ confirmed twice independently. The same payload over cbus is stored complete in
 `inbox.jsonl` but the Monitor event renders it clipped near 3000 characters with a
 `(truncated)` marker, consistent with the ~440 bytes/line and ~2800 chars/
 notification bounds already recorded in
-[how-it-works.md](how-it-works.md). **[M]**
+[how-it-works.md](../../how-it-works.md). **[M]**
 
 **What this changes.** Nothing about the transport decisions in §3 and §4, which
 were sound when made and still work. What it changes is the argument: cbus is no

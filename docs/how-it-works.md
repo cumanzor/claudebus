@@ -1,13 +1,19 @@
 # How it works
 
+For the full system map (components, message flow, daemon lifecycle,
+presence, credential store), see
+[current-architecture.md](architecture/current-architecture.md). This page
+covers the join-time behavior a session needs to know.
+
 ## Native sessions
 
 Ordinary Claude and Codex CLI sessions run `cbus connect CHANNEL [ALIAS] --json`
 from inside the target session. The daemon receives mail and delivers through the
 exact session's native adapter: Claude's messaging socket or Codex's queue.
 iTerm2, tmux and manually opened terminals use the same transport. No Monitor,
-tail process or periodic model polling is needed. Both native CLI adapters have
-shipped since v0.13.0, on macOS and Linux. See [Claude](claude.md)
+tail process or periodic model polling is needed. The native Codex adapter has
+shipped since v0.12.0 and the native Claude adapter since v0.13.0, both on
+macOS and Linux. See [Claude](claude.md)
 and [Codex](codex.md) for capability checks, recovery and receipt semantics.
 
 After joining, check `cbus list CHANNEL` once (retain `@host` for relays), report
@@ -51,7 +57,7 @@ Each legacy session **joins a channel** and **arms a listener**:
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
   **Monitor** tool. A Monitor is not persistent: it expires after `timeout_ms`
   (default 5 minutes, max 30) and must be re-armed, at which point the peer
-  reads `off` until it is. See [the Monitor stopgap](claude-monitor-stopgap.md)
+  reads `off` until it is. See [the Monitor stopgap](history/legacy/claude-monitor-stopgap.md)
   for the opt-in workaround. It runs the blocking follower in-process, so
   *its own pid* becomes the liveness signal, recorded together with its process
   start time (`listenerStart` in `meta.json`) — the identity witness the

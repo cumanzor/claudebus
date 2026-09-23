@@ -1,6 +1,6 @@
 # Claude Code native connections
 
-Native Claude receive ships in [cbus v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
+Native Claude receive has shipped since [cbus v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
 for terminal CLI sessions on macOS and Linux, alongside native Codex receive.
 The signed-in CCS pilot used Claude 2.1.278, with mixed Claude/Codex delivery and
 Mac–server relay checks; see the [release validation](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
@@ -36,6 +36,11 @@ Claude's hold/refuse settings remain effective; cbus does not bypass them or inf
 which policy caused an unconfirmed submission. After joining, the command instructions check the roster
 once, retain known roles and announce membership changes to the user without bus
 acknowledgments or repeated roster polling.
+
+After a cbus upgrade, the daemon still running the previous version refuses
+new connects until `cbus daemon restart`; [install.md](install.md) quotes the
+refusal. [Codex](codex.md#explicit-optional-reply-permissions-and-upgrades)
+covers the same daemon restart, and it applies equally here.
 
 ## Delivery and resume
 
@@ -81,7 +86,7 @@ and export any unread mail, and explicitly decide whether it may be discarded.
 natively to that alias. Do not run a Monitor and native receive for the same inbox,
 and do not automatically replay exported messages that may already have arrived.
 
-The opt-in [Monitor stopgap](claude-monitor-stopgap.md) is for sessions still using
+The opt-in [Monitor stopgap](history/legacy/claude-monitor-stopgap.md) is for sessions still using
 the legacy transport. Native receive does not require the GrowthBook snapshot or
 telemetry-off workaround.
 

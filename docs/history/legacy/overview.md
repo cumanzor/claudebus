@@ -1,32 +1,34 @@
 # claudebus — System Overview
 
-> **Historical scope:** the Monitor receive loop below describes the legacy
-> interface. For current native Claude/Codex operation, start with
-> [how-it-works](../how-it-works.md) and the harness guides linked there.
+> **Historical: the Monitor receive loop below describes the legacy interface
+> (dated 2026-09-22).** For current native Claude/Codex operation, start with
+> [how-it-works.md](../../how-it-works.md), [claude.md](../../claude.md) and
+> [codex.md](../../codex.md). For the current system's full architecture, see
+> [current-architecture.md](../../architecture/current-architecture.md).
 >
 > Audience: a developer browsing this repo. This document describes the system as
 > audited at HEAD `f213e26` (2026-07-12), when the client was the bash `bin/cbus` —
 > behavioral quirks flagged, not fixed. **As of 2026-07-13 the installed client is the Go
 > port** (`cmd/cbus` + `internal/client` + `internal/core`), differentially verified
 > byte-identical to the bash client (27/27 verbs; see
-> [cutover-decision-package.md](cutover-decision-package.md)). Topology, protocol,
+> [cutover-decision-package.md](../decisions/cutover-decision-package.md)). Topology, protocol,
 > semantics, and the security model below are unchanged; statements about bash/python3
-> mechanics describe the retired reference implementation (kept in `bin/` until P3).
+> mechanics describe the retired reference implementation (deleted at P3).
 > Post-cutover feature additions — `spawn`, formations, roles, and the distribution
 > surface — are folded into the component map (§2) and command-reference.md.
 >
 > Companion documents:
-> - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
-> - [protocol.md](protocol.md) — on-disk formats, wire protocol, framing contract
-> - [port-map.md](port-map.md) — what a port to a real language must preserve, and why
-> - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the landscape survey and the
+> - [command-reference.md](../../architecture/command-reference.md) — every subcommand, flag, output string, and exit code
+> - [protocol.md](../../architecture/protocol.md) — on-disk formats, wire protocol, framing contract
+> - [port-map.md](../decisions/port-map.md) — what a port to a real language must preserve, and why
+> - [prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the landscape survey and the
 >   Claude Code internals probes that justified building this at all (the design research, summarized
 >   and kept as the historical record)
-> - [design-space.md](design-space.md) — why append-only files + a polling follower beat
+> - [design-space.md](../decisions/design-space.md) — why append-only files + a polling follower beat
 >   ws/RPC/IPC/SQLite/Redis: the constraint analysis and rejected alternatives
-> - [cutover-decision-package.md](cutover-decision-package.md) — the executed cutover's
+> - [cutover-decision-package.md](../decisions/cutover-decision-package.md) — the executed cutover's
 >   decision record and rollback procedure
-> - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash
+> - [compat-deletion-plan.md](../decisions/compat-deletion-plan.md) — the coexistence shims and bash
 >   artifacts deleted at P3
 > - [behavior-spec.md](behavior-spec.md) — frozen bash-era spec (every command, state file,
 >   wire format, quirk), `file:line`-anchored; the port's verification contract
@@ -69,7 +71,7 @@ Design pillars, stated up front in the README and held throughout:
 
 ### Why not the built-in teammate mailbox?
 
-**Superseded 2026-08-18** — see [how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox)
+**Superseded 2026-08-18** — see [how-it-works.md](../../how-it-works.md#why-not-the-built-in-teammate-mailbox)
 for the current picture. Claude Code has cross-session messaging (2.1.224+): `ListAgents`
 enumerates independent sessions and `SendMessage` addresses them by name over a per-session
 socket, and hooks and Bash children get that socket too. Teammates are separate Claude Code
@@ -82,7 +84,7 @@ claudebus's distinction is now openness rather than reach — a file and a CLI w
 handshake or token, non-Claude peers, a relay you own, and a readable mailbox and ledger.
 
 The original probe, across three live sessions before building anything (see
-[prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md)), accurate when made:
+[prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md)), accurate when made:
 
 - **`SendMessage`'s addressable universe is one session's spawn tree, full stop.** There is no
   cross-session namespace.
@@ -113,13 +115,13 @@ hook, which is why the Monitor-tail is still what cbus uses to wake an arbitrary
 
 | Component | Where | What it is |
 |---|---|---|
-| **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`, including `cbus close` — the one lifecycle verb that signals a peer's OS process (SIGTERM, then `--force` for SIGKILL) rather than just its registration. No runtime dependencies. The retired 914-line bash implementation remains at `bin/cbus` as the rollback artifact until P3. |
+| **Client CLI** | `cmd/cbus` + `internal/client` + `internal/core` | Single static Go binary installed as `cbus` (cutover 2026-07-13); every subcommand plus `cbus --version`, including `cbus close`, the one lifecycle verb that signals a peer's OS process (SIGTERM, then `--force` for SIGKILL) rather than just its registration. No runtime dependencies. The retired 914-line bash implementation was deleted at P3 homogenization; recover it from git history if ever needed. |
 | **Local transport** | `~/.claude-bus/` | Plain files. `<channel>/<alias>/meta.json` (registration + liveness pids) and `inbox.jsonl` (append-only mailbox, one JSON message per line). `.remote/<host>/<channel>/<sessionId>` holds per-session remote identity markers. |
-| **The follower** | run in-process by `cbus tail` | An in-process Go loop under the Monitor tool — no re-exec, no argv identity (P3 tranche 2, 2026-07-19). Listener identity is structural, `(pid, starttime)` via `procStartTime`, not argv; a `TRANSITION(P3T2)` argv fallback applies only to peers armed by a pre-P3 binary and is scoped to one release. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
-| **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the server bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /peers` presence; `GET /healthz`. |
+| **The follower** | run in-process by `cbus tail` | An in-process Go loop under the Monitor tool: no re-exec, no argv identity (P3 tranche 2, 2026-07-19). Listener identity is structural, `(pid, starttime)` via `procStartTime`, not argv. Follows the inbox `tail -F`-style (0.2 s poll, reopen on inode change/shrink) and reframes each message via the shared `core.LocalEmit` framer into a `◀ cbus msg …` block sized for the Monitor's measured output caps. Its pid *is* the recorded `listenerPid`. |
+| **Relay daemon** | `relay/cmd/cbus-relay` | Go, std-lib only, zero external deps. Runs on the server bound to `127.0.0.1:8090` under systemd. `POST /send` → Maildir spool; `GET /tail` → hand-rolled RFC 6455 WebSocket (in `relay/internal/wire`) that drains the queue and streams live; `GET /tail/durable-v1` → the native daemon's durable, acknowledged subscription; `GET /peers` presence; `POST /prune` reaps off peers server-side with no queued mail; `GET /healthz`. |
 | **Maildir spool** | `relay/internal/spool` | `<root>/<channel>/<alias>/{tmp,new,cur}` — write to `tmp/`, atomic rename into `new/`, move to `cur/` after delivery. Crash-safe by construction (no fsync — deliberately not power-loss durable). |
 | **wstail** | `relay/cmd/wstail` | Loopback **debug/verification client** for `/tail`. TCP-only (no TLS) so it cannot cross the Cloudflare front door — it is not a production bridge. The real remote consumer is the Monitor's `ws:` source. |
-| **CC integration** | `commands/*.md`, `roles/*.md` (embedded); placed by `cbus install-commands` / `install-roles` | Five slash commands (`/bus-join`, `/bus-branch`, `/bus-spawn`, `/bus-rename`, `/bus-formation`) that are deliberately thin — logic lives in the binary. `cbus branch` (fork) and `cbus spawn` (fresh session) place the child natively via a `TerminalForker` (see *Terminal coupling*, below) using `--resume <sid> --fork-session` for branch (CCS-profile-aware); `bin/cc-branch.sh` is retired. `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
+| **CC integration** | `commands/*.md`, `roles/*.md` (embedded); placed by `cbus install-commands` / `install-roles` | Eight slash commands (`/bus-join`, `/bus-branch`, `/bus-spawn`, `/bus-rename`, `/bus-formation`, `/bus-codex`, `/bus-layout`, `/save-formation`) that are deliberately thin: logic lives in the binary. `cbus branch` (fork) and `cbus spawn` (fresh session) place the child natively via a `TerminalForker` (see *Terminal coupling*, below) using `--resume <sid> --fork-session` for branch (CCS-profile-aware); `bin/cc-branch.sh` is retired. `cbus hook-exit` runs from a SessionEnd hook (wired manually in `~/.claude/settings.json` on each machine) to announce departure on graceful exit. |
 | **Formations** | `cmd/cbus/formation.go` + `internal/client/formation*.go`; `$CBUS_DIR/.formations/`, repo `formations/` | Saved channel topologies — peers, roles, models, restore modes — that relaunch a fleet with `cbus formation apply`. Runtime saves shadow committed starter templates (`formations/dev-trio.json`); `save` captures the birth-record origin/model automatically. |
 | **Roles** | `roles/*.md` (embedded via `go:embed`); `internal/client/role.go` | Committed role-prompt files that `cbus spawn --role <r>` appends to a fresh peer's first turn (repo `roles/` first, then `$CBUS_DIR/roles`). Each carries a `MODEL:` line that defaults the child's model. |
 | **Distribution** | `get.sh`; `cmd/cbus/{selfupdate,install_assets,update_check,version}.go` | First install bootstraps via `get.sh` (downloads a GitHub release binary, then installs the embedded skills/roles); thereafter `cbus selfupdate`. `CBUS_UPDATE_CHECK=1` opts into a once-a-day update hint. The legacy `install.sh` / `install-cbus-go.sh` were retired (`de07cbe`). |
@@ -197,9 +199,11 @@ under a non-iTerm2 terminal.
 ## 3. Cross-machine topology
 
 ```
-Laptop session ── bin/cbus ──► https://bus.example.com  (CF tunnel front door)
+Laptop session ── cbus ──► https://bus.example.com  (CF tunnel front door)
                               │  POST /send: CF Access service token + relay bearer
                               │  GET  /tail: CF Access bypass (path-scoped); auth = ws subprotocol
+                              │  GET  /tail/durable-v1: CF Access bypass (path-scoped); auth = ws subprotocol
+                              │  POST /prune: CF Access service token + relay bearer
                               ▼
 Server: cbus-relay on 127.0.0.1:8090 ──► Maildir spool ──► ws push to the single active tail per peer
 ```
@@ -220,8 +224,9 @@ Server: cbus-relay on 127.0.0.1:8090 ──► Maildir spool ──► ws push t
   registry — a taken alias is self-evident because the relay keeps **one active tail per peer**
   and a new `/tail` visibly displaces the old Monitor.
 - **Credentials** live in the macOS Keychain (Linux: `0600` files under `~/.config/cbus/<host>/`),
-  seeded once via `cbus auth set`. They never appear in argv: curl auth rides a config on stdin
-  (`curl -K -`), Keychain writes go through `security -i`.
+  seeded once via `cbus auth set`. They never appear in argv: credentials go in HTTP headers
+  from the Go client's `net/http` (never a shelled-out `curl`), Keychain writes go through
+  `security -i`.
 
 ### A remote send → deliver round trip
 
@@ -295,8 +300,8 @@ The auth is deliberately **asymmetric per path**:
 
 | Path | Edge (Cloudflare Access) | Origin (relay) |
 |---|---|---|
-| `POST /send`, `GET /peers` | service-token headers required | `Authorization: Bearer <token>`, constant-time compare |
-| `GET /tail` (ws) | **bypass, scoped to this path only** | token in `Sec-WebSocket-Protocol: bearer.cbus.<token>`, constant-time compare |
+| `POST /send`, `GET /peers`, `POST /prune` | service-token headers required | `Authorization: Bearer <token>`, constant-time compare |
+| `GET /tail`, `GET /tail/durable-v1` (ws) | **bypass, scoped to this path only** | token in `Sec-WebSocket-Protocol: bearer.cbus.<token>`, constant-time compare |
 
 The asymmetry exists because of a hard harness constraint: the Monitor's `ws:` source takes only
 `{url, protocols}` — **no custom headers** — so CF Access header auth is impossible on the ws leg.
@@ -364,7 +369,7 @@ decisions below are unaffected — they were sound then and the mechanism still 
 the *reason to keep* cbus is no longer the absence of an alternative. It is an open
 boundary any process can use without a token, non-Claude peers, a relay you own, and a
 mailbox you can read with `cat`. See §1 and
-[how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox).
+[how-it-works.md](../../how-it-works.md#why-not-the-built-in-teammate-mailbox).
 
 ### 5.3 Session-scoped bridge identity
 
@@ -507,5 +512,5 @@ Documented, accepted, or tracked — none are silent.
   `hook-compact`'s compaction presence followed in the 2026-07-18 pass.
 
 For the exhaustive per-command behavior (including every quirk found in the audit), see
-[command-reference.md](command-reference.md); for wire/disk formats see
-[protocol.md](protocol.md); for the port-critical invariants see [port-map.md](port-map.md).
+[command-reference.md](../../architecture/command-reference.md); for wire/disk formats see
+[protocol.md](../../architecture/protocol.md); for the port-critical invariants see [port-map.md](../decisions/port-map.md).

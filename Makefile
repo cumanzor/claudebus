@@ -51,10 +51,13 @@ install:
 	go install -ldflags "$(LDFLAGS)" $(PKG)
 
 # cut a release: `git tag vX.Y.Z` on HEAD, then `make release CBUS_REPO=owner/repo`.
-# WRITTEN, NEVER RUN in this effort — the remote, tag, and first release are
-# Carlos-gated and sequenced after the quiesce window (cbus-7sg). Requires gh
-# authenticated with write access. A tag with a '-' suffix (v0.2.0-rc1) publishes as
-# a prerelease that selfupdate ignores by construction.
+# This target builds the five client binaries (via dist) and publishes them with
+# `gh release create`; SHA256SUMS and any other release assets (relay binaries,
+# validation files) are not produced here and are uploaded separately with
+# `gh release upload` (RELEASE-CHECKLIST.md). The tag and publish step are
+# Carlos-gated and sequenced after the pre-release checklist. Requires gh
+# authenticated with write access. A tag with a '-' suffix (v0.2.0-rc1) publishes
+# as a prerelease that selfupdate ignores by construction.
 #
 # The clean-tree guard is not hygiene. assets.go go:embed snapshots the WORKING TREE,
 # and VERSION carries git describe --dirty, so a dirty release ships uncommitted files

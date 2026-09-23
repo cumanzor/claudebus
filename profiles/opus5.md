@@ -2,9 +2,10 @@
 
 Source: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5
 
-Appended after your role file. The role file is your mandate; this is tuning for
-the model running it. Where they conflict, the role file wins and you flag the
-conflict.
+Sent by the orchestrator with your role file; cbus does not automatically
+inject `profiles/*.md`. The role file is your mandate; this is tuning for
+the model running it. Where they conflict, the role file wins and you flag
+the conflict.
 
 ## Do not stack verification on yourself
 
