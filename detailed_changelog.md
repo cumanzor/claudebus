@@ -1,5 +1,44 @@
 # Changelog (detailed)
 
+## [2026-09-23 18:13:50 UTC] [Docs/R3] generalize example tool-inventory names
+
+[Attempt #1] Branch `republish-docs`, same worktree. 14 files: AGENTS.md,
+CHEATSHEET.md, one commands file, docs/architecture/command-reference.md,
+docs/formations.md, docs/relay.md, docs/security.md, three docs/history
+records, one role file's process rules (not its shared doctrine block),
+and both changelogs.
+
+[What changed]
+Every place a doc named the author's issue tracker, a retired
+documentation-repo tier, a formations-reading dashboard, or one of four
+third-party services, in prose, a CLI flag example, an argument hint, or a
+runnable credential-seed block, now reads as a generic placeholder term
+instead: an issue tracker, a docs repo, a dashboard, a password manager, a
+private network, or a Linux container runtime, matching the equivalent
+rename landing on the parallel code-side pass. The saved-anchor CLI
+convention (a flag plus its example fixture value) changes together
+everywhere it appears, keeping the worked example runnable as written. The
+two runnable credential-seed blocks now pipe a generic secret-manager
+placeholder command into the existing auth-set example rather than naming
+a specific product. A tracker-item id family distinct from this project's
+own tracker ids was renamed or dropped to match, since those ids embedded
+the tool name itself; this project's own tracker ids are untouched
+everywhere, including inside the same sentences.
+
+[Testing Notes]
+Dash/vocab sweep: no self-authored instances; every flagged line was a
+touched-in-passing rename inside an otherwise-unchanged historical
+sentence, left as is. Repo-wide link checker reports zero unresolved
+links. A case-insensitive word-boundary grep for every service and tool
+name the mapping table lists, plus their singular and plural forms and
+their compound path forms, returns zero hits across the full scope. A
+before/after multiset comparison of this project's own tracker ids across
+the full diff confirms none were altered as a side effect of the
+surrounding prose edits. The one role file touched was diffed against its
+three siblings and against the pre-R1 base commit: only its own
+non-shared process rules changed, its shared doctrine block stayed
+byte-identical everywhere.
+
 ## [2026-09-23 17:49:40 UTC] [Docs/R2] generalize example machine names
 
 [Attempt #1] Branch `republish-docs`, same worktree. 18 files: the
@@ -10519,7 +10558,7 @@ implementation) against every doc that mentions the bash client. 8
 files MUST-CHANGE, 5 BANNER-only (audit-era body preserved as the
 verified contract the port was checked against), 4 NO-CHANGE. Applied
 in dependency order: user-facing docs (README/CHEATSHEET/bus-join.md)
-first, so the docs-repo status lines that claim "drift fixed" would
+first, so the docs repo's status lines that claim "drift fixed" would
 actually be true when written.
 
 [Files Changed — repo, 4 commits]
