@@ -312,10 +312,6 @@ func runHookCompact(args []string) int {
 	return 0
 }
 
-// runHookJoin runs the SessionStart hook: auto-join $CBUS_CHANNEL under the stdin session id
-// (alias $CBUS_ALIAS or auto), optionally writing the id to $CBUS_CODEX_RENDEZVOUS. It ALWAYS
-// returns 0 and writes NOTHING to stdout — a SessionStart hook must never fail the session and
-// its stdout is parsed as hook directives.
 // hostLabelGated: every verb refuses up front on an invalid CBUS_HOST, except help
 // and version (they never resolve it) and the hooks, whose contract is exit 0: a
 // PreCompact hook exiting 2 blocks compaction. The hooks fail closed internally.
@@ -327,6 +323,10 @@ func hostLabelGated(verb string) bool {
 	return true
 }
 
+// runHookJoin runs the SessionStart hook: auto-join $CBUS_CHANNEL under the stdin session id
+// (alias $CBUS_ALIAS or auto), optionally writing the id to $CBUS_CODEX_RENDEZVOUS. It ALWAYS
+// returns 0 and writes NOTHING to stdout — a SessionStart hook must never fail the session and
+// its stdout is parsed as hook directives.
 func runHookJoin() int {
 	client.HookJoin(os.Stdin, os.Getenv("CBUS_CHANNEL"), os.Getenv("CBUS_ALIAS"), os.Getenv("CBUS_CODEX_RENDEZVOUS"))
 	return 0

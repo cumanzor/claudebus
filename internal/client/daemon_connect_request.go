@@ -33,7 +33,7 @@ func connectHostLabel(sent string) (string, error) {
 	if sent == "" {
 		return HostLabel()
 	}
-	if !core.ValidName(sent) || shortLabel(sent) != sent {
+	if !core.ValidStoreName(sent) || shortLabel(sent) != sent {
 		return "", fmt.Errorf("%w %q in the connect request", ErrBadHostLabel, sent)
 	}
 	return sent, nil

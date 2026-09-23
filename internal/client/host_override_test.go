@@ -57,7 +57,9 @@ func TestHostLabelOverride(t *testing.T) {
 
 func TestInvalidHostLabelIsAnErrorNeverAFallback(t *testing.T) {
 	sys := systemLabel(t)
-	for _, bad := range []string{"bad/host", "two words", "..", "host\n", ".hidden", "é"} {
+	// ValidStoreName (D12): a leading '-' reads as a flag wherever the label is passed;
+	// "box." is refused on the raw value even though its short form would be valid.
+	for _, bad := range []string{"bad/host", "two words", "..", "host\n", ".hidden", "é", "-box", "box."} {
 		t.Setenv("CBUS_HOST", bad)
 		got, err := HostLabel()
 		if err == nil || !errors.Is(err, ErrBadHostLabel) {
@@ -68,7 +70,7 @@ func TestInvalidHostLabelIsAnErrorNeverAFallback(t *testing.T) {
 			t.Errorf("CBUS_HOST=%q: an invalid override returned label %q; it must return none", bad, got)
 		}
 		msg := err.Error()
-		for _, want := range []string{"CBUS_HOST", strings.TrimSuffix(strings.TrimPrefix(quote(bad), `"`), `"`), "letters, digits", "unset it"} {
+		for _, want := range []string{"CBUS_HOST", strings.TrimSuffix(strings.TrimPrefix(quote(bad), `"`), `"`), "letters, digits", "not starting with '.' or '-'", "unset it"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("CBUS_HOST=%q: error %q does not tell the user how to fix it (missing %q)", bad, msg, want)
 			}
@@ -160,7 +162,7 @@ func TestDaemonRecordsTheClientHostLabel(t *testing.T) {
 }
 
 func TestDaemonRefusesAnInvalidRequestHostBeforeMutation(t *testing.T) {
-	for _, bad := range []string{"bad/host", "dotted.name", "..", "two words"} {
+	for _, bad := range []string{"bad/host", "dotted.name", "..", "two words", "-box", "box."} {
 		t.Run(bad, func(t *testing.T) {
 			d, q, req := daemonFixture(t)
 			req.Host = bad

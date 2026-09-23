@@ -188,10 +188,10 @@ func HostLabel() (string, error) {
 var ErrBadHostLabel = errors.New("invalid CBUS_HOST")
 
 func screenHostLabel(v string) (string, error) {
-	if s := shortLabel(v); core.ValidName(v) && s != "" && core.ValidName(s) {
+	if s := shortLabel(v); core.ValidStoreName(v) && core.ValidStoreName(s) {
 		return s, nil
 	}
-	return "", fmt.Errorf("%w %q: use letters, digits, '.', '_' or '-' (the part before the first dot is the label), or unset it to use the system hostname", ErrBadHostLabel, v)
+	return "", fmt.Errorf("%w %q: use letters, digits, '.', '_' or '-', not starting with '.' or '-' and not ending with '.' (the part before the first dot is the label), or unset it to use the system hostname", ErrBadHostLabel, v)
 }
 
 func shortLabel(h string) string {
