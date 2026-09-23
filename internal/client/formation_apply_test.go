@@ -138,7 +138,7 @@ func TestApplyPerModeArgv(t *testing.T) {
 		}),
 	)
 	for i := range f.Peers {
-		f.Peers[i].Machine = ShortHostname()
+		f.Peers[i].Machine = thisHost()
 	}
 	fk := &recForker{}
 	hasTranscript := func(profile, sid string) bool { return sid == "sid-coder" || sid == "sid-clone" }
@@ -234,9 +234,9 @@ func TestApplyAnchorFirst(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("reviewer", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("reviewer", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &recForker{}
 	if _, err := applyWith(t, f, ApplyOptions{}, fk, nil); err != nil {
@@ -256,14 +256,14 @@ func TestApplyReconcileSkipsPresentAndRefused(t *testing.T) {
 	armPeer(t, "ch", "orchestrator") // the applier is genuinely live
 
 	f := applyFixture(
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
 		peer("ghost", func(p *FormationPeer) { // fork-born: R1 refuses
 			p.Mode = ModeFork
 			p.Origin = OriginFork
 			p.SessionID = "sid-parent"
-			p.Machine = ShortHostname()
+			p.Machine = thisHost()
 		}),
-		peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &recForker{}
 	rep, err := applyWith(t, f, ApplyOptions{}, fk, func(_, sid string) bool { return true })
@@ -317,7 +317,7 @@ func TestApplyZeroLaunchableFails(t *testing.T) {
 func TestApplyDryRunLaunchesNothing(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }))
 	fk := &recForker{}
 	rep, err := applyWith(t, f, ApplyOptions{DryRun: true, Wait: time.Second}, fk, nil)
 	if err != nil {
@@ -339,8 +339,8 @@ func TestApplyOnlyFilter(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &recForker{}
 	if _, err := applyWith(t, f, ApplyOptions{Only: []string{"coder"}}, fk, nil); err != nil {
@@ -362,8 +362,8 @@ func TestApplyConvergenceRoundTrip(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	inbox := applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &answeringForker{t: t, inbox: inbox}
 	rep, err := applyWith(t, f, ApplyOptions{Wait: 5 * time.Second}, fk, nil)
@@ -394,8 +394,8 @@ func TestApplySilentPeerFails(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	inbox := applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("mute", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("mute", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &answeringForker{t: t, inbox: inbox, quiet: map[string]bool{"mute": true}}
 	rep, err := applyWith(t, f, ApplyOptions{Wait: 300 * time.Millisecond}, fk, nil)
@@ -424,7 +424,7 @@ func TestApplySilentPeerFails(t *testing.T) {
 func TestApplyWaitZeroDoesNotPoll(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }))
 	rep, err := applyWith(t, f, ApplyOptions{Wait: 0}, &recForker{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -441,7 +441,7 @@ func TestApplyWaitZeroDoesNotPoll(t *testing.T) {
 func TestApplyLaunchFailureIsReported(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }))
 	fk := &recForker{err: os.ErrPermission}
 	rep, err := applyWith(t, f, ApplyOptions{}, fk, nil)
 	if err != nil {
@@ -461,7 +461,7 @@ func TestApplyLaunchFailureIsReported(t *testing.T) {
 func TestApplyReservesTemplateAlias(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }))
 	if _, err := applyWith(t, f, ApplyOptions{}, &recForker{}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ func TestApplyPeerProfile(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(ccs, "alpha"))
 	applierOn(t, "ch", "applier")
 	f := applyFixture(peer("orchestrator", func(p *FormationPeer) {
-		p.Machine = ShortHostname()
+		p.Machine = thisHost()
 		p.Profile = "beta"
 	}))
 	fk := &recForker{}
@@ -500,7 +500,7 @@ func TestApplyPeerProfile(t *testing.T) {
 		t.Errorf("CLAUDE_CONFIG_DIR = %q, want the peer's instance dir", got)
 	}
 	// a blank profile keeps the applier's
-	f2 := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f2 := applyFixture(peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }))
 	fk2 := &recForker{}
 	if _, err := applyWith(t, f2, ApplyOptions{}, fk2, nil); err != nil {
 		t.Fatal(err)
@@ -518,8 +518,8 @@ func TestApplyNeverLaunchesItself(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "orchestrator") // joined, deliberately NOT armed
 	f := applyFixture(
-		peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-		peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+		peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 	)
 	fk := &recForker{}
 	rep, err := applyWith(t, f, ApplyOptions{}, fk, nil)
@@ -559,7 +559,7 @@ func TestApplyNeverLaunchesItself(t *testing.T) {
 func TestApplyBriefReachesKickoff(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }))
 	fk := &recForker{}
 	brief := "Ship formations v1; answer the nonce then wait."
 	if _, err := applyWith(t, f, ApplyOptions{Brief: brief}, fk, nil); err != nil {
@@ -593,16 +593,16 @@ func TestApplyReservationBirthPerMode(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("fresh1", func(p *FormationPeer) { p.Machine = ShortHostname(); p.Model = "opus" }), // template (default mode)
+		peer("fresh1", func(p *FormationPeer) { p.Machine = thisHost(); p.Model = "opus" }), // template (default mode)
 		peer("clone1", func(p *FormationPeer) {
-			p.Machine = ShortHostname()
+			p.Machine = thisHost()
 			p.Model = "sonnet"
 			p.Mode = ModeFork
 			p.Origin = OriginFresh
 			p.SessionID = "sid-clone"
 		}),
 		peer("cont1", func(p *FormationPeer) {
-			p.Machine = ShortHostname()
+			p.Machine = thisHost()
 			p.Model = "fable"
 			p.Mode = ModeResume
 			p.Origin = OriginFresh
@@ -675,7 +675,7 @@ func TestApplyDeferredModelReachesLaunchAndReservation(t *testing.T) {
 	roleFileIn(t, dir, "m8role", "# M8 Role\n\nMODEL: fable\n\nbody")
 	applierOn(t, "ch", "applier")
 	f := applyFixture(peer("worker", func(p *FormationPeer) {
-		p.Machine = ShortHostname()
+		p.Machine = thisHost()
 		p.Rolefile = "roles/m8role.md" // no model -> defers to MODEL: fable
 	}))
 	fk := &recForker{}
@@ -717,8 +717,8 @@ func TestApplyChannelOverride(t *testing.T) {
 	f := &Formation{
 		Schema: FormationSchema, Name: "dev-trio", Channel: "dev-trio", AnchorAlias: "orchestrator",
 		Peers: []FormationPeer{
-			peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-			peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+			peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+			peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 		},
 	}
 	fk := &recForker{}
@@ -765,7 +765,7 @@ func TestApplyChannelOverride(t *testing.T) {
 func TestApplyChannelOverrideRejectsBad(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
-	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }))
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }))
 	if _, err := applyWith(t, f, ApplyOptions{Channel: "bad/name"}, &recForker{}, nil); err == nil ||
 		!strings.Contains(err.Error(), "--channel") {
 		t.Errorf("a bad --channel must be refused, got %v", err)
@@ -779,7 +779,7 @@ func panePeer(alias string, mut ...func(*FormationPeer)) FormationPeer {
 		p.Target = "pane"
 		p.Mode = ModeTemplate
 		p.Origin = OriginJoined
-		p.Machine = ShortHostname()
+		p.Machine = thisHost()
 		for _, m := range mut {
 			m(p)
 		}
@@ -795,8 +795,8 @@ func TestApplyDryRunNeedsNoJoinNorChannel(t *testing.T) {
 	f := &Formation{
 		Schema: FormationSchema, Name: "dev-trio", Channel: "dev-trio", AnchorAlias: "orchestrator",
 		Peers: []FormationPeer{
-			peer("orchestrator", func(p *FormationPeer) { p.Machine = ShortHostname() }),
-			peer("coder", func(p *FormationPeer) { p.Machine = ShortHostname() }),
+			peer("orchestrator", func(p *FormationPeer) { p.Machine = thisHost() }),
+			peer("coder", func(p *FormationPeer) { p.Machine = thisHost() }),
 		},
 	}
 	rep, err := Apply(f, ApplyOptions{DryRun: true}, &recForker{})

@@ -32,6 +32,7 @@ type ConnectRequest struct {
 	Config   CodexQueueConfig      `json:"config"`
 	Claude   *ClaudeConnectBinding `json:"claude,omitempty"`
 	Relay    *RelayConfig          `json:"relay,omitempty"`
+	Host     string                `json:"host,omitempty"`
 }
 
 // ConnectionState reports queue acceptance separately from recipient receipt.
@@ -525,6 +526,10 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if err := validateConnectEnvelope(req, token); err != nil {
 		return nil, err
 	}
+	host, err := connectHostLabel(req.Host)
+	if err != nil {
+		return nil, err
+	}
 	req.Harness = daemonHarness(req.Harness)
 	if !d.connectMu.TryLock() {
 		return nil, errDaemonBusy
@@ -719,7 +724,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		return nil, err
 	}
 	now := Now()
-	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname(), TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
+	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: host, TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
 	if reservation != nil {
 		m.Origin, m.Model = reservation.Origin, reservation.Model
 	}

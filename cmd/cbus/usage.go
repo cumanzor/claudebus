@@ -237,6 +237,8 @@ convention: channel "global" is the machine-wide orchestrator bus; per-task or
 per-repo channels (e.g. the repo name) are the default for parent/fork pairs.
 
 env: CBUS_DIR (default ~/.claude-bus),
+     CBUS_HOST (this machine's label in list, meta and formations; default the
+       short hostname; part before the first dot; an invalid value refuses),
      CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL (relay endpoints),
      CBUS_REPO (owner/repo for selfupdate; baked into released binaries),
      CBUS_UPDATE_CHECK=1 (opt-in: a once-a-day 'update available' hint)

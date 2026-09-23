@@ -2,11 +2,14 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"claudebus/internal/core"
 )
 
 // CBUSDir is the local bus state root: $CBUS_DIR or ~/.claude-bus (bin/cbus:16).
@@ -165,15 +168,35 @@ func markerSID() string {
 	return "nosession-" + strconv.Itoa(os.Getppid())
 }
 
-// ShortHostname is `hostname -s` (the label before the first dot); "unknown" on
-// failure.
-func ShortHostname() string {
+// HostLabel is this machine's label, the ONE place it is resolved: $CBUS_HOST when
+// set, else `hostname -s` ("unknown" if the system has none). Both take the part
+// before the first dot. An invalid $CBUS_HOST is an error, never a fallback: meta,
+// ledger and formation machine all carry this value, so a silent substitute would
+// record the machine under a name the user did not choose.
+func HostLabel() (string, error) {
+	if v := os.Getenv("CBUS_HOST"); v != "" {
+		return screenHostLabel(v)
+	}
 	h, err := os.Hostname()
 	if err != nil || h == "" {
-		return "unknown"
+		return "unknown", nil
 	}
+	return shortLabel(h), nil
+}
+
+// ErrBadHostLabel marks an invalid CBUS_HOST so callers can tell it from I/O errors.
+var ErrBadHostLabel = errors.New("invalid CBUS_HOST")
+
+func screenHostLabel(v string) (string, error) {
+	if s := shortLabel(v); core.ValidName(v) && s != "" && core.ValidName(s) {
+		return s, nil
+	}
+	return "", fmt.Errorf("%w %q: use letters, digits, '.', '_' or '-' (the part before the first dot is the label), or unset it to use the system hostname", ErrBadHostLabel, v)
+}
+
+func shortLabel(h string) string {
 	if i := strings.IndexByte(h, '.'); i >= 0 {
-		h = h[:i]
+		return h[:i]
 	}
 	return h
 }
@@ -183,17 +206,21 @@ func ShortHostname() string {
 // alias, else the unroutable <shorthost>-<ppid> fallback. It never consults local
 // registrations or $CBUS_ALIAS — the remote chain differs from the local one by
 // design (protocol.md §3.1).
-func RemoteFromDefault(host, channel string) string {
+func RemoteFromDefault(host, channel string) (string, error) {
 	mf := filepath.Join(CBUSDir(), ".remote", host, channel, markerSID())
 	if b, err := os.ReadFile(mf); err == nil {
 		var m struct {
 			Alias string `json:"alias"`
 		}
 		if json.Unmarshal(b, &m) == nil && m.Alias != "" {
-			return channel + "@" + host + "/" + m.Alias
+			return channel + "@" + host + "/" + m.Alias, nil
 		}
 	}
-	return fmt.Sprintf("%s-%d", ShortHostname(), os.Getppid())
+	label, err := HostLabel()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s-%d", label, os.Getppid()), nil
 }
 
 // metaSessionID reads the sessionId out of a meta.json, tolerating a missing or

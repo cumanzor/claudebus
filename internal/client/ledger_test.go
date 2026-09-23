@@ -860,7 +860,7 @@ func TestRestoreRecordsContinuityAndClearsLauncherPid(t *testing.T) {
 	applierOn(t, "ch", "applier")
 	f := applyFixture(
 		peer("coder", func(p *FormationPeer) {
-			p.Machine = ShortHostname()
+			p.Machine = thisHost()
 			p.SessionID = "PRIOR-SID"
 			p.Origin = OriginFork
 		}),

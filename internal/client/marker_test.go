@@ -40,7 +40,7 @@ func TestWriteAndReadRemoteMarker(t *testing.T) {
 	if !strings.HasPrefix(string(b), "{\n  \"alias\": \"laptop\",") {
 		t.Errorf("on-disk marker is not indent=2: %q", b)
 	}
-	if from := RemoteFromDefault("server", "dev"); from != "dev@server/laptop" {
+	if from, err := RemoteFromDefault("server", "dev"); err != nil || from != "dev@server/laptop" {
 		t.Errorf("RemoteFromDefault = %q, want dev@server/laptop", from)
 	}
 }
@@ -63,7 +63,7 @@ func TestWriteRemoteMarkerReplacesLegacyFile(t *testing.T) {
 	if fi, err := os.Stat(legacyFile); err != nil || !fi.IsDir() {
 		t.Errorf("legacy file not replaced by a dir: %v", err)
 	}
-	if from := RemoteFromDefault("server", "dev"); from != "dev@server/x" {
+	if from, err := RemoteFromDefault("server", "dev"); err != nil || from != "dev@server/x" {
 		t.Errorf("RemoteFromDefault after replace = %q", from)
 	}
 }
@@ -72,7 +72,10 @@ func TestRemoteFromDefaultFallbackUnroutable(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID")
-	from := RemoteFromDefault("server", "nomarker") // no marker -> <shorthost>-<ppid>
+	from, err := RemoteFromDefault("server", "nomarker") // no marker -> <shorthost>-<ppid>
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(from, "@") {
 		t.Errorf("fallback from must be unroutable (no @): %q", from)
 	}

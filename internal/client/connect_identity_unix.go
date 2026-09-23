@@ -20,6 +20,11 @@ func nativeConnectIdentityForHarness(harness string, opts CodexConnectOptions, c
 		harness = "codex"
 	}
 	req := ConnectRequest{Harness: harness, Protocol: DaemonProtocolVersion}
+	host, err := HostLabel()
+	if err != nil {
+		return req, "", err
+	}
+	req.Host = host
 	switch harness {
 	case "codex":
 		cfg, sid, err := codex(opts)

@@ -31,7 +31,7 @@ func formationClaudeFixture(t *testing.T) (*ConnectionState, string) {
 		t.Fatal(err)
 	}
 	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Harness: c.Harness, ConnectionID: c.ID,
-		Cwd: "/stale-metadata", Profile: "stale-profile", Origin: OriginFresh, Model: "sonnet", Host: ShortHostname(),
+		Cwd: "/stale-metadata", Profile: "stale-profile", Origin: OriginFresh, Model: "sonnet", Host: thisHost(),
 		ListenerPid: json.RawMessage(fmt.Sprint(os.Getpid())), ListenerStart: cfg.Binding.Endpoint.StartToken, OwnerPid: jsonNull}
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)

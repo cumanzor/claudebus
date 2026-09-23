@@ -586,6 +586,11 @@ func RecordEventInRun(event, ch, alias, sessionID, runID string, fill func(*Ledg
 	if ch == "" {
 		return
 	}
+	host, err := HostLabel()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cbus: ledger event not recorded:", err)
+		return
+	}
 	if runID == "" {
 		runID = runIDForEvent(ch, alias)
 	}
@@ -597,7 +602,7 @@ func RecordEventInRun(event, ch, alias, sessionID, runID string, fill func(*Ledg
 		Alias:          alias,
 		SessionID:      sessionID,
 		Harness:        HarnessName(),
-		Host:           ShortHostname(),
+		Host:           host,
 		Cwd:            cwd(),
 		Emitter:        EmitterSelf,
 	}

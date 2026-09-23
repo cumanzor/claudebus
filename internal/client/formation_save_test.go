@@ -19,7 +19,7 @@ func plantPeer(t *testing.T, ch, alias, sid string) {
 	m := peerMeta{
 		Alias: alias, Channel: ch, SessionID: sid,
 		Cwd: "/Users/dev/repos/AI/claudebus", ListenerPid: jsonNull, OwnerPid: jsonNull,
-		Host: ShortHostname(), TS: Now(), LastActivity: Now(),
+		Host: thisHost(), TS: Now(), LastActivity: Now(),
 	}
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestChannelRoster(t *testing.T) {
 	if len(got) != 2 || got[0].Alias != "coder" || got[1].Alias != "orchestrator" {
 		t.Fatalf("roster = %+v (want coder, orchestrator, sorted)", got)
 	}
-	if got[0].SessionID != "sid-coder" || got[0].Machine != ShortHostname() {
+	if got[0].SessionID != "sid-coder" || got[0].Machine != thisHost() {
 		t.Errorf("captured facts wrong: %+v", got[0])
 	}
 	if _, err := ChannelRoster("ghost"); err == nil {
@@ -108,7 +108,7 @@ func TestSaveFormationNew(t *testing.T) {
 		t.Fatal("coder not captured")
 	}
 	// captured
-	if coder.SessionID != "sid-coder" || coder.Machine != ShortHostname() || coder.Cwd == "" {
+	if coder.SessionID != "sid-coder" || coder.Machine != thisHost() || coder.Cwd == "" {
 		t.Errorf("captured fields wrong: %+v", coder)
 	}
 	// declared defaults, not captured facts
@@ -721,7 +721,7 @@ func plantPeerProfile(t *testing.T, ch, alias, sid, profile string) {
 	m := peerMeta{
 		Alias: alias, Channel: ch, SessionID: sid,
 		Cwd: "/Users/dev/repos/AI/claudebus", ListenerPid: jsonNull, OwnerPid: jsonNull,
-		Host: ShortHostname(), TS: Now(), LastActivity: Now(), Profile: profile,
+		Host: thisHost(), TS: Now(), LastActivity: Now(), Profile: profile,
 	}
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)

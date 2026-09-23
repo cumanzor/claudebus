@@ -233,10 +233,10 @@ func TestModeOverrideLeavesPresentPeers(t *testing.T) {
 	// flag actually meets
 	f := applyFixture(
 		peer("coder", func(p *FormationPeer) {
-			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-coder", ShortHostname()
+			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-coder", thisHost()
 		}),
 		peer("documenter", func(p *FormationPeer) {
-			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-doc", ShortHostname()
+			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-doc", thisHost()
 		}),
 	)
 	fk := &recForker{}
@@ -268,7 +268,7 @@ func TestModeOverrideComposesWithOnly(t *testing.T) {
 
 	fixture := func() *Formation {
 		mut := func(p *FormationPeer) {
-			p.Mode, p.Origin, p.Machine = ModeTemplate, OriginFresh, ShortHostname()
+			p.Mode, p.Origin, p.Machine = ModeTemplate, OriginFresh, thisHost()
 		}
 		return applyFixture(
 			peer("documenter", mut, func(p *FormationPeer) { p.SessionID = "sid-doc" }),
@@ -325,10 +325,10 @@ func TestModeOverrideDryRun(t *testing.T) {
 
 	f := applyFixture(
 		peer("documenter", func(p *FormationPeer) {
-			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-doc", ShortHostname()
+			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFresh, "sid-doc", thisHost()
 		}),
 		peer("ghost", func(p *FormationPeer) {
-			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFork, "sid-parent", ShortHostname()
+			p.Mode, p.Origin, p.SessionID, p.Machine = ModeTemplate, OriginFork, "sid-parent", thisHost()
 		}),
 	)
 	fk := &recForker{}

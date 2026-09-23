@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -95,6 +96,9 @@ func HookJoin(stdin io.Reader, channel, alias, rendezvous string) {
 	}
 	defer OverrideSessionID(sid)()
 	if _, _, err := Join(channel, alias); err != nil {
+		if errors.Is(err, ErrBadHostLabel) {
+			fmt.Fprintln(os.Stderr, "cbus hook-join: not joined:", err) // stderr only: stdout is hook output
+		}
 		return // best-effort; a taken/already-joined error must not fail the session
 	}
 	if rendezvous != "" {
@@ -367,6 +371,9 @@ func forkReplicatedEnv() (map[string]string, error) {
 		return nil, err
 	}
 	env := map[string]string{"PATH": os.Getenv("PATH"), "HOME": home, "CBUS_DIR": bus}
+	if h := os.Getenv("CBUS_HOST"); h != "" {
+		env["CBUS_HOST"] = h // a child must record the same machine label as its parent
+	}
 	if cfg := os.Getenv("CLAUDE_CONFIG_DIR"); cfg != "" {
 		cfg, err = filepath.Abs(cfg)
 		if err != nil {

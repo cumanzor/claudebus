@@ -1,6 +1,11 @@
 package client
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	"claudebus/internal/core"
+)
 
 // The capability exists only in this private, write-only control request.
 // ConnectRequest, ClaudeConnectBinding and ConnectionState remain nonsecret.
@@ -19,6 +24,19 @@ func DaemonConnect(req ConnectRequest, claudeToken string, out *ConnectionState)
 		return err
 	}
 	return DaemonCall("POST", "/connect", connectWireRequest{req, claudeToken}, out)
+}
+
+// connectHostLabel is the host recorded for a connecting session: the label the
+// client resolved from its own environment, re-screened because the request is
+// input, or the daemon's own label when an older client sends none.
+func connectHostLabel(sent string) (string, error) {
+	if sent == "" {
+		return HostLabel()
+	}
+	if !core.ValidName(sent) || shortLabel(sent) != sent {
+		return "", fmt.Errorf("%w %q in the connect request", ErrBadHostLabel, sent)
+	}
+	return sent, nil
 }
 
 func validateConnectEnvelope(req ConnectRequest, token string) error {

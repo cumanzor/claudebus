@@ -21,7 +21,7 @@ func TestPeerSidState(t *testing.T) {
 	setHome(t, home)
 	live := "a26d120e-4d73-4d91-8550-498ab65a5107"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", live)
-	here := ShortHostname()
+	here := thisHost()
 	// foreign BY CONSTRUCTION: strictly longer than the host it derives from, so no
 	// real hostname can collide with it and invert the unchecked cases below.
 	elsewhere := here + "-elsewhere"

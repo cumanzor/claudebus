@@ -303,8 +303,14 @@ func (p *FormationPeer) SidState() (state SidState, detail string) {
 	if path, ok := TranscriptPath(p.Profile, p.SessionID); ok {
 		return SidPresent, path
 	}
-	if p.Machine != "" && p.Machine != ShortHostname() {
-		return SidUnchecked, "recorded on " + p.Machine
+	if p.Machine != "" {
+		host, err := HostLabel()
+		if err != nil {
+			return SidUnchecked, err.Error()
+		}
+		if p.Machine != host {
+			return SidUnchecked, "recorded on " + p.Machine
+		}
 	}
 	return SidStale, "no transcript found on this machine"
 }

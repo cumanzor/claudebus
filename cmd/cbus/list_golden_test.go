@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"claudebus/internal/client"
 )
 
 // M5.2(a) rig. Freezes the RENDERED BYTES of list / list --active / active / channels
@@ -187,12 +189,9 @@ func pidField(v string) string { return fmt.Sprintf("pid=%-7s", v) }
 
 func shortHostnameForTest(t *testing.T) string {
 	t.Helper()
-	h, err := os.Hostname()
-	if err != nil || h == "" {
-		return "unknown"
-	}
-	if i := strings.IndexByte(h, '.'); i >= 0 {
-		h = h[:i]
+	h, err := client.HostLabel()
+	if err != nil {
+		t.Fatalf("HostLabel: %v", err)
 	}
 	return h
 }

@@ -28,8 +28,14 @@ func saveFixture(t *testing.T, dir, name, body string) {
 // otherMachine is foreign by construction (strictly longer than any hostname it is
 // derived from), so the "recorded elsewhere" case cannot invert on a host that
 // happens to be named like the fixture.
-func thisMachine() string  { return client.ShortHostname() }
-func otherMachine() string { return client.ShortHostname() + "-elsewhere" }
+func thisMachine() string {
+	h, err := client.HostLabel()
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+func otherMachine() string { return thisMachine() + "-elsewhere" }
 
 func fixtureRoles() string {
 	return `{

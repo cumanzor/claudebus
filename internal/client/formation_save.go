@@ -35,7 +35,7 @@ type RosterPeer struct {
 	CodexBackend *FormationCodexBackend
 	SessionID    string
 	Cwd          string
-	Machine      string // meta.host, which is ShortHostname() on the writing machine
+	Machine      string // meta.host, which is HostLabel() on the writing machine
 	Origin       string
 	Model        string
 	Profile      string // the CCS instance the session stamped about itself at join
@@ -246,7 +246,9 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 	}
 
 	f.SavedAt = Now()
-	f.SavedBy = savedBy(ch)
+	if f.SavedBy, err = savedBy(ch); err != nil {
+		return nil, nil, err
+	}
 	// Envelope run identity is derived from the UNIQUE claims of the ROSTER being
 	// saved, dead peers included. Save exists precisely for a pausing effort whose
 	// peers are dying, so reading only live claims (currentRun) would blank the run
@@ -408,13 +410,17 @@ func strPtr(s string) *string { return &s }
 
 // savedBy is this session's address on ch, falling back to the machine when the
 // saver is not itself a peer (a formation can be saved from outside the channel).
-func savedBy(ch string) string {
+func savedBy(ch string) (string, error) {
 	for _, reg := range ResolveSelf() {
 		if reg.Channel == ch {
-			return reg.Channel + "/" + reg.Alias
+			return reg.Channel + "/" + reg.Alias, nil
 		}
 	}
-	return ShortHostname() + " (not joined)"
+	host, err := HostLabel()
+	if err != nil {
+		return "", err
+	}
+	return host + " (not joined)", nil
 }
 
 // anchorDefault picks the saving session's own alias as the anchor — apply launches

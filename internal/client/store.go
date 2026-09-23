@@ -207,6 +207,10 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if err := checkStoreName("channel", ch); err != nil {
 		return "", false, err
 	}
+	host, err := HostLabel() // before any store mutation: a bad label must leave no trace
+	if err != nil {
+		return "", false, err
+	}
 	// Birth-record (cbus-m9l): capture it BEFORE PruneChannel. A resume-rejoin's own
 	// meta carries a DEAD listener, so prune would reap it (and with it the origin) an
 	// instant before birthForJoin could read it — D18 case 1 would silently fail for
@@ -291,7 +295,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	m := peerMeta{
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
-		Host: ShortHostname(), TS: now, LastActivity: now,
+		Host: host, TS: now, LastActivity: now,
 		Origin: origin, Model: model, Profile: currentProfile(), Harness: harnessNameFn(),
 	}
 	if err := writeMeta(dir, m); err != nil {
@@ -368,6 +372,10 @@ func birthForJoin(metaPath, selfSid string) (origin, model string) {
 // child's join can carry them into the real-sid meta. Blank when the caller does not
 // know (never a guess).
 func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
+	host, err := HostLabel() // before any store mutation: a bad label must leave no trace
+	if err != nil {
+		return "", err
+	}
 	if err := checkStoreName("channel", ch); err != nil {
 		return "", err
 	}
@@ -417,7 +425,7 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 	m := peerMeta{
 		Alias: alias, Channel: ch, SessionID: "reserved", Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
-		Host: ShortHostname(), TS: now, LastActivity: now,
+		Host: host, TS: now, LastActivity: now,
 		Origin: origin, Model: model,
 	}
 	if err := writeMeta(dir, m); err != nil {

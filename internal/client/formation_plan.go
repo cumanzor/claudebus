@@ -93,7 +93,7 @@ func (p *Plan) Refusals() []PeerPlan {
 // table test rather than a live rehearsal, which is the point: the B31 restore
 // failed on a DECISION (fork the wrong transcript), not on a terminal.
 type PlanWorld struct {
-	Host          string            // ShortHostname()
+	Host          string            // HostLabel()
 	GitHead       string            // current short HEAD; "" outside a repo
 	Roster        []RosterPeer      // who is on the channel right now
 	LiveSids      map[string]string // sid -> holder address; live or managed availability unresolved
@@ -117,6 +117,10 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 			return nil, err
 		}
 	}
+	host, err := HostLabel()
+	if err != nil {
+		return nil, err
+	}
 	head, _ := gitHead()
 	self := ""
 	for _, reg := range ResolveSelf() {
@@ -126,7 +130,7 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 		}
 	}
 	return &PlanWorld{
-		Host:             ShortHostname(),
+		Host:             host,
 		GitHead:          head,
 		Roster:           roster,
 		LiveSids:         liveSids(),

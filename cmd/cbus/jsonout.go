@@ -73,9 +73,13 @@ type channelCountJSON struct {
 // --active and channel filters. An empty store is a valid document with an empty
 // channels array, not a sentence: stdout carries exactly the JSON doc.
 func emitListJSON(snap client.StoreSnapshot, active bool, chosen string) int {
+	host, err := client.HostLabel()
+	if err != nil {
+		return die("%v", err)
+	}
 	doc := listJSON{
 		SchemaVersion: jsonSchemaVersion,
-		Host:          client.ShortHostname(),
+		Host:          host,
 		Channels:      []channelJSON{},
 	}
 	for _, ch := range snap.Channels {
@@ -122,9 +126,13 @@ func emitListJSON(snap client.StoreSnapshot, active bool, chosen string) int {
 }
 
 func emitChannelsJSON(snap client.StoreSnapshot) int {
+	host, err := client.HostLabel()
+	if err != nil {
+		return die("%v", err)
+	}
 	doc := channelsJSON{
 		SchemaVersion: jsonSchemaVersion,
-		Host:          client.ShortHostname(),
+		Host:          host,
 		Channels:      []channelCountJSON{},
 	}
 	for _, ch := range snap.Channels {

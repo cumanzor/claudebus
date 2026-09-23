@@ -1,11 +1,12 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"claudebus/internal/client"
 )
 
 // buildCbus builds the real cbus binary to a temp path and returns it. It is the ONE
@@ -17,7 +18,7 @@ func buildCbus(t *testing.T) string {
 	t.Helper()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		host, _ := os.Hostname()
+		host, _ := client.HostLabel()
 		t.Skipf("no go toolchain on %s (%s/%s): this test builds the real cbus binary at runtime, "+
 			"which the D8 gate host cannot do; skipped here, run where a toolchain exists",
 			host, runtime.GOOS, runtime.GOARCH)

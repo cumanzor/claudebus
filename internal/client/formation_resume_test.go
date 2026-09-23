@@ -459,18 +459,18 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 	anchorSid := "bbbbbbbb-1111-2222-3333-444444444444"
 	writeTranscript(t, cfg, "-Users-dev-repos-AI-claudebus", anchorSid)
 
-	elsewhere := ShortHostname() + "-elsewhere"
+	elsewhere := thisHost() + "-elsewhere"
 	f := &Formation{
 		Schema: FormationSchema, Name: "dd", Channel: "dd", AnchorAlias: "orchestrator",
 		Peers: []FormationPeer{
 			{Alias: "orchestrator", SessionID: anchorSid, Origin: OriginJoined, Mode: ModeTemplate,
-				Machine: ShortHostname(), Cwd: "/nonexistent/recorded/cwd"},
+				Machine: thisHost(), Cwd: "/nonexistent/recorded/cwd"},
 			{Alias: "seen", SessionID: visible, Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
 			{Alias: "unseen", SessionID: "ffffffff-0000-0000-0000-000000000000", Origin: OriginFresh, Mode: ModeResume, Machine: elsewhere},
 		},
 	}
 	world := &PlanWorld{
-		Host: ShortHostname(), LiveSids: map[string]string{},
+		Host: thisHost(), LiveSids: map[string]string{},
 		HasTranscript: func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
 	}
 	rows := map[string]string{}

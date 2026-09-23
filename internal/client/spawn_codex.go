@@ -52,6 +52,9 @@ func resolveCodexSpawnContext() (codexSpawnContext, error) {
 		return c, err
 	}
 	c.env = map[string]string{"PATH": os.Getenv("PATH"), "HOME": home, "CODEX_HOME": codexHome, "CBUS_DIR": busHome}
+	if h := os.Getenv("CBUS_HOST"); h != "" {
+		c.env["CBUS_HOST"] = h
+	}
 	return c, nil
 }
 

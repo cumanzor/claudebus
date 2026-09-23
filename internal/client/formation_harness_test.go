@@ -84,7 +84,7 @@ func TestSaveFormationCapturesCodexHarnessAndBackend(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", connectIdentityThread)
 	plantPeer(t, "native", "advisor", connectIdentityThread)
 	dir := filepath.Join(root, "native", "advisor")
-	m := peerMeta{Alias: "advisor", Channel: "native", SessionID: connectIdentityThread, Harness: "codex", ConnectionID: "connection-1", ListenerPid: jsonNull, OwnerPid: jsonNull, Host: ShortHostname()}
+	m := peerMeta{Alias: "advisor", Channel: "native", SessionID: connectIdentityThread, Harness: "codex", ConnectionID: "connection-1", ListenerPid: jsonNull, OwnerPid: jsonNull, Host: thisHost()}
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)
 	}

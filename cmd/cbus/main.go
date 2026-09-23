@@ -35,6 +35,11 @@ func run(args []string) int {
 	if verb == updateCheckSubcmd {
 		return cmdUpdateCheckRefresh()
 	}
+	if hostLabelGated(verb) {
+		if _, err := client.HostLabel(); err != nil {
+			return die("%v", err)
+		}
+	}
 	// opt-in update hint (CBUS_UPDATE_CHECK=1): a best-effort stderr note + a detached
 	// poll, both silent on failure — it must never break the command it precedes.
 	maybeStartUpdateCheck(verb, hasJSONFlag(args))
@@ -216,7 +221,9 @@ func runSendRemote(args []string) int {
 		return die("%v", err)
 	}
 	if !fromSet {
-		from = client.RemoteFromDefault(host, ch)
+		if from, err = client.RemoteFromDefault(host, ch); err != nil {
+			return die("%v", err)
+		}
 	}
 	if err := client.RemoteSend(ep, core.SendReq{Channel: ch, Alias: al, From: from, Text: text}); err != nil {
 		return die("%v", err)
@@ -309,6 +316,17 @@ func runHookCompact(args []string) int {
 // (alias $CBUS_ALIAS or auto), optionally writing the id to $CBUS_CODEX_RENDEZVOUS. It ALWAYS
 // returns 0 and writes NOTHING to stdout — a SessionStart hook must never fail the session and
 // its stdout is parsed as hook directives.
+// hostLabelGated: every verb refuses up front on an invalid CBUS_HOST, except help
+// and version (they never resolve it) and the hooks, whose contract is exit 0: a
+// PreCompact hook exiting 2 blocks compaction. The hooks fail closed internally.
+func hostLabelGated(verb string) bool {
+	switch verb {
+	case "", "-h", "--help", "--version", "version", "hook-exit", "hook-compact", "hook-join", "codex-stop-hook":
+		return false
+	}
+	return true
+}
+
 func runHookJoin() int {
 	client.HookJoin(os.Stdin, os.Getenv("CBUS_CHANNEL"), os.Getenv("CBUS_ALIAS"), os.Getenv("CBUS_CODEX_RENDEZVOUS"))
 	return 0

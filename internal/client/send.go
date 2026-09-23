@@ -71,7 +71,11 @@ func LocalSend(target, from string, force bool, text string) (resolved, fromOut 
 				from = channel + "/" + a
 			}
 		} else {
-			from = fmt.Sprintf("%s-%d", ShortHostname(), os.Getppid())
+			label, err := HostLabel()
+			if err != nil {
+				return "", "", false, err
+			}
+			from = fmt.Sprintf("%s-%d", label, os.Getppid())
 		}
 	}
 	line, err := json.Marshal(core.Message{From: from, To: ch + "/" + al, TS: Now(), Text: text})
