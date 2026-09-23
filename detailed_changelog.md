@@ -1,5 +1,44 @@
 # Changelog (detailed)
 
+## [2026-09-23 00:39:22 UTC] [Docs/M5b2] protocol.md relay/wire contract corrected against source, part 2 of 3
+
+[Attempt #1] On `docs/audit-m5c`, branched from `docs/audit-m5b`. 1 file
+edited (docs/architecture/protocol.md, sections 9-13). Second of three
+stacked PRs (D16 split): M5b1 store/local, M5b2 relay contract (this
+commit), M5b3 native contract gaps A-H.
+
+[Motivating problem]
+Sections 9-13 describe the relay/wire contract, still almost entirely
+bash-era despite protocol.md being the living contract (D13). 12 findings
+(P19, P25-P35), each re-verified against actual Go source before writing.
+
+[What changed]
+Section 9: added the two Go-only routes (durable-v1, prune) and two new
+subsections covering them in full (keep/remove rule and response shape for
+prune; the shared legacy/durable upgrade path, its 409 consumer-conflict
+refusal, and its ownership record written for both transports); corrected
+the timeout claim to the client's actual 4s/20s bounds. Section 10:
+corrected wire.Dial (TCP-only) vs the daemon's actual DialContext (wss/TLS
+support, now living in a shared internal/wire package); corrected max frame
+1 MiB to 2 MiB and noted the poison-pill hazard is very likely closed by
+that change though not independently re-measured; documented durable-v1's
+gated MarkDelivered and delivery-id dedup as closing the legacy sleep-window
+loss. Section 11 (spool): rewrote the write mechanism end to end against
+current source, wrong filename format, a real fsync where the doc said
+none, os.Link replacing os.Rename, prune now able to remove a whole peer
+dir; added the native .durable-owners/.durable-events paths and the
+dashboard external-reader compatibility note from spool.go's own header
+comment. Section 12: unknown-host non-fatal corrected to a hard error;
+added that native connections resolve the front door once and refuse
+redirects; added two missing credential-table rows (prune, native connect);
+corrected the list-failure error text. Section 13: constants table and the
+10-item invariants list reconciled against every correction from this PR
+and M5b1.
+
+[Testing Notes]
+Dash/vocab/stray-id sweeps clean. Applied-findings tracker at
+`/tmp/cbus-docs-audit/M5b2-applied.md`.
+
 ## [2026-09-23 00:26:22 UTC] [Docs/M5b1] reviewer fixup on the M5b1 commit
 
 [Attempt #1] Separate worktree (`/tmp/cbus-docs-m5b-fixup`, documenter was
