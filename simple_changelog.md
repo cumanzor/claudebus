@@ -1,6 +1,6 @@
 # Changelog (simple)
 
-[2026-09-23 17:49:40 UTC] [Docs/R2] Generalized the example machine names across the docs and both changelogs: the author's server, laptop and Windows machine now read as generic placeholder names everywhere a doc named one, including the site environment variable and CLI examples. Also documented that the status-lookup credential command now requires its host argument explicitly, printing a usage error and exiting nonzero without one.
+[2026-09-23 17:49:40 UTC] [Docs/R2] Generalized the example machine names across the docs and both changelogs: the author's server, laptop and Windows machine now read as generic placeholder names everywhere a doc named one, including the site environment variable and CLI examples. Also documented that `cbus auth status` now requires its host argument explicitly, printing a usage error and exiting nonzero without one.
 
 [2026-09-23 17:38:31 UTC] [Docs/R1] Generalized example CCS profile names across the docs and both changelogs: the two example profile names are now alpha and beta, everywhere the docs named a specific profile (launch commands, env values, formation checks). The generic term "CCS profile" is unchanged.
 

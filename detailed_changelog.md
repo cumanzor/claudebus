@@ -2,9 +2,9 @@
 
 ## [2026-09-23 17:49:40 UTC] [Docs/R2] generalize example machine names
 
-[Attempt #1] Branch `republish-docs`, same worktree. 18 files across
-README, CHEATSHEET, docs/**, docs/history/**, and both changelogs (the
-full list is in R-applied-docs.md).
+[Attempt #1] Branch `republish-docs`, same worktree. 18 files: the
+CHEATSHEET, both changelogs, and docs, guides and historical records
+under docs/**.
 
 [What changed]
 Every place a doc named one of the author's three machines, in prose,
@@ -1673,7 +1673,7 @@ Installing v0.14.0 on the server, `cbus daemon restart` printed `confirm daemon 
 - Candidate: two fresh clones of the local repo at `7b18fb2`, tag created only inside them; `go vet`, `go test -race ./...` green; `make dist CBUS_REPO=cumanzor/claudebus` in both, five binaries byte-identical. Stamps `v0.14.0`, `vcs.revision=7b18fb2`, `vcs.modified=false`. Read-only field smoke against the real store (`list`, `formation list`), `:80` refused, `install-commands` into a temp dir placed 8 files.
 - Published with `make release` from a fresh clone of origin at the tag; its dist matched the candidate; title and notes set by `gh release edit`, `SHA256SUMS` uploaded; downloaded assets pass `shasum -c`.
 - Mac: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-darwin-arm64` (`cbe8ccbc...`), `bus-codex.md` and `bus-layout.md` refreshed, both CCS profiles see them via `~/.ccs/shared/commands -> ~/.claude/commands`. Daemon NOT restarted: six live Claude peers (partner-mobile, mobile-authfix) and the daemon code is identical.
-- server: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-linux-amd64` (`67d8d42a...`), `save-formation.md` installed. `cbus daemon restart` hit the EOF bug above; `cbus daemon start` brought up v0.14.0 (pid 313557, protocol 3), confirmed from a second ssh session, 2 connections retained, relay connected.
+- Server: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-linux-amd64` (`67d8d42a...`), `save-formation.md` installed. `cbus daemon restart` hit the EOF bug above; `cbus daemon start` brought up v0.14.0 (pid 313557, protocol 3), confirmed from a second ssh session, 2 connections retained, relay connected.
 - Relay not redeployed: `relay/`, `internal/wire`, `internal/core` unchanged since v0.13.0.
 
 [Possible Ripple Effects]
@@ -2233,7 +2233,7 @@ uploaded after.
   ran the spawn. No process or channel was left; rerun matched `^listen ` only.
 
 [Possible Ripple Effects]
-- winbox stays on its current version until Carlos updates it; spawned tmux windows
+- Winbox stays on its current version until Carlos updates it; spawned tmux windows
   there keep the `cc-branch` name (tmux is not a Windows target in practice).
 - Anything matching tmux windows by the literal `cc-branch` stops matching new
   windows on both updated machines.
@@ -2335,7 +2335,7 @@ uploaded after.
   survivors and a released writer lock.
 
 [Possible Ripple Effects]
-- winbox stays on v0.10.2 until Carlos updates it, so a codex peer there (if the
+- Winbox stays on v0.10.2 until Carlos updates it, so a codex peer there (if the
   verb were reachable, which it is not in phase 1) would still orphan.
 - Three releases in a day means three `.old` binaries rotated on each machine;
   selfupdate keeps exactly one, so nothing accumulates.
@@ -2428,7 +2428,7 @@ from dist and uploaded after.
   binaries to an identical digest list.
 - Mac: v0.11.0 -> v0.11.1, commands 6 -> 7 files,
   `~/.claude/commands/bus-codex.md` present.
-- server: v0.11.0 -> v0.11.1 over ssh, `~/.local/bin/cbus` hashes to the published
+- Server: v0.11.0 -> v0.11.1 over ssh, `~/.local/bin/cbus` hashes to the published
   `cbus-linux-amd64` (dcd1814b...), `bus-codex.md` present in its command set.
 - A live codex peer (`ui-test-mcp/advisor`, itself a resumed session on the
   new feature) was running across the Mac swap and kept listening, which is what
@@ -2437,7 +2437,7 @@ from dist and uploaded after.
 [Possible Ripple Effects]
 - The installed surface is now 11 files by name (7 commands + 4 roles), up from
   10; the windows acceptance list moves with it.
-- winbox stays on v0.10.2 until Carlos updates it, so a harness there will not
+- Winbox stays on v0.10.2 until Carlos updates it, so a harness there will not
   find `/bus-codex` yet.
 
 ## [2026-09-07 17:37:12 UTC] [Commands/Docs] /bus-codex: the skill surface for codex peers, fresh or resumed
@@ -12520,7 +12520,7 @@ strict status parse + handshake deadline).
 
 ### [Possible Ripple Effects]
 
-- server gains a systemd service `cbus-relay` on loopback :8090 and a token file
+- Server gains a systemd service `cbus-relay` on loopback :8090 and a token file
   `/home/relay/cbus-relay/token` (0600). Not yet exposed via CF (epic .4).
 - Message shape over the relay is identical to local inbox lines, so the .3
   client work needs no translation layer.
