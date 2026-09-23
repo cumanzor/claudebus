@@ -63,7 +63,7 @@ type Formation struct {
 	SavedBy      string                     `json:"savedBy"`
 	DriftAnchors map[string]json.RawMessage `json:"drift_anchors"`
 	Payload      json.RawMessage            `json:"payload"`
-	// FormationRunID identifies the RUN this snapshot was taken from (trk-mec.2).
+	// FormationRunID identifies the RUN this snapshot was taken from.
 	// Channel names are reused, so a name is not run identity. Additive under the
 	// UNCHANGED cbus-formation/v1 schema: Validate matches the schema string exactly,
 	// so bumping it would make older binaries reject new snapshots — the opposite of

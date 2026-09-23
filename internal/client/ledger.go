@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// The durable channel ledger (trk-mec.2). meta.json is the only place alias,
+// The durable channel ledger. meta.json is the only place alias,
 // channel and sessionId bind together, and PruneChannel destroys it with the peer
 // dir — which is why a finished formation's alias-to-session map exists nowhere
 // afterwards. The ledger records that binding append-only, outside every peer dir,

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// The durable ledger (trk-mec.2). These tests pin the properties that make it worth
+// The durable ledger. These tests pin the properties that make it worth
 // having at all: it outlives the peer dirs, it survives torn writes, one run gets one
 // id, and a crashed peer still produces a terminal event.
 
@@ -363,8 +363,8 @@ func dirEntriesExist(root, ch string) int {
 	return n
 }
 
-// The backward-compatibility claim that the whole additive approach rests on
-// (trk-mec.2): an OLDER binary must neither REJECT a snapshot carrying
+// The backward-compatibility claim that the whole additive approach rests on:
+// an OLDER binary must neither REJECT a snapshot carrying
 // formationRunId nor DROP the key when it re-saves. This started as a throwaway
 // probe run before any code was written; it is permanent because the property is
 // what makes it safe to ship the new field while live formations keep running the

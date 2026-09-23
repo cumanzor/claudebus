@@ -25,7 +25,7 @@ import (
 //   - cursorState. The predicate computed it and discarded it. ABSENT means no cursor
 //     file was ever created, so the stall is on the WRITE side. CORRUPT means the file
 //     EXISTS and the read failed, which is the cbus-que.12 transient-reads class and the
-//     only result that makes the shared mechanism between those tracker items real.
+//     only result that makes the shared mechanism between those items real.
 //   - running. The follower checks its identity BEFORE writing, and on failure emits a
 //     dormant marker and returns. A follower that is gone when the wait expires means it
 //     took that door and no cursor write was ever attempted.

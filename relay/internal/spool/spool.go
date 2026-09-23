@@ -6,7 +6,7 @@
 // File data and directory transitions are fsynced before success. Ordering
 // is by wall-clock name; a backwards clock step can reorder across the step.
 //
-// External readers exist: the dashboard's formations sweep reads {new,cur} dir
+// External readers exist: a dashboard's formations sweep reads {new,cur} dir
 // mtimes (read-only, never content) as a peer-activity signal, so this layout
 // is a compatibility surface — restructuring it blinds those readers.
 package spool
