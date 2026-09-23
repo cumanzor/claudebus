@@ -1,5 +1,22 @@
 # Changelog (detailed)
 
+## [2026-09-23 00:53:32 UTC] [Docs/M5b2] re-check fixup on the M5b2 commit
+
+[Attempt #1] Separate worktree (`/tmp/cbus-docs-m5c-recheck`, documenter was
+already on m5d). 1 file (protocol.md), 1 finding + 1 citation fix.
+
+[What changed]
+- R1: section 9.8's "on either endpoint" claim was wrong. Verified
+  `validTailUpgrade` and the durable-v1 endpoint arrived in the same commit
+  (`7b223c3`, v0.12.0), so durable-v1 never lacked the pre-hijack check;
+  only legacy `/tail`, which predates that commit, had the window. Reworded
+  to say so.
+- Citation fix: the client-side dedup refusal spans
+  `daemon_relay.go:592-599`, not `:592-597`.
+
+[Testing Notes]
+Dash/vocab sweeps clean. M5b2-applied.md updated.
+
 ## [2026-09-23 00:48:32 UTC] [Docs/M5b2] reviewer fixup on the M5b2 commit
 
 [Attempt #1] Separate worktree (`/tmp/cbus-docs-m5c-fixup`, documenter was

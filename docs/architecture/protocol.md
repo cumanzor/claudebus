@@ -1054,10 +1054,11 @@ A second, parallel upgrade path to §9.5's legacy `/tail`, sharing the same
 `ws.Upgrade`/handshake mechanics but adding an application-level consumer
 identity and stop-and-wait acknowledgment on top. Pre-hijack failures on
 **both** endpoints refuse the same way: `400 valid WebSocket GET required`
-(`main.go:334`, `durable_tail.go:158`), as §9.5 now describes; the pre-
-`validTailUpgrade` relay is what let an ungraded pre-hijack request through
-silently, on either endpoint (the relay itself was always the Go server,
-never a bash script, only that one check was missing).
+(`main.go:334`, `durable_tail.go:158`), as §9.5 now describes.
+`validTailUpgrade` and this endpoint arrived in the same commit (`7b223c3`,
+v0.12.0), so durable-v1 never lacked the check; only the legacy `/tail`,
+which predates that commit, had the window where an unchecked pre-hijack
+request got the implicit 200.
 
 **Legacy-vs-durable consumer conflict.** Both endpoints share one hub keyed
 by `channel/alias`, and `attachTailWithGate`/`upgradeOwnedTail`
@@ -1251,7 +1252,7 @@ check entirely: the daemon scans its own inbox for an existing line whose
 `relayId` already matches the incoming frame's spool id, and if the bytes
 agree, skips re-appending it (refusing only if the same id names different
 bytes, `"relay ID repeated with different message bytes"`,
-`daemon_relay.go:592-597`). Together the two mean a retried durable
+`daemon_relay.go:592-599`). Together the two mean a retried durable
 delivery cannot become a duplicate on either the relay's spool or the
 client's inbox. The HTTP-ingress-retry and delivery-replay duplication
 points above are unaffected either way; only the silent sleep-window LOSS
