@@ -15,27 +15,20 @@ replaced with a short sentence linking to the security guide's new
 label and two edge labels, an ASCII topology diagram's four per-path
 annotation lines, a prose bullet, and a full table-plus-explanation
 passage. port-map.md, behavior-spec.md (a bullet and a drift-register
-table row) and prior-art-and-cc-internals.md (two passages, one inside
-its existing redacted block) each had one or two passages of the same
-kind. Wire-level facts with source citations (bearer header format,
-subprotocol format, main.go line numbers) were left in place, since those
-are code facts, not deployment description.
+table row) and prior-art-and-cc-internals.md (two passages) each had one
+or two passages of the same kind. Wire-level facts with source citations
+(bearer header format, subprotocol format, main.go line numbers) were
+left in place, since those are code facts, not deployment description.
 
 [Testing Notes]
 Dash/vocab sweep clean on every changed line. Repo-wide link checker
 reports zero unresolved links, including every new
-`security.md#deploying-a-relay` cross-reference (six of them, one per
-file plus overview.md's extra occurrences).
+`security.md#deploying-a-relay` cross-reference (overview.md 1,
+port-map.md 1, behavior-spec.md 2, prior-art-and-cc-internals.md 2).
 
 [Open items, not applied]
-Two more CF-specific passages were found in overview.md while doing this
-pass, neither named in the plan: a components-table row noting `wstail`
-can't cross the front door (a tool limitation, not per-path detail), and
-a full second mermaid diagram (a sequence diagram titled "A remote send
--> deliver round trip") with its own dedicated participant lane for the
-edge and message labels naming the header pair. The first is minor and
-left alone; the second would need a real diagram redesign, not a text
-swap, so it was left for a scope decision rather than guessed at.
+The wstail components-table row and the send/deliver sequence diagram in
+overview.md were kept as written.
 
 ## [2026-09-23 04:26:45 UTC] [Docs/M9] fix relay security review findings
 

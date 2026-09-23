@@ -1,6 +1,6 @@
 # Changelog (simple)
 
-[2026-09-23 16:27:36 UTC] [Docs/M10] Pointed the historical records (overview.md, port-map.md, behavior-spec.md, prior-art-and-cc-internals.md under docs/history/) at the security guide's "Deploying a relay" section instead of restating the relay's per-path access detail inline. Each affected passage is now one short sentence with a link; the rest of each record is unchanged.
+[2026-09-23 16:27:36 UTC] [Docs/M10] Pointed the historical records (overview.md, port-map.md, behavior-spec.md, prior-art-and-cc-internals.md under docs/history/) at the security guide's "Deploying a relay" section instead of restating the relay's per-path access detail inline. Each affected passage now points to that section or drops the provider detail; the rest of each record is unchanged.
 
 [2026-09-23 04:26:45 UTC] [Docs/M9] Follow-up fixup on the security guide's new relay section: corrected the presence-fanout scope, the durable-conflict response (a collision guard, not authentication), and named the front-door header pair as wire behavior in the protocol reference with a link from the security guide, instead of naming it in both places.
 
