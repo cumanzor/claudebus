@@ -1002,10 +1002,12 @@ Check order matters and is observable:
    (**before auth** — an unauthenticated probe can distinguish bad-name from bad-token);
 2. subprotocol token (§10.1) → else plain HTTP `401 unauthorized` (a failed handshake,
    not a ws close);
-3. `wire.Upgrade` — on any pre-hijack failure (non-GET, missing upgrade headers, bad
-   version/key) the handler logs and returns without writing: the client sees an
-   implicit **`200 OK` empty body**. *quirk — any stock ws library in a port will
-   return 400/426 here instead; nothing in-repo depends on the 200.*
+3. `validTailUpgrade` (non-GET, missing upgrade headers, bad version/key) → else
+   `400 valid WebSocket GET required` (`main.go:333-335`). This was, at `f213e26`,
+   a pre-hijack failure the handler logged and returned from without writing,
+   leaving the client an implicit `200 OK` empty body; the shipped Go relay
+   checks explicitly and refuses with a real 400 before ever attempting the
+   hijack.
 
 On success: 101 with the matched subprotocol echoed; per-connection
 `WriteTimeout = 10s`; the connection is hijacked into the ws protocol (§10).
@@ -1051,11 +1053,11 @@ below: the relay itself never GCs on its own, an operator (or the local
 A second, parallel upgrade path to §9.5's legacy `/tail`, sharing the same
 `ws.Upgrade`/handshake mechanics but adding an application-level consumer
 identity and stop-and-wait acknowledgment on top. Pre-hijack failures on
-**both** endpoints now refuse the same way: `400 valid WebSocket GET
-required` (`main.go:334`, `durable_tail.go:158`) replaces the old implicit
-`200 OK` empty body §9.5 still describes for the legacy path; that
-description is bash-era only in this respect, the shipped Go server never
-lets an ungraded pre-hijack request through silently on either endpoint.
+**both** endpoints refuse the same way: `400 valid WebSocket GET required`
+(`main.go:334`, `durable_tail.go:158`), as §9.5 now describes; the pre-
+`validTailUpgrade` relay is what let an ungraded pre-hijack request through
+silently, on either endpoint (the relay itself was always the Go server,
+never a bash script, only that one check was missing).
 
 **Legacy-vs-durable consumer conflict.** Both endpoints share one hub keyed
 by `channel/alias`, and `attachTailWithGate`/`upgradeOwnedTail`
@@ -1091,9 +1093,10 @@ plus `Sec-WebSocket-Protocol: <echo>` when a subprotocol was selected.
 
 The in-repo debug client (`wire.Dial`, used by the `wstail` tool) is TCP-only, no
 TLS, so it works only against loopback. **The daemon itself uses a different,
-newer entry point**: `wire.DialContext` (`internal/wire/ws.go:107-145`, the
-package moved here from `relay/internal/wire`, which is now a thin re-export
-shim so the daemon and relay share one implementation) parses the URL scheme
+newer entry point**: `wire.DialContext` (`internal/wire/ws.go:117-145`; the
+legacy `Dial` sits just above it at `:107`. The package moved here from
+`relay/internal/wire`, which is now a thin re-export shim so the daemon and
+relay share one implementation.) `DialContext` parses the URL scheme
 and, for `wss`, wraps the connection in real TLS (`tls.Client`,
 `MinVersion: tls.VersionTLS12`) before the handshake: this is what lets a
 native remote connection reach the public front door over the CF tunnel
@@ -1107,7 +1110,7 @@ subprotocol must verify the server echoed it exactly.
 | Opcodes | `OpText 0x1`, `OpClose 0x8`, `OpPing 0x9`, `OpPong 0xA` — no binary (0x2), no continuation (0x0) |
 | Fragmentation | rejected (`!fin` or opcode 0 → connection error); RSV bits rejected |
 | Masking | direction enforced: client→server MUST mask, server→client MUST NOT |
-| Max frame | Was **1 MiB, read-side only** in the bash-era design (`WriteFrame` had no size check, so a `/send` body near the 1 MiB cap could reframe into an OpText frame larger than what a contract-enforcing reader accepted, dropped after `MarkDelivered`, a deterministic loss). **The Go client's `maxFrame` is 2 MiB** (`internal/wire/ws.go:35`, comment: "allows the 1 MiB bus message plus a protocol envelope"), which was very likely raised specifically to close this poison-pill hazard by giving the reframed block headroom over the raw 1 MiB body cap. Not independently measured end to end in this session; the size relationship strongly implies the hazard is closed, but no test exercising a near-cap message through the durable-v1 path was run to confirm it. |
+| Max frame | Was **1 MiB, read-side only, at `f213e26`** (`WriteFrame` had no size check, so a `/send` body near the 1 MiB cap could reframe into an OpText frame larger than what a contract-enforcing reader accepted, dropped after `MarkDelivered`, a deterministic loss). **`maxFrame` is 2 MiB today** (`internal/wire/ws.go:35`), the source comment quoted verbatim: `Allows the 1 MiB bus message plus a protocol envelope.` Not independently measured end to end in this session; the size relationship strongly implies the hazard is closed, but no test exercising a near-cap message through the durable-v1 path was run to confirm it. |
 | Control frames | payload ≤ 125 B (read-side) |
 | Close | best-effort **empty close frame (no status code, no reason)**, then TCP close |
 
@@ -1123,6 +1126,18 @@ Constants: `pingEvery = 30s`, `pongGrace = 90s` (main.go:29-30).
   `since(lastPong) > 90s` at a 30 s tick → detection lands **90–120 s** after the last
   frame. The reader goroutine's per-frame read deadline is `pongGrace + pingEvery` =
   120 s.
+
+**Durable-v1 has no equivalent pong-staleness sweep.** Its reader
+(`durable_tail.go:181`) sets the same 120 s per-frame read deadline
+(`pongGrace + pingEvery`) but there is no separate 30 s-tick liveness check
+layered on top: a durable connection's only liveness signal is that read
+deadline firing. A durable detach also does not trigger the legacy
+relay-generated `departed`-after-grace path (§8): durable presence is
+daemon-originated instead (§8's native rows). The only `departed` the relay
+itself enqueues on this path is a one-time legacy-to-durable handoff at
+attach, settling a pending legacy presence before switching to
+consumer-reported presence (`attachTailWithGate`, `durable_tail.go:53-60`),
+not an ongoing substitute for detach detection.
 
 ### 10.4 Delivery loop
 
@@ -1226,13 +1241,21 @@ takes the same per-key `tailGate` mutex the upgrade path uses and refuses to
 mark a message delivered if the subscription was displaced in the meantime
 (`"subscription displaced before acknowledgment"`), so a black-holed
 connection can never silently advance a message to `cur/` on its behalf.
-Writes on the ingest side are deduplicated by delivery id: `WriteNamed`
-(§11) treats a write of a name that already exists in `new/`/`cur/` as
-idempotent when the bytes match, refusing only a genuine collision, which is
-what lets a retried durable delivery (identified by `relayId`, §3.2/§8) land
-safely without becoming a duplicate. The HTTP-ingress-retry and
-delivery-replay duplication points above are unaffected either way; only the
-silent sleep-window LOSS is what durable-v1 addresses.
+Two separate dedup mechanisms sit on either side of the wire, not one:
+**relay-side spool ingest** (`WriteNamed`, §11) treats a write of a name
+that already exists in `new/`/`cur/` as idempotent when the bytes match,
+refusing only a genuine collision; its callers are ordinary `Store.Write`
+for `/send` and the durable presence fanout replay
+(`durable_presence.go:113`). **Client-side delivery dedup** is a different
+check entirely: the daemon scans its own inbox for an existing line whose
+`relayId` already matches the incoming frame's spool id, and if the bytes
+agree, skips re-appending it (refusing only if the same id names different
+bytes, `"relay ID repeated with different message bytes"`,
+`daemon_relay.go:592-597`). Together the two mean a retried durable
+delivery cannot become a duplicate on either the relay's spool or the
+client's inbox. The HTTP-ingress-retry and delivery-replay duplication
+points above are unaffected either way; only the silent sleep-window LOSS
+is what durable-v1 addresses.
 
 ---
 
@@ -1282,8 +1305,11 @@ plain message id a legacy recipient shares.
 **There is still no retention or GC by default**: `/prune` (§9.7) exists but
 is never called automatically:
 
-- `cur/` grows forever until an operator (or an automated caller) hits
-  `/prune`; `tmp/` orphans from a crash between `Write` and the final
+- `cur/` of any live or pending peer grows forever regardless: `/prune` only
+  removes a peer wholesale, and skips any peer with queued mail or a live
+  tail entirely (`n > 0 || connected[key]`, `main.go:502-504`), so it can
+  never selectively clear just the delivered history of a peer still in
+  use; `tmp/` orphans from a crash between `Write` and the final
   `os.Remove` are not separately swept;
 - peer/channel dirs accumulate in `/peers` (and `cbus list @host`) until
   pruned;
@@ -1292,10 +1318,10 @@ is never called automatically:
   including a different session or machine.
 
 `spool.go`'s own header comment (`spool.go:9-11`) flags a compatibility
-constraint worth preserving in a port: **the dashboard**, an external reader,
-reads `{new,cur}` directory mtimes (read-only, never content) as a
-peer-activity signal, so this layout is itself a compatibility surface;
-restructuring it blinds that reader.
+constraint worth preserving in a port: an external reader (an operator
+dashboard) reads the `{new,cur}` directory mtimes, read-only, as a
+peer-activity signal; the layout and those mtimes are a compatibility
+surface a port must keep, restructuring it blinds that reader.
 
 ---
 
@@ -1380,7 +1406,7 @@ behavior and silently mis-frame if the harness changes.
 | Reader deadline | 120 s | main.go:283 | pongGrace + pingEvery |
 | Conn WriteTimeout | 10 s | main.go:271 | bounds each ws write incl. teardown close |
 | `/send` body cap | 1 MiB | main.go:163 | MaxBytesReader |
-| ws `maxFrame` | **2 MiB in the Go client** (was 1 MiB, read-side only, in the bash-era design) | `internal/wire/ws.go:35` | allows the 1 MiB bus message plus a protocol envelope (§10.2) |
+| ws `maxFrame` | **2 MiB today** (was 1 MiB, read-side only, at `f213e26`) | `internal/wire/ws.go:35` | allows the 1 MiB bus message plus a protocol envelope, per the source comment verbatim (§10.2) |
 | durable-v1 consumer length | 128 bytes | `durable_tail.go:148` | max length of the `consumer` identity string |
 | Control-frame payload | 125 B | ws.go:260-262 | read-side only |
 | ReadHeaderTimeout | 5 s | main.go:419 | only HTTP server timeout |

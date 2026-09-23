@@ -1,5 +1,36 @@
 # Changelog (detailed)
 
+## [2026-09-23 00:48:32 UTC] [Docs/M5b2] reviewer fixup on the M5b2 commit
+
+[Attempt #1] Separate worktree (`/tmp/cbus-docs-m5c-fixup`, documenter was
+already on m5d). 1 file (protocol.md), 6 fixes + 1 ruling.
+
+[What changed]
+- F1: added a missing gate item, durable-v1 has no pong-staleness sweep
+  beyond its 120s per-frame read deadline, and a durable detach does not
+  trigger the legacy relay-generated departed grace (only a one-time
+  legacy-to-durable handoff at attach).
+- F2: fixed the "200 OK empty body" claim in section 9.5 itself (it is now
+  400), removed a now-redundant stale-pointer sentence from 9.8, and
+  corrected "bash-era only" (the relay was always Go) to name the missing
+  check instead.
+- F3: "1 MiB in the bash-era design" corrected to "1 MiB at f213e26" (maxFrame
+  is a Go relay concept, not a bash one); the source comment quoted verbatim
+  in place of a guessed rationale.
+- F4: the sleep-window dedup paragraph now attributes two separate
+  mechanisms to their correct sides (relay-side WriteNamed spool-ingest
+  idempotency vs. client-side daemon relayId-vs-inbox-line dedup), which
+  had been conflated into one.
+- F5: corrected the retention bullet: /prune skips any peer with queued
+  mail or a live tail entirely, so such a peer's cur/ grows forever
+  regardless of /prune being called.
+- F6: fixed a citation (DialContext is ws.go:117, not :107, which is Dial).
+- Ruling: dropped a specific product name from the external-reader note,
+  described generically as an operator dashboard.
+
+[Testing Notes]
+Dash/vocab sweeps clean. M5b2-applied.md updated.
+
 ## [2026-09-23 00:39:22 UTC] [Docs/M5b2] protocol.md relay/wire contract corrected against source, part 2 of 3
 
 [Attempt #1] On `docs/audit-m5c`, branched from `docs/audit-m5b`. 1 file
