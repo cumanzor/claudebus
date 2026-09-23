@@ -186,7 +186,8 @@ v0.12.0 or later; the old Monitor WebSocket endpoint keeps its legacy semantics.
 | [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |
 | [docs/history/acceptance/claude-native-review.md](docs/history/acceptance/claude-native-review.md) | native Claude receive milestone: review, acceptance evidence and release validation |
 | [docs/architecture/current-architecture.md](docs/architecture/current-architecture.md) | how cbus works today: components, message flow, daemon lifecycle, presence, credential store |
-| [docs/architecture/](docs/architecture/) | the deep end: system overview, full command reference, wire protocol, port map |
+| [docs/architecture/](docs/architecture/) | the living references: current architecture, the wire and disk protocol, command reference, cross-harness scope |
+| [docs/history/](docs/history/) | dated records: acceptance reports, decision packages, explorations, and legacy (the bash-era spec, the original overview, the Monitor stopgap) |
 
 ## License
 

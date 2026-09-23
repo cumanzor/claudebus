@@ -1,5 +1,25 @@
 # Changelog (detailed)
 
+## [2026-09-23 03:10:45 UTC] [Docs/M7] describe the new docs layout in the README
+
+[Attempt #1] Same branch, `docs/audit-m7`, second commit. 1 file
+(README.md), the open item flagged in the prior commit.
+
+[What changed]
+The docs table's `docs/architecture/` row named "system overview, full
+command reference, wire protocol, port map", which stopped being true the
+moment the prior commit moved overview.md and port-map.md out of that
+directory. Reworded to name what actually lives there now: current
+architecture, the wire and disk protocol, command reference, cross-harness
+scope. Added a new `docs/history/` row describing the dated-records tree
+this milestone created: acceptance reports, decision packages,
+explorations, and legacy (the bash-era spec, the original overview, the
+Monitor stopgap).
+
+[Testing Notes]
+Dash/vocab sweep clean. Link checker still reports zero unresolved links
+on the full tree.
+
 ## [2026-09-23 03:08:42 UTC] [Docs/M7] reorganize docs/ into living references and dated history
 
 [Attempt #1] Branch `docs/audit-m7` off `docs/audit-m6`. 24 files/dirs
