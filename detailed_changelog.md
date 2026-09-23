@@ -8,9 +8,8 @@ three docs/history/ files, the changelog pair, and one Go test comment.
 
 [What changed]
 Example channel and formation names used throughout the guides and the
-changelog history are now generic, applied consistently (the same old
-name maps to the same new name everywhere it appeared, including
-changelog entry text for this one category, by explicit call). The
+changelog history are now generic, applied consistently everywhere they
+appeared. The
 cost-analysis notes keep their method and their per-seat findings but
 state the cross-profile comparison as a ratio ("close to even") instead
 of absolute per-profile totals, and drop one absolute dollar figure that
@@ -31,13 +30,6 @@ Dash/vocab sweep clean on every changed line. Repo-wide link checker
 reports zero unresolved links. `go vet ./internal/client/...` clean,
 `gofmt -l` empty on the one touched Go file, and its package's test suite
 passes unchanged (comment-only edit).
-
-[Open item]
-A small number of Go unit test fixtures elsewhere in internal/client use
-the same two words this pass generalized, as CCS profile-path segments
-that flow into asserted command output; correcting them touches test
-assertions in five files well beyond this pass's file list, so they were
-left as they were pending a decision on whether that is in scope.
 
 ## [2026-09-23 03:10:45 UTC] [Docs/M7] describe the new docs layout in the README
 
