@@ -66,12 +66,12 @@ inbox and is not native disconnect.
 The `/tail` protocol and join/arm examples below apply only to legacy peers.
 Native peers use the durable subscription above.
 
-- **`POST /send`** appends `{from,to,ts,text}` — the exact local
-  inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
+- **`POST /send`** appends `{from,to,ts,text}` (the exact local
+  inbox shape) to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
 - **`GET /tail?channel=&alias=`** upgrades to WebSocket (the Claude Code Monitor
   `ws:` source can't send headers, hence the subprotocol auth). Replays queued
   messages, then streams; delivered messages move `new/` → `cur/` (at-least-once).
-- **`GET /peers`** — presence/queue depth; liveness = relay presence +
+- **`GET /peers`**: presence/queue depth; liveness = relay presence +
   30s/90s ping heartbeat, not pids. See
   [Deploying a relay](security.md#deploying-a-relay) for what each of these
   paths needs authentication-wise, including `/healthz`.

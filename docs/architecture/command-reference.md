@@ -1474,7 +1474,7 @@ above will see that exit code and refusal text in their hook's output.
 ## 8. Commands: auth
 
 Credentials per host: `token` (relay bearer), `cf-id` + `cf-secret`
-(front-door service-token credentials — needed only by HTTP `send`/`list` through
+(front-door service-token credentials, needed only by HTTP `send`/`list` through
 the public front door; the ws `tail` leg never uses them). See
 [Deploying a relay](../security.md#deploying-a-relay) for which path needs which.
 

@@ -1,5 +1,33 @@
 # Changelog (detailed)
 
+## [2026-09-23 04:26:45 UTC] [Docs/M9] fix relay security review findings
+
+[Attempt #1] Same branch, `docs/audit-m9`, second commit. 4 files:
+security.md, relay.md, command-reference.md, protocol.md.
+
+[What changed]
+- security.md's risk paragraph said a leaked token's presence broadcast
+  reaches "every connected session"; corrected to every session connected
+  to the same channel, which is the actual fanout scope.
+- security.md's `409 Conflict` sentence read as if the response were an
+  auth guarantee. Rewritten against the actual conflict check: it fires
+  on a durability mismatch in either direction, or on two durable
+  attaches with different consumer ids, and nothing else. Added that the
+  consumer id is just the connection id the client sends in the query
+  string, unauthenticated beyond the bearer itself, so presenting the
+  same id displaces a durable consumer exactly like any other
+  last-writer-wins attach.
+- protocol.md §12.3 now states, as client wire behavior, the literal
+  header pair the client sends in public mode and which credentials feed
+  it. security.md's per-path bullet now points there for the header
+  names instead of naming them itself.
+- Four em-dashes on lines this pass had rewritten changed to a comma,
+  parentheses, or a colon.
+
+[Testing Notes]
+Dash/vocab sweep clean. Repo-wide link checker reports zero unresolved
+links. docs/history/ and every prior changelog entry untouched.
+
 ## [2026-09-23 04:21:12 UTC] [Docs/M9] consolidate relay deployment guidance in security.md
 
 [Attempt #1] Branch `docs/audit-m9` off `docs/audit-m8`, kept local (not

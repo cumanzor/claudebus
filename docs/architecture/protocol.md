@@ -1364,6 +1364,13 @@ yields an empty string** with no error. *quirk.*
 
 ### 12.3 Credential requirements per operation
 
+In `public` mode, the client sends the `cf-id`/`cf-secret` credentials as the
+literal header pair `CF-Access-Client-Id`/`CF-Access-Client-Secret`
+(`RemoteEndpoint`, `remote.go:74-75`), alongside the relay's own
+`Authorization: Bearer <token>`. See
+[Deploying a relay](../security.md#deploying-a-relay) for what a front door
+in front of the relay needs to do with that header pair.
+
 | Operation | token | cf-id + cf-secret |
 |---|---|---|
 | `cbus tail <ch>@<host>/<al>` (arm spec) | required | never (ws leg is subprotocol-only) |

@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-09-23 04:26:45 UTC] [Docs/M9] Follow-up fixup on the security guide's new relay section: corrected the presence-fanout scope, the durable-conflict response (a collision guard, not authentication), and named the front-door header pair as wire behavior in the protocol reference with a link from the security guide, instead of naming it in both places.
+
 [2026-09-23 04:21:12 UTC] [Docs/M9] Consolidated the relay's deployment and access-bypass guidance into one "Deploying a relay" section in the security guide. The living docs (relay guide, command reference, current-architecture overview, wire protocol) now link to that section instead of restating it; the wire protocol keeps only the paths, the subprotocol auth format, and status codes.
 
 [2026-09-23 04:12:12 UTC] [Docs/M8] Generalized examples and deployment notes across the docs and changelogs: example channel and formation names in the guides and changelog history are now generic, the cost-analysis notes are reduced to ratios and relative statements instead of absolute per-profile totals, and the deployment guidance in the README, security guide and one historical doc states its requirements generically rather than describing one specific setup. No behavior change; a Go test comment updated to match.
