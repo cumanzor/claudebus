@@ -2,33 +2,33 @@
 
 > **Historical: the Monitor receive loop below describes the legacy interface
 > (dated 2026-09-22).** For current native Claude/Codex operation, start with
-> [how-it-works.md](../how-it-works.md), [claude.md](../claude.md) and
-> [codex.md](../codex.md). For the current system's full architecture, see
-> [current-architecture.md](current-architecture.md).
+> [how-it-works.md](../../how-it-works.md), [claude.md](../../claude.md) and
+> [codex.md](../../codex.md). For the current system's full architecture, see
+> [current-architecture.md](../../architecture/current-architecture.md).
 >
 > Audience: a developer browsing this repo. This document describes the system as
 > audited at HEAD `f213e26` (2026-07-12), when the client was the bash `bin/cbus` —
 > behavioral quirks flagged, not fixed. **As of 2026-07-13 the installed client is the Go
 > port** (`cmd/cbus` + `internal/client` + `internal/core`), differentially verified
 > byte-identical to the bash client (27/27 verbs; see
-> [cutover-decision-package.md](cutover-decision-package.md)). Topology, protocol,
+> [cutover-decision-package.md](../decisions/cutover-decision-package.md)). Topology, protocol,
 > semantics, and the security model below are unchanged; statements about bash/python3
 > mechanics describe the retired reference implementation (deleted at P3).
 > Post-cutover feature additions — `spawn`, formations, roles, and the distribution
 > surface — are folded into the component map (§2) and command-reference.md.
 >
 > Companion documents:
-> - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
-> - [protocol.md](protocol.md) — on-disk formats, wire protocol, framing contract
-> - [port-map.md](port-map.md) — what a port to a real language must preserve, and why
-> - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the landscape survey and the
+> - [command-reference.md](../../architecture/command-reference.md) — every subcommand, flag, output string, and exit code
+> - [protocol.md](../../architecture/protocol.md) — on-disk formats, wire protocol, framing contract
+> - [port-map.md](../decisions/port-map.md) — what a port to a real language must preserve, and why
+> - [../prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the landscape survey and the
 >   Claude Code internals probes that justified building this at all (the design research, summarized
 >   and kept as the historical record)
-> - [design-space.md](design-space.md) — why append-only files + a polling follower beat
+> - [design-space.md](../decisions/design-space.md) — why append-only files + a polling follower beat
 >   ws/RPC/IPC/SQLite/Redis: the constraint analysis and rejected alternatives
-> - [cutover-decision-package.md](cutover-decision-package.md) — the executed cutover's
+> - [cutover-decision-package.md](../decisions/cutover-decision-package.md) — the executed cutover's
 >   decision record and rollback procedure
-> - [compat-deletion-plan.md](compat-deletion-plan.md) — the coexistence shims and bash
+> - [compat-deletion-plan.md](../decisions/compat-deletion-plan.md) — the coexistence shims and bash
 >   artifacts deleted at P3
 > - [behavior-spec.md](behavior-spec.md) — frozen bash-era spec (every command, state file,
 >   wire format, quirk), `file:line`-anchored; the port's verification contract
@@ -71,7 +71,7 @@ Design pillars, stated up front in the README and held throughout:
 
 ### Why not the built-in teammate mailbox?
 
-**Superseded 2026-08-18** — see [how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox)
+**Superseded 2026-08-18** — see [how-it-works.md](../../how-it-works.md#why-not-the-built-in-teammate-mailbox)
 for the current picture. Claude Code has cross-session messaging (2.1.224+): `ListAgents`
 enumerates independent sessions and `SendMessage` addresses them by name over a per-session
 socket, and hooks and Bash children get that socket too. Teammates are separate Claude Code
@@ -84,7 +84,7 @@ claudebus's distinction is now openness rather than reach — a file and a CLI w
 handshake or token, non-Claude peers, a relay you own, and a readable mailbox and ledger.
 
 The original probe, across three live sessions before building anything (see
-[prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md)), accurate when made:
+[prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md)), accurate when made:
 
 - **`SendMessage`'s addressable universe is one session's spawn tree, full stop.** There is no
   cross-session namespace.
@@ -369,7 +369,7 @@ decisions below are unaffected — they were sound then and the mechanism still 
 the *reason to keep* cbus is no longer the absence of an alternative. It is an open
 boundary any process can use without a token, non-Claude peers, a relay you own, and a
 mailbox you can read with `cat`. See §1 and
-[how-it-works.md](../how-it-works.md#why-not-the-built-in-teammate-mailbox).
+[how-it-works.md](../../how-it-works.md#why-not-the-built-in-teammate-mailbox).
 
 ### 5.3 Session-scoped bridge identity
 
@@ -512,5 +512,5 @@ Documented, accepted, or tracked — none are silent.
   `hook-compact`'s compaction presence followed in the 2026-07-18 pass.
 
 For the exhaustive per-command behavior (including every quirk found in the audit), see
-[command-reference.md](command-reference.md); for wire/disk formats see
-[protocol.md](protocol.md); for the port-critical invariants see [port-map.md](port-map.md).
+[command-reference.md](../../architecture/command-reference.md); for wire/disk formats see
+[protocol.md](../../architecture/protocol.md); for the port-critical invariants see [port-map.md](../decisions/port-map.md).

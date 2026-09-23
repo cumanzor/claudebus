@@ -9,7 +9,7 @@ Canonical as-is behavior of every command, state file, wire format, framing rule
 > Go binary is now installed as `cbus` on both machines; `bin/cbus` itself was
 > deleted at P3 homogenization (`f78fad0`), so `bin/cbus:N` anchors below
 > resolve only in git history (`git show f213e26:bin/cbus`), never in the
-> working tree. Current behavior lives in [protocol.md](protocol.md) and the
+> working tree. Current behavior lives in [protocol.md](../../architecture/protocol.md) and the
 > guides; a current architecture doc is milestone M6. Everything below remains
 > true of the shared contract EXCEPT the port's intended deltas:
 >
@@ -665,7 +665,7 @@ Five placements: cbus → `~/.local/bin`, cc-branch.sh → `~/.claude/bin`, 3 co
 
 ## 13. Consolidated quirk registry (beyond those inline above)
 
-Preserve-or-rethink flags for a port; dispositions in [port-map.md](port-map.md).
+Preserve-or-rethink flags for a port; dispositions in [port-map.md](../decisions/port-map.md).
 
 1. Idempotent join ignores a requested alias — you silently keep the old name (:399-406).
 2. Bare-alias resolution is alphabetical-glob-order dependent; ambiguity silent (:107-114).

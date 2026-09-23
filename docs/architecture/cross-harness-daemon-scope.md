@@ -6,7 +6,7 @@ separate until its own adapter landed.
 
 **Status (2026-09-22).** Both first-class adapters this doc scoped have shipped:
 Codex CLI v1 in [v0.12.2](https://github.com/cumanzor/claudebus/releases/tag/v0.12.2)
-(see [codex-v1-release-readiness.md](codex-v1-release-readiness.md)), native Claude
+(see [codex-v1-release-readiness.md](../history/acceptance/codex-v1-release-readiness.md)), native Claude
 Code receive in [v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0)
 (see [docs/claude.md](../claude.md)). OpenCode and the six directed routes below
 remain open; this doc is their live scope and adapter proposal.
@@ -85,7 +85,7 @@ availability and message receipt are separate states.
 
 | Harness | Initial candidate | Important boundary |
 | --- | --- | --- |
-| Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Idle wake and signed-in authentication/policy proved in the v0.13.0 native signed-in acceptance (35 minutes idle, unchanged transcripts, real signed-in Claude 2.1.278; `docs/claude-native-review.md`). Still open: network-loss/offline-spool injection, and a custom config root that automatic formation launch cannot recreate (§10 refuses it outright) |
+| Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Idle wake and signed-in authentication/policy proved in the v0.13.0 native signed-in acceptance (35 minutes idle, unchanged transcripts, real signed-in Claude 2.1.278; `docs/history/acceptance/claude-native-review.md`). Still open: network-loss/offline-spool injection, and a custom config root that automatic formation launch cannot recreate (§10 refuses it outright) |
 | Codex CLI | Native durable queue via a non-owning sidecar and `cbus connect`; existing wrapper remains compatible | Exact thread and local storage context; preserve TUI ownership; reconcile ambiguous enqueue because native client IDs do not deduplicate |
 | OpenCode | Session API and event stream, with a small plugin for session registration and shell identity | Runtime endpoint and session ID must both be explicit; a shared server can contain multiple sessions |
 
@@ -167,5 +167,5 @@ part of this scope update.
 The earlier stopgap/delivery assessment remains attached to cbus-rtt as
 `eb65ad39fda9f9b5`, plus private notes in the internal knowledge base (not
 reachable from this repo). The
-[July exploration](multi-harness-exploration.md) is historical research, not the
+[July exploration](../history/explorations/multi-harness-exploration.md) is historical research, not the
 current implementation status.

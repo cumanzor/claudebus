@@ -11,7 +11,7 @@
 > binary (27/27 differential parity; decision record:
 > [cutover-decision-package.md](cutover-decision-package.md)). This document is
 > historical, preserved as the planning record; the current wire/behavior
-> contract is [protocol.md](protocol.md), not this plan. Phase 3 (`cbus-8k9.4`) executed in two tranches
+> contract is [protocol.md](../../architecture/protocol.md), not this plan. Phase 3 (`cbus-8k9.4`) executed in two tranches
 > against [compat-deletion-plan.md](compat-deletion-plan.md): tranche 1 (2026-07-18,
 > `8f79a83`) dropped the mtime grace fallback (D3) and the bash artifacts
 > (**correction, 2026-09-22:** `8f79a83` is not on `main`; the tranche-1 commit
@@ -27,10 +27,10 @@
 > `internal/core.ValidStoreName`; `cmd/cbus/jsonout.go`). Phase 4 is unchanged.
 >
 > Companion documents:
-> - [overview.md](overview.md) — system topology, design pillars, security model
-> - [command-reference.md](command-reference.md) — every subcommand, flag, output string, and exit code
-> - [protocol.md](protocol.md) — on-disk formats, wire protocol, framing contract
-> - [../prior-art-and-cc-internals.md](../prior-art-and-cc-internals.md) — the research that shaped the design
+> - [overview.md](../legacy/overview.md) — system topology, design pillars, security model
+> - [command-reference.md](../../architecture/command-reference.md) — every subcommand, flag, output string, and exit code
+> - [protocol.md](../../architecture/protocol.md) — on-disk formats, wire protocol, framing contract
+> - [../prior-art-and-cc-internals.md](../explorations/prior-art-and-cc-internals.md) — the research that shaped the design
 >
 > Two ground rules frame everything below:
 >

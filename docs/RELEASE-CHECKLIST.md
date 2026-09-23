@@ -3,7 +3,7 @@
 ## Current release procedure
 
 1. Complete the acceptance gates for every adapter the release touches: the
-   [Codex v1 readiness gates](architecture/codex-v1-release-readiness.md) for Codex,
+   [Codex v1 readiness gates](history/acceptance/codex-v1-release-readiness.md) for Codex,
    and the Claude canaries under `scripts/` (e.g. `claude_cbus_canary.py`,
    `claude_interactive_wake_canary.py`) for the native Claude adapter, against one
    frozen source revision. Keep raw canary artifacts local and attach aggregate

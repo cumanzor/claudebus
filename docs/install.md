@@ -58,7 +58,7 @@ Make sure `~/.local/bin` is on your `PATH`. `cbus --version` shows what's instal
 > **Legacy installers — retired.** `install.sh` (bash-client restore) and
 > `install-cbus-go.sh` (the transitional side-by-side installer) were removed once
 > releases and `cbus selfupdate` shipped, and the bash client itself was deleted at
-> P3 homogenization (see [compat-deletion-plan](architecture/compat-deletion-plan.md)).
+> P3 homogenization (see [compat-deletion-plan](history/decisions/compat-deletion-plan.md)).
 > All of it is recoverable from git history if ever needed; the supported path is
 > releases plus `cbus selfupdate`.
 

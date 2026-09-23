@@ -8,18 +8,18 @@ carry over by hand.
 
 The recordings below are from v0.9 (committed 2026-08-10): they show the legacy join/tail flow, which native connect has since replaced.
 
-![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers (v0.9-era recording, before native connect)](docs/demo-live.gif)
+![two live Claude Code sessions on one channel: main joins and stands by, a presence event announces fork-1 joining, main pings it over the bus, and fork-1 wakes and answers (v0.9-era recording, before native connect)](docs/media/demo-live.gif)
 
 The original Monitor integration below shows the file-bus exchange at the CLI
 level. Native CLI connections now let the daemon handle waiting:
 
-![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness (v0.9-era recording, before native connect)](docs/demo.gif)
+![the CLI internals: join, tail, a presence event when a second peer joins, a message arriving framed, and cbus list showing liveness (v0.9-era recording, before native connect)](docs/media/demo.gif)
 
 And a whole fleet driving itself — one prompt in, then the orchestrator spawns
 its coder and reviewer with `cbus spawn pane` and runs a task → review → verdict
 loop entirely over the bus:
 
-![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict (v0.9-era recording, before native connect)](docs/demo-fleet.gif)
+![a three-peer dev fleet: the orchestrator spawns coder and reviewer as panes, dispatches a task over the bus, routes the result to review, and announces the verdict (v0.9-era recording, before native connect)](docs/media/demo-fleet.gif)
 
 Claude Code and Codex CLI can connect their existing conversations through a
 local daemon: native Codex since **v0.12.0**, native Claude since **v0.13.0**.
@@ -182,9 +182,9 @@ v0.12.0 or later; the old Monitor WebSocket endpoint keeps its legacy semantics.
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
-| [docs/claude-monitor-stopgap.md](docs/claude-monitor-stopgap.md) | the opt-in legacy Monitor workaround, for sessions still on that transport |
+| [docs/history/legacy/claude-monitor-stopgap.md](docs/history/legacy/claude-monitor-stopgap.md) | the opt-in legacy Monitor workaround, for sessions still on that transport |
 | [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |
-| [docs/claude-native-review.md](docs/claude-native-review.md) | native Claude receive milestone: review, acceptance evidence and release validation |
+| [docs/history/acceptance/claude-native-review.md](docs/history/acceptance/claude-native-review.md) | native Claude receive milestone: review, acceptance evidence and release validation |
 | [docs/architecture/current-architecture.md](docs/architecture/current-architecture.md) | how cbus works today: components, message flow, daemon lifecycle, presence, credential store |
 | [docs/architecture/](docs/architecture/) | the deep end: system overview, full command reference, wire protocol, port map |
 

@@ -309,7 +309,7 @@ failure mode. This is a direct application of the ███ gap identified in §
 
 ## 5. Pointers
 
-- [architecture/design-space.md](architecture/design-space.md) — the forward-looking
+- [architecture/design-space.md](../decisions/design-space.md) — the forward-looking
   companion to §3/§4: the constraint analysis for the store/transport choices and the
   rejected alternatives (local ws broker, p2p ws, RPC/IPC, SQLite, Redis), captured
   from a v0.7.0-era design review.
@@ -385,7 +385,7 @@ confirmed twice independently. The same payload over cbus is stored complete in
 `inbox.jsonl` but the Monitor event renders it clipped near 3000 characters with a
 `(truncated)` marker, consistent with the ~440 bytes/line and ~2800 chars/
 notification bounds already recorded in
-[how-it-works.md](how-it-works.md). **[M]**
+[how-it-works.md](../../how-it-works.md). **[M]**
 
 **What this changes.** Nothing about the transport decisions in §3 and §4, which
 were sound when made and still work. What it changes is the argument: cbus is no

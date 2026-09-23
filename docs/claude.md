@@ -86,7 +86,7 @@ and export any unread mail, and explicitly decide whether it may be discarded.
 natively to that alias. Do not run a Monitor and native receive for the same inbox,
 and do not automatically replay exported messages that may already have arrived.
 
-The opt-in [Monitor stopgap](claude-monitor-stopgap.md) is for sessions still using
+The opt-in [Monitor stopgap](history/legacy/claude-monitor-stopgap.md) is for sessions still using
 the legacy transport. Native receive does not require the GrowthBook snapshot or
 telemetry-off workaround.
 

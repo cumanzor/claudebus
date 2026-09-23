@@ -57,7 +57,7 @@ Each legacy session **joins a channel** and **arms a listener**:
 - **Receive** — the session runs `cbus tail <channel>/<alias>` under Claude Code's
   **Monitor** tool. A Monitor is not persistent: it expires after `timeout_ms`
   (default 5 minutes, max 30) and must be re-armed, at which point the peer
-  reads `off` until it is. See [the Monitor stopgap](claude-monitor-stopgap.md)
+  reads `off` until it is. See [the Monitor stopgap](history/legacy/claude-monitor-stopgap.md)
   for the opt-in workaround. It runs the blocking follower in-process, so
   *its own pid* becomes the liveness signal, recorded together with its process
   start time (`listenerStart` in `meta.json`) — the identity witness the

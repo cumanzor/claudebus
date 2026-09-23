@@ -25,7 +25,7 @@ below apply only to legacy join/Monitor peers.
    tool on `cbus tail <channel>/<new-alias>`, description
    `cbus:<channel>/<new-alias>`. It is not persistent: it expires at its
    `timeout_ms` (max 30 min) and must be re-armed; see
-   `docs/claude-monitor-stopgap.md` for the opt-in workaround. ⚠️ `cbus tail`
+   `docs/history/legacy/claude-monitor-stopgap.md` for the opt-in workaround. ⚠️ `cbus tail`
    goes to the **Monitor** tool, never Bash: it blocks forever in a shell (the
    follower never exits).
 3. Report the new address in one line. If you want the Claude Code session title

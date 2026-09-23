@@ -15,7 +15,7 @@ This document describes a stopgap intended to restore `persistent` for eligible 
 using it. The stopgap is not the plan of record: cross-session messaging over each session's
 Unix socket inbox is the durable path, it needs none of the gates below, and it makes this
 document unnecessary for peers using the native receive path shipped in v0.13.0.
-Use [native Claude connections](claude.md) for that path; this helper is only for
+Use [native Claude connections](../../claude.md) for that path; this helper is only for
 sessions deliberately retaining the legacy Monitor transport.
 
 ## What actually changed

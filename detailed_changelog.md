@@ -1,5 +1,104 @@
 # Changelog (detailed)
 
+## [2026-09-23 03:08:42 UTC] [Docs/M7] reorganize docs/ into living references and dated history
+
+[Attempt #1] Branch `docs/audit-m7` off `docs/audit-m6`. 24 files/dirs
+moved via `git mv` (all renames, similarity 96-100%), 15 files edited for
+link/path updates only, 0 content changes beyond path tokens.
+
+[Motivating problem]
+docs/architecture/ had accumulated both the living wire/behavior contract
+and years of superseded planning, pilot and acceptance records side by
+side, with no structural signal for which was which beyond a banner
+sentence. Carlos asked for the split: living references stay put, dated
+history groups by kind.
+
+[What changed: the moves]
+```
+docs/claude-native-review.md               -> docs/history/acceptance/claude-native-review.md
+docs/architecture/codex-native-queue-pilot.md      -> docs/history/acceptance/codex-native-queue-pilot.md
+docs/architecture/codex-v1-release-readiness.md    -> docs/history/acceptance/codex-v1-release-readiness.md
+docs/architecture/cutover-decision-package.md      -> docs/history/decisions/cutover-decision-package.md
+docs/architecture/compat-deletion-plan.md          -> docs/history/decisions/compat-deletion-plan.md
+docs/architecture/port-map.md                      -> docs/history/decisions/port-map.md
+docs/architecture/design-space.md                  -> docs/history/decisions/design-space.md
+docs/architecture/multi-harness-exploration.md     -> docs/history/explorations/multi-harness-exploration.md
+docs/prior-art-and-cc-internals.md                 -> docs/history/explorations/prior-art-and-cc-internals.md
+docs/cost-analysis.md                              -> docs/history/explorations/cost-analysis.md
+docs/architecture/behavior-spec.md                 -> docs/history/legacy/behavior-spec.md
+docs/architecture/overview.md                      -> docs/history/legacy/overview.md
+docs/architecture/commit-timeline.md               -> docs/history/legacy/commit-timeline.md
+docs/claude-monitor-stopgap.md                     -> docs/history/legacy/claude-monitor-stopgap.md
+docs/evidence/claude-monitor/2026-09-18/*  (5 files) -> docs/history/legacy/evidence/claude-monitor/2026-09-18/*
+docs/demo-fleet.gif, .tape                         -> docs/media/demo-fleet.gif, .tape
+docs/demo-live.gif, .tape                          -> docs/media/demo-live.gif, .tape
+docs/demo.gif, .tape                               -> docs/media/demo.gif, .tape
+```
+docs/architecture/ keeps only current-architecture.md, protocol.md,
+command-reference.md and cross-harness-daemon-scope.md. docs/ top level
+keeps the guides (install, usage, how-it-works, claude, codex, formations,
+relay, security, shared-instructions) and RELEASE-CHECKLIST.md, unmoved.
+
+[What changed: link rewrites]
+Every relative markdown link and anchor into or out of a moved file was
+recomputed for its file's new location, both directions (a moved file's
+own outbound links, and every stationary file's inbound links to it). This
+touched README.md, docs/RELEASE-CHECKLIST.md, docs/architecture/{command-
+reference,cross-harness-daemon-scope,current-architecture,protocol}.md,
+docs/{claude,codex,formations,how-it-works,install}.md, commands/bus-
+rename.md, and the moved files' own internal cross-references (most
+visibly overview.md, which alone had 18 links needing new relative
+depth). README's three demo image links now point at docs/media/. Two
+non-markdown path comments were updated: scripts/monitor-stopgap.sh:2 and
+cmd/cbus/jsonout_test.go:213 (both cite a moved doc by path in a code
+comment). Two bare `port-map`/`behavior-spec` comments elsewhere in
+cmd/cbus (flags.go, sessionless.go, usage.go) and internal/core/message.go
+name the file without a directory prefix and needed no change; two test
+comments in list_golden_test.go and vjo_parity_test.go cite
+protocol.md, which did not move, so no change either.
+
+In the changelog pair, only the 2 real markdown links that target a moved
+file were touched, both link TARGETS only, text unchanged: `[acceptance
+scope]`/`[release audit]` in simple_changelog.md and `[component review
+record]`/`[release audit]` in detailed_changelog.md, all four now pointing
+at docs/history/acceptance/. Every other mention of a moved filename in
+either changelog's entry text (hundreds, across years of dated entries) is
+historical narrative and was deliberately left untouched.
+
+GitHub's own release notes only link into this repo by commit/tag-pinned
+blob URL (v0.12.0's `docs/codex.md`/`docs/RELEASE-CHECKLIST.md`, v0.13.0's
+`docs/claude-native-review.md`), which resolve against that historical
+commit's tree regardless of what main's layout looks like today, so none
+of them needed or received any change.
+
+[Files Changed]
+24 renames (listed above) + 15 edits (link/path tokens only): README.md,
+commands/bus-rename.md, docs/RELEASE-CHECKLIST.md,
+docs/architecture/{command-reference,cross-harness-daemon-scope,current-
+architecture,protocol}.md, docs/{claude,codex,formations,how-it-works,
+install}.md, scripts/monitor-stopgap.sh, cmd/cbus/jsonout_test.go,
+simple_changelog.md, detailed_changelog.md.
+
+[Testing Notes]
+A repo-wide relative-link-and-anchor checker (scratch script, every *.md)
+reports zero unresolved links or anchors, before and after cross-checked
+against a corrected GitHub-slug algorithm (a first pass had two false
+positives from an over-eager whitespace-collapsing bug in the checker
+itself, not the docs). `gofmt -l` empty. `go vet ./...` clean. `go test
+./cmd/cbus/...` green with this session's own CBUS_DIR/CLAUDE_* identity
+env unset (`env -u ...`), so the test run never touched the real store.
+Every moved path confirmed as a git rename (`git diff --cached -M
+--diff-filter=R`), similarity 96-100%, no add+delete pairs. `.tape` files
+were moved but not edited; their `Output` lines stay relative to the tape
+file itself, unaffected by the directory move.
+
+[Open item]
+README.md's `docs/architecture/` row still describes it as containing
+"system overview... port map", which moved out in this milestone; left
+as-is since it is prose, not a path token, and this milestone's rule is
+path-only changes. Flagged in M7-applied.md for the reviewer's call on
+whether a follow-up should reword it.
+
 ## [2026-09-23 01:35:31 UTC] [Docs/M6] re-check fixup on the M6 commit
 
 [Attempt #1] Same worktree, still on `docs/audit-m6`. 1 file
@@ -1845,7 +1944,7 @@ then a late message received an exact receipt and reply in 11.92 seconds; this
 measures transcript activity, not exhaustive provider HTTP traffic or billing.
 The subsequent manual CCS `alpha` formation check passed for one reviewer in
 an iTerm window, including departure; it does not cover every placement or profile.
-The [component review record](docs/claude-native-review.md) retains earlier
+The [component review record](docs/history/acceptance/claude-native-review.md) retains earlier
 candidate hashes and fake-provider results as historical evidence.
 OpenCode, desktop harness clients, native Windows receive, the full cross-harness
 route matrix and broader terminal/formation UX acceptance are outside this release.
@@ -1874,7 +1973,7 @@ route matrix and broader terminal/formation UX acceptance are outside this relea
   native-child teardown. Standalone bridge creation respects the server caller's
   configured permission policy.
 
-The [release audit](docs/architecture/codex-v1-release-readiness.md) records
+The [release audit](docs/history/acceptance/codex-v1-release-readiness.md) records
 v0.12.2 publication and Mac/server installation separately from the historical
 pre-release candidate evidence. The relay was not redeployed in v0.12.2.
 

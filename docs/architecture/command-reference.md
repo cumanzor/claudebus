@@ -59,10 +59,10 @@ preserves or rethinks them deliberately, never silently.
 > **STATUS (2026-07-13): bash-era reference spec.** The installed `cbus` on every
 > machine is now the Go port (`cmd/cbus`), differentially verified byte-identical
 > against this document (27/27 verbs, both platforms — see
-> [cutover-decision-package.md](cutover-decision-package.md)). This reference remains
+> [cutover-decision-package.md](../history/decisions/cutover-decision-package.md)). This reference remains
 > the behavioral contract; `bin/cbus:N` anchors point at the retired bash
 > implementation, deleted at P3 homogenization
-> ([compat-deletion-plan.md](compat-deletion-plan.md)). Intended deltas shipped by
+> ([compat-deletion-plan.md](../history/decisions/compat-deletion-plan.md)). Intended deltas shipped by
 > the port:
 >
 > 1. Unknown relay hosts and invalid channel/alias/host names are **hard errors** (bash: a
@@ -93,7 +93,7 @@ preserves or rethinks them deliberately, never silently.
 > `formation` family (§10), and the distribution verbs (§11) — have no bash
 > counterpart and anchor to `cmd/cbus`/`internal/client`.
 
-Related docs: [`prior-art-and-cc-internals.md`](../prior-art-and-cc-internals.md)
+Related docs: [`prior-art-and-cc-internals.md`](../history/explorations/prior-art-and-cc-internals.md)
 (design rationale), the repo [`README.md`](../../README.md) and
 [`CHEATSHEET.md`](../../CHEATSHEET.md) (operator-facing; some sections lag the
 code — this reference is the current truth).
@@ -1462,7 +1462,7 @@ Set `CBUS_CHANNEL` (and optionally `CBUS_ALIAS`) in the codex process env so the
 SessionStart join has a channel. The `Stop` timeout must exceed `--wait`.
 
 On windows (phase 1), `codex-stop-hook` is one of the excluded verbs (cbus-que.3,
-[behavior spec §9.2](behavior-spec.md)): it exits 1 and prints `cbus: codex-stop-hook
+[behavior spec §9.2](../history/legacy/behavior-spec.md)): it exits 1 and prints `cbus: codex-stop-hook
 is not available on windows in phase 1: ...` instead of running the poll above. An
 operator wiring the `~/.codex/hooks.json` Stop hook on a windows host per the snippet
 above will see that exit code and refusal text in their hook's output.
@@ -2448,7 +2448,7 @@ pending mail preserved) before ever reaching the steps below.
    described `cbus:<channel>/<old-alias>`, then arm a fresh one on `cbus tail
    <channel>/<new-alias>`, description `cbus:<channel>/<new-alias>`: not
    persistent, expires at its `timeout_ms` (max 30 min) and needs re-arming
-   (`docs/claude-monitor-stopgap.md`). `cbus tail` goes to the Monitor tool,
+   (`docs/history/legacy/claude-monitor-stopgap.md`). `cbus tail` goes to the Monitor tool,
    never Bash.
 3. Report the new address; the Claude Code TUI title itself needs the user's
    own `/rename <new-alias>`, since it cannot be set programmatically.

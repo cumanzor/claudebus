@@ -12,7 +12,7 @@ runtime. Desktop attachment remains outside v1.
 **Status (2026-09-22): unchanged through v0.13.0-v0.14.1.** Native
 `cbus connect`/`spawn --harness codex` shipped in v0.12.x, alongside this
 doc's own v0.12.2 evidence; native Claude receive followed a release later,
-in v0.13.0 ([docs/codex.md](../codex.md)), tested against Codex 0.155.1
+in v0.13.0 ([docs/codex.md](../../codex.md)), tested against Codex 0.155.1
 (macOS) and 0.154.0 (Linux); v0.14.0 and v0.14.1 were client-only releases
 that did not touch the Codex adapter. This doc's v0.12.2 evidence below
 remains the readiness record for the wrapper/queue path that native connect
@@ -127,7 +127,7 @@ must not cause periodic model turns.
 ### Historical publication boundary
 
 At this snapshot, the remaining gates preceded
-[the release checklist](../RELEASE-CHECKLIST.md). No release, tag, global
+[the release checklist](../../RELEASE-CHECKLIST.md). No release, tag, global
 installation, user config change or production relay restart had yet been
 performed. A coordinated relay upgrade was required for native remote
 subscriptions; local connections did not depend on it. This is historical,

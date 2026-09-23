@@ -42,7 +42,7 @@ Conventions:
   transports (local `command` source, remote `ws:` source).
 
 Related docs: `README.md` (user-facing overview — note several of its claims lag this
-spec; where they conflict, this spec follows the code), `docs/prior-art-and-cc-internals.md`
+spec; where they conflict, this spec follows the code), `docs/history/explorations/prior-art-and-cc-internals.md`
 (design rationale and the measured harness constraints).
 
 ---

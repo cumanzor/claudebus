@@ -5,8 +5,8 @@ pieces are, how a message actually travels, and where each contract lives.
 It links to [protocol.md](protocol.md) (wire/on-disk formats, exact
 strings) and [command-reference.md](command-reference.md) (every command,
 flag and output) rather than restating them; neither substitute reads this
-page for the shape of the system. [overview.md](overview.md),
-[design-space.md](design-space.md) and [port-map.md](port-map.md) are
+page for the shape of the system. [overview.md](../history/legacy/overview.md),
+[design-space.md](../history/decisions/design-space.md) and [port-map.md](../history/decisions/port-map.md) are
 historical records of the bash-era system and its 2026-07 port; this doc
 describes what replaced them.
 
@@ -233,4 +233,4 @@ Exact output strings live in command-reference.md; this is the shape.
 | Uncertain delivery, reconcile, abandon | [how-it-works.md](../how-it-works.md), protocol.md §14.1 |
 | Every command, flag, and exact output string | [command-reference.md](command-reference.md) |
 | Operator recovery steps (daemon, epoch fence, migration) | [usage.md](../usage.md), [install.md](../install.md) |
-| Bash-era system and the 2026-07 port (historical) | [overview.md](overview.md), [design-space.md](design-space.md), [port-map.md](port-map.md) |
+| Bash-era system and the 2026-07 port (historical) | [overview.md](../history/legacy/overview.md), [design-space.md](../history/decisions/design-space.md), [port-map.md](../history/decisions/port-map.md) |

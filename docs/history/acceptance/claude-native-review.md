@@ -3,7 +3,7 @@
 > **Historical: the completed v0.13.0 acceptance record (banner added
 > 2026-09-22).** It documents review and acceptance for that one milestone; it
 > does not track current behavior. Current native Claude reference:
-> [claude.md](claude.md).
+> [claude.md](../../claude.md).
 >
 > **Correction (2026-09-22):** 27 PRs merged, not 28; #37 was folded into #25
 > and closed rather than merged separately.

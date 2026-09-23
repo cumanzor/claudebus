@@ -89,7 +89,7 @@ The offline lifecycle canary passed 17 checks using a scratch app-server and a
 local fake provider, including a busy turn held for 11.05 seconds and both live
 and cold resume after interruption. That source=`vscode` test establishes queue
 semantics, not desktop support or actual CLI restart acceptance. See the
-[pilot evidence (historical)](architecture/codex-native-queue-pilot.md).
+[pilot evidence (historical)](history/acceptance/codex-native-queue-pilot.md).
 
 Ordinary CLI tests verify clean exit and resume by exact UUID, `--last`, name,
 and picker: the replacement process retains prior conversation input and
@@ -154,7 +154,7 @@ mail. A subsequent 65-minute idle test also passed against default
 reply. That reply used the existing `cbus send` allow rule, which permits that
 command outside the command sandbox. No global setting or rule changed. Fresh
 installations need an explicit permission setup; do not infer that an unapproved
-workspace sandbox can write the default bus. See the [pilot evidence](architecture/codex-native-queue-pilot.md).
+workspace sandbox can write the default bus. See the [pilot evidence](history/acceptance/codex-native-queue-pilot.md).
 
 ### Explicit optional reply permissions and upgrades
 
