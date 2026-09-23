@@ -1013,9 +1013,9 @@ Check order matters and is observable:
 On success: 101 with the matched subprotocol echoed; per-connection
 `WriteTimeout = 10s`; the connection is hijacked into the ws protocol (§10).
 
-### 9.6 Auth model & CF Access topology
+### 9.6 Auth model
 
-Two independent mechanisms in the relay:
+Two independent mechanisms in the relay itself:
 
 | Surface | Mechanism |
 |---|---|
@@ -1025,14 +1025,11 @@ Two independent mechanisms in the relay:
 The subprotocol pattern exists because the Monitor `ws:` source cannot send custom
 headers; a header (unlike a `?token=` query param) also stays out of edge access logs.
 
-Edge topology (infrastructure outside this repo; per README): the public front door
-`https://bus.example.com` is reached through an authenticated tunnel. `POST /send` and `GET /peers` require
-**CF Access service-token headers** (`CF-Access-Client-Id`/`-Secret`) at the edge *plus*
-the relay bearer at origin. `GET /tail` has a **path-scoped CF Access bypass** — the
-subprotocol token is the sole auth on that path. The deliberate asymmetry: compromising
-the tail path only allows eavesdropping a channel; the write path (which injects
-instructions into live sessions) keeps the stronger double guard. The relay never sees
-or checks CF headers.
+Everything above the relay's own bearer check (any front door, service-token
+headers, per-path bypass) is deployment, not wire contract: see
+[Deploying a relay](../security.md#deploying-a-relay) for the requirement and the
+current risk if the token leaks. The relay itself never sees or checks any
+front-door headers.
 
 ### 9.7 `POST /prune` (Go client addition)
 
@@ -1349,8 +1346,8 @@ surface a port must keep, restructuring it blinds that reader.
 ### 12.2 Front-door probe
 
 `relay_base` (bin/cbus:148-155): GET `${CBUS_RELAY_LOCAL_URL:-http://127.0.0.1:8090}/healthz`
-with `curl -m 0.3`; body exactly `ok` → mode `local` (loopback URL, **no CF Access
-headers**); else mode `public` (site URL + CF Access in the HTTP legs). This bash-era
+with `curl -m 0.3`; body exactly `ok` → mode `local` (loopback URL, **no front-door
+headers**); else mode `public` (site URL + front-door credentials in the HTTP legs). This bash-era
 probe ran fresh on every remote operation (~0.3 s latency cost off-relay).
 Trust-by-port: anything answering `ok` on loopback:8090 is believed. *quirk.*
 
@@ -1374,7 +1371,7 @@ yields an empty string** with no error. *quirk.*
 | `cbus list [<ch>]@<host>` | required | public mode only |
 | `cbus prune [<ch>]@<host>` (Go client) | required | public mode only |
 | `cbus connect <ch>@<host> ...` (Go client, native) | required | never; the daemon's
-  durable-v1 dial is token-only regardless of mode, no CF headers on that leg |
+  durable-v1 dial is token-only regardless of mode, no front-door headers on that leg |
 
 Missing credentials die with pointer messages to `cbus auth set <host> --… -`.
 Bash era: failure surfaces differed by command; remote send/tail wrapped errors in

@@ -1,5 +1,39 @@
 # Changelog (detailed)
 
+## [2026-09-23 04:21:12 UTC] [Docs/M9] consolidate relay deployment guidance in security.md
+
+[Attempt #1] Branch `docs/audit-m9` off `docs/audit-m8`, kept local (not
+pushed). 5 files: security.md, relay.md, command-reference.md,
+current-architecture.md, protocol.md.
+
+[What changed]
+security.md gained one "Deploying a relay" section that states the
+per-path access requirement (which paths need the front door plus the
+bearer, which need a different check (see the security guide), and that the
+health check is unauthenticated by design) and the current risk if the
+bearer leaks, generically, with no reference to any particular front-door
+provider, hostname, or machine. The existing "Cross-machine relay" bullet
+above it now points there instead of repeating the detail inline.
+
+relay.md, command-reference.md and current-architecture.md each had at
+least one place restating the same requirement or naming a specific
+front-door provider; those now state the fact they own (an operation's
+required credential, a component's reachability) in one line and link to
+the new section for the reasoning. protocol.md's own auth section keeps
+only the wire mechanism (the bearer header format, the subprotocol
+format, which surface uses which) and now links out for the deployment
+question it used to answer inline.
+
+docs/history/ and every existing changelog entry are untouched; this is a
+docs-consolidation pass, not a content rewrite.
+
+[Testing Notes]
+Dash/vocab sweep clean on every changed line (the handful of pre-existing
+em-dashes on lines this pass touched a different part of were left as
+they were). Repo-wide link checker reports zero unresolved links,
+including the new cross-references into security.md's new anchor.
+`go vet ./...` clean (no Go files touched).
+
 ## [2026-09-23 04:12:12 UTC] [Docs/M8] generalize examples and deployment notes
 
 [Attempt #1] Branch `docs/audit-m8` off `docs/audit-m7`, kept local (not

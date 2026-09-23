@@ -10,8 +10,8 @@ see below):
 > serves every participating machine** — you don't run one per host. Adding a
 > machine to the mesh means pointing it at the *existing* relay, not standing up a
 > new one: set `CBUS_SITE_<HOST>_URL` to the relay's base and `cbus auth set
-> <host>` with its bearer (plus CF Access service-token if it's behind a tunnel),
-> then address `<channel>@<host>/<alias>`. A machine only needs its *own* relay if
+> <host>` with its bearer (plus any front-door credentials it needs, if it's
+> behind one), then address `<channel>@<host>/<alias>`. A machine only needs its *own* relay if
 > you want other machines to address channels *hosted on it* (`@that-host`) —
 > uncommon. The relay host itself reaches its channels over loopback and needs no
 > `CBUS_SITE_*` override; every other client does.
@@ -37,8 +37,9 @@ No Monitor, tail or periodic model polling is needed. This requires the relay's
 `/tail/durable-v1` endpoint; an older server is refused before consuming
 messages: "durable relay unavailable; server must support /tail/durable-v1
 (upgrade the relay)". The daemon dials that endpoint with only the bearer
-subprotocol and no CF Access headers, the same constraint as legacy `/tail`
-below; see [security.md](security.md) for the resulting auth requirement.
+subprotocol and no front-door headers, the same constraint as legacy `/tail`
+below; see [Deploying a relay](security.md#deploying-a-relay) for the
+resulting auth requirement.
 
 The durable stream sends a stable message ID with the raw bus message. The
 daemon acknowledges only after an atomic, synchronized local inbox append;
@@ -65,16 +66,17 @@ inbox and is not native disconnect.
 The `/tail` protocol and join/arm examples below apply only to legacy peers.
 Native peers use the durable subscription above.
 
-- **`POST /send`** (bearer token) appends `{from,to,ts,text}` — the exact local
+- **`POST /send`** appends `{from,to,ts,text}` — the exact local
   inbox shape — to a Maildir spool (`spool/<channel>/<alias>/{tmp,new,cur}`).
-- **`GET /tail?channel=&alias=`** upgrades to WebSocket, authed via
-  `Sec-WebSocket-Protocol: bearer.cbus.<token>` (k8s-apiserver pattern — the
-  Claude Code Monitor `ws:` source can't send headers). Replays queued messages,
-  then streams; delivered messages move `new/` → `cur/` (at-least-once).
-- **`GET /peers`** (bearer) — presence/queue depth; liveness = relay presence +
-  30s/90s ping heartbeat, not pids. **`/healthz`** — unauthenticated.
+- **`GET /tail?channel=&alias=`** upgrades to WebSocket (the Claude Code Monitor
+  `ws:` source can't send headers, hence the subprotocol auth). Replays queued
+  messages, then streams; delivered messages move `new/` → `cur/` (at-least-once).
+- **`GET /peers`** — presence/queue depth; liveness = relay presence +
+  30s/90s ping heartbeat, not pids. See
+  [Deploying a relay](security.md#deploying-a-relay) for what each of these
+  paths needs authentication-wise, including `/healthz`.
 - Runs as systemd unit `cbus-relay` on the server, loopback `127.0.0.1:8090`,
-  fronted by the CF tunnel. Deploy with `relay/deploy.sh` (builds on the server).
+  behind a front door. Deploy with `relay/deploy.sh` (builds on the server).
 - One active tail per peer: a new `/tail` displaces the old (per-message
   displacement checks; delivery is at-least-once — a narrow handover race can deliver
   one in-flight message to both tails).
@@ -103,9 +105,9 @@ Details that matter:
   There's no remote registry; a taken alias is self-evident because the relay
   keeps one active tail per peer (your Monitor visibly drops if displaced).
 - **Endpoint autodetects**: a session on the relay host probes
-  `127.0.0.1:8090/healthz` and talks loopback with no CF Access; everyone else
+  `127.0.0.1:8090/healthz` and talks loopback with no front door; everyone else
   goes through the host's `CBUS_SITE_<HOST>_URL` (e.g. `https://bus.example.com`)
-  with CF Access service-token headers.
+  with the front door's own credentials.
 - **Credentials are never in code**: `cbus auth` stores them in the macOS
   Keychain (`security(1)`) or, on Linux, 0600 files under `~/.config/cbus/`.
 - **Monitor receive**: remote `tail` prints the `Monitor {ws:}` arm

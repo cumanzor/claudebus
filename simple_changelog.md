@@ -1,5 +1,7 @@
 # Changelog (simple)
 
+[2026-09-23 04:21:12 UTC] [Docs/M9] Consolidated the relay's deployment and access-bypass guidance into one "Deploying a relay" section in the security guide. The living docs (relay guide, command reference, current-architecture overview, wire protocol) now link to that section instead of restating it; the wire protocol keeps only the paths, the subprotocol auth format, and status codes.
+
 [2026-09-23 04:12:12 UTC] [Docs/M8] Generalized examples and deployment notes across the docs and changelogs: example channel and formation names in the guides and changelog history are now generic, the cost-analysis notes are reduced to ratios and relative statements instead of absolute per-profile totals, and the deployment guidance in the README, security guide and one historical doc states its requirements generically rather than describing one specific setup. No behavior change; a Go test comment updated to match.
 
 [2026-09-23 03:10:45 UTC] [Docs/M7] Second M7 commit: fixed the README docs table's docs/architecture/ row, stale after the reorg (it still named files that had just moved out), and added a docs/history/ row describing the new dated-records tree. Split out as its own commit so the first M7 commit stays pure path-token changes.

@@ -48,9 +48,11 @@ flowchart LR
   fully supported for peers that never connect natively; a daemon-managed
   peer refuses to be joined, renamed or tailed this way instead
   (protocol.md §2, §5).
-- **Relay**: a single Go binary reachable locally or through a Cloudflare
-  tunnel, serving both the legacy best-effort `/tail` and the durable,
-  acknowledged `/tail/durable-v1` (protocol.md §9-10, §16).
+- **Relay**: a single Go binary reachable locally or through an authenticated
+  front door, serving both the legacy best-effort `/tail` and the durable,
+  acknowledged `/tail/durable-v1` (protocol.md §9-10, §16;
+  [Deploying a relay](../security.md#deploying-a-relay) for the access-control
+  requirement).
 - **Maildir spool**: the relay's own durable per-peer queue,
   `tmp/`→`new/`→`cur/` (protocol.md §11).
 - **Formations**: saved channel topology snapshots and their restore/apply

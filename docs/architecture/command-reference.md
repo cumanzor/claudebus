@@ -379,7 +379,7 @@ forked child's CLI as a flag.
 ```mermaid
 flowchart TD
     A["remote command for host H"] --> B{"curl -m 0.3\n$CBUS_RELAY_LOCAL_URL/healthz\nbody == 'ok'?"}
-    B -- yes --> C["mode = local\nbase = http://127.0.0.1:8090\n(no CF Access headers)"]
+    B -- yes --> C["mode = local\nbase = http://127.0.0.1:8090\n(no front-door headers)"]
     B -- no --> D{"CBUS_SITE_&lt;H&gt;_URL set?"}
     D -- yes --> E["mode = public\nbase = env URL"]
     D -- no --> F{"H in built-in table?\n(server → https://bus.example.com)"}
@@ -536,8 +536,9 @@ note: the protocols entry carries the relay token — expected; it IS the auth.
 
 The bearer token is printed in cleartext by design — the Monitor `ws:` source
 cannot send custom headers, so the token rides in the WebSocket subprotocol.
-Only the token is needed (CF Access credentials apply to the HTTP `send`/`list`
-legs, never the ws leg — `/tail` has a path-scoped CF Access bypass).
+Only the token is needed here; see
+[Deploying a relay](../security.md#deploying-a-relay) for why `/tail` needs a
+front-door bypass while `send`/`list` don't.
 
 **Same subcommand, opposite execution contracts:** local `tail` must ONLY run
 under Monitor; remote `tail` must run under Bash (it just prints the spec).
@@ -847,7 +848,8 @@ pushes it to the connected tail or holds it for replay on next connect.
 - **`--force` is accepted and ignored** — meaningless remotely: the spool
   always queues.
 - Endpoint via the healthz probe (§2); credentials: bearer token always,
-  CF Access `cf-id`/`cf-secret` only in `public` mode. Missing credentials die
+  `cf-id`/`cf-secret` (front-door service-token credentials) only in `public`
+  mode. Missing credentials die
   with pointers: `cbus: no relay token for "<host>" — run: cbus auth set
   <host> --token -` (similarly `no cf-id` / `no cf-secret`).
 - **`from` default:** this session's identity marker for `<host>/<ch>` → `<ch>@<host>/<marker-alias>`;
@@ -1472,8 +1474,9 @@ above will see that exit code and refusal text in their hook's output.
 ## 8. Commands: auth
 
 Credentials per host: `token` (relay bearer), `cf-id` + `cf-secret`
-(Cloudflare Access service token — needed only by HTTP `send`/`list` through
-the public front door; the ws `tail` leg never uses them).
+(front-door service-token credentials — needed only by HTTP `send`/`list` through
+the public front door; the ws `tail` leg never uses them). See
+[Deploying a relay](../security.md#deploying-a-relay) for which path needs which.
 
 Storage: macOS Keychain generic passwords, service `cbus-relay-<host>`,
 account = field name; Linux: `${XDG_CONFIG_HOME:-~/.config}/cbus/<host>/<field>`,
