@@ -1,5 +1,40 @@
 # Changelog (detailed)
 
+## [2026-09-23 17:49:40 UTC] [Docs/R2] generalize example machine names
+
+[Attempt #1] Branch `republish-docs`, same worktree. 18 files across
+README, CHEATSHEET, docs/**, docs/history/**, and both changelogs (the
+full list is in R-applied-docs.md).
+
+[What changed]
+Every place a doc named one of the author's three machines, in prose,
+CLI examples, a diagram, a title, or an environment variable name, now
+uses one of three generic placeholder names instead, applied with a
+scripted case-matched word-boundary pass and then a manual sweep for
+sentence-initial and heading-initial capitalization the script's
+lowercase-only rule missed. Two compound forms needed their own rule
+ahead of the generic pass: a hyphenated machine-name form (so the
+generalized name doesn't carry a dangling name-prefix) and the site
+environment variable name (`CBUS_SITE_<HOST>_URL` for that one specific
+host). The status-lookup command's reference entry no longer says its
+host argument defaults to a specific machine; it now says the host
+argument is required, describes the usage-error path a missing one
+takes (the same `die()`-based path every other malformed invocation
+takes, exit 1), and keeps its unrelated host-validation and
+short-secret-masking notes unchanged. This documents a behavior change
+landing on a parallel code-side pass; I did not wait for that pass to
+land before writing it, per the ruling that already fixed the exit
+behavior question (a usage error through the existing error path, not a
+new exit code).
+
+[Testing Notes]
+Dash/vocab sweep: no self-authored instances; every flagged line was a
+touched-in-passing rename inside an otherwise-unchanged historical
+sentence, left as is. Repo-wide link checker reports zero unresolved
+links. A case-insensitive word-boundary grep for every machine-name form
+the mapping table lists, plus the two compound forms, returns zero hits
+across the full scope.
+
 ## [2026-09-23 17:38:31 UTC] [Docs/R1] generalize example CCS profile names
 
 [Attempt #1] Branch `republish-docs` off `d1d24d8`, kept local. 5 files:
@@ -9,10 +44,10 @@ docs/history/legacy/claude-monitor-stopgap.md,
 docs/history/acceptance/claude-native-review.md.
 
 [What changed]
-Every place a doc named a specific CCS profile, launch commands, env
-values, quoted formation-check mentions, and bare-word pairings alike,
-now uses the two example profile names instead, matching the naming a
-parallel pass is applying on the code side. The generic phrase "CCS
+Every place a doc named a specific CCS profile (launch commands, env
+values, formation checks, bare-word pairings) now uses the two example
+profile names instead, matching the naming a parallel pass is applying
+on the code side. The generic phrase "CCS
 profile" and placeholder forms were already generic and needed no
 change. Cross-checked the full-history sweep's CCS-profile-name group
 against every markdown file in scope; every TIP-present occurrence it
@@ -1638,7 +1673,7 @@ Installing v0.14.0 on the server, `cbus daemon restart` printed `confirm daemon 
 - Candidate: two fresh clones of the local repo at `7b18fb2`, tag created only inside them; `go vet`, `go test -race ./...` green; `make dist CBUS_REPO=cumanzor/claudebus` in both, five binaries byte-identical. Stamps `v0.14.0`, `vcs.revision=7b18fb2`, `vcs.modified=false`. Read-only field smoke against the real store (`list`, `formation list`), `:80` refused, `install-commands` into a temp dir placed 8 files.
 - Published with `make release` from a fresh clone of origin at the tag; its dist matched the candidate; title and notes set by `gh release edit`, `SHA256SUMS` uploaded; downloaded assets pass `shasum -c`.
 - Mac: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-darwin-arm64` (`cbe8ccbc...`), `bus-codex.md` and `bus-layout.md` refreshed, both CCS profiles see them via `~/.ccs/shared/commands -> ~/.claude/commands`. Daemon NOT restarted: six live Claude peers (partner-mobile, mobile-authfix) and the daemon code is identical.
-- Server: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-linux-amd64` (`67d8d42a...`), `save-formation.md` installed. `cbus daemon restart` hit the EOF bug above; `cbus daemon start` brought up v0.14.0 (pid 313557, protocol 3), confirmed from a second ssh session, 2 connections retained, relay connected.
+- server: `cbus selfupdate` 0.13.0 -> 0.14.0, binary hashes to `cbus-linux-amd64` (`67d8d42a...`), `save-formation.md` installed. `cbus daemon restart` hit the EOF bug above; `cbus daemon start` brought up v0.14.0 (pid 313557, protocol 3), confirmed from a second ssh session, 2 connections retained, relay connected.
 - Relay not redeployed: `relay/`, `internal/wire`, `internal/core` unchanged since v0.13.0.
 
 [Possible Ripple Effects]
@@ -2393,7 +2428,7 @@ from dist and uploaded after.
   binaries to an identical digest list.
 - Mac: v0.11.0 -> v0.11.1, commands 6 -> 7 files,
   `~/.claude/commands/bus-codex.md` present.
-- Server: v0.11.0 -> v0.11.1 over ssh, `~/.local/bin/cbus` hashes to the published
+- server: v0.11.0 -> v0.11.1 over ssh, `~/.local/bin/cbus` hashes to the published
   `cbus-linux-amd64` (dcd1814b...), `bus-codex.md` present in its command set.
 - A live codex peer (`ui-test-mcp/advisor`, itself a resumed session on the
   new feature) was running across the Mac swap and kept listening, which is what
@@ -5798,7 +5833,7 @@ Built by the `winport` formation on channel `winport`: orchestrator (Opus 5), co
 43 labeled rulings, D1-D43. The full record is on `cbus-que`.
 
 [Motivating problem]
-winbox runs Windows-native Claude Code and has no WSL distribution, and WSL was
+Winbox runs Windows-native Claude Code and has no WSL distribution, and WSL was
 ruled out on 2026-07-19, so a native port is the only route to fleet membership.
 `internal/core` and `relay/...` already built clean for windows; `internal/client`
 did not, and plain `go build` understated the surface because it stops at 10
@@ -11403,9 +11438,9 @@ closed six-for-six: 40c82f0..b474c0d, all six milestones reviewer-approved.
   the inbox path in its argv reads `listen`; null pid, dead pid,
   argv-mismatch, and dead-owner cases all read `off`.
 - `ReadPeerMeta` tolerance test; verb tests over a seeded `$CBUS_DIR`.
-- **Laptop seeded differential**: `whoami`/`inbox`/`channels`/`list`/`list
+- **laptop seeded differential**: `whoami`/`inbox`/`channels`/`list`/`list
   dev`/`list --active` all byte-identical between cbus-go and bash cbus.
-- **Server live local-mode differential**: coder cross-compiled a temp
+- **server live local-mode differential**: coder cross-compiled a temp
   `cbus-go` binary, ran it directly on the server against real state, confirmed
   byte-identical output, then deleted the temp binary (no install).
   Reviewer did not independently reproduce this leg — it crosses a
@@ -12439,7 +12474,7 @@ The relay binary is byte-identical to f64753e; everything below is bin/cbus.
   `cbus list @server` flipped off→listen and queued 1→0; cleanup verified.
 - NOT yet tested: the public CF front door (needs cf-id/cf-secret seeded from
   a password manager) — that is exactly the .4 acceptance round-trip, pending a live
-  Server-side session.
+  server-side session.
 
 ## [2026-07-07 16:00:00 UTC] [Relay] cbus-relay daemon on the server — networked leg of the bus
 
@@ -12485,7 +12520,7 @@ strict status parse + handshake deadline).
 
 ### [Possible Ripple Effects]
 
-- Server gains a systemd service `cbus-relay` on loopback :8090 and a token file
+- server gains a systemd service `cbus-relay` on loopback :8090 and a token file
   `/home/relay/cbus-relay/token` (0600). Not yet exposed via CF (epic .4).
 - Message shape over the relay is identical to local inbox lines, so the .3
   client work needs no translation layer.

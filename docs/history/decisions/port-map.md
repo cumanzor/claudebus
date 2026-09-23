@@ -489,7 +489,7 @@ homogenization.**
   property. The same holds for any future `kind`-over-the-relay work (Phase 4), which then
   touches one codebase.
 - **Single static binary, `GOOS/GOARCH` cross-compile** to every planned node (darwin/arm64
-  Laptop, linux server, linux/WSL winbox); version stamp via `-ldflags`; no runtime deps — this
+  laptop, linux server, linux/WSL winbox); version stamp via `-ldflags`; no runtime deps — this
   directly answers both the python3 dependency and the copy-install drift problem.
 - **Process forensics fit the adapter split**: `syscall.Kill(pid, 0)`; `/proc/<pid>/cmdline`
   on Linux; shelling to `ps` on darwin preserves today's exact semantics (no clean foreign-argv

@@ -1505,14 +1505,16 @@ headers, never a shelled-out `curl`.
 - Output: `stored <n> credential(s) for <host> in macOS Keychain
   (cbus-relay-<host>)` (or `... in <config-dir> (0600)` on Linux).
 
-### `cbus auth status [host]`
+### `cbus auth status <host>`
 
-Host defaults to `server`; bare `cbus auth` ≡ `cbus auth status`. Prints
-`site <host>:` then, per field, `set (…<last-4-chars>)` or `absent`. Exits 0
-on a valid host, regardless of which fields are set or absent; a bad host
-exits 1 (below). A secret of 4 bytes or fewer prints in full, not masked
-(also below): "never prints full secrets" is the intent, not a guarantee
-for every stored value.
+The host argument is required. Called with none, it takes the same
+`die()`-based usage-error path every other malformed invocation takes,
+naming the form `cbus auth status <host>`, and exits 1. Given a host, it
+prints `site <host>:` then, per field, `set (…<last-4-chars>)` or `absent`.
+Exits 0 on a valid host, regardless of which fields are set or absent; a
+bad host exits 1 (below). A secret of 4 bytes or fewer prints in full, not
+masked (also below): "never prints full secrets" is the intent, not a
+guarantee for every stored value.
 
 **Host validation:** the Go client validates the host argument here too
 (`cbus auth status ../x` → `cbus: bad host "../x"`, rc 1); this is no
