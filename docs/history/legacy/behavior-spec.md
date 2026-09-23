@@ -584,7 +584,7 @@ Flags: `-listen 127.0.0.1:8090`, `-spool spool`, `-token-file token` (absolute i
 ### Auth
 - HTTP bearer for `/send`/`/peers`: `Authorization: Bearer <token>`, constant-time compare (main.go:121-125).
 - ws subprotocol for `/tail`: scan `Sec-WebSocket-Protocol` entries for `bearer.cbus.<token>` (constant-time on the suffix); echo the matched protocol in the 101 (main.go:127-143). Rationale: Monitor `ws:` cannot send headers.
-- CF Access (infra outside the repo): `/send`,`/peers` need CF-Access-Client-Id/Secret at the edge; `/tail` has a path-scoped Access bypass.
+- Edge access control (infra outside the repo): see [Deploying a relay](../../security.md#deploying-a-relay) for the per-path requirement.
 
 ### POST /send (main.go:153-200)
 `405 POST only` / `401 unauthorized` / body capped 1 MiB (`http.MaxBytesReader`) / `400 bad json | bad channel/alias | empty text`. `from` empty → `"unknown"`; `ts` empty → server RFC3339 now, **else stored verbatim** (garbage accepted; bash client never sends ts). Stored line: `{"from","text","to":"<ch>/<al>","ts"}\n` — Go-map **alphabetical key order** (local lines are insertion-ordered; parse JSON, never key order). Write spool → poke hub → `{"ok":true,"id":"<spool filename>"}`. No existence check — sends to any valid name create the spool dir and queue forever.
@@ -657,7 +657,7 @@ Five placements: cbus → `~/.local/bin`, cc-branch.sh → `~/.claude/bin`, 3 co
 | README env list (3 vars) / usage heredoc | Missing `CBUS_SITE_<HOST>_URL`, `CBUS_RELAY_LOCAL_URL` (README) and `CBUS_ALIAS` (everywhere) |
 | whoami descriptions (README:245, CHEATSHEET:31, heredoc :874) | Omit remote-marker lines + exit-1-on-empty |
 | CHEATSHEET:85 `ws://localhost:8090` | Printed spec is literally `ws://127.0.0.1:8090` |
-| CHEATSHEET:68,90 "wss… + CF Access" | The ws /tail leg carries NO CF headers (path-scoped bypass; token-only) |
+| CHEATSHEET:68,90 "wss… + CF Access" | The ws /tail leg needs no edge headers; see [Deploying a relay](../../security.md#deploying-a-relay) |
 | bus-join.md:31-32 / CHEATSHEET:134 "nothing is lost" | Sleep-window loss (~90-120 s) — see architecture §7 |
 | install.sh:34-35 NOTE | Stale since b15ce12 |
 | Presence + hook-exit + `peers` alias | Absent from all shipped docs (changelogs only) |

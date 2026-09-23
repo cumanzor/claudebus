@@ -210,8 +210,8 @@ DLQ/corrupt-message handling; delivery/read receipts.
 Four ████ constraints, ████ with a design consequence:
 
 - **Monitor's `ws:` source takes only `{url, protocols}` — no custom headers.**
-  Discovered during server relay recon, this rules out CF Access header auth
-  (`CF-Access-Client-Id`/`Secret`) for the WebSocket `/tail` leg, even though
+  Discovered during server relay recon; see [Deploying a relay](../../security.md#deploying-a-relay)
+  for what that rules out on the WebSocket `/tail` leg, and why
   `POST /send` (shelled via `curl`) is unaffected. This single constraint is why
   the relay's receive-side auth rides in `Sec-WebSocket-Protocol` instead of a
   header — see the decision log in ████
@@ -284,11 +284,10 @@ declined-with-rationale alternatives:
   leak into CF edge/relay access logs and a subprotocol rides in a header
   instead; a private-network VPN was considered and kept only as a documented fast-path
   alternative because the always-on host was intermittently offline at recon
-  time █████ failing the always-armed-receive-leg availability bar). `POST /send` keeps
-  the stronger CF Access █████████████ ██████ `/tail`'s bypass-scoped token
-  compromise only allows eavesdropping a channel, not injecting ████ one — a
-  deliberate asymmetry, since the write path is the one that injects
-  instructions into a live session. Reviewed by zen/gpt-5.5 (high thinking): one
+  time █████ failing the always-armed-receive-leg availability bar). `POST /send` and
+  `/tail` are guarded differently by design; see
+  [Deploying a relay](../../security.md#deploying-a-relay) for the current per-path
+  requirement and risk. Reviewed by zen/gpt-5.5 (high thinking): one
   HIGH finding (a displacement/drain overlap on tail handover could duplicate
   delivery or kill the displacing ████ on █ mark race) was fixed and
   regression-tested (7-message handover █████ 7 delivered, █ unique, 0

@@ -335,7 +335,8 @@ is deleted wholesale in one commit once the fleet is homogeneous.
   broadcast would skip unarmed peers forever) + skip-actor + once-only `departed`.
 - Session-scoped remote identity; markers are a from-default, **not** proof of reachability;
   `leave @host` is local-only (queued mail stays on the relay).
-- Front-door autodetect: 0.3 s loopback `/healthz` probe → local mode skips CF Access headers.
+- Front-door autodetect: 0.3 s loopback `/healthz` probe distinguishes local from public
+  mode; see [Deploying a relay](../../security.md#deploying-a-relay) for what public mode needs.
 - Idempotent join per (session, channel); alias auto-pick `main` then lowest free `fork-N`;
   dead-alias reclaim rules.
 - Exit-code coarse contract: errors → 1; `whoami` exits 1 on empty (used as a probe);

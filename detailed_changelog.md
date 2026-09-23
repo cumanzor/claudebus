@@ -1,5 +1,42 @@
 # Changelog (detailed)
 
+## [2026-09-23 16:27:36 UTC] [Docs/M10] point historical records to the security guide for relay deployment
+
+[Attempt #1] Branch `docs/audit-m10` off `docs/audit-m9`, kept local. 4
+files: docs/history/legacy/overview.md, docs/history/decisions/port-map.md,
+docs/history/legacy/behavior-spec.md,
+docs/history/explorations/prior-art-and-cc-internals.md.
+
+[What changed]
+Each record kept its own frozen findings and structure; only the passages
+that walked through the relay's per-path access-control detail were
+replaced with a short sentence linking to the security guide's new
+"Deploying a relay" section. overview.md had the most: a flowchart node
+label and two edge labels, an ASCII topology diagram's four per-path
+annotation lines, a prose bullet, and a full table-plus-explanation
+passage. port-map.md, behavior-spec.md (a bullet and a drift-register
+table row) and prior-art-and-cc-internals.md (two passages, one inside
+its existing redacted block) each had one or two passages of the same
+kind. Wire-level facts with source citations (bearer header format,
+subprotocol format, main.go line numbers) were left in place, since those
+are code facts, not deployment description.
+
+[Testing Notes]
+Dash/vocab sweep clean on every changed line. Repo-wide link checker
+reports zero unresolved links, including every new
+`security.md#deploying-a-relay` cross-reference (six of them, one per
+file plus overview.md's extra occurrences).
+
+[Open items, not applied]
+Two more CF-specific passages were found in overview.md while doing this
+pass, neither named in the plan: a components-table row noting `wstail`
+can't cross the front door (a tool limitation, not per-path detail), and
+a full second mermaid diagram (a sequence diagram titled "A remote send
+-> deliver round trip") with its own dedicated participant lane for the
+edge and message labels naming the header pair. The first is minor and
+left alone; the second would need a real diagram redesign, not a text
+swap, so it was left for a scope decision rather than guessed at.
+
 ## [2026-09-23 04:26:45 UTC] [Docs/M9] fix relay security review findings
 
 [Attempt #1] Same branch, `docs/audit-m9`, second commit. 4 files:

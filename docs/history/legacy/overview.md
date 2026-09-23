@@ -141,7 +141,7 @@ flowchart LR
         bus -->|follower| sessB
     end
 
-    cf["authenticated tunnel + access control<br/>bus.example.com"]
+    cf["authenticated front door<br/>bus.example.com"]
 
     subgraph server["server (Linux, systemd)"]
         direction TB
@@ -150,11 +150,11 @@ flowchart LR
         serverSess["CC session on server<br/>Monitor ws source"]
         wstail["wstail<br/>(loopback debug client)"]
         relay <--> spool
-        relay -->|"ws text frames<br/>(loopback, no CF)"| serverSess
+        relay -->|"ws text frames<br/>(loopback)"| serverSess
         wstail -.->|test only| relay
     end
 
-    cli -->|"POST /send<br/>bearer + CF Access headers"| cf
+    cli -->|"POST /send<br/>bearer + front-door credentials"| cf
     cf --> relay
     relay -->|"wss /tail<br/>subprotocol token"| cf
     cf -->|"one Monitor notification<br/>per message"| sessA
@@ -199,11 +199,8 @@ under a non-iTerm2 terminal.
 ## 3. Cross-machine topology
 
 ```
-Laptop session ── cbus ──► https://bus.example.com  (CF tunnel front door)
-                              │  POST /send: CF Access service token + relay bearer
-                              │  GET  /tail: CF Access bypass (path-scoped); auth = ws subprotocol
-                              │  GET  /tail/durable-v1: CF Access bypass (path-scoped); auth = ws subprotocol
-                              │  POST /prune: CF Access service token + relay bearer
+Laptop session ── cbus ──► https://bus.example.com  (authenticated front door)
+                              │  see docs/security.md "Deploying a relay" for the per-path requirement
                               ▼
 Server: cbus-relay on 127.0.0.1:8090 ──► Maildir spool ──► ws push to the single active tail per peer
 ```
@@ -214,7 +211,7 @@ Server: cbus-relay on 127.0.0.1:8090 ──► Maildir spool ──► ws push t
   `channel/alias`.
 - **Endpoint autodetect**: every remote command first probes
   `http://127.0.0.1:8090/healthz` with a 0.3 s timeout. A session *on the relay host* gets
-  `local` mode (loopback, no CF Access); everyone else gets `public` mode through the tunnel.
+  `local` mode (loopback, no front-door credentials); everyone else gets `public` mode through the tunnel.
   Zero config, at the cost of a ~0.3 s probe per remote command when off-relay.
 - **Remote receive** is not a process: `cbus tail <ch>@<host>/<alias>` *prints* a Monitor `ws:`
   arm spec (`url` + `protocols: ["bearer.cbus.<token>"]`) and records this session's identity
@@ -296,20 +293,8 @@ A single-operator service with no multi-tenant auth. It must only be reachable o
 LAN or private network or through an authenticated tunnel with an edge access-control layer, binding
 the daemon to `127.0.0.1` only. Do **not** expose `:8090` directly.
 
-The auth is deliberately **asymmetric per path**:
-
-| Path | Edge (Cloudflare Access) | Origin (relay) |
-|---|---|---|
-| `POST /send`, `GET /peers`, `POST /prune` | service-token headers required | `Authorization: Bearer <token>`, constant-time compare |
-| `GET /tail`, `GET /tail/durable-v1` (ws) | **bypass, scoped to this path only** | token in `Sec-WebSocket-Protocol: bearer.cbus.<token>`, constant-time compare |
-
-The asymmetry exists because of a hard harness constraint: the Monitor's `ws:` source takes only
-`{url, protocols}` — **no custom headers** — so CF Access header auth is impossible on the ws leg.
-The token rides in the subprotocol instead (the "k8s-apiserver pattern"), chosen over a `?token=`
-query param because query strings leak into edge and access logs. The trade was made knowingly in
-the safe direction: compromising the bypass-path token only allows *eavesdropping* a channel;
-the write path — the one that injects instructions into a live session — keeps the stronger
-double guard.
+See [Deploying a relay](../../security.md#deploying-a-relay) for the per-path access
+requirement and the current risk if the token leaks.
 
 Consequences to know about:
 
