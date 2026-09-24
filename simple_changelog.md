@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 18:34:31 UTC] [Docs] Added repository guidance for public content.
+
 [2026-09-24 18:33:15 UTC] [Docs] Removed an outdated exploration.
 
 [2026-09-24 18:06:02 UTC] [Docs] Restored the formations guide's fleet recording, updating its caption to name all three spawned peers (coder, reviewer, documenter) and the coded/reviewed/logged task it runs, matching what the recording actually shows.

@@ -4,6 +4,29 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 18:34:31 UTC] [Docs] add repository guidance for public content
+
+[Attempt #1] 3 files: AGENTS.md, detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Added a new "Public content" section to AGENTS.md, after "Integration
+boundaries": this repository is public, so code, docs, changelogs, commit
+messages and recordings are written for any reader, not one operator's
+setup. Covers using the generic example names, not hardcoding deployment
+details, naming the operator's own tooling by role while keeping
+third-party product names, keeping ids and machine/account details out of
+new changelog and commit text, security docs describing the code rather
+than one live deployment's exposure, and recording demos in a scratch
+environment with a frame-by-frame check independent of the tool that
+edited them. Inserted verbatim, checksum-verified against the supplied
+source text; no factual or style issue found against this file's existing
+bullet conventions, so nothing was changed.
+
+[Testing Notes]
+Diffed the inserted block against the source file directly: byte
+identical. Link checker reports zero unresolved links. No em or en dash
+in the added lines (the source text has none).
+
 ## [2026-09-24 18:33:15 UTC] [Docs] remove an outdated exploration
 
 [Attempt #1] 3 files: docs/history/explorations/cost-analysis.md

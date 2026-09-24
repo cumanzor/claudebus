@@ -35,3 +35,33 @@ permission and collaboration procedures remain in their skills and commands.
 - Run checks appropriate to the change. Separate fixture tests, source tracing,
   actual harness acceptance and field evidence in reports; do not claim one
   proves another.
+
+## Public content
+
+This repository is public. Code, comments, tests, fixtures, docs, changelogs,
+commit messages, tags, release notes and recordings are all written for any
+reader, not for one operator's setup.
+
+- Use the generic names in examples, fixtures and prose: hosts `laptop`,
+  `server` and `winbox`, CCS profiles `alpha` and `beta`, channels such as
+  `demo`. Never a real hostname, username, home path, profile or account name.
+- Do not hardcode deployment details. Hosts, relay URLs, credentials and paths
+  come from arguments, environment or config, never from a built-in default
+  that points at one person's machines. The relay has no built-in hosts (each
+  resolves through `CBUS_SITE_<HOST>_URL`) and `cbus auth status` requires its
+  host argument; new code follows the same pattern.
+- Name the operator's own tooling by its role: "the tracker", "a password
+  manager", "a private network", "a Linux container runtime", "a dotfiles
+  directory". Products cbus integrates with (Claude Code, Codex CLI, CCS,
+  iTerm2, tmux) keep their names.
+- New changelog entries, comments and commit messages say what changed and why.
+  Leave out tracker and finding ids, local branch and worktree names, scratch paths,
+  machine names, and account, plan or billing details.
+- Security docs describe what the code does and how to configure it safely.
+  They do not describe the exposure of a particular live deployment.
+- Record demos and screenshots in a scratch environment: `CBUS_HOST` set, a
+  scratch store and working directory, a minimal environment. Check every frame
+  for names, paths and hostnames before committing, with a check that is
+  independent of the tool that edited the frames.
+- Before committing, search the diff for your own machine, account and tool
+  names. Keep that list outside the repository.
