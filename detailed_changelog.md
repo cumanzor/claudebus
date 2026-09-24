@@ -4,58 +4,45 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
-## [2026-09-24 16:49:50 UTC] [Docs] fix a line wrap in bus-join.md's reply example
+## [2026-09-24 16:53:03 UTC] [Client/Formations] single-quote the kickoff reply example
 
-[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
-commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
-
-[What changed]
-The example added moments earlier wrapped its backtick span across two
-source lines, `cbus send demo/alice` on one and the quoted reply text on
-the next, so a model copying the raw markdown literally would run it as
-two shell commands. Moved the sentence break to before "For example" so
-the whole `cbus send demo/alice 'got it, on it now'` span sits on one
-line. Wording otherwise unchanged.
-
-[Testing Notes]
-Confirmed the full example string appears on a single line in the file.
-Link checker reports zero unresolved links. No em or en dash in the
-changed lines.
-
-## [2026-09-24 16:46:40 UTC] [Docs] add a literal reply example to bus-join.md
-
-[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
-commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
+[Attempt #1] Coder commit `e58e8cd` on branch `republish-demo`. 2 files:
+internal/client/formation_kickoff.go, internal/client/formation_kickoff_test.go.
 
 [What changed]
-Naming the send command was not enough on its own: rehearsal evidence
-showed a session still copying the delivered message header's `from=`
-and `to=` field names as literal arguments rather than the bare address
-they label, in most of a small run's attempts. Added a one-line worked
-example with a concrete address and single-quoted text, and a short
-sentence saying explicitly that the argument is the bare address, not
-the header's field names.
+The formation kickoff's required first-reply line showed `cbus send
+<addr> "..."`, double-quoted, and a peer copies that form verbatim.
+Inside double quotes the shell runs backticks and `$(` found in the
+message body, so a reply that happened to mention a command could
+execute it. The example now single-quotes the text and states why
+inline. A new test pins the quoting.
 
 [Testing Notes]
-Link checker reports zero unresolved links. No em or en dash in the
-added lines.
+Recorded from the coder's commit message and diff; not independently
+re-run by the documenter.
 
-## [2026-09-24 16:27:06 UTC] [Docs] name the reply command in bus-join.md
+## [2026-09-24 16:49:50 UTC] [Docs] name and demonstrate the bus-join reply command
 
 [Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
 commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 The reply-to-incoming-messages sentence told a session to reply to the
-exact `from=` address without ever naming the command that does it. A
-session with no other reference for that command tried inventing one and
-failed. The Codex skill and the formation briefs already name the send
-command; this brings bus-join.md in line, keeping the existing note about
-preserving `@host` for a relay peer.
+exact `from=` address without ever naming the command that does it.
+Rehearsal evidence showed the gap mattered twice over: a session with no
+other reference tried inventing a command outright, and once the command
+was named, a session still copied the delivered header's `from=`/`to=`
+field names as literal arguments instead of the bare address they label.
+The line now names `cbus send` explicitly, keeps the existing `@host`
+note for a relay peer, and adds a one-line worked example with a
+concrete address and single-quoted text, kept on one source line so a
+model copying it literally runs one command, plus a sentence saying not
+to reuse the header's field names.
 
 [Testing Notes]
-Link checker reports zero unresolved links. No em or en dash in the added
-lines.
+Confirmed the full example string, `cbus send demo/alice 'got it, on it
+now'`, appears on a single line in the file. Link checker reports zero
+unresolved links. No em or en dash in the added lines.
 
 ## [2026-09-23 21:19:48 UTC] [Docs/H7] document CBUS_HOST
 
