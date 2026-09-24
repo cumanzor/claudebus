@@ -6,6 +6,8 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
+![two Claude Code sessions join the same channel over native connect, one pings the other, and the reply arrives](docs/media/demo-ping.gif)
+
 *Two Claude Code sessions on one channel: one pings, the other answers.*
 (Claude Code's own peer-message notice is trimmed from this and the
 formation recording below, for clarity.)
@@ -100,6 +102,8 @@ cbus will not substitute a fresh Claude session.
   [docs/relay.md](docs/relay.md)
 
 ## Advanced example
+
+![an orchestrator spawns a coder, a reviewer and a documenter as panes, then routes one small task through all three over native connect, coded, reviewed and logged](docs/media/demo-fleet.gif)
 
 *A four-peer formation: an orchestrator spawns a coder, a reviewer and a
 documenter, then routes one small task through all three in turn, coded,

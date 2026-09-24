@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 17:52:48 UTC] [Docs] Added the two README recordings now that they exist: the opening two-session ping and the Advanced example four-peer formation, both over native connect, each with meaningful alt text.
+
 [2026-09-24 17:39:50 UTC] [Docs] Corrected the Advanced example caption: the formation's orchestrator spawns all three other peers itself, then routes one small task through them in turn, rather than the reviewer and documenter joining on their own partway through.
 
 [2026-09-24 17:37:42 UTC] [Docs/R7] Simplified the README: moved the Claude Code coordination comparison (why the project exists, the mechanism table, the detailed notes) to its own guide, linked from a short paragraph in its place; added an Advanced example section for the four-peer formation recording; trimmed two operational paragraphs to short pointers at their more detailed existing homes; trimmed the docs table by folding a few entries into their parent rows. Image lines wait on the new recordings.

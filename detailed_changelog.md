@@ -4,6 +4,27 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 17:52:48 UTC] [Docs] add the README recordings
+
+[Attempt #1] Coder commit `900f888` supplied the media. 3 files: README.md,
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Both caption slots prepared in the README simplification pass now carry
+their image: `docs/media/demo-ping.gif` above the opening caption
+(two sessions join and ping each other over native connect), and
+`docs/media/demo-fleet.gif` above the Advanced example caption (an
+orchestrator spawns a coder, a reviewer and a documenter as panes, then
+routes one small task through all three). Both alt texts describe the
+shown sequence rather than restating the caption verbatim, for a reader
+with images off. Neither caption's wording changed.
+
+[Testing Notes]
+Verified the coder's reported sha256 for both GIFs against the files in
+the worktree directly (`shasum -a 256`) before adding either image line;
+both matched. Link checker reports zero unresolved links, confirming no
+dangling image reference. No em or en dash in the added lines.
+
 ## [2026-09-24 17:39:50 UTC] [Docs] correct the Advanced example caption
 
 [Attempt #1] 3 files: README.md, detailed_changelog.md, simple_changelog.md.
