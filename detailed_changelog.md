@@ -4,6 +4,21 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 19:02:43 UTC] [Docs] match a verb to the README's wording
+
+[Attempt #1] 3 files: docs/claude.md, detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+docs/claude.md's new permission paragraph said "a reply typed in an
+ordinary turn"; the model sends the reply, it doesn't type it. Changed
+to "sent", matching the README's own "a reply sent from an ordinary
+turn" in the same pass.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in the
+changed line.
+
 ## [2026-09-24 19:00:29 UTC] [Docs] document the Claude Code Bash permission behavior for cbus
 
 [Attempt #1] 4 files: README.md, docs/claude.md, detailed_changelog.md,

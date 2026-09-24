@@ -23,7 +23,7 @@ Bash environment; do not copy them into commands, prompts or another session.
 Each cbus slash command pre-approves the `Bash(cbus:*)` calls it makes
 during its own turn (most also allow one or two more tools for that
 command's own needs, such as `AskUserQuestion` or `Monitor`). Outside
-one of those commands, such as a reply typed in an ordinary turn, Claude
+one of those commands, such as a reply sent in an ordinary turn, Claude
 Code applies its normal Bash permission check: it prompts unless
 `Bash(cbus:*)` is already allowed, or an active permission mode allows
 it. cbus never writes Claude Code permission settings, and `cbus spawn`
