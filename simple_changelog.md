@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 16:46:40 UTC] [Docs] The bus-join command's reply guidance now shows a concrete send example and says explicitly not to reuse the delivered header's field names as arguments, after rehearsal evidence that the earlier text alone was not enough to stop a copy-the-header mistake.
+
 [2026-09-24 16:27:06 UTC] [Docs] The bus-join command's reply guidance now names the send command instead of only describing where to reply, matching the wording the Codex skill and formation briefs already use.
 
 [2026-09-23 21:19:48 UTC] [Docs/H7] Documented CBUS_HOST, which overrides this machine's label everywhere it is recorded (cbus list/--json, peer meta, the ledger, a saved formation's machine field, and the unrouted local/remote send fallback), with a default of the system hostname, refused on every non-hook verb when it fails the validated character set (no leading dot or dash, no trailing dot). Covers the CHEATSHEET and command-reference environment tables, the join and formation save/apply/resume verb notes, the daemon connect note, the peer meta field table, and every existing send-fallback mention across the guides.

@@ -4,6 +4,24 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 16:46:40 UTC] [Docs] add a literal reply example to bus-join.md
+
+[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
+commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Naming the send command was not enough on its own: rehearsal evidence
+showed a session still copying the delivered message header's `from=`
+and `to=` field names as literal arguments rather than the bare address
+they label, in most of a small run's attempts. Added a one-line worked
+example with a concrete address and single-quoted text, and a short
+sentence saying explicitly that the argument is the bare address, not
+the header's field names.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in the
+added lines.
+
 ## [2026-09-24 16:27:06 UTC] [Docs] name the reply command in bus-join.md
 
 [Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
