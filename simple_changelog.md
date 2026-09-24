@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 18:33:15 UTC] [Docs] Removed an outdated exploration.
+
 [2026-09-24 18:06:02 UTC] [Docs] Restored the formations guide's fleet recording, updating its caption to name all three spawned peers (coder, reviewer, documenter) and the coded/reviewed/logged task it runs, matching what the recording actually shows.
 
 [2026-09-24 17:54:01 UTC] [Docs] Corrected the opening recording's caption and alt text: the ping goes both ways, each session pings the other and gets an ack, not just one session pinging the other.

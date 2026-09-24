@@ -4,6 +4,22 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 18:33:15 UTC] [Docs] remove an outdated exploration
+
+[Attempt #1] 3 files: docs/history/explorations/cost-analysis.md
+(removed), detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Removed docs/history/explorations/cost-analysis.md.
+
+[Testing Notes]
+Checked for any reference to the file by path or by title
+("cost analysis" / "formation cost") anywhere in scope outside the two
+changelogs: none found. No docs/history index or README entry names it
+by title; the README's docs/history/ row describes the folder generically
+and does not name individual files. Link checker reports zero unresolved
+links after the removal.
+
 ## [2026-09-24 18:06:02 UTC] [Docs] restore the formations guide's fleet recording
 
 [Attempt #1] 3 files: docs/formations.md, detailed_changelog.md,
