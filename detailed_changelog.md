@@ -6,8 +6,8 @@ previous repository and may not resolve.
 
 ## [2026-09-24 16:27:06 UTC] [Docs] name the reply command in bus-join.md
 
-[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 1 file:
-commands/bus-join.md.
+[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
+commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 The reply-to-incoming-messages sentence told a session to reply to the
