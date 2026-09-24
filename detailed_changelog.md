@@ -22,13 +22,15 @@ changed lines.
 
 ## [2026-09-24 17:37:42 UTC] [Docs/R7] simplify the README
 
-[Attempt #1] 3 files: README.md, docs/claude-code-coordination.md (new).
+[Attempt #1] 4 files: README.md, docs/claude-code-coordination.md (new),
+detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 The README's "How this relates to Claude Code's own coordination" section
 was 58 of 182 lines: a narrative paragraph, a five-way mechanism
-comparison table, and three more paragraphs of detail. Moved all of it,
-verbatim, to a new docs/claude-code-coordination.md, and replaced it in
+comparison table, and three more paragraphs of detail. Moved the
+narrative, the table and the detail paragraphs verbatim to a new
+docs/claude-code-coordination.md, and replaced it in
 the README with one short paragraph naming the same four mechanisms in
 plain words and linking out. Added a new "Advanced example" section
 between "What's in the box" and the coordination paragraph, for the
@@ -41,7 +43,7 @@ single shared sentence noting Claude Code's own peer-message notice is
 trimmed from both recordings, stated once rather than per caption.
 The Formations bullet in "What's in the box" now points at the new
 Advanced example section instead of the removed "three-peer fleet demo at
-the top of the doc" line, and names four peers to match.
+the top of the doc" line.
 Checked the two operational paragraphs that closed the old section (send
 refusal for a dead listener; per-transport restart and resume semantics)
 against command-reference.md and the per-harness guides: the send-gate
