@@ -64,6 +64,9 @@ func TestInvalidHostLabelSparesHelpVersionAndHooks(t *testing.T) {
 	}
 	t.Setenv("CBUS_CHANNEL", "cc")
 	t.Setenv("CBUS_ALIAS", "coder")
+	// a runner inside Claude Code inherits the socket; hook-join would then skip for
+	// that reason instead of refusing the label, and the assertions below would pass blind
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "")
 	for _, hook := range [][]string{{"hook-join"}, {"hook-exit"}, {"hook-compact", "pre"}} {
 		var rc int
 		var stdout, stderr string

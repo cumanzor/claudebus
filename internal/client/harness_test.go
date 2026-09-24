@@ -483,11 +483,29 @@ func TestHookCompactKeepsRemoteMarkers(t *testing.T) {
 // ---- hook-join -------------------------------------------------------------------
 
 // clearAllSessionEnv blanks the whole $*_SESSION_ID chain for a hook-join test that drives
-// identity purely through stdin or a single set var.
+// identity purely through stdin or a single set var. It also blanks the native messaging
+// socket: run from inside Claude Code, HookJoin sees it (and a claude ancestor) and skips.
 func clearAllSessionEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID"} {
+	for _, k := range []string{"CBUS_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "GROK_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET"} {
 		t.Setenv(k, "")
+	}
+}
+
+// TestClearAllSessionEnvIsolatesHookJoinFromANativeRunner pins the helper itself: a
+// runner inside Claude Code inherits the messaging socket and has a claude ancestor, and
+// then HookJoin (correctly) skips. The helper must undo that for the hook-join tests.
+func TestClearAllSessionEnvIsolatesHookJoinFromANativeRunner(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/inherited/from/a/live/session.sock")
+	previous := harnessNameFn
+	harnessNameFn = func() string { return "claude" }
+	defer func() { harnessNameFn = previous }()
+	clearAllSessionEnv(t)
+	HookJoin(strings.NewReader(`{"session_id":"PINSID"}`), "pinch", "coder", "")
+	if m, ok := ReadPeerMeta(filepath.Join(root, "pinch", "coder", "meta.json")); !ok || m.SessionID != "PINSID" {
+		t.Fatalf("hook-join did not register after clearAllSessionEnv (meta ok=%v sid=%q): the inherited socket leaked", ok, m.SessionID)
 	}
 }
 
