@@ -4,6 +4,23 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 17:09:30 UTC] [Client] isolate hook-join tests from an inherited messaging socket
+
+[Attempt #1] Coder commit `6cb571f`. 2 files: cmd/cbus/host_label_test.go,
+internal/client/harness_test.go.
+
+[What changed]
+Run from inside a live session, the suite inherited a messaging socket
+and a session ancestor that made hook-join take its native-session skip,
+failing six tests for an environment reason rather than a code reason.
+The shared session-clearing test helper now blanks that socket too, a
+new pin test sets a bogus socket and confirms the helper undoes it, and
+a related host-label hook test now clears it as well so its own
+no-registration check cannot pass for the wrong reason.
+
+[Testing Notes]
+Recorded from the coder's commit message and diff.
+
 ## [2026-09-24 16:53:03 UTC] [Client/Formations] single-quote the kickoff reply example
 
 [Attempt #1] Coder commit `e58e8cd`. 2 files:
