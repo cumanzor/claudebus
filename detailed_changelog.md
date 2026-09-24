@@ -201,7 +201,7 @@ across the full scope.
 
 ## [2026-09-23 17:38:31 UTC] [Docs/R1] generalize example CCS profile names
 
-[Attempt #1] Off `d1d24d8`, kept local. 5 files:
+[Attempt #1] Off `d1d24d8`. 5 files:
 detailed_changelog.md, simple_changelog.md,
 docs/history/decisions/cutover-decision-package.md,
 docs/history/legacy/claude-monitor-stopgap.md,
@@ -285,7 +285,7 @@ links. docs/history/ and every prior changelog entry untouched.
 
 ## [2026-09-23 04:21:12 UTC] [Docs/M9] consolidate relay deployment guidance in security.md
 
-[Attempt #1] Not pushed. 5 files: security.md, relay.md, command-reference.md,
+[Attempt #1] 5 files: security.md, relay.md, command-reference.md,
 current-architecture.md, protocol.md.
 
 [What changed]
@@ -318,7 +318,7 @@ including the new cross-references into security.md's new anchor.
 
 ## [2026-09-23 04:12:12 UTC] [Docs/M8] generalize examples and deployment notes
 
-[Attempt #1] Not pushed. 11 files: README.md, security.md, codex.md, command-reference.md,
+[Attempt #1] 11 files: README.md, security.md, codex.md, command-reference.md,
 three docs/history/ files, the changelog pair, and one Go test comment.
 
 [What changed]
