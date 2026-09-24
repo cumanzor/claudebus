@@ -65,6 +65,24 @@ func TestKickoffCarriesEverythingDesignAsksFor(t *testing.T) {
 	}
 }
 
+// TestKickoffReplyExampleIsSingleQuoted pins the reply line: a peer copies it
+// verbatim, and inside double quotes the shell runs backticks and $( in the body.
+func TestKickoffReplyExampleIsSingleQuoted(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	roleFileIn(t, dir, "kickofftest", "# Kickoff Test Role\n\nMODEL: opus\n\nYou implement the milestones.")
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Rolefile = "roles/kickofftest.md@b3a806e" }))
+	got := kickoffFor(t, f, PeerPlan{Peer: &f.Peers[0], Action: ActionTemplate}, "")
+	want := "send ONE message to ch/orchestrator with: cbus send ch/orchestrator '...'\n" +
+		"(single quotes: inside double quotes the shell runs backticks and $( in your text)\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("reply line not pinned to the single-quoted form; want %q in:\n%s", want, got)
+	}
+	if strings.Contains(got, `cbus send ch/orchestrator "`) {
+		t.Errorf("kickoff still shows a double-quoted cbus send:\n%s", got)
+	}
+}
+
 // TestKickoffPerModeFraming: a resumed peer, a fork, and a fresh one are three
 // different situations, and telling a fork it is the original is how a copy starts
 // acting on someone else's unfinished work.

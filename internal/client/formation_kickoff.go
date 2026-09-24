@@ -80,7 +80,8 @@ func KickoffPrompt(f *Formation, pp PeerPlan, self, nonce, brief string) string 
 			"Cold-load from the pointers above before acting, and say so if something you need is missing.")
 	}
 	b.WriteString(r.Replace("\n\n--- first reply (required) ---\nOnce you are connected, send ONE message to " + self +
-		" with: cbus send " + self + " \"...\"\nIt must contain, and will be checked:\n" +
+		" with: cbus send " + self + " '...'\n(single quotes: inside double quotes the shell runs backticks and $( in your text)\n" +
+		"It must contain, and will be checked:\n" +
 		"1. the token " + nonce + " verbatim — this is what proves you are reachable\n" +
 		"2. a one-line proof you read the role and the pointers (something specific from them, not \"done\")\n" +
 		"3. your provenance: fresh spawn or fork, and what alias you first joined as\n" +
