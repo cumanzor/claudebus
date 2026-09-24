@@ -4,6 +4,55 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 17:37:42 UTC] [Docs/R7] simplify the README
+
+[Attempt #1] 3 files: README.md, docs/claude-code-coordination.md (new).
+
+[What changed]
+The README's "How this relates to Claude Code's own coordination" section
+was 58 of 182 lines: a narrative paragraph, a five-way mechanism
+comparison table, and three more paragraphs of detail. Moved all of it,
+verbatim, to a new docs/claude-code-coordination.md, and replaced it in
+the README with one short paragraph naming the same four mechanisms in
+plain words and linking out. Added a new "Advanced example" section
+between "What's in the box" and the coordination paragraph, for the
+four-peer formation recording (orchestrator, coder, reviewer,
+documenter), with a one-line caption and a pointer to
+docs/formations.md; no image line yet, that waits on the recording.
+Added a matching one-line caption above the opening paragraph's own
+recording slot (two sessions, one pings, the other answers), with a
+single shared sentence noting Claude Code's own peer-message notice is
+trimmed from both recordings, stated once rather than per caption.
+The Formations bullet in "What's in the box" now points at the new
+Advanced example section instead of the removed "three-peer fleet demo at
+the top of the doc" line, and names four peers to match.
+Checked the two operational paragraphs that closed the old section (send
+refusal for a dead listener; per-transport restart and resume semantics)
+against command-reference.md and the per-harness guides: the send-gate
+paragraph restates command-reference.md's own listener-gate table nearly
+verbatim, and the restart/resume paragraph's claims are already covered,
+in more depth, split across docs/claude.md (Claude), docs/codex.md
+(Codex), docs/how-it-works.md (legacy join/tail) and docs/relay.md (the
+relay's version floor); no single existing doc states the four-transport
+synthesis, so kept both paragraphs as short pointer sentences rather than
+duplicating or inventing a fifth doc for them. Trimmed the docs table
+from 15 rows to 13: dropped the claude-native-review.md and
+current-architecture.md rows as redundant with their parent
+docs/history/ and docs/architecture/ folder rows (folded a one-clause
+mention into each), dropped the claude-monitor-stopgap.md row since the
+docs/history/ folder row already names it explicitly, and added a row
+for the new coordination guide.
+
+[Testing Notes]
+Link checker reports zero unresolved links, including the new
+docs/claude-code-coordination.md links, the command-reference.md
+listener-gate anchor, and the README's own #advanced-example self-link.
+Confirmed zero `![` image lines were added anywhere in this diff. No em
+or en dash in any newly authored sentence; the one flagged dash
+(the Formations bullet's link separator) is the same pre-existing
+description-to-link convention every other bullet in that list uses,
+untouched by this edit.
+
 ## [2026-09-24 17:09:30 UTC] [Client] isolate hook-join tests from an inherited messaging socket
 
 [Attempt #1] Coder commit `6cb571f`. 2 files: cmd/cbus/host_label_test.go,
@@ -19,7 +68,8 @@ a related host-label hook test now clears it as well so its own
 no-registration check cannot pass for the wrong reason.
 
 [Testing Notes]
-Recorded from the coder's commit message and diff.
+`TestClearAllSessionEnvIsolatesHookJoinFromANativeRunner` pins the
+isolation; `go test ./...` passes.
 
 ## [2026-09-24 16:53:03 UTC] [Client/Formations] single-quote the kickoff reply example
 

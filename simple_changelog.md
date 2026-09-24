@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 17:37:42 UTC] [Docs/R7] Simplified the README: moved the Claude Code coordination comparison (why the project exists, the mechanism table, the detailed notes) to its own guide, linked from a short paragraph in its place; added an Advanced example section for the four-peer formation recording; trimmed two operational paragraphs to short pointers at their more detailed existing homes; trimmed the docs table by folding a few entries into their parent rows. Image lines wait on the new recordings.
+
 [2026-09-24 17:09:30 UTC] [Client] Hook-join tests now clear an inherited Claude Code messaging socket, so the suite passes when run from inside a Claude Code session instead of failing for an environment reason; a pin test covers the isolation, and a related host-label test clears it too.
 
 [2026-09-24 16:53:03 UTC] [Client/Formations] The formation kickoff's required first-reply example now single-quotes its message text instead of double-quoting it, so backticks and $( in a reply body are not run by the shell; a new test pins the quoting.

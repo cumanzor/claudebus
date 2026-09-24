@@ -6,6 +6,10 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
+*Two Claude Code sessions on one channel: one pings, the other answers.*
+(Claude Code's own peer-message notice is trimmed from this and the
+formation recording below, for clarity.)
+
 Claude Code and Codex CLI can connect their existing conversations through a
 local daemon: native Codex since **v0.12.0**, native Claude since **v0.13.0**.
 Claude uses its per-session native messaging socket;
@@ -85,8 +89,8 @@ cbus will not substitute a fresh Claude session.
   file — [docs/usage.md](docs/usage.md)
 - **Formations** — save a fleet's shape, restore it with one command, stamp out
   fresh fleets from starter templates, or checkpoint the current channel with
-  `/save-formation`; there's a three-peer fleet demo at the
-  top of the doc — [docs/formations.md](docs/formations.md)
+  `/save-formation`; see the [advanced example](#advanced-example) below —
+  [docs/formations.md](docs/formations.md)
 - **Harness-neutral peers** — ordinary Claude Code and Codex CLI sessions connect
   from inside their conversation. Existing `cbus codex` launches remain supported;
   OpenCode is the next adapter. Terminal placement remains independent —
@@ -95,65 +99,30 @@ cbus will not substitute a fresh Claude session.
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
 
+## Advanced example
+
+*A four-peer formation: an orchestrator spawns a coder and a reviewer, a
+documenter joins, and the four coordinate a task entirely over the bus.*
+
+See [docs/formations.md](docs/formations.md) for how to save, resume, and
+stamp out a fleet like this one.
+
 ## How this relates to Claude Code's own coordination
 
-Why I built it, and why it stayed: the shapes that fan out inside one task kept
-failing the same way. A teammate reports *finished* and never delivers its report,
-so the only recovery is asking an agent what it remembers concluding — an open
-invitation to reconstruct a verdict after the fact. A peer that owns a terminal and
-a file on disk fails visibly instead: scroll its pane, `cat` its inbox.
+Claude Code has its own ways to fan sessions out and message across them:
+Subagents, Agent Teams, cross-session SendMessage, Workflow. cbus overlaps
+some of that, but stays open where those stay closed: any peer that can
+write a line, not just Claude Code, a relay you own, and a mailbox and
+ledger you can read with `cat`. See
+[docs/claude-code-coordination.md](docs/claude-code-coordination.md) for
+the comparison, including why I built it and where each mechanism lands
+against it.
 
-Claude Code has cross-session messaging of its own since 2.1.224, so the bus is no
-longer the only thing that crosses a session boundary. Four mechanisms overlap what
-cbus does, and this is where each one lands (measured on 2.1.235, macOS + iTerm2):
-
-|  | Subagent | Agent Teams | SendMessage | Workflow | cbus |
-|---|---|---|---|---|---|
-| Target has its own terminal | no | pane when configured | session, terminal optional | no | peer, terminal optional |
-| Target outlives this session | no | no, unless the lead is killed | yes | no | yes |
-| Nesting | 3 layers by default | teammates spawn subagents, not teammates | n/a | n/a | no enforced limit |
-| Discoverable by other sessions | no | no, team-scoped | `ListAgents` | no | `cbus list` |
-| Reachable from a hook or script | no | no | own session's socket | no | `cbus send` |
-| Cross-machine | no | no | Remote Control, web sessions | no | your own relay |
-| Non-Claude peer | no | no | no | no | Codex today |
-| Readable store | agent transcripts | mailbox, config, tasks | receiving transcript | script + run JSON | `inbox.jsonl`, relay spool |
-
-Agent Teams' pane column is configuration-specific: the default is in-process, and
-panes come from `teammateMode: tmux`, which picks iTerm2 when it's there. Teammates
-are separate Claude Code instances either way, parented by the terminal rather than
-by the lead, and torn down when the lead exits cleanly. Kill a lead ungracefully and
-they keep running without one.
-
-**Agent Teams** and **Workflow** are shapes for fan-out inside one task. The ceiling
-worth knowing is that only the lead adds teammates: *"Teammates cannot spawn other
-teammates — the team roster is flat."* A cbus formation has no such limit, which is
-how an orchestrator spawns a coder that spawns its own helpers.
-
-**Cross-session messaging** is the near neighbour. It delivers a long message whole
-where a Monitor tail clips it at the documented ~2800-character notification budget,
-it needs no follower process, and hooks and Bash children can post into their own
-session through `CLAUDE_CODE_MESSAGING_SOCKET`. Its peers are Claude Code sessions,
-reached through a socket and a token.
-
-What's left for cbus is an **open** boundary rather than a wider one: a file and a
-CLI usable by anything that can write a line, peers that aren't Claude Code, a relay
-you own and can inspect, and a mailbox and ledger you can read with `cat`.
-
-A send to a peer whose listener died is refused unless `--force`: a legacy
-listener that exited, a disconnected native peer, or any native peer while
-the daemon is down. (A legacy peer that joined but never armed still accepts
-mail.) For a connected native peer, listen means the daemon holds the
-connection, not that the CLI session is running; session presence is
-`consumer.state` in `cbus connection status CH/AL --json`, and mail to a
-departed native session queues for its resume.
-Legacy join/tail registrations have their existing restart and inbox-reset
-semantics. Managed native connections retain their inbox, delivery cursor and
-uncertain attempts across daemon and exact-session CLI restarts. Claude socket
-writes remain unconfirmed until an exact transcript receipt; Codex queue acceptance
-is also distinct from recipient history receipt and a completed reply; inspect
-`cbus connection status` and use on-demand `reconcile` for evidence. Native relay
-subscriptions require the acknowledged-delivery endpoint in a relay from
-v0.12.0 or later; the old Monitor WebSocket endpoint keeps its legacy semantics.
+A send to a dead listener is refused unless `--force`; see the
+[send gate](docs/architecture/command-reference.md#cbus-send-target---from-x---force-text--local).
+Each transport keeps its own resume and retained-mail behavior across a
+restart: [Claude](docs/claude.md), [Codex](docs/codex.md), the
+[legacy transport](docs/how-it-works.md), and the [relay](docs/relay.md).
 
 ## Docs
 
@@ -168,12 +137,10 @@ v0.12.0 or later; the old Monitor WebSocket endpoint keeps its legacy semantics.
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
-| [docs/history/legacy/claude-monitor-stopgap.md](docs/history/legacy/claude-monitor-stopgap.md) | the opt-in legacy Monitor workaround, for sessions still on that transport |
+| [docs/claude-code-coordination.md](docs/claude-code-coordination.md) | why claudebus exists next to Subagents, Agent Teams, SendMessage and Workflow |
 | [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |
-| [docs/history/acceptance/claude-native-review.md](docs/history/acceptance/claude-native-review.md) | native Claude receive milestone: review, acceptance evidence and release validation |
-| [docs/architecture/current-architecture.md](docs/architecture/current-architecture.md) | how cbus works today: components, message flow, daemon lifecycle, presence, credential store |
 | [docs/architecture/](docs/architecture/) | the living references: current architecture, the wire and disk protocol, command reference, cross-harness scope |
-| [docs/history/](docs/history/) | dated records: acceptance reports, decision packages, explorations, and legacy (the bash-era spec, the original overview, the Monitor stopgap) |
+| [docs/history/](docs/history/) | dated records: acceptance reports (incl. the native Claude receive milestone), decision packages, explorations, and legacy (the bash-era spec, the original overview, the Monitor stopgap) |
 
 ## License
 
