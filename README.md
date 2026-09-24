@@ -6,9 +6,10 @@ windows working the same repo, or a session on your laptop and one on a home
 server — so results flow between them live instead of through handoff files you
 carry over by hand.
 
-![two Claude Code sessions join the same channel over native connect, one pings the other, and the reply arrives](docs/media/demo-ping.gif)
+![two Claude Code sessions join the same channel over native connect and each pings the other, getting an ack back both ways](docs/media/demo-ping.gif)
 
-*Two Claude Code sessions on one channel: one pings, the other answers.*
+*Two Claude Code sessions join one channel, and each pings the other and
+gets an ack.*
 (Claude Code's own peer-message notice is trimmed from this and the
 formation recording below, for clarity.)
 

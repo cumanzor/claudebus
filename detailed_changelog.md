@@ -4,6 +4,22 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 17:54:01 UTC] [Docs] fix the ping recording's caption and alt text
+
+[Attempt #1] 3 files: README.md, detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Both the opening caption and the image's alt text described only one
+direction of the recorded exchange (one session pinging, the other
+answering). The recording is a round trip each way: alice pings bob and
+gets an ack, then bob pings alice and gets an ack. Reworded both to say
+each session pings the other and gets an ack, matching what the
+recording shows in either order.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in the
+changed lines.
+
 ## [2026-09-24 17:52:48 UTC] [Docs] add the README recordings
 
 [Attempt #1] Coder commit `900f888` supplied the media. 3 files: README.md,

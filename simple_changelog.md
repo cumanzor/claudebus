@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 17:54:01 UTC] [Docs] Corrected the opening recording's caption and alt text: the ping goes both ways, each session pings the other and gets an ack, not just one session pinging the other.
+
 [2026-09-24 17:52:48 UTC] [Docs] Added the two README recordings now that they exist: the opening two-session ping and the Advanced example four-peer formation, both over native connect, each with meaningful alt text.
 
 [2026-09-24 17:39:50 UTC] [Docs] Corrected the Advanced example caption: the formation's orchestrator spawns all three other peers itself, then routes one small task through them in turn, rather than the reviewer and documenter joining on their own partway through.
