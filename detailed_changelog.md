@@ -6,7 +6,7 @@ previous repository and may not resolve.
 
 ## [2026-09-24 17:39:50 UTC] [Docs] correct the Advanced example caption
 
-[Attempt #1] 1 file: README.md.
+[Attempt #1] 3 files: README.md, detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 The caption written for the four-peer formation recording had the
