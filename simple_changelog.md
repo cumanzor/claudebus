@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 16:27:06 UTC] [Docs] The bus-join command's reply guidance now names the send command instead of only describing where to reply, matching the wording the Codex skill and formation briefs already use.
+
 [2026-09-23 21:19:48 UTC] [Docs/H7] Documented CBUS_HOST, which overrides this machine's label everywhere it is recorded (cbus list/--json, peer meta, the ledger, a saved formation's machine field, and the unrouted local/remote send fallback), with a default of the system hostname, refused on every non-hook verb when it fails the validated character set (no leading dot or dash, no trailing dot). Covers the CHEATSHEET and command-reference environment tables, the join and formation save/apply/resume verb notes, the daemon connect note, the peer meta field table, and every existing send-fallback mention across the guides.
 
 [2026-09-23 18:25:25 UTC] [Docs/R4] Removed the three outdated pre-native-connect demo recordings and their README/formations-doc image lines (the source recipes that built them stay in the repo for a future re-record), and dropped a leftover local filesystem path from one changelog entry.

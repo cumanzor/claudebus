@@ -4,6 +4,23 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 16:27:06 UTC] [Docs] name the reply command in bus-join.md
+
+[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 1 file:
+commands/bus-join.md.
+
+[What changed]
+The reply-to-incoming-messages sentence told a session to reply to the
+exact `from=` address without ever naming the command that does it. A
+session with no other reference for that command tried inventing one and
+failed. The Codex skill and the formation briefs already name the send
+command; this brings bus-join.md in line, keeping the existing note about
+preserving `@host` for a relay peer.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in the added
+lines.
+
 ## [2026-09-23 21:19:48 UTC] [Docs/H7] document CBUS_HOST
 
 [Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. Docs for
