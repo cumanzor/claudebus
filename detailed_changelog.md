@@ -4,6 +4,38 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 18:37:56 UTC] [Docs] reword the opening and refine the public-content guidance
+
+[Attempt #1] 4 files: README.md, AGENTS.md, detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+Replaced the README's opening description with Carlos's approved
+wording: what the bus does (a local daemon delivers into each session,
+every mailbox a plain file) as its own sentence, ahead of the existing
+examples (an orchestrator and its workers, two windows on one repo, a
+laptop and a home server) and the "results flow live" close, rephrased
+to join without an em dash. Checked every other doc for the same
+headline description: the only other "file-based" or "message bus"
+mentions are docs/architecture/current-architecture.md's one mention of
+the legacy join/tail path specifically (not a headline, unrelated to
+this wording) and several mentions inside frozen docs/history/
+exploration records discussing the file-based-mailbox design family
+historically; none is a headline description of the project the way the
+README's opening is, so none was changed. CHEATSHEET.md's own opening
+line never used this wording at all.
+Two small precision fixes to the "Public content" section added earlier:
+the relay's host-resolution sentence now says "in public mode each
+resolves" rather than stating it unconditionally, and the recordings
+bullet gained one sentence carving out harness interface text that
+legitimately appears in a frame (model, version, plan badge) from the
+name/path/hostname check.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in any
+touched line. Re-wrapped one AGENTS.md line that grew past the file's
+normal width after the public-mode insertion.
+
 ## [2026-09-24 18:34:31 UTC] [Docs] add repository guidance for public content
 
 [Attempt #1] 3 files: AGENTS.md, detailed_changelog.md, simple_changelog.md.

@@ -1,10 +1,11 @@
 # claudebus
 
-A **file-based message bus for Claude Code and Codex CLI sessions** — an
-orchestrator and the worker sessions it spawned, two
-windows working the same repo, or a session on your laptop and one on a home
-server — so results flow between them live instead of through handoff files you
-carry over by hand.
+A **message bus for Claude Code and Codex CLI sessions**: a local daemon
+delivers into each session, and every mailbox is a plain file you can
+read. Whether it's an orchestrator and the worker sessions it spawned,
+two windows working the same repo, or a session on your laptop and one
+on a home server, results flow live between them instead of through
+handoff files you carry over by hand.
 
 ![two Claude Code sessions join the same channel over native connect and each pings the other, getting an ack back both ways](docs/media/demo-ping.gif)
 
