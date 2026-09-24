@@ -1,9 +1,12 @@
 # Formations
 
-*A dev fleet driving itself: the orchestrator's first prompt is the only human
-input — it spawns its coder and reviewer as panes with `cbus spawn pane`, waits
-for their presence announcements, then runs a task → review → verdict loop
-entirely over the bus.*
+![an orchestrator spawns a coder, a reviewer and a documenter as panes, then routes one small task through all three over native connect, coded, reviewed and logged](media/demo-fleet.gif)
+
+*A dev fleet driving itself: the orchestrator's first prompt is the only
+human input, spawning a coder, a reviewer and a documenter as panes with
+`cbus spawn pane`, waiting for each one's presence announcement, then
+routing one small task through all three in turn: coded, reviewed and
+logged, entirely over the bus.*
 
 
 A **formation** is a saved snapshot of a channel's shape: its peers, their

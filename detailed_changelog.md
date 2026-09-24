@@ -4,6 +4,29 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 18:06:02 UTC] [Docs] restore the formations guide's fleet recording
+
+[Attempt #1] 3 files: docs/formations.md, detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+docs/formations.md still opened with the italic fleet caption and no
+image, from R4's removal of the pre-native-connect recordings. Put
+`media/demo-fleet.gif` back under that caption, a relative link from
+docs/ (the same file the README now links as `docs/media/demo-fleet.gif`),
+with alt text matching the README's. The caption itself was stale: it
+named only a coder and a reviewer, and a generic "task -> review ->
+verdict loop", from before the documenter peer and the coded/reviewed/
+logged sequence existed. Reworded it to name all three spawned peers and
+the actual task shape, matching the README's own Advanced example
+caption.
+
+[Testing Notes]
+Link checker reports zero unresolved links, confirming the relative
+`media/demo-fleet.gif` link resolves from docs/formations.md. No em or
+en dash in the added lines (the caption's pre-existing em dash and arrow
+notation did not survive the rewrite).
+
 ## [2026-09-24 17:54:01 UTC] [Docs] fix the ping recording's caption and alt text
 
 [Attempt #1] 3 files: README.md, detailed_changelog.md, simple_changelog.md.
