@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 16:49:50 UTC] [Docs] Reflowed the bus-join command's new send example so the whole command sits on one source line, fixing a wrap that split it across two lines a model could copy as separate shell commands. Wording unchanged.
+
 [2026-09-24 16:46:40 UTC] [Docs] The bus-join command's reply guidance now shows a concrete send example and says explicitly not to reuse the delivered header's field names as arguments, after rehearsal evidence that the earlier text alone was not enough to stop a copy-the-header mistake.
 
 [2026-09-24 16:27:06 UTC] [Docs] The bus-join command's reply guidance now names the send command instead of only describing where to reply, matching the wording the Codex skill and formation briefs already use.

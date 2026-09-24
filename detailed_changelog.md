@@ -4,6 +4,24 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 16:49:50 UTC] [Docs] fix a line wrap in bus-join.md's reply example
+
+[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
+commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+The example added moments earlier wrapped its backtick span across two
+source lines, `cbus send demo/alice` on one and the quoted reply text on
+the next, so a model copying the raw markdown literally would run it as
+two shell commands. Moved the sentence break to before "For example" so
+the whole `cbus send demo/alice 'got it, on it now'` span sits on one
+line. Wording otherwise unchanged.
+
+[Testing Notes]
+Confirmed the full example string appears on a single line in the file.
+Link checker reports zero unresolved links. No em or en dash in the
+changed lines.
+
 ## [2026-09-24 16:46:40 UTC] [Docs] add a literal reply example to bus-join.md
 
 [Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
