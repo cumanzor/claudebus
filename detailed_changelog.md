@@ -4,6 +4,22 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 17:39:50 UTC] [Docs] correct the Advanced example caption
+
+[Attempt #1] 1 file: README.md.
+
+[What changed]
+The caption written for the four-peer formation recording had the
+reviewer and documenter joining on their own partway through. The actual
+recorded run has the orchestrator spawn all three peers itself with
+`cbus spawn pane`, one after another, then route one small task through
+them in sequence: the coder writes a function, the reviewer approves it,
+the documenter logs it in one line. Reworded the caption to match.
+
+[Testing Notes]
+Link checker reports zero unresolved links. No em or en dash in the
+changed lines.
+
 ## [2026-09-24 17:37:42 UTC] [Docs/R7] simplify the README
 
 [Attempt #1] 3 files: README.md, docs/claude-code-coordination.md (new).

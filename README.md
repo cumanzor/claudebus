@@ -101,8 +101,9 @@ cbus will not substitute a fresh Claude session.
 
 ## Advanced example
 
-*A four-peer formation: an orchestrator spawns a coder and a reviewer, a
-documenter joins, and the four coordinate a task entirely over the bus.*
+*A four-peer formation: an orchestrator spawns a coder, a reviewer and a
+documenter, then routes one small task through all three in turn, coded,
+reviewed and logged, entirely over the bus.*
 
 See [docs/formations.md](docs/formations.md) for how to save, resume, and
 stamp out a fleet like this one.
