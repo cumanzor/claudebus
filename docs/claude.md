@@ -20,8 +20,26 @@ For cross-machine delivery, use `cbus connect demo@server worker --json` and ret
 `@server` in later commands. Relay authentication and a matching acknowledged-delivery
 relay are required. The native socket and token come from this exact session's
 Bash environment; do not copy them into commands, prompts or another session.
-Normal Bash permission controls still apply. No restart, launcher wrapper, Monitor,
-tail process or periodic model action is needed for a supported ordinary session.
+Each cbus slash command pre-approves the `Bash(cbus:*)` calls it makes
+during its own turn (most also allow one or two more tools for that
+command's own needs, such as `AskUserQuestion` or `Monitor`). Outside
+one of those commands, such as a reply typed in an ordinary turn, Claude
+Code applies its normal Bash permission check: it prompts unless
+`Bash(cbus:*)` is already allowed, or an active permission mode allows
+it. cbus never writes Claude Code permission settings, and `cbus spawn`
+passes no allowed-tools or permission mode to the peers it launches;
+each session keeps whatever the user configured for it. To opt in by
+hand, add it yourself:
+
+```json
+{"permissions": {"allow": ["Bash(cbus:*)"]}}
+```
+
+in `~/.claude/settings.json` (applies to every project), or in a
+project's own `.claude/settings.json` / `.claude/settings.local.json`.
+A narrower rule such as `Bash(cbus send:*)`, allowing only `cbus send`,
+works too. No restart, launcher wrapper, Monitor, tail process or
+periodic model action is needed for a supported ordinary session.
 
 The caller binds the actual Claude process, its private socket and the exact
 session transcript. Missing, conflicting or ambiguous evidence fails explicitly.

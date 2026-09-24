@@ -4,6 +4,39 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-24 19:00:29 UTC] [Docs] document the Claude Code Bash permission behavior for cbus
+
+[Attempt #1] 4 files: README.md, docs/claude.md, detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+Documented a gap in the Claude Code side of cbus's Bash permission
+story. README, right after the Codex `--with-permissions` paragraph:
+1-2 sentences saying each cbus slash command pre-approves the
+`Bash(cbus:*)` calls it makes during its own turn, and that a call made
+outside one of those commands goes through Claude Code's normal Bash
+permission check instead, pointing at docs/claude.md. docs/claude.md's
+one-line "Normal Bash permission controls still apply." expanded into a
+short paragraph with the same two facts, plus: most slash commands also
+allow one or two more tools for their own needs (`AskUserQuestion`,
+`Monitor`, and so on), not just `Bash(cbus:*)`; cbus never writes Claude
+Code permission settings itself; `cbus spawn` passes no allowed-tools or
+permission mode to the peers it launches, so each session keeps whatever
+the user configured for it; and how to opt in by hand, with the exact
+JSON shape (`{"permissions": {"allow": ["Bash(cbus:*)"]}}`) and which
+settings files it can go in (the user's `~/.claude/settings.json`, or a
+project's own `.claude/settings.json` / `.claude/settings.local.json`),
+plus a narrower example scoped to only `cbus send`.
+
+[Testing Notes]
+Verified every claim against the actual code before writing, not
+transcribed unverified: grepped every commands/*.md frontmatter directly
+(all 8 declare `Bash(cbus:*)`, 6 of 8 also declare at least one more
+tool); grepped the client and cmd/cbus source for any permission-mode or
+allowed-tools flag passed at spawn time (zero hits, confirming the
+no-settings-write claim). Link checker reports zero unresolved links. No
+em or en dash in any added line.
+
 ## [2026-09-24 18:37:56 UTC] [Docs] reword the opening and refine the public-content guidance
 
 [Attempt #1] 4 files: README.md, AGENTS.md, detailed_changelog.md,

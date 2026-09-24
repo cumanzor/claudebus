@@ -65,6 +65,12 @@ those rules. This trusts all cbus subcommands; ordinary skill installation keeps
 normal command approvals. See the [Codex cheat sheet](CHEATSHEET.md#codex-cli-quick-reference)
 and [full setup](docs/codex.md).
 
+For Claude Code, each cbus slash command pre-approves the `Bash(cbus:*)`
+calls it makes during its own turn. A `cbus` call made outside one of
+those commands, such as a reply sent from an ordinary turn, goes through
+Claude Code's normal Bash permission check instead; see
+[docs/claude.md](docs/claude.md) to opt in ahead of time.
+
 Claude uses [native receive](docs/claude.md); existing Monitor peers need deliberate
 migration. Neither native path needs a Monitor or a recurring roster check.
 Native receive supports macOS/Linux; desktop harness clients remain outside v1.

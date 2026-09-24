@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-24 19:00:29 UTC] [Docs] Documented Claude Code's Bash permission behavior for cbus calls: shipped slash commands pre-approve their own cbus calls, an ordinary-turn call goes through the normal permission check, and how to opt in by hand.
+
 [2026-09-24 18:37:56 UTC] [Docs] Reworded the README's opening description and made two small precision fixes to the public-content guidance added earlier.
 
 [2026-09-24 18:34:31 UTC] [Docs] Added repository guidance for public content.
