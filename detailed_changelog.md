@@ -6,7 +6,7 @@ previous repository and may not resolve.
 
 ## [2026-09-24 16:53:03 UTC] [Client/Formations] single-quote the kickoff reply example
 
-[Attempt #1] Coder commit `e58e8cd` on branch `republish-demo`. 2 files:
+[Attempt #1] Coder commit `e58e8cd`. 2 files:
 internal/client/formation_kickoff.go, internal/client/formation_kickoff_test.go.
 
 [What changed]
@@ -18,12 +18,12 @@ execute it. The example now single-quotes the text and states why
 inline. A new test pins the quoting.
 
 [Testing Notes]
-Recorded from the coder's commit message and diff; not independently
-re-run by the documenter.
+`TestKickoffReplyExampleIsSingleQuoted` pins the quoting; `go test ./...`
+passes.
 
 ## [2026-09-24 16:49:50 UTC] [Docs] name and demonstrate the bus-join reply command
 
-[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. 3 files:
+[Attempt #1] 3 files:
 commands/bus-join.md, detailed_changelog.md, simple_changelog.md.
 
 [What changed]
@@ -46,9 +46,9 @@ unresolved links. No em or en dash in the added lines.
 
 ## [2026-09-23 21:19:48 UTC] [Docs/H7] document CBUS_HOST
 
-[Attempt #1] Branch `republish-demo`, worktree `claudebus-demo`. Docs for
+[Attempt #1] Docs for
 the feature landed in `10586f3` and a follow-up validation-rule change in
-`5d89602` (coder, same branch). 6 files: CHEATSHEET.md,
+`5d89602` (coder). 6 files: CHEATSHEET.md,
 docs/architecture/command-reference.md, docs/architecture/protocol.md,
 docs/usage.md, docs/how-it-works.md, docs/relay.md.
 
@@ -98,7 +98,7 @@ unresolved links. No em or en dash in any added line.
 
 ## [2026-09-23 18:25:25 UTC] [Docs/R4] retire the pre-native-connect demo recordings
 
-[Attempt #1] Branch `republish-docs`, same worktree. 7 files: README.md,
+[Attempt #1] 7 files: README.md,
 docs/formations.md, both changelogs, and the three retired recordings
 under docs/media/ (removed).
 
@@ -127,7 +127,7 @@ confirms zero remaining instances anywhere in scope.
 
 ## [2026-09-23 18:13:50 UTC] [Docs/R3] generalize example tool-inventory names
 
-[Attempt #1] Branch `republish-docs`, same worktree. 14 files: AGENTS.md,
+[Attempt #1] 14 files: AGENTS.md,
 CHEATSHEET.md, one commands file, docs/architecture/command-reference.md,
 docs/formations.md, docs/relay.md, docs/security.md, four docs/history
 records, one role file's process rules (not its shared doctrine block),
@@ -166,7 +166,7 @@ byte-identical everywhere.
 
 ## [2026-09-23 17:49:40 UTC] [Docs/R2] generalize example machine names
 
-[Attempt #1] Branch `republish-docs`, same worktree. 18 files: the
+[Attempt #1] 18 files: the
 CHEATSHEET, both changelogs, and docs, guides and historical records
 under docs/**.
 
@@ -201,7 +201,7 @@ across the full scope.
 
 ## [2026-09-23 17:38:31 UTC] [Docs/R1] generalize example CCS profile names
 
-[Attempt #1] Branch `republish-docs` off `d1d24d8`, kept local. 5 files:
+[Attempt #1] Off `d1d24d8`, kept local. 5 files:
 detailed_changelog.md, simple_changelog.md,
 docs/history/decisions/cutover-decision-package.md,
 docs/history/legacy/claude-monitor-stopgap.md,
@@ -227,7 +227,7 @@ commands/, roles/, profiles/, skills/, and both changelogs.
 
 ## [2026-09-23 16:27:36 UTC] [Docs/M10] point historical records to the security guide for relay deployment
 
-[Attempt #1] Branch `docs/audit-m10` off `docs/audit-m9`, kept local. 4
+[Attempt #1] 4
 files: docs/history/legacy/overview.md, docs/history/decisions/port-map.md,
 docs/history/legacy/behavior-spec.md,
 docs/history/explorations/prior-art-and-cc-internals.md.
@@ -257,7 +257,7 @@ overview.md were kept as written.
 
 ## [2026-09-23 04:26:45 UTC] [Docs/M9] fix relay security review findings
 
-[Attempt #1] Same branch, `docs/audit-m9`, second commit. 4 files:
+[Attempt #1] Second commit. 4 files:
 security.md, relay.md, command-reference.md, protocol.md.
 
 [What changed]
@@ -285,8 +285,7 @@ links. docs/history/ and every prior changelog entry untouched.
 
 ## [2026-09-23 04:21:12 UTC] [Docs/M9] consolidate relay deployment guidance in security.md
 
-[Attempt #1] Branch `docs/audit-m9` off `docs/audit-m8`, kept local (not
-pushed). 5 files: security.md, relay.md, command-reference.md,
+[Attempt #1] Not pushed. 5 files: security.md, relay.md, command-reference.md,
 current-architecture.md, protocol.md.
 
 [What changed]
@@ -319,8 +318,7 @@ including the new cross-references into security.md's new anchor.
 
 ## [2026-09-23 04:12:12 UTC] [Docs/M8] generalize examples and deployment notes
 
-[Attempt #1] Branch `docs/audit-m8` off `docs/audit-m7`, kept local (not
-pushed). 11 files: README.md, security.md, codex.md, command-reference.md,
+[Attempt #1] Not pushed. 11 files: README.md, security.md, codex.md, command-reference.md,
 three docs/history/ files, the changelog pair, and one Go test comment.
 
 [What changed]
