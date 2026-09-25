@@ -4,6 +4,70 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-25 21:35:23 UTC] [Release] v0.15.0: CBUS_HOST machine label, required host for auth status
+
+[Attempt #1] Range v0.14.1..efde716, 83 commits (2 merges). Committed before
+the v0.15.0 tag, so the tag sits on this commit. 2 files:
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Behavior:
+- `CBUS_HOST` (93f3674, c4a9168) sets this machine's label. It is shown by
+  `cbus list` and `list --json` and recorded in peer `meta.host`, the ledger
+  and a formation's saved `machine`; `formation apply` and `resume` compare
+  against it, so a peer saved under another label reads as recorded
+  elsewhere. Default is the system hostname, only the part before the first
+  dot is used, and empty means unset. The value must be a legal store name
+  (letters, digits, `.`, `_`, `-`, not starting with `.` or `-`, not ending
+  with `.`). An invalid value makes every command except `help`, `--help`,
+  `-h`, `version` and `--version` exit 1 with `cbus: invalid CBUS_HOST
+  "<value>": ...` naming the rule; hooks keep exit 0 and `hook-join` does
+  not join and says why on stderr. `spawn`, `branch`, `formation apply` and
+  Codex spawn pass it to children. The client sends its label at connect;
+  the daemon records it after validating it and falls back to its own label
+  for an older client that sends none. The same label is the
+  `<label>-$PPID` sender used when a send has no registration to resolve
+  `from`.
+- Breaking (a42e79d): `cbus auth status` requires a host. With none, and for
+  a bare `cbus auth`, it prints `usage: cbus auth status <host>` and exits 1;
+  the built-in default host is gone. Help text shows `<host>` as required
+  and gains a `CBUS_HOST` line.
+- The formation kickoff's first-reply line (34b9521) tells a peer to reply
+  with `cbus send <address> '...'` in single quotes and says why: inside
+  double quotes the shell runs backticks and `$(` in the text. The
+  `/bus-join` command's reply guidance names `cbus send` and gives a
+  literal single-quoted example with the bare address, not the `from=` and
+  `to=` header fields.
+
+Examples and docs, no behavior change: generic example names throughout code,
+tests and docs (25a9fde, a42e79d); docs reorganized into living references
+and dated history with a rewritten README and a new architecture overview;
+relay deployment guidance consolidated in the security guide; the Claude
+Code Bash permission behavior for cbus documented; repository guidance for
+public content added to `AGENTS.md`. New recordings `docs/media/demo-fleet.gif`
+(four native-connect sessions) and `demo-ping.gif` (two sessions join with
+`/bus-join`, then ping and ack), each with its tape, with Claude Code's
+peer-message notice trimmed to one labelled line (4cfc7ef covers notice
+tails cut off at a pane edge). The Monitor-era recordings and tapes are
+retired and the changelogs note the repository move.
+
+Internal: hook-join tests no longer fail when run inside a Claude Code
+session (69e7c3a), and committed templates are checked for machine-specific
+paths (7de95b6).
+
+Watch: the daemon change is why `cbus daemon restart` matters after
+`cbus selfupdate`; until then new `cbus connect` calls are refused because
+the CLI and daemon versions differ, and existing connections keep working.
+Scripts that call `cbus auth status` with no host now fail.
+
+[Testing Notes]
+Checked against the source at the release tree (b0448ba7): the range and
+commit counts, the exact `CBUS_HOST` error text and exempt-verb list, both
+`auth status` usage paths, the kickoff line, the label used for the
+send-fallback sender, the relay diff (one comment line, nothing else) and
+the daemon protocol version (3 at v0.14.1 and now). `go vet ./...` is clean
+and `go test ./...` passes on this tree, run from a fresh clone.
+
 ## [2026-09-24 19:02:43 UTC] [Docs] match a verb to the README's wording
 
 [Attempt #1] 3 files: docs/claude.md, detailed_changelog.md,

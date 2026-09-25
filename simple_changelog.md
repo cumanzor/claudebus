@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-09-25 21:35:23 UTC] [Release] v0.15.0: new `CBUS_HOST` environment variable sets this machine's label (shown in `cbus list`, recorded in peer meta, the ledger and a formation's machine field, compared by `formation apply` and `resume`, passed to spawned sessions, sent by the client at connect and recorded by the daemon); an invalid value is refused by every command except help and version, and `hook-join` does not join. Breaking: `cbus auth status` requires a host argument and the built-in default host is gone. The formation kickoff reply example and the `/bus-join` reply guidance now show `cbus send` with single-quoted text. Also generic example names throughout code, tests and docs, reorganized docs and a rewritten README with two new recordings, and test isolation for hook-join tests run inside a Claude Code session. Relay code and wire protocol unchanged.
+
 [2026-09-24 19:02:43 UTC] [Docs] Wording fix in docs/claude.md: "typed" to "sent", matching the README.
 
 [2026-09-24 19:00:29 UTC] [Docs] Documented Claude Code's Bash permission behavior for cbus calls: shipped slash commands pre-approve their own cbus calls, an ordinary-turn call goes through the normal permission check, and how to opt in by hand.
