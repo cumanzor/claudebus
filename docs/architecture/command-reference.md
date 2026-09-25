@@ -187,6 +187,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | `CBUS_SITE_<HOST>_URL` | :134-139 | Per-host relay public URL override/extension (see [§2](#host--endpoint-resolution)) |
 | `CBUS_RELAY_LOCAL_URL` | :149 | Loopback relay probe target (default `http://127.0.0.1:8090`) |
 | `CBUS_REPO` | get.sh; cmd/cbus/repo.go:20 | Release repo slug for `get.sh` and dev-build `selfupdate`; release binaries carry the slug baked in |
+| `CBUS_RELEASE_BASE_URL` | get.sh; cmd/cbus/release_source.go:36 | Release download base for `get.sh`, `selfupdate` and the update-check hint, for mirrors and testing (default `https://github.com`, laid out as `/<slug>/releases/...`). Must be `https://`; plain `http://` is accepted only for `127.0.0.1`, `localhost` and `[::1]`, because the checksums come from the same base and a cleartext remote base could swap binary and checksums together. Any other `http://` base is refused: `CBUS_RELEASE_BASE_URL "<v>" must be https:// (plain http only for 127.0.0.1, localhost or [::1])` |
 | `CBUS_UPDATE_CHECK` | update_check.go | `=1` opts into a once-a-day background "update available" hint |
 | `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` | connect_identity_unix.go:36 | Native Claude connect: the exact session's per-session socket and token; never substituted from a parent or another session |
 | `CC_BRANCH` | :817 (bash era) | Fork-helper path for the retired `cc-branch.sh` (default `~/.claude/bin/cc-branch.sh`). **No longer consulted** — `branch`/`spawn` fork natively (TerminalForker, §9); dropped from `--help` |
@@ -2258,8 +2259,24 @@ in at build)`.
 ### `cbus selfupdate [--check] [--force]`
 
 Updates the running binary from the latest GitHub release, then refreshes the
-installed commands and roles. Needs `gh` on `PATH` and authenticated (`gh CLI not
-found — ...`; `gh is not authenticated — run 'gh auth login'`).
+installed commands and roles. `gh` is optional: it is used when it is on `PATH`
+and authenticated, and otherwise the release is fetched anonymously over HTTPS
+(the latest tag comes from the `releases/latest` redirect, which needs no API
+token and has no API rate limit). A `gh` failure is reported, never retried
+another way; the `gh CLI not found` and `gh is not authenticated` errors no
+longer exist, and download errors are prefixed `gh release download:` or `https
+release download:` for the path taken. `CBUS_RELEASE_BASE_URL` (environment
+table) overrides the download base.
+
+Every path checks the binary against its exact line in the release's
+`SHA256SUMS` before installing it (the anonymous path fetches `SHA256SUMS`
+first and hashes the download as it streams; the `gh` path downloads
+`SHA256SUMS` and verifies the file). A refusal leaves the installed binary
+untouched: `release <tag> has no SHA256SUMS
+(<cause>): it carries no verifiable binaries, refusing to install` | `SHA256SUMS
+of <tag> has no line for <asset> — refusing to install a binary it cannot verify`
+| `checksum mismatch for <asset> in <tag>: SHA256SUMS says <want>, download is
+<got> — refusing to install it`.
 
 - `--check` reports and applies nothing, printing one of: `<cur> (dev/local
   build) — latest release: <latest>` / `<cur> — already on latest` / `<cur> ->
@@ -2354,8 +2371,9 @@ There is **no public `update-check` verb**. Opt in by exporting
 one stderr hint when a cache already knows a newer stable release — `cbus: note:
 <version> available — run 'cbus selfupdate'` — then, if the cache is missing or
 older than 24h, spawns a **detached** `cbus __update-check` (a hidden subcommand)
-that polls `gh release view --repo <slug> --json tagName` with a 5s budget and
-rewrites `~/.config/cbus/update-check.json`. Everything is best-effort and
+that polls `gh release view --repo <slug> --json tagName` when `gh` is installed
+and authenticated, and otherwise the anonymous `releases/latest` redirect, with a
+5s budget either way, and rewrites `~/.config/cbus/update-check.json`. Everything is best-effort and
 silent on error; it is skipped for `selfupdate`/`hook-exit`/`hook-compact`/
 `--version`/`version`/`__update-check`, in `--json` mode, and when no repo
 slug is configured. The hint itself fires only when both the cached latest

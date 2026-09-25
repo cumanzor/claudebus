@@ -3,17 +3,31 @@
 The client is a single static Go binary — no runtime dependencies (python3 is no
 longer needed).
 
-**From a release.** Bootstrap once, then update in place. The `gh` CLI must be
-installed and authenticated (`gh auth login`); the repo slug is passed in (it
-is not baked into the script):
+**From a release.** Bootstrap once, then update in place. The repo slug is passed
+in (it is not baked into the script):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cumanzor/claudebus/main/get.sh | CBUS_REPO=cumanzor/claudebus sh
 cbus selfupdate                                     # thereafter, update in place
 ```
 
+The `gh` CLI is optional. `get.sh` and `cbus selfupdate` use `gh` when it is
+installed and authenticated, and otherwise download the public release
+anonymously over HTTPS. Either way the binary is checked against its exact line
+in the release's `SHA256SUMS` before it is installed: a missing `SHA256SUMS`, a
+missing line or a mismatch refuses and leaves the installed binary untouched. A
+`gh` failure is reported, not retried another way. `get.sh` needs `sha256sum` or
+`shasum` on every path, and `curl` when `gh` is not used. A release that has no
+`SHA256SUMS`, such as an older one republished with notes only (including one
+pinned with `CBUS_VERSION`), is refused rather than installed unverified. Versions
+older than v0.15.0 still need an authenticated `gh` for their own `selfupdate`;
+after updating to v0.15.0 it is optional.
+
 `CBUS_INSTALL_DIR=/path` overrides the `~/.local/bin` default; `CBUS_VERSION=vX.Y.Z`
-installs that tag instead of latest.
+installs that tag instead of latest. `CBUS_RELEASE_BASE_URL` overrides the download
+base (default `https://github.com`) for mirrors and testing; `get.sh` and the
+binary both read it. It must be `https://`; plain `http://` is accepted only for
+`127.0.0.1`, `localhost` and `[::1]`, and any other `http://` base is refused.
 
 `get.sh` writes `cbus` to `~/.local/bin` and installs Claude commands, role prompts,
 and the Codex `cbus-connect` skill.

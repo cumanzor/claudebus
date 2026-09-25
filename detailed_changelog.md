@@ -4,6 +4,51 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-25 21:52:39 UTC] [Release] v0.15.0 addition: install and update without gh
+
+[Attempt #1] Documentation for a code change that joins the v0.15.0 release
+after the entry below was written. 5 files: docs/install.md, CHEATSHEET.md,
+docs/architecture/command-reference.md, detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+Releases are public, so `gh` is optional. `get.sh`, `cbus selfupdate` and the
+update-check hint use `gh` when it is installed and authenticated and
+otherwise fetch the release anonymously over HTTPS; the latest tag comes from
+the `releases/latest` redirect, which needs no API token and has no API rate
+limit. A `gh` failure is reported, never retried another way, and the
+`gh CLI not found` and `gh is not authenticated` errors no longer exist.
+Every path checks the binary against its exact line in the release's
+`SHA256SUMS` before installing it. A missing `SHA256SUMS`, a missing line or
+a checksum mismatch refuses and leaves the installed binary untouched.
+`CBUS_RELEASE_BASE_URL` overrides the download base for mirrors and testing,
+read by both `get.sh` and the binary. It must be `https://`, with plain
+`http://` accepted only for `127.0.0.1`, `localhost` and `[::1]`, because the
+checksums come from the same base. `get.sh` needs `sha256sum` or `shasum` on
+every path and `curl` when `gh` is not used.
+Docs changed: the install guide no longer says `gh` must be installed and
+authenticated and now describes the fallback, the verification, the new
+variable and the `CBUS_VERSION` behavior for a release with no `SHA256SUMS`;
+the cheat sheet's first-install comment now says `gh` is optional; the
+command reference's `selfupdate` and update-check sections describe both
+paths and the three refusals, and its environment table has the new variable.
+`docs/RELEASE-CHECKLIST.md` is unchanged: publishing still uses `gh`.
+
+[Testing Notes]
+Checked against the source of the change as committed (the release source
+file, `selfupdate.go`, `update_check.go`, the help text and `get.sh`); not
+exercised end to end by the documenter. Two corrections to the fact list
+came out of that read: `get.sh` needs a checksum tool on every path, not only
+without `gh`, and the missing-`SHA256SUMS` message carries the underlying
+cause in parentheses. Checked anonymously that `releases/latest` answers with
+a redirect and that `SHA256SUMS` is absent (404) from the four published
+releases sampled (v0.14.1, v0.13.0, v0.10.0, v0.9.0).
+
+Watch: until v0.15.0 is published with binaries and `SHA256SUMS`, the
+anonymous path refuses the current latest release for lack of `SHA256SUMS`.
+A version older than v0.15.0 still needs an authenticated `gh` for its own
+`selfupdate`.
+
 ## [2026-09-25 21:35:23 UTC] [Release] v0.15.0: CBUS_HOST machine label, required host for auth status
 
 [Attempt #1] Range v0.14.1..efde716, 83 commits (2 merges). Committed before

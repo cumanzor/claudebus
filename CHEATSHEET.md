@@ -301,8 +301,9 @@ arrange, which makes trying one cheap.
 ## Install & update
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cumanzor/claudebus/main/get.sh | CBUS_REPO=cumanzor/claudebus sh   # first install (needs gh authed)
+curl -fsSL https://raw.githubusercontent.com/cumanzor/claudebus/main/get.sh | CBUS_REPO=cumanzor/claudebus sh   # first install (gh optional)
 # CBUS_INSTALL_DIR=/path overrides the ~/.local/bin default; CBUS_VERSION=vX.Y.Z installs a specific tag instead of latest
+# CBUS_RELEASE_BASE_URL overrides the download base (mirrors, testing); the binary is checked against the release SHA256SUMS
 cbus selfupdate                                     # update the binary in place
 cbus selfupdate --check                             # is there a newer release?
 cbus install-commands                               # (re)write the /bus-* skills
