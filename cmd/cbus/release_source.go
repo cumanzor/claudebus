@@ -38,6 +38,9 @@ func releaseBaseURL() (string, error) {
 	if v == "" {
 		return "https://github.com", nil
 	}
+	if strings.Contains(v, "@") {
+		return "", fmt.Errorf("CBUS_RELEASE_BASE_URL must not contain credentials or '@'")
+	}
 	u, err := url.Parse(v)
 	if err != nil || u.Host == "" {
 		return "", fmt.Errorf("CBUS_RELEASE_BASE_URL %q is not a URL", v)

@@ -71,6 +71,7 @@ func TestHTTPDownloadVerifiesAgainstSHA256SUMS(t *testing.T) {
 		{"no SHA256SUMS", map[string][]byte{"v1.0.0/" + asset: good}, "has no SHA256SUMS"},
 		{"no line for the asset", map[string][]byte{"v1.0.0/" + asset: good, "v1.0.0/SHA256SUMS": []byte(sha(good) + "  cbus-darwin-arm64\n")}, "has no line for"},
 		{"longer name must not match", map[string][]byte{"v1.0.0/" + asset: good, "v1.0.0/SHA256SUMS": []byte(sha(good) + "  " + asset + ".exe\n")}, "has no line for"},
+		{"name that only ends with the asset must not match", map[string][]byte{"v1.0.0/" + asset: good, "v1.0.0/SHA256SUMS": []byte(sha(good) + "  x-" + asset + "\n")}, "has no line for"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,21 +139,28 @@ func TestSelfupdateSourceChoice(t *testing.T) {
 
 func TestReleaseBaseURLRequiresHTTPS(t *testing.T) {
 	for v, ok := range map[string]bool{
-		"":                          true,
-		"https://mirror.example":    true,
-		"http://127.0.0.1:8080":     true,
-		"http://localhost:9000/":    true,
-		"http://[::1]:7000":         true,
-		"http://example.com":        false,
-		"http://127.0.0.2":          false,
-		"http://localhost.evil.com": false,
-		"ftp://mirror.example":      false,
-		"not a url":                 false,
+		"":                                   true,
+		"https://mirror.example":             true,
+		"http://127.0.0.1:8080":              true,
+		"http://localhost:9000/":             true,
+		"http://[::1]:7000":                  true,
+		"http://example.com":                 false,
+		"http://127.0.0.2":                   false,
+		"http://localhost.evil.com":          false,
+		"ftp://mirror.example":               false,
+		"not a url":                          false,
+		"http://localhost:x@example.invalid": false,
+		"http://127.0.0.1:x@example.invalid": false,
+		"http://[::1]:x@example.invalid":     false,
+		"https://user:pass@mirror.example":   false,
 	} {
 		t.Setenv("CBUS_RELEASE_BASE_URL", v)
 		_, err := releaseBaseURL()
 		if ok != (err == nil) {
 			t.Errorf("CBUS_RELEASE_BASE_URL=%q: err=%v, want accepted=%v", v, err, ok)
+		}
+		if strings.Contains(v, "@") && (err == nil || !strings.Contains(err.Error(), "credentials")) {
+			t.Errorf("CBUS_RELEASE_BASE_URL=%q: want the explicit credentials refusal, got %v", v, err)
 		}
 		if !ok {
 			if _, err := httpLatestTag("o/r"); err == nil {
