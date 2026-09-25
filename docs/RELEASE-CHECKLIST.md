@@ -79,10 +79,15 @@ mistaken for tested.
 Each is unit-tested at the helper level and driven through injectable seams where one
 exists; the true gh round-trip is checked here, by hand, once step 3 has run.
 
-- **`cbus selfupdate`** end to end: `gh release view` → `gh release download` of the
+- **`cbus selfupdate`** end to end, with `gh`: `gh release view` → `gh release download` of the
   exact `cbus-<os>-<arch>` asset → the version-gate (downloaded `--version` equals the
   tag) → the in-place swap → the commands/roles refresh. Verify on both a Mac (rename
   swap) and the server (its tmpfs `/tmp` forces the cross-filesystem copy leg).
+- **The anonymous path** (no `gh`): with `gh` absent from `PATH`, run `get.sh` and then
+  `cbus selfupdate` against the published release. Both must download over HTTPS, print no
+  `gh` errors, and check the binary against its exact line in `SHA256SUMS` before
+  installing. Also confirm a release with no `SHA256SUMS` is refused with a message
+  naming it, and that the refusal leaves the installed binary untouched.
 - **`cbus selfupdate --check`** against the live latest tag (dev-build, up-to-date, and
   update-available lines).
 - **`get.sh`**: a clean bootstrap on a machine with no cbus, plus the `CBUS_REPO`

@@ -7,9 +7,9 @@ previous repository and may not resolve.
 ## [2026-09-25 21:52:39 UTC] [Release] v0.15.0 addition: install and update without gh
 
 [Attempt #1] Documentation for a code change that joins the v0.15.0 release
-after the entry below was written. 5 files: docs/install.md, CHEATSHEET.md,
-docs/architecture/command-reference.md, detailed_changelog.md,
-simple_changelog.md.
+after the entry below was written. 6 files: docs/install.md, CHEATSHEET.md,
+docs/architecture/command-reference.md, docs/RELEASE-CHECKLIST.md,
+detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 Releases are public, so `gh` is optional. `get.sh`, `cbus selfupdate` and the
@@ -32,7 +32,9 @@ variable and the `CBUS_VERSION` behavior for a release with no `SHA256SUMS`;
 the cheat sheet's first-install comment now says `gh` is optional; the
 command reference's `selfupdate` and update-check sections describe both
 paths and the three refusals, and its environment table has the new variable.
-`docs/RELEASE-CHECKLIST.md` is unchanged: publishing still uses `gh`.
+`docs/RELEASE-CHECKLIST.md` gains a check for the anonymous path next to the
+`gh` one, and its `gh` wording is otherwise unchanged because publishing
+still uses `gh`.
 
 [Testing Notes]
 Checked against the source of the change as committed (the release source
