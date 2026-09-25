@@ -241,5 +241,7 @@ env: CBUS_DIR (default ~/.claude-bus),
        short hostname; part before the first dot; an invalid value refuses),
      CBUS_SITE_<HOST>_URL / CBUS_RELAY_LOCAL_URL (relay endpoints),
      CBUS_REPO (owner/repo for selfupdate; baked into released binaries),
+     CBUS_RELEASE_BASE_URL (release download base, mirrors and testing; default
+       https://github.com; https only, plain http only to localhost),
      CBUS_UPDATE_CHECK=1 (opt-in: a once-a-day 'update available' hint)
 `

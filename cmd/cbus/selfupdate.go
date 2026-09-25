@@ -14,11 +14,10 @@ import (
 // ghLatestTag and ghDownload are seams: real gh calls in production, injectable in
 // tests so the flow around them (version-gate, swap, refusals) can be exercised
 // without a live release. The gh round-trip itself needs a real release and rides the
-// post-release checklist (S10).
+// post-release checklist (S10). The anonymous HTTPS path is in release_source.go.
 var (
 	ghLatestTag = ghLatestTagImpl
 	ghDownload  = ghDownloadImpl
-	requireGhFn = requireGh
 )
 
 // runSelfupdate: cbus selfupdate [--check] [--force]
@@ -36,10 +35,11 @@ func runSelfupdate(args []string) int {
 	if !ok {
 		return die("%s", repoSlugRemedy)
 	}
-	if err := requireGhFn(); err != nil {
-		return die("%v", err)
+	latestFn, downloadFn, via := httpLatestTag, httpDownload, "https"
+	if ghUsableFn() {
+		latestFn, downloadFn, via = ghLatestTag, ghDownload, "gh"
 	}
-	latest, err := ghLatestTag(slug)
+	latest, err := latestFn(slug)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -90,8 +90,8 @@ func runSelfupdate(args []string) int {
 	tmpBin := filepath.Join(tmpDir, asset)
 
 	fmt.Printf("cbus: downloading %s %s from %s...\n", latest, asset, slug)
-	if err := ghDownload(slug, latest, asset, tmpBin); err != nil {
-		return die("gh release download: %v", err)
+	if err := downloadFn(slug, latest, asset, tmpBin); err != nil {
+		return die("%s release download: %v", via, err)
 	}
 	// zero-assets-matched must be LOUD, never a quiet no-update (S5): gh can succeed
 	// having written nothing when the pattern matched no asset.
@@ -99,6 +99,20 @@ func runSelfupdate(args []string) int {
 		return die("no asset named %q in release %s of %s — that platform's binary is missing from the release", asset, latest, slug)
 	}
 	_ = os.Chmod(tmpBin, 0o755)
+	// the HTTPS path verified while downloading; gh's download is checked the same way
+	if via == "gh" {
+		tmpSums := filepath.Join(tmpDir, "SHA256SUMS")
+		if err := ghDownload(slug, latest, "SHA256SUMS", tmpSums); err != nil {
+			return die("%v", noSumsError(latest, err))
+		}
+		sums, err := os.ReadFile(tmpSums)
+		if err != nil {
+			return die("%v", noSumsError(latest, err))
+		}
+		if err := verifyFileAgainstSums(tmpBin, sums, latest, asset); err != nil {
+			return die("%v", err)
+		}
+	}
 
 	// VERSION-GATE (S4): the download must report the version we asked for BEFORE it
 	// is allowed near the install. A corrupt or wrong-asset binary never swaps in.
@@ -153,18 +167,6 @@ func assetRefreshCommands() [][]string {
 	return [][]string{{"install-commands", "--force"}, {"install-roles", "--force"}, {"install-codex-skills"}}
 }
 
-// requireGh surfaces actionable hints because the repo is private and selfupdate
-// cannot work without an authenticated gh.
-func requireGh() error {
-	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("gh CLI not found — install from https://cli.github.com/ then run 'gh auth login'")
-	}
-	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
-		return fmt.Errorf("gh is not authenticated — run 'gh auth login'")
-	}
-	return nil
-}
-
 func ghLatestTagImpl(slug string) (string, error) {
 	cmd := exec.Command("gh", "release", "view", "--repo", slug, "--json", "tagName")
 	var stderr bytes.Buffer
@@ -172,7 +174,7 @@ func ghLatestTagImpl(slug string) (string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		// surface gh's own message ("release not found", "could not resolve to a
-		// Repository") — for the private-repo flow this is the error users meet (c6).
+		// Repository") rather than a bare exit status (c6).
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return "", fmt.Errorf("gh release view: %s", msg)
 		}

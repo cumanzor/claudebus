@@ -179,8 +179,8 @@ func TestSelfupdateEarlyPaths(t *testing.T) {
 	})
 
 	// stub gh + the latest tag for the reporting branches.
-	defer func(f func() error) { requireGhFn = f }(requireGhFn)
-	requireGhFn = func() error { return nil }
+	defer func(f func() bool) { ghUsableFn = f }(ghUsableFn)
+	ghUsableFn = func() bool { return true }
 	defer func(f func(string) (string, error)) { ghLatestTag = f }(ghLatestTag)
 
 	withSlug := func(t *testing.T) {

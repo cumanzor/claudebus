@@ -122,17 +122,29 @@ func refreshUpdateCache(path string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), updateCheckBudget)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "release", "view", "--repo", slug, "--json", "tagName").Output()
-	if err != nil {
+	var tag string
+	if ghUsableFn() {
+		out, err := exec.CommandContext(ctx, "gh", "release", "view", "--repo", slug, "--json", "tagName").Output()
+		if err != nil {
+			return
+		}
+		var resp struct {
+			TagName string `json:"tagName"`
+		}
+		if json.Unmarshal(out, &resp) != nil {
+			return
+		}
+		tag = resp.TagName
+	} else {
+		var err error
+		if tag, err = httpLatestTagCtx(ctx, slug); err != nil {
+			return
+		}
+	}
+	if tag == "" {
 		return
 	}
-	var resp struct {
-		TagName string `json:"tagName"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil || resp.TagName == "" {
-		return
-	}
-	_ = writeUpdateCheckCache(path, updateCheckCache{CheckedAt: time.Now().UTC(), LatestKnown: resp.TagName})
+	_ = writeUpdateCheckCache(path, updateCheckCache{CheckedAt: time.Now().UTC(), LatestKnown: tag})
 }
 
 // hasJSONFlag reports whether --json / -json appears before a "--" terminator.

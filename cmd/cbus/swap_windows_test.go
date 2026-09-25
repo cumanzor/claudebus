@@ -202,8 +202,8 @@ func TestSelfupdateReportsStuckDisplaced(t *testing.T) {
 		os.Remove(planted)
 	})
 
-	defer func(f func() error) { requireGhFn = f }(requireGhFn)
-	requireGhFn = func() error { return nil }
+	defer func(f func() bool) { ghUsableFn = f }(ghUsableFn)
+	ghUsableFn = func() bool { return true }
 	defer func(f func(string) (string, error)) { ghLatestTag = f }(ghLatestTag)
 	ghLatestTag = func(string) (string, error) { return "v9.9.9", nil }
 	defer func(f func(string, string, string, string) error) { ghDownload = f }(ghDownload)
