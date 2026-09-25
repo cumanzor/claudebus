@@ -13,7 +13,7 @@ detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 Pull request and milestone numbers from the previous repository, written as
-links to `github.com/cumanzor/claudebus/pull/N` and `.../milestone/1`, now open
+links to that repository's pull request and milestone pages, now open
 unrelated issues in this repository, because the two share a slug and this one
 numbers its issues from 1. Each link became plain text: `PR N in the previous
 repository` where the number stood alone, `milestone 1 in the previous
