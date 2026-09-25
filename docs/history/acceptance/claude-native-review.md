@@ -8,7 +8,7 @@
 > **Correction (2026-09-22):** 27 PRs merged, not 28; #37 was folded into #25
 > and closed rather than merged separately.
 
-The [Claude Code native receive milestone](https://github.com/cumanzor/claudebus/milestone/1)
+The Claude Code native receive milestone (milestone 1 in the previous repository)
 is merged into `main`: 28 component PRs merged, with #37 incorporated into #25.
 [v0.13.0](https://github.com/cumanzor/claudebus/releases/tag/v0.13.0) is released
 and installed on Mac and server, including the relay. Release-artifact validation and
@@ -24,14 +24,14 @@ map. The landing instructions and frozen staging references describe that review
 they are not outstanding merge work. Historical acceptance remains attributed to
 the exact candidates below, not automatically to the v0.13.0 release assets.
 
-| Group | PRs in suggested order | Review focus |
+| Group | PRs in suggested order (numbers from the previous repository) | Review focus |
 | --- | --- | --- |
-| Independent maintenance | [12](https://github.com/cumanzor/claudebus/pull/12), [16](https://github.com/cumanzor/claudebus/pull/16) | Codex canary/help corrections; shared AGENTS policy with a Claude compatibility import. |
-| Inactive foundations | [13](https://github.com/cumanzor/claudebus/pull/13), [14](https://github.com/cumanzor/claudebus/pull/14), [15](https://github.com/cumanzor/claudebus/pull/15), [18](https://github.com/cumanzor/claudebus/pull/18), [19](https://github.com/cumanzor/claudebus/pull/19) | Harness boundary, process/socket ownership, receipt primitives, private credentials and exact caller identity. |
-| Delivery and admission | [20](https://github.com/cumanzor/claudebus/pull/20) → [21](https://github.com/cumanzor/claudebus/pull/21) → [22](https://github.com/cumanzor/claudebus/pull/22) → [23](https://github.com/cumanzor/claudebus/pull/23) | Exact durable receipts, unresolved attempts without replay, native admission and reconnect. |
-| User flow and lifecycle | [24](https://github.com/cumanzor/claudebus/pull/24), [25](https://github.com/cumanzor/claudebus/pull/25) including [37](https://github.com/cumanzor/claudebus/pull/37), [28](https://github.com/cumanzor/claudebus/pull/28) → [29](https://github.com/cumanzor/claudebus/pull/29) → [30](https://github.com/cumanzor/claudebus/pull/30) → [38](https://github.com/cumanzor/claudebus/pull/38) → [31](https://github.com/cumanzor/claudebus/pull/31) | In-session connect, reservations, current-session fencing, formations, prompts, commands, legacy migration and isolated child launch environments. |
-| Reproducible native acceptance | [17](https://github.com/cumanzor/claudebus/pull/17) → [27](https://github.com/cumanzor/claudebus/pull/27) → [32](https://github.com/cumanzor/claudebus/pull/32) → [33](https://github.com/cumanzor/claudebus/pull/33), then [34](https://github.com/cumanzor/claudebus/pull/34) and [36](https://github.com/cumanzor/claudebus/pull/36) | Ordinary CLI receipt/reply, isolation, lifecycle, relay and mixed Claude/Codex self-join. |
-| Optional Monitor workaround, last | Comparison [26](https://github.com/cumanzor/claudebus/pull/26) → evidence [40](https://github.com/cumanzor/claudebus/pull/40) → helper [35](https://github.com/cumanzor/claudebus/pull/35) | Reversible pinned-version helper, measured mechanism and explicit field limits. Native receive does not depend on it. |
+| Independent maintenance | 12, 16 | Codex canary/help corrections; shared AGENTS policy with a Claude compatibility import. |
+| Inactive foundations | 13, 14, 15, 18, 19 | Harness boundary, process/socket ownership, receipt primitives, private credentials and exact caller identity. |
+| Delivery and admission | 20 → 21 → 22 → 23 | Exact durable receipts, unresolved attempts without replay, native admission and reconnect. |
+| User flow and lifecycle | 24, 25 including 37, 28 → 29 → 30 → 38 → 31 | In-session connect, reservations, current-session fencing, formations, prompts, commands, legacy migration and isolated child launch environments. |
+| Reproducible native acceptance | 17 → 27 → 32 → 33, then 34 and 36 | Ordinary CLI receipt/reply, isolation, lifecycle, relay and mixed Claude/Codex self-join. |
+| Optional Monitor workaround, last | Comparison 26 → evidence 40 → helper 35 | Reversible pinned-version helper, measured mechanism and explicit field limits. Native receive does not depend on it. |
 
 Most components remain below 500 changed lines. Review fixes bring the transcript
 trust milestone #19 to 571 lines and the operational documentation #31 to 697;

@@ -20,7 +20,7 @@ request timings, checks, cleanup and limitations are retained as recorded.
 ## Reproduce
 
 The tested canary is committed in
-[PR #26](https://github.com/cumanzor/claudebus/pull/26), source `6f7961f`.
+PR #26 in the previous repository, source `6f7961f`.
 Its tested SHA-256 is
 `741d0e8c96a6e0d4ce902d84b975d6ad7d8f0d6a38d2c34ad00989625178d03e`.
 With the matching Claude binary available, run:

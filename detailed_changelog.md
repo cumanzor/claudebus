@@ -4,6 +4,33 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-25 23:01:47 UTC] [Docs] stop linking to pull requests and a milestone of the previous repository
+
+[Attempt #1] 5 files: docs/history/acceptance/claude-native-review.md,
+docs/history/legacy/claude-monitor-stopgap.md,
+docs/history/legacy/evidence/claude-monitor/2026-09-18/README.md,
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Pull request and milestone numbers from the previous repository, written as
+links to `github.com/cumanzor/claudebus/pull/N` and `.../milestone/1`, now open
+unrelated issues in this repository, because the two share a slug and this one
+numbers its issues from 1. Each link became plain text: `PR N in the previous
+repository` where the number stood alone, `milestone 1 in the previous
+repository` for the milestone, and in the native receive review table bare
+numbers under a column header that now says they come from the previous
+repository (28 links there, 30 pull request links in all). Four evidence links in the Monitor
+stopgap guide were pinned to a commit hash that does not exist in this
+repository and returned 404; they now pin the equivalent commit here, the one
+that introduced the same four files. Changelog entries had no such links and are
+unchanged.
+
+[Testing Notes]
+A search of every file for links to pull requests, issues, milestones, compares
+and commits of `cumanzor/claudebus` finds none left. The four repointed links,
+the release links and the `validation.json` link were fetched anonymously and
+all return 200.
+
 ## [2026-09-25 21:52:39 UTC] [Release] v0.15.0 addition: install and update without gh
 
 [Attempt #1] Documentation for a code change that joins the v0.15.0 release
