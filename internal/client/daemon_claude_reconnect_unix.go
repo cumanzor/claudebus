@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// The caller holds the connection lane. Retain the old receipt source until an
-// uncertain attempt has been positively reconciled or explicitly abandoned.
+// the caller holds the connection lane; keep the old receipt source until a pending attempt (uncertain or awaiting-receipt) is reconciled or abandoned.
 func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg *ClaudeConnectionConfig, token string) (*ConnectionState, error) {
 	if c.Claude == nil || cfg == nil {
 		return nil, errors.New("existing Claude binding is unavailable; refusing implicit adoption")

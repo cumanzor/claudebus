@@ -146,9 +146,11 @@ byte-identical at their journaled offsets. The daemon then saves the new
 device number and logs `inbox device changed with the same inode and
 matching records; identity re-stamped`. This checks those two records, not
 every byte already delivered. The bound Claude transcript, presence
-recipients and the Codex rollout are accepted the same way on a device-only
-change, because each carries its own session or thread ID. On Windows the
-volume serial number stays part of the identity.
+recipients and the Codex rollout also accept a device-only change with the
+same inode, but not by that record check: each is matched by its own identity
+instead (the transcript's Claude session ID, the recipient's session and
+connection IDs with the event ID scan, the rollout's thread ID). On Windows
+the volume serial number stays part of the identity.
 
 A different inode, an inbox shorter than the delivered offset, or a changed
 record is still refused. The daemon log and `cbus connection status CH/AL
