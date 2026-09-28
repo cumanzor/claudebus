@@ -1242,8 +1242,10 @@ roster twice.
   - `already gone; connection disconnected, inbox retained`
   - `process ended; connection disconnected, inbox retained; <surface detail>`,
     where the surface detail is `surface unknown (no tty)`, `tty busy, surface
-    left alone`, `surface left open (could not confirm idle)` (ps did not
-    positively show the tty idle or its device gone), `tmux pane closed`,
+    left alone`, `surface left open (could not confirm idle)` (the tty counts
+    as idle only when one ps call for the tty and for close itself exited 0,
+    printed nothing on stderr, and listed only close; any other result,
+    including a tty device that no longer exists, leaves the surface open), `tmux pane closed`,
     `iTerm2 surface closed`, `surface sweep timed out — left alone` or
     `surface already closed`
   - `disconnect failed, no signal sent: <reason>`
