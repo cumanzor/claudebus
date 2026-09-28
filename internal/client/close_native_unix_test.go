@@ -436,3 +436,14 @@ func TestNativeCloseRefusesThisSessionUnderAnotherAlias(t *testing.T) {
 		t.Fatalf("this session was closed through another alias: %+v", rep)
 	}
 }
+
+func TestNativeCloseCodexWithoutAPinnedConsumerRefuses(t *testing.T) {
+	pid := fakeCodexCLI(t)
+	f := seedNativeCodex(t, pid)
+	f.state.Consumer = nil
+	writeCloseJournal(t, f.state)
+	observeCodexAs(t, consumerProbe{State: "exited", Detail: "previous CLI process exited"})
+	if rep := ClosePeer("dev", "worker", true); rep.Ok || !strings.Contains(rep.Detail, "no recorded consumer process") || len(f.calls) != 0 {
+		t.Fatalf("a Codex peer with no pinned consumer was treated as gone: %+v", rep)
+	}
+}
