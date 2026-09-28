@@ -336,7 +336,8 @@ cbus branch [target] [channel]   # fork a bootstrapped child; connect parent fir
 cbus inbox <channel>/<alias>     # path to a peer's inbox.jsonl
 cbus unregister <channel>/<alias>  # force-remove any peer
 cbus close <ch>/<alias> [...] [--force]  # end a peer's process (SIGTERM, then
-                                  # sweep its terminal surface; local only)
+                                  # sweep its terminal surface; local only;
+                                  # a native peer is disconnected first)
 cbus hook-exit                   # SessionEnd hook target (announces departure)
 cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus hook-join                   # SessionStart hook target (auto-joins $CBUS_CHANNEL)

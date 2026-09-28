@@ -4,7 +4,9 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,35 @@ import (
 // (a var, not a const, only so the timeout path is testable in milliseconds.)
 var surfaceSweepBudget = 5 * time.Second
 
+// signalProcess is the only way close signals a process. (A var only so tests
+// can confine signals to processes they started.)
+var signalProcess = signalUnlessOwnAncestry
+
+var errOwnAncestry = errors.New("refusing to signal this process or one of its ancestors")
+
+// No close may end the process running it or anything above it, whatever path
+// resolved the target.
+func signalUnlessOwnAncestry(pid int, sig syscall.Signal) error {
+	if err := ownAncestryRefusal(pid); err != nil {
+		return err
+	}
+	return syscall.Kill(pid, sig)
+}
+
+func ownAncestryRefusal(pid int) error {
+	if pid <= 1 || pid == os.Getpid() {
+		return errOwnAncestry
+	}
+	ancestor, err := ownAncestor(pid)
+	if err != nil {
+		return fmt.Errorf("%w: cannot prove pid %d is not an ancestor: %v", errOwnAncestry, pid, err)
+	}
+	if ancestor {
+		return errOwnAncestry
+	}
+	return nil
+}
+
 // ClosePeer tears down the LOCAL peer ch/alias on instruction: SIGTERM its owning
 // claude process (graceful — the SessionEnd hook broadcasts 'left' and removes the
 // registration), wait out a ≤5s grace, then sweep the terminal surface the peer
@@ -31,7 +62,8 @@ var surfaceSweepBudget = 5 * time.Second
 // stranger is worse than failing). Without force a TERM-surviving process is
 // reported, not escalated: closing its surface would be a disguised kill.
 // Registrations are NEVER touched here — the SessionEnd hook handles the graceful
-// path and the lazy-prune backstop the rest.
+// path and the lazy-prune backstop the rest. A daemon-managed peer takes
+// closeNativePeer instead, which disconnects its connection and keeps its inbox.
 func ClosePeer(ch, alias string, force bool) CloseReport {
 	target := ch + "/" + alias
 	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
@@ -39,11 +71,13 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 	if !ok {
 		return CloseReport{target, false, "no such peer"}
 	}
-	if m.ConnectionID != "" {
-		return CloseReport{target, false, "daemon-managed peer — use cbus connection disconnect " + target + "; close must not signal its shared daemon or terminal"}
-	}
 	if sid := SessionID(); sid != "" && m.SessionID == sid {
 		return CloseReport{target, false, "that peer is THIS session — refusing (exit it normally)"}
+	}
+	if m.ConnectionID != "" {
+		// a native listener pid is the shared daemon, so the ownership walk below
+		// must never run for it
+		return closeNativePeer(ch, alias, m, force)
 	}
 	pid := m.OwnerPid
 	if pid == 0 {
@@ -67,7 +101,7 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		return CloseReport{target, false, fmt.Sprintf("pid %d does not look like a claude session (pid recycled?) — refusing to signal", pid)}
 	}
 	tty := ttyOf(pid)
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := signalProcess(pid, syscall.SIGTERM); err != nil {
 		if err == syscall.ESRCH {
 			// died between the argv check and the signal — a teardown that finds
 			// nothing to tear down succeeded (idempotent sweeps).
@@ -79,7 +113,7 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		if !force {
 			return CloseReport{target, false, fmt.Sprintf("pid %d still running after TERM; use --force", pid)}
 		}
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = signalProcess(pid, syscall.SIGKILL)
 		if !waitGone(pid, 2*time.Second) {
 			return CloseReport{target, false, fmt.Sprintf("pid %d survived SIGKILL", pid)}
 		}
@@ -135,6 +169,12 @@ func sweepSurface(tty string) string {
 	if err == nil && strings.TrimSpace(string(out)) != "" {
 		return "tty busy — surface left alone"
 	}
+	return closeSurface(ctx, tty)
+}
+
+// closeSurface closes the tmux pane or iTerm2 session on a tty the caller has
+// already judged idle.
+func closeSurface(ctx context.Context, tty string) string {
 	dev := "/dev/" + tty
 	if out, err := boundedCmd(ctx, "tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {

@@ -99,6 +99,13 @@ and a peer reply supplies separate evidence of action. Use
 `cbus connection reconcile deploy/laptop --json` on demand. Busy Claude sessions
 can receive input between foreground tool calls; hold/refuse policy still applies.
 Stop future delivery with `cbus connection disconnect deploy/laptop`, which retains the inbox.
+To end the peer's session as well, `cbus close deploy/laptop` signals the
+Claude or Codex process bound to that connection, after disconnecting it,
+and then closes its tmux pane or iTerm2 tab. It never signals the daemon,
+keeps the inbox and the registration, and refuses when it cannot prove the
+process is still that peer's session. The checks and the signal are separate
+system calls, so this narrows but cannot fully exclude a process that exits
+and is replaced in between.
 
 ## The global channel
 

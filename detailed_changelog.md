@@ -4,6 +4,147 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-28 19:07:09 UTC] [Client] end a natively connected peer's consumer with cbus close
+
+[Attempt #1] 18 files. Production: internal/client/close_native_unix.go (new),
+close_unix.go, daemon.go, daemon_claude.go, codex_runtime_writer.go. Tests:
+close_native_unix_test.go, close_unix_test.go, daemon_disconnect_fence_test.go
+(new), signalguard_unix_test.go (new), signalguard_windows_test.go (new),
+testowned_test.go (new), identity_test.go, procfixture_test.go. Docs:
+docs/usage.md, docs/architecture/command-reference.md, CHEATSHEET.md.
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+`cbus close CH/ALIAS` refused outright on any peer with a daemon-managed
+connection ID, because the legacy path it fell through to relies on things a
+native peer does not have: an owner pid in its meta, a listener-pid ancestry
+walk that would reach the daemon rather than the session, and a SessionEnd
+hook that does nothing for daemon-managed peers.
+
+Close now ends the peer's bound Claude or Codex process. The order is: resolve
+the target and refuse on the caller's own session or an unreadable identity;
+fence the disconnect against the daemon's own record of the exact connection
+ID and thread, under the daemon's own lock, so a replacement registration of
+the same alias can never be the one disconnected; revalidate the pinned process
+and its session right before sending anything; SIGTERM; wait for the exit. A
+disconnect that the daemon does not confirm sends no signal. A revalidation
+failure after a confirmed disconnect reports the connection as disconnected
+with no signal sent, not an automatic reconnect. `--force` follows with
+SIGKILL only after the same incarnation check passes again, so a changed
+start token is never treated as permission to kill whatever process now holds
+that pid. The connection is disconnected, never unregistered, so unread mail
+and the receipt history survive. Windows close still refuses entirely; the
+native path is unix-only.
+
+Identity for Claude is the bound process ID and start token plus a check that
+Claude's own session registry still shows that process running exactly that
+session. Identity for Codex is re-probed fresh after the disconnect: the exact
+interactive process holding that thread's rollout and queue writer, never a
+cached pid, and never the daemon's own app-server sidecar. A caller's own
+session, its own process, or any of its own ancestors can never be signalled,
+refused in production by the single signal path both close paths use; in
+tests, a package-wide guard also fails any run that would signal a process the
+tests did not start. Every inspection that comes back inconclusive
+refuses rather than assuming the target is gone: an unreadable ancestry chain,
+a daemon too old to support the fenced disconnect (checked before any
+disconnect call), and a process or session probe that errors instead of
+returning a clear answer.
+
+The pane or tab is swept only after the process is confirmed exited and the
+terminal is proven idle by one `ps` call that returns exactly the caller
+itself on that tty, with a clean exit, no stderr, and no other row. Anything
+else, including a tty whose device is now gone, leaves the surface open rather
+than closing it. The legacy sweep is factored out to the same function the
+native path now calls, with its own behavior on a `ps` error unchanged.
+
+`docs/usage.md`, `docs/architecture/command-reference.md` and `CHEATSHEET.md`
+describe the native close outcomes, the fenced disconnect, the caller-ancestry
+refusal (which now applies to the legacy path too), and the tty idle rule
+exactly as the code implements it.
+
+[Possible Ripple Effects]
+`cbus close` on a native peer that used to refuse now signals its process.
+Anything that relied on the refusal, or that assumed close was a no-op for a
+native alias, sees different behavior. The daemon gains a fenced `/disconnect`
+capability that an older daemon does not support; against an old daemon,
+native close refuses with a restart hint rather than disconnecting unfenced.
+
+The signal-guard test infrastructure applies to the whole `internal/client`
+test package: any future test in that package that starts a real process and
+expects to signal it must register that process with the guard first, or the
+run fails.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` and `go vet ./...` pass at the final
+commit in the documenter's own run, and again independently by the advisor at
+the same commit. Linux amd64 and arm64 and Windows amd64 build and vet pass,
+checked by the coder, the reviewer and the advisor at various commits across
+the milestone, most recently the advisor at the second-to-last commit (the
+last commit is docs only, one file, and touches nothing that changes those
+results). Every reviewer run, and every coder mutation run after the signal guard
+landed, was executed from a process reparented to init, so a test that walked
+its own process's real ancestry could not reach the session driving the work;
+the same test guard caught zero unexpected signals across every run and
+printed exactly the one expected refusal each pass had a test for.
+
+Mutation checks: coder mutants Q1 through Q33 (one early equivalence claim,
+Q5, was later withdrawn once a killed run was produced) and reviewer mutants
+R1 through R9, S1 through S7, T1b, T2 each failed the test aimed at them, run
+independently across four reviewer passes and confirmed again by the advisor
+at the final head. One of them, S4, at first survived an earlier pass because
+the test it should have caught stubbed a lower seam instead of the real check;
+a later test closed that gap and the same mutant now fails on the intended
+assertion. A further reviewer mutant, S3b, survives on purpose: it replaces
+the real native terminal sweep with its test stub and nothing catches that,
+which is the property the tests are meant to have, since no test should reach
+the real sweep against a real terminal.
+
+Findings and fixes, folded in as they closed rather than left as open items:
+a Codex disconnect did not re-probe the exact thread before trusting it was
+still the same consumer, fixed by re-checking after the disconnect; the native
+terminal sweep treated any failed `ps` call as proof the terminal was idle,
+fixed by requiring a clean, self-only result; an inconclusive process or
+ancestry check was treated as "gone" or "not an ancestor", fixed to refuse
+instead; the test-only process registry that lets tests signal processes they
+started was keyed by a bare pid that a reused pid could satisfy, fixed by
+keying it to a start token; a version-skew gap let an old daemon perform an
+unfenced disconnect that native close then misreported as failed, fixed by
+checking the daemon's fence capability before disconnecting at all. Three
+rounds of documentation findings (missing outcome strings, a stale idle
+description, one legacy behavior undocumented) were folded into the docs
+commits as they were found.
+
+Not covered. There is no real close run against a live peer: a scratch-store
+plan exists and is user-gated, not run. Windows close is unimplemented and
+continues to refuse.
+
+Linux: `go test -count=1 ./...` and `go vet ./...` both pass on Debian 13
+(kernel 6.12, go1.26.2, procps-ng 4.0.4, ext4), except one test that already
+fails the same way on main and is unrelated to this change:
+TestManagedPresenceRecipientEpochAndMalformedTail/replace. The close guard
+printed zero unexpected refusals against the one expected. `ps -o pid=,tty=
+-t TTY -p SELF` selects a union on procps (measured: a busy tty prints the
+self row plus its own rows, rc 0), the same semantics measured on darwin's
+BSD `ps`. A Linux tty whose processes have all exited is freed at the kernel
+level, so
+`ps` then reports the tty as not found; the idle branch is reachable only
+when the tty stays allocated with no processes left on it (for example a
+tmux pane kept open after its command exits). Outside that case the surface
+is left open, which is the existing fail-closed behavior, not a new gap.
+
+Observed and not explained. During the milestone's own work, its coder
+session was itself terminated by one of its mutation runs: a test mutant sent
+a native peer down the legacy owner-pid ancestry walk, and a fixture daemon
+process the test had started turned out to have an ancestry chain that reached
+the operator's own Claude session, which the walk then signalled. This is
+exactly the failure class the caller-ancestry guard above exists to make
+impossible in production, and the incident is source-traced, not proven by a
+captured signal. Separately, two unrelated tests outside this milestone's code
+paths (a Codex writer-discovery test and a directory-deletion test in the
+follower) failed once under load during a review pass and passed in eight
+follow-up runs at the same commit; neither path is touched by this change, and
+the failures are unreproduced, not cleared, and are a candidate follow-up.
+
 ## [2026-09-28 17:56:29 UTC] [Client] show the consumer pid for natively connected peers in cbus list
 
 [Attempt #1] 10 files. Production: cmd/cbus/jsonout.go, cmd/cbus/main.go,

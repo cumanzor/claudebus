@@ -117,11 +117,14 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 	return consumerProbe{State: "unknown", Detail: "no exact CLI rollout writer observed"}, nil
 }
 
+// ownerStartTime reads a process start token. (A var only for tests.)
+var ownerStartTime = procStartTime
+
 func codexOwnerExited(pid int, start string) (bool, error) {
 	if procZombie(pid) {
 		return true, nil
 	}
-	current, err := procStartTime(pid)
+	current, err := ownerStartTime(pid)
 	if errors.Is(err, syscall.ESRCH) || os.IsNotExist(err) {
 		return true, nil
 	}
