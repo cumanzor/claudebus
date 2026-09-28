@@ -31,7 +31,8 @@ var surfaceSweepBudget = 5 * time.Second
 // stranger is worse than failing). Without force a TERM-surviving process is
 // reported, not escalated: closing its surface would be a disguised kill.
 // Registrations are NEVER touched here — the SessionEnd hook handles the graceful
-// path and the lazy-prune backstop the rest.
+// path and the lazy-prune backstop the rest. A daemon-managed peer takes
+// closeNativePeer instead, which disconnects its connection and keeps its inbox.
 func ClosePeer(ch, alias string, force bool) CloseReport {
 	target := ch + "/" + alias
 	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
@@ -39,11 +40,13 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 	if !ok {
 		return CloseReport{target, false, "no such peer"}
 	}
-	if m.ConnectionID != "" {
-		return CloseReport{target, false, "daemon-managed peer — use cbus connection disconnect " + target + "; close must not signal its shared daemon or terminal"}
-	}
 	if sid := SessionID(); sid != "" && m.SessionID == sid {
 		return CloseReport{target, false, "that peer is THIS session — refusing (exit it normally)"}
+	}
+	if m.ConnectionID != "" {
+		// a native listener pid is the shared daemon, so the ownership walk below
+		// must never run for it
+		return closeNativePeer(ch, alias, m, force)
 	}
 	pid := m.OwnerPid
 	if pid == 0 {

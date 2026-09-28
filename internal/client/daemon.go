@@ -286,16 +286,18 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 		case r.URL.Path == "/disconnect" && r.Method == "POST":
 			var req struct {
 				Target string `json:"target"`
+				disconnectFence
 			}
 			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}
-			if err := d.disconnect(req.Target); err != nil {
+			id, err := d.disconnectExact(req.Target, req.disconnectFence)
+			if err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}
-			writeDaemonJSON(w, map[string]bool{"disconnected": true})
+			writeDaemonJSON(w, map[string]any{"disconnected": true, "connectionId": id})
 		case r.URL.Path == "/reconcile" && r.Method == "POST":
 			var req struct {
 				Target string `json:"target"`
@@ -812,38 +814,63 @@ func (d *busDaemon) armLocked(c *ConnectionState) error {
 }
 
 func (d *busDaemon) disconnect(target string) error {
+	_, err := d.disconnectExact(target, disconnectFence{})
+	return err
+}
+
+// disconnectFence pins the registration and consumer incarnation a caller
+// validated. Empty fields leave the operator verb unfenced.
+type disconnectFence struct {
+	ConnectionID  string `json:"connectionId,omitempty"`
+	ThreadID      string `json:"threadId,omitempty"`
+	ConsumerPID   int    `json:"consumerPid,omitempty"`
+	ConsumerStart string `json:"consumerStart,omitempty"`
+}
+
+// The fence is checked under the connection lane and peer lock, so an
+// unregister and reconnect of the same alias cannot slip in between.
+func (d *busDaemon) disconnectExact(target string, f disconnectFence) (string, error) {
 	c, unlock, finish, err := d.lockConnectionWithRelease(target)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer finish()
 	defer unlock()
+	if (f.ConnectionID != "" && c.ID != f.ConnectionID) || (f.ThreadID != "" && c.ThreadID != f.ThreadID) {
+		return "", fmt.Errorf("%s is now a different registration; refusing to disconnect it", target)
+	}
+	if f.ConsumerPID != 0 || f.ConsumerStart != "" {
+		pid, start := pinnedConsumer(c)
+		if pid != f.ConsumerPID || start != f.ConsumerStart {
+			return "", fmt.Errorf("%s is bound to a different consumer process; refusing to disconnect it", target)
+		}
+	}
 	// Retain the durable inbox/journal and commit departure with the disconnect.
 	next := *c
 	next.State, next.Error = "disconnected", ""
 	if err := d.disconnectPresence(&next); err != nil {
-		return err
+		return "", err
 	}
 	if err := d.save(&next); err != nil {
-		return err
+		return "", err
 	}
 	*c = next
 	d.closeQueue(c.ID)
 	d.stopRelay(c.ID)
 	b, err := os.ReadFile(filepath.Join(d.peerDir(c), "meta.json"))
 	if err != nil {
-		return err
+		return "", err
 	}
 	var m peerMeta
 	if err := json.Unmarshal(b, &m); err != nil {
-		return err
+		return "", err
 	}
 	m.ListenerPid, m.ListenerStart, m.OwnerPid = json.RawMessage("-1"), "", jsonNull
 	if err := writeDaemonMeta(d.peerDir(c), m); err != nil {
-		return err
+		return "", err
 	}
 	unlock()
-	return d.flushPresence(c)
+	return c.ID, d.flushPresence(c)
 }
 
 func (d *busDaemon) deliver(c *ConnectionState) error {
