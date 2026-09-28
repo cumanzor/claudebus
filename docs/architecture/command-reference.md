@@ -951,6 +951,14 @@ listen|off     <ch>/<alias>                 pid=<pid|?>   <host|?>  <cwd|?>
   `liveness.go:102-104`), so `listen` means the daemon holds the connection,
   not that the CLI session is running; a disconnected native peer's
   `listenerPid` reads `-1` and shows `off`.
+- The `pid=` column of a **native** row is the consumer: the Claude or Codex
+  process the daemon last observed online, read from the connection's daemon
+  journal without contacting the daemon (`ScanStore`, `journaledConsumer`).
+  It shows only while the row is `listen` and the consumer is observed
+  online; an exited, unknown or disconnected consumer, a stopped daemon, or a
+  missing, unreadable or mismatched journal shows `pid=?`. A native row never
+  shows the daemon's pid, which every native row shares. Legacy rows keep
+  their listener pid.
 - `--active` / `-a` shows only live listeners. Any other arg is the channel
   filter (last non-flag wins).
 - Legacy v1 entries render as `off <ch>  legacy v1 entry — run: cbus prune`
@@ -1002,6 +1010,13 @@ of a session.
   is itself a real pid-shaped value and would read as one. A disconnected
   native peer emits `listenerPid: -1` explicitly, distinct from omission
   (`jsonout.go:50`).
+- `consumerState` and `consumerPid` appear on **native** rows only.
+  `consumerState` is the daemon's last consumer observation (`online`,
+  `exited`, `unknown`, `disconnected`), reported as `unknown` when the row is
+  not listening. `consumerPid` is present only while the row is listening
+  and the consumer is `online`. `listenerPid` keeps its meaning (the
+  daemon's pid for a native row). Both fields are additive; `schemaVersion`
+  is unchanged.
 - `scope` is pinned `"local"` for now; the key exists before `"remote"` does so
   a consumer written today keeps working once it appears.
 - A legacy v1 channel entry is rendered **explicitly** (`"legacyV1": true`,
