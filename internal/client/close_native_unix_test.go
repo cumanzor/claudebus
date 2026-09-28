@@ -447,3 +447,28 @@ func TestNativeCloseCodexWithoutAPinnedConsumerRefuses(t *testing.T) {
 		t.Fatalf("a Codex peer with no pinned consumer was treated as gone: %+v", rep)
 	}
 }
+
+func TestNativeCloseCodexReprobesTheThreadAfterDisconnect(t *testing.T) {
+	codex := fakeCodexCLI(t)
+	f := seedNativeCodex(t, codex)
+	start := startTokenOf(t, codex)
+	disconnected := false
+	prevDisconnect := nativeDisconnect
+	nativeDisconnect = func(target string, fence disconnectFence) (string, error) {
+		disconnected = true
+		return prevDisconnect(target, fence)
+	}
+	prevObserve := closeObserveCodex
+	closeObserveCodex = func(context.Context, *ConnectionState) (consumerProbe, error) {
+		if disconnected {
+			// same pid and start token, but it no longer writes this thread
+			return consumerProbe{State: "unknown", Detail: "no exact CLI rollout writer observed"}, nil
+		}
+		return consumerProbe{State: "online", PID: codex, StartToken: start}, nil
+	}
+	t.Cleanup(func() { closeObserveCodex = prevObserve })
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.HasPrefix(rep.Detail, "disconnected, no signal sent") || !processRunning(codex) || len(f.calls) != 1 {
+		t.Fatalf("a Codex process that left this thread during the disconnect was signalled: %+v", rep)
+	}
+}

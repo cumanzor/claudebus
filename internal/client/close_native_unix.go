@@ -134,20 +134,6 @@ func resolveNativeConsumer(c *ConnectionState, daemonPid int) (nativeConsumer, e
 	switch daemonHarness(c.Harness) {
 	case daemonHarnessClaude:
 	case daemonHarnessCodex:
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		p, err := closeObserveCodex(ctx, c)
-		if err != nil {
-			return consumer, refuseNative("cannot inspect", "%v", err)
-		}
-		switch {
-		case p.State == "exited":
-			return consumer, errConsumerGone
-		case p.State != "online":
-			return consumer, refuseNative("cannot inspect", "%s", orDefault(p.Detail, "no unique Codex consumer observed"))
-		case p.PID != pid || p.StartToken != start:
-			return consumer, refuseNative("changed incarnation", "the observed Codex consumer is pid %d, not the pinned pid %d", p.PID, pid)
-		}
 	default:
 		return consumer, refuseNative("cannot inspect", "unsupported harness %q", c.Harness)
 	}
@@ -185,6 +171,11 @@ func revalidateNativeConsumer(c *ConnectionState, consumer nativeConsumer, daemo
 			return refuseNative("different loaded session", "pid %d is not running session %s: %v", consumer.pid, c.ThreadID, err)
 		}
 	case daemonHarnessCodex:
+		// the same process can load another thread, so the exact-thread writer
+		// probe is repeated on every revalidation, not only before the disconnect
+		if err := observedCodexMatches(c, consumer); err != nil {
+			return err
+		}
 		comm, _, err := procParent(consumer.pid)
 		if err != nil {
 			return refuseNative("cannot inspect", "pid %d: %v", consumer.pid, err)
@@ -237,4 +228,24 @@ func orDefault(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// observedCodexMatches requires a fresh probe to find the pinned incarnation as
+// the unique writer of this thread's rollout and queue.
+func observedCodexMatches(c *ConnectionState, consumer nativeConsumer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	p, err := closeObserveCodex(ctx, c)
+	if err != nil {
+		return refuseNative("cannot inspect", "%v", err)
+	}
+	switch {
+	case p.State == "exited":
+		return errConsumerGone
+	case p.State != "online":
+		return refuseNative("cannot inspect", "%s", orDefault(p.Detail, "no unique Codex consumer observed"))
+	case p.PID != consumer.pid || p.StartToken != consumer.start:
+		return refuseNative("changed incarnation", "the observed Codex consumer is pid %d, not the pinned pid %d", p.PID, consumer.pid)
+	}
+	return nil
 }
