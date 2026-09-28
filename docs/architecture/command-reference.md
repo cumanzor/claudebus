@@ -1582,8 +1582,8 @@ turns into one command. Handler `runBranch` (main.go:505); mechanics
   frontmost (`internal/client/pane.go`).
 - Channel default: basename of the git toplevel, filtered to `[A-Za-z0-9._-]`;
   if empty (not a repo), `global`.
-- `--model M` launches the child on a specific model (`sonnet`, `opus`,
-  `fable`, …), passed through verbatim to the child launch. Pre-screened: a
+- `--model M` launches the child on a specific model (`sonnet`,
+  `claude-opus-5-5`, `fable`, …), passed through verbatim to the child launch. Pre-screened: a
   flag-shaped or invalid token fails with `cbus: bad model "<M>"` before any
   fork (a leading `-` would be read as a CLI flag and instant-close the window).
 - `--name N` fixes the child's alias, its session title, **and** (target `tmux`)
@@ -2453,8 +2453,8 @@ must **not** be followed.
    child's alias is reserved up front, the fork carries the canonical
    bootstrap prompt, and both addresses print. The child's session title is
    its alias (picker, terminal title, and the tmux window name for a tmux
-   target). `--model <m>` (sonnet, fable, `claude-opus-4-8`, never bare
-   `opus`, which resolves to Opus 5) and `--name <n>` (charset
+   target). `--model <m>` (sonnet, fable, `claude-opus-5-5`, never bare
+   `opus`, whose target moves with each release) and `--name <n>` (charset
    `[A-Za-z0-9._-]`) pass straight through on request.
 2. Preserve the parent's native connection; the child gets its own native
    connect instructions, no Monitor or tail loop on either side.

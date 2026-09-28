@@ -12,8 +12,8 @@ regardless of who runs it.
 
 Model tuning is the opposite. "You already verify your own work, do not add a
 pass" is correct for one model and actively harmful for another. A formation
-routinely runs several generations at once — as of this writing orchestrator and
-coder on Opus 5, reviewer on Fable 5, documenter on Sonnet 5, and codex peers on
+routinely runs several generations at once — as of this writing orchestrator,
+coder and reviewer on Opus 5.5, documenter on Sonnet 5, and codex peers on
 another provider entirely. Any tuning written into the shared doctrine block is
 wrong for most of those seats by construction.
 

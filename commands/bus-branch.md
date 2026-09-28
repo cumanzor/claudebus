@@ -24,9 +24,9 @@ Then:
    child's session title is its alias (picker + terminal title, and the tmux
    window name when the target is tmux). If the user
    mentions a model (e.g. "fork with sonnet"), append `--model <m>` — valid
-   values today: sonnet, fable, claude-opus-4-8. "opus" is temporarily pinned
-   to Opus 4.8: pass `claude-opus-4-8` verbatim, never bare `opus` (which now
-   resolves to Opus 5). If the user names the child (e.g. "call
+   values today: sonnet, fable, claude-opus-5-5. Pass the full id verbatim,
+   never bare `opus`: the alias moves to each new release on its own, and a
+   silent move under a running formation has broken one before. If the user names the child (e.g. "call
    it tester2"), append `--name <n>` — it becomes the child's alias AND title
    (alias charset: [A-Za-z0-9._-]); otherwise one is auto-picked (fork-N).
 2. Preserve the parent's native connection. The child receives its own native
