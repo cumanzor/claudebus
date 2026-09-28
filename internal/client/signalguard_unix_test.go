@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-var signalViolations atomic.Int64
+var signalViolations, expectedRefusals atomic.Int64
 
 // installSignalGuard confines every close signal in this package's tests to
 // processes the tests started. Anything else is refused, reported, and fails
@@ -29,6 +29,11 @@ func installSignalGuard() func() int64 {
 		if isTestOwned(pid) {
 			return syscall.Kill(pid, sig)
 		}
+		if expectedRefusals.Add(-1) >= 0 {
+			fmt.Fprintf(os.Stderr, "SIGNAL GUARD: expected refusal of %v to pid %d\n", sig, pid)
+			return syscall.EPERM
+		}
+		expectedRefusals.Add(1)
 		signalViolations.Add(1)
 		fmt.Fprintf(os.Stderr, "SIGNAL GUARD: refused %v to pid %d, which this test binary did not start\n", sig, pid)
 		return syscall.EPERM
@@ -46,10 +51,9 @@ func TestSignalGuardRefusesAnUnregisteredOwner(t *testing.T) {
 	owner, child := fakeSessionTree(t, "claude", needle)
 	testOwnedPids.Delete(owner)
 	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(child), startTokenOf(t, child))
-	before := signalViolations.Load()
+	expectedRefusals.Store(1)
 	rep := ClosePeer("ch", "peer", true)
-	caught := signalViolations.Load() - before
-	signalViolations.Add(-caught) // expected here; must not fail the run
+	caught := 1 - expectedRefusals.Swap(0)
 	if caught != 1 || rep.Ok || !processRunning(owner) {
 		t.Fatalf("the guard did not stop a signal to an unregistered owner: caught=%d report=%+v", caught, rep)
 	}
