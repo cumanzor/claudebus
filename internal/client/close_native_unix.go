@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -26,11 +27,14 @@ var nativeDisconnect = func(target string, f disconnectFence) (string, error) {
 }
 
 // closeObserveCodex is the fresh Codex consumer probe, nativeTermGrace the wait
-// after TERM and stillPinned the check before each signal. (Vars only for tests.)
+// after TERM, inspectIncarnation every liveness check and preSignalCheck the one
+// made right before each signal. (Vars only for tests.)
 var (
-	closeObserveCodex = observeCodexConsumer
-	nativeTermGrace   = 5 * time.Second
-	stillPinned       = incarnationLive
+	closeObserveCodex  = observeCodexConsumer
+	nativeTermGrace    = 5 * time.Second
+	inspectIncarnation = incarnationGone
+	preSignalCheck     = incarnationGone
+	nativeTTYOf        = ttyOf
 )
 
 // nativeConsumer is one process incarnation that consumes a native inbox.
@@ -84,11 +88,13 @@ func closeNativePeer(ch, alias string, m PeerMeta, force bool) CloseReport {
 		}
 		return CloseReport{target, false, "disconnected, no signal sent: " + err.Error()}
 	}
-	tty := ttyOf(consumer.pid)
+	tty := nativeTTYOf(consumer.pid)
 	if daemonPid > 0 && tty != "" && tty == ttyOf(daemonPid) {
 		tty = "" // never sweep the daemon's terminal
 	}
-	if !stillPinned(consumer) {
+	if gone, err := preSignalCheck(consumer); err != nil {
+		return CloseReport{target, false, "disconnected, no signal sent: cannot inspect: " + err.Error()}
+	} else if gone {
 		return CloseReport{target, true, "already gone; connection disconnected, inbox retained"}
 	}
 	if err := signalProcess(consumer.pid, syscall.SIGTERM); err != nil {
@@ -97,20 +103,31 @@ func closeNativePeer(ch, alias string, m PeerMeta, force bool) CloseReport {
 		}
 		return CloseReport{target, false, fmt.Sprintf("disconnected; SIGTERM pid %d failed: %v", consumer.pid, err)}
 	}
-	if !waitIncarnationGone(consumer, nativeTermGrace) {
+	unconfirmed := func(sig string, err error) CloseReport {
+		return CloseReport{target, false, fmt.Sprintf("disconnected; %s sent to pid %d, outcome unconfirmed: cannot inspect: %v", sig, consumer.pid, err)}
+	}
+	ended, err := waitIncarnationGone(consumer, nativeTermGrace)
+	if err != nil {
+		return unconfirmed("SIGTERM", err)
+	}
+	if !ended {
 		if !force {
 			return CloseReport{target, false, fmt.Sprintf("disconnected; pid %d still running after TERM; use --force", consumer.pid)}
 		}
 		// a changed start token is never permission to signal the pid's new occupant
-		if !stillPinned(consumer) {
+		if gone, err := preSignalCheck(consumer); err != nil {
+			return unconfirmed("SIGTERM", err)
+		} else if gone {
 			return CloseReport{target, true, fmt.Sprintf("disconnected; pid %d is no longer the consumer that got TERM; not killed", consumer.pid)}
 		}
 		_ = signalProcess(consumer.pid, syscall.SIGKILL)
-		if !waitIncarnationGone(consumer, 2*time.Second) {
+		if gone, err := waitIncarnationGone(consumer, 2*time.Second); err != nil {
+			return unconfirmed("SIGKILL", err)
+		} else if !gone {
 			return CloseReport{target, false, fmt.Sprintf("disconnected; pid %d survived SIGKILL", consumer.pid)}
 		}
 	}
-	return CloseReport{target, true, "process ended; connection disconnected, inbox retained; " + sweepSurface(tty)}
+	return CloseReport{target, true, "process ended; connection disconnected, inbox retained; " + sweepNativeSurface(tty)}
 }
 
 func nativeRefusalReport(target string, err error) CloseReport {
@@ -151,11 +168,9 @@ func revalidateNativeConsumer(c *ConnectionState, consumer nativeConsumer, daemo
 	if consumer.pid == os.Getpid() || ownAncestor(consumer.pid) {
 		return refuseNative("this session", "pid %d is this process or one of its ancestors", consumer.pid)
 	}
-	exited, err := codexOwnerExited(consumer.pid, consumer.start)
-	if err != nil {
+	if gone, err := inspectIncarnation(consumer); err != nil {
 		return refuseNative("cannot inspect", "%v", err)
-	}
-	if exited {
+	} else if gone {
 		return errConsumerGone
 	}
 	argv, err := procArgs(consumer.pid)
@@ -184,26 +199,29 @@ func revalidateNativeConsumer(c *ConnectionState, consumer nativeConsumer, daemo
 			return refuseNative("changed incarnation", "pid %d is not an interactive codex CLI", consumer.pid)
 		}
 	}
-	if !incarnationLive(consumer) {
+	if gone, err := inspectIncarnation(consumer); err != nil {
+		return refuseNative("cannot inspect", "%v", err)
+	} else if gone {
 		return errConsumerGone
 	}
 	return nil
 }
 
-func incarnationLive(consumer nativeConsumer) bool {
-	exited, err := codexOwnerExited(consumer.pid, consumer.start)
-	return err == nil && !exited
+// incarnationGone is proof of exit only: no such process, a zombie, or a
+// different start token. Any other inspection failure is an error, never gone.
+func incarnationGone(consumer nativeConsumer) (bool, error) {
+	return codexOwnerExited(consumer.pid, consumer.start)
 }
 
-func waitIncarnationGone(consumer nativeConsumer, grace time.Duration) bool {
+func waitIncarnationGone(consumer nativeConsumer, grace time.Duration) (bool, error) {
 	deadline := time.Now().Add(grace)
 	for {
-		exited, err := codexOwnerExited(consumer.pid, consumer.start)
-		if err == nil && exited {
-			return true
+		gone, err := inspectIncarnation(consumer)
+		if err == nil && gone {
+			return true, nil
 		}
 		if !time.Now().Before(deadline) {
-			return false
+			return false, err
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -248,4 +266,44 @@ func observedCodexMatches(c *ConnectionState, consumer nativeConsumer) error {
 		return refuseNative("changed incarnation", "the observed Codex consumer is pid %d, not the pinned pid %d", p.PID, consumer.pid)
 	}
 	return nil
+}
+
+// nativeTTYProbe lists the processes on tty. (A var only for tests.)
+var nativeTTYProbe = func(ctx context.Context, tty string) (stdout, stderr string, exitCode int, err error) {
+	var out, errOut strings.Builder
+	cmd := boundedCmd(ctx, "ps", "-t", tty, "-o", "pid=")
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	err = cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return out.String(), errOut.String(), exit.ExitCode(), nil
+	}
+	return out.String(), errOut.String(), 0, err
+}
+
+// sweepNativeSurface closes the consumer's surface only on positive proof that
+// its tty is idle: ps ran and found no process on it, or the device is gone.
+// Any failure to ask leaves the surface open.
+func sweepNativeSurface(tty string) string {
+	if tty == "" {
+		return "surface unknown (no tty)"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), surfaceSweepBudget)
+	defer cancel()
+	stdout, stderr, code, err := nativeTTYProbe(ctx, tty)
+	if !ttyProvenIdle(stdout, stderr, code, err) {
+		if err == nil && code == 0 && strings.TrimSpace(stdout) != "" {
+			return "tty busy, surface left alone"
+		}
+		return "surface left open (could not confirm idle)"
+	}
+	return closeSurface(ctx, tty)
+}
+
+func ttyProvenIdle(stdout, stderr string, code int, err error) bool {
+	if err != nil || strings.TrimSpace(stdout) != "" {
+		return false
+	}
+	stderr = strings.TrimSpace(stderr)
+	return code == 0 || (code == 1 && (stderr == "" || strings.HasSuffix(stderr, "No such file or directory")))
 }

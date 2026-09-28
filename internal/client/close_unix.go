@@ -162,6 +162,12 @@ func sweepSurface(tty string) string {
 	if err == nil && strings.TrimSpace(string(out)) != "" {
 		return "tty busy — surface left alone"
 	}
+	return closeSurface(ctx, tty)
+}
+
+// closeSurface closes the tmux pane or iTerm2 session on a tty the caller has
+// already judged idle.
+func closeSurface(ctx context.Context, tty string) string {
 	dev := "/dev/" + tty
 	if out, err := boundedCmd(ctx, "tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_tty}").Output(); err == nil {
 		for _, line := range strings.Split(string(out), "\n") {

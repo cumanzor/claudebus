@@ -211,9 +211,9 @@ func TestNativeCloseRefusesWithoutProof(t *testing.T) {
 func TestNativeCloseRechecksTheIncarnationBeforeTerm(t *testing.T) {
 	consumer := fakeClaude(t)
 	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
-	prev := stillPinned
-	stillPinned = func(nativeConsumer) bool { return false }
-	t.Cleanup(func() { stillPinned = prev })
+	prev := preSignalCheck
+	preSignalCheck = func(nativeConsumer) (bool, error) { return true, nil }
+	t.Cleanup(func() { preSignalCheck = prev })
 	if rep := ClosePeer("dev", "worker", true); !strings.Contains(rep.Detail, "already gone") || !processRunning(consumer) || len(f.calls) != 1 {
 		t.Fatalf("TERM was sent after the incarnation changed: %+v", rep)
 	}
@@ -399,9 +399,15 @@ func TestNativeCloseForceNeverKillsAChangedIncarnation(t *testing.T) {
 	consumer := fakeStubbornClaude(t)
 	seedNativeClaude(t, consumer, startTokenOf(t, consumer))
 	checks := 0
-	prev := stillPinned
-	stillPinned = func(c nativeConsumer) bool { checks++; return checks == 1 && prev(c) }
-	t.Cleanup(func() { stillPinned = prev })
+	prev := preSignalCheck
+	preSignalCheck = func(c nativeConsumer) (bool, error) {
+		checks++
+		if checks == 1 {
+			return prev(c)
+		}
+		return true, nil
+	}
+	t.Cleanup(func() { preSignalCheck = prev })
 	rep := ClosePeer("dev", "worker", true)
 	if !strings.Contains(rep.Detail, "not killed") || !processRunning(consumer) || checks != 2 {
 		t.Fatalf("--force signalled after the incarnation check failed: %+v (checks %d)", rep, checks)
@@ -470,5 +476,96 @@ func TestNativeCloseCodexReprobesTheThreadAfterDisconnect(t *testing.T) {
 	rep := ClosePeer("dev", "worker", true)
 	if rep.Ok || !strings.HasPrefix(rep.Detail, "disconnected, no signal sent") || !processRunning(codex) || len(f.calls) != 1 {
 		t.Fatalf("a Codex process that left this thread during the disconnect was signalled: %+v", rep)
+	}
+}
+
+func TestNativeCloseTrulyDeadConsumerIsGoneAndDisconnected(t *testing.T) {
+	cmd := exec.Command("sleep", "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	start := startTokenOf(t, pid)
+	_ = cmd.Process.Kill() // through the handle this test holds
+	_, _ = cmd.Process.Wait()
+	f := seedNativeClaude(t, pid, start)
+	rep := ClosePeer("dev", "worker", false)
+	if !rep.Ok || !strings.Contains(rep.Detail, "already gone") || len(f.calls) != 1 {
+		t.Fatalf("a dead consumer was not reported gone with its connection disconnected: %+v calls=%d", rep, len(f.calls))
+	}
+}
+
+func failInspection(t *testing.T, when func() bool) {
+	t.Helper()
+	prev := inspectIncarnation
+	inspectIncarnation = func(c nativeConsumer) (bool, error) {
+		if when() {
+			return false, errors.New("process table unreadable")
+		}
+		return prev(c)
+	}
+	t.Cleanup(func() { inspectIncarnation = prev })
+}
+
+func TestNativeCloseInspectionErrorBeforeDisconnectRefuses(t *testing.T) {
+	consumer := fakeClaude(t)
+	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	failInspection(t, func() bool { return true })
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "cannot inspect") || len(f.calls) != 0 || !processRunning(consumer) {
+		t.Fatalf("an inspection error was taken as proof of exit: %+v", rep)
+	}
+}
+
+func TestNativeCloseInspectionErrorAfterTermIsUnconfirmed(t *testing.T) {
+	shortTermGrace(t)
+	consumer := fakeStubbornClaude(t)
+	seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	termSent := false
+	prevSignal := signalProcess
+	signalProcess = func(pid int, sig syscall.Signal) error {
+		termSent = true
+		return prevSignal(pid, sig)
+	}
+	t.Cleanup(func() { signalProcess = prevSignal })
+	failInspection(t, func() bool { return termSent })
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "SIGTERM sent to pid") || !strings.Contains(rep.Detail, "outcome unconfirmed") || strings.Contains(rep.Detail, "surface") {
+		t.Fatalf("an unconfirmed exit was reported as ended or swept: %+v", rep)
+	}
+}
+
+func TestNativeSweepNeedsPositiveIdleProof(t *testing.T) {
+	consumer := fakeClaude(t)
+	seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	prevTTY, prevProbe := nativeTTYOf, nativeTTYProbe
+	nativeTTYOf = func(int) string { return "ttys999" }
+	nativeTTYProbe = func(context.Context, string) (string, string, int, error) {
+		return "", "", 0, errors.New("ps: permission denied")
+	}
+	t.Cleanup(func() { nativeTTYOf, nativeTTYProbe = prevTTY, prevProbe })
+	if rep := ClosePeer("dev", "worker", false); !rep.Ok || !strings.HasSuffix(rep.Detail, "surface left open (could not confirm idle)") {
+		t.Fatalf("a surface was swept without proof that its tty is idle: %+v", rep)
+	}
+}
+
+func TestTTYProvenIdle(t *testing.T) {
+	for _, tc := range []struct {
+		stdout, stderr string
+		code           int
+		err            error
+		want           bool
+	}{
+		{"", "", 1, nil, true},
+		{"", "ps: /dev/ttys999: No such file or directory", 1, nil, true},
+		{"", "", 0, nil, true},
+		{"4321\n", "", 0, nil, false},
+		{"", "ps: permission denied", 1, nil, false},
+		{"", "", 2, nil, false},
+		{"", "", 0, errors.New("exec: ps not found"), false},
+	} {
+		if got := ttyProvenIdle(tc.stdout, tc.stderr, tc.code, tc.err); got != tc.want {
+			t.Errorf("ttyProvenIdle(%q, %q, %d, %v) = %v", tc.stdout, tc.stderr, tc.code, tc.err, got)
+		}
 	}
 }
