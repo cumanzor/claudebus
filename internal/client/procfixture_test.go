@@ -48,6 +48,7 @@ func startTracked(t *testing.T, cmd *exec.Cmd) int {
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		disownTestPid(cmd.Process.Pid)
 	})
 	return cmd.Process.Pid
 }

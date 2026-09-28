@@ -86,3 +86,14 @@ func TestSignalSeamRefusesSelfAndAncestors(t *testing.T) {
 		}
 	}
 }
+
+func TestTestOwnedRegistryRejectsARecycledPid(t *testing.T) {
+	pid := liveProc(t)
+	if !isTestOwned(pid) {
+		t.Fatal("precondition: a started fixture must be registered")
+	}
+	testOwnedPids.Store(pid, "an-earlier-process")
+	if isTestOwned(pid) {
+		t.Fatal("a pid whose start token changed was admitted")
+	}
+}

@@ -87,9 +87,16 @@ func fakeSessionTree(t *testing.T, name, listenerArg string) (ownerPid, childPid
 	ownerPid, childPid = parsed[0], parsed[1]
 	ownTestPid(ownerPid)
 	ownTestPid(childPid)
+	ownerStart, _ := procStartTime(ownerPid)
+	childStart, _ := procStartTime(childPid)
 	t.Cleanup(func() {
-		_ = syscall.Kill(ownerPid, syscall.SIGKILL)
-		_ = syscall.Kill(childPid, syscall.SIGKILL)
+		// only the incarnations this helper started: an exited pid may be reused
+		for pid, start := range map[int]string{ownerPid: ownerStart, childPid: childStart} {
+			if current, err := procStartTime(pid); err == nil && start != "" && current == start {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+			disownTestPid(pid)
+		}
 	})
 
 	// the barrier, asserted: without it a failed match walks into the real session
