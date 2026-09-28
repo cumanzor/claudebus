@@ -4,6 +4,94 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-28 17:56:29 UTC] [Client] show the consumer pid for natively connected peers in cbus list
+
+[Attempt #1] 10 files. Production: cmd/cbus/jsonout.go, cmd/cbus/main.go,
+internal/client/roster.go, internal/client/formation_harness.go. Tests:
+cmd/cbus/list_consumer_test.go, internal/client/roster_consumer_test.go,
+internal/client/roster_consumer_unix_test.go (all new). Docs:
+docs/architecture/command-reference.md. detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+For a daemon-managed peer, `meta.json` records the daemon as the listener, so
+every native row in `cbus list` showed the same pid, the daemon's. That pid
+has to stay in `meta.json` because liveness, send, close and layout match it
+against the running daemon, so the fix is in the display only.
+
+`ScanStore` now reads the connection's daemon journal without contacting the
+daemon and reports the consumer the daemon last observed. The text pid column
+of a native row shows that consumer's pid while the row is `listen` and the
+consumer is `online`, and `?` otherwise, and never the daemon's pid. The JSON
+adds `consumerState` (`online`, `exited`, `unknown` or `disconnected`) to native
+rows and `consumerPid` while the consumer is online; `listenerPid` keeps its
+value and `schemaVersion` is unchanged. An `online` observation on a row that
+is not listening is reported as `unknown`, because the daemon is not observing
+it and the journal may be stale. The recorded pid survives an exit in the
+journal, so it counts only while `online`. A missing, unreadable, unparsable or
+mismatched journal reads as unknown and never fails the list. Legacy rows are
+unchanged, and remote rows are out of scope.
+
+The journal read and its identity check (id, channel, alias and session must
+match the registration) moved out of formation save into one function,
+`readManagedJournal`, which both use; the checks and their error text are the
+same.
+
+docs/architecture/command-reference.md describes the pid column and the two
+JSON fields. The review caught the JSON paragraph saying `consumerState` is
+`unknown` whenever the row is not listening, where the code downgrades only an
+`online` observation and a disconnected row reports `disconnected`; the
+sentence now matches the code. The finding was folded in here.
+
+[Possible Ripple Effects]
+The pid column of a native row changes meaning: it was the daemon's pid, the
+same on every native row, and is now the consumer's pid or `?`. Anything that
+read that column to find the daemon will not find it there. A native row that
+is `off` shows `?`.
+
+`cbus list` now opens one small journal file per native peer on each run. It
+takes no lock and asks the daemon nothing; journals are written by temp file
+and rename, so a torn read is not expected. The rule that decides what a row
+shows lives in `ScanStore`; a new consumer of the roster should read
+`ConsumerPid` from it and not recompute the rule.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` and `go vet ./...` pass at the final
+commit in the documenter's own run. At the second commit the coder ran vet for
+linux amd64 and arm64 and windows (the Claude fixture moved to a unix-tagged
+file to build there), and the reviewer re-ran the suite, vet and the linux and
+windows builds and vets. The final commit only rewords one docs sentence.
+
+Mutation checks: six mutants (the online guard, the listening guard, the text
+column showing the daemon's pid, the JSON dropping `consumerPid`, the journal
+identity check, and the native flag unset) each fail the test aimed at them
+(coder run). The identity-check mutant was first killed only through a formation
+test, so the list fixture now carries an online consumer and the re-run fails at
+the list test's own assertion. The reviewer cut four of these independently
+(the listening downgrade, the pid kept for any state, native rows using the
+listener pid, the channel check dropped) and each failed on the aimed line.
+
+Fixtures. The tests for a missing, foreign or unparsable journal are labelled
+defensive fixtures: no cbus code writes those states (connection ids are random
+nonces, journals are written only through the daemon's save and never removed,
+and connect saves the journal before it writes the meta), so only an outside
+edit, copy or restore produces them. The exited, unknown and disconnected cases
+come from real paths. The "daemon gone" case stands in for a dead daemon by
+editing its recorded start token, not by stopping it.
+
+Field run, read-only: `cbus list` and `cbus list --json` on a real store, the
+installed binary against one built at the second commit, 56 rows each. Every
+column other than the pid is identical. The 13 legacy rows keep their pids; the
+43 native rows changed and none shows the daemon's pid. The 12 `consumerPid`
+values all resolve to live processes (11 Claude, 1 Codex) and the session that
+ran the list shows its own pid. In the JSON, 43 native rows carry
+`consumerState`, 12 carry `consumerPid`, none breaks the listening-and-online
+rule, and no legacy row gained a field.
+
+Not covered. Remote rows are out of scope. Linux and Windows are compiled and
+vetted only, not run. The list was not run against a
+peer whose daemon had really died; the fixture stands in for it.
+
 ## [2026-09-28 03:27:09 UTC] [Roles] documenter writes the tracker; evidence files, per-pass review files, topic docs; Opus 5.5 defaults
 
 [Attempt #1] 12 files: roles/orchestrator.md, roles/coder.md,
