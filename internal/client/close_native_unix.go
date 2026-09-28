@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -298,10 +299,11 @@ func observedCodexMatches(c *ConnectionState, consumer nativeConsumer) error {
 	return nil
 }
 
-// nativeTTYProbe lists the processes on tty. (A var only for tests.)
+// nativeTTYProbe lists the processes on tty together with this process, which
+// must appear as a positive control. (A var only for tests.)
 var nativeTTYProbe = func(ctx context.Context, tty string) (stdout, stderr string, exitCode int, err error) {
 	var out, errOut strings.Builder
-	cmd := boundedCmd(ctx, "ps", "-t", tty, "-o", "pid=")
+	cmd := boundedCmd(ctx, "ps", "-o", "pid=,tty=", "-t", tty, "-p", strconv.Itoa(os.Getpid()))
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err = cmd.Run()
 	var exit *exec.ExitError
@@ -312,8 +314,8 @@ var nativeTTYProbe = func(ctx context.Context, tty string) (stdout, stderr strin
 }
 
 // sweepNativeSurface closes the consumer's surface only on positive proof that
-// its tty is idle: ps ran and found no process on it, or the device is gone.
-// Any failure to ask leaves the surface open.
+// its tty is idle. ps exit codes are not proof (macOS ps can fail its process
+// query and still exit 0), so the same ps call must also list this process.
 func sweepNativeSurface(tty string) string {
 	if tty == "" {
 		return "surface unknown (no tty)"
@@ -321,19 +323,45 @@ func sweepNativeSurface(tty string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), surfaceSweepBudget)
 	defer cancel()
 	stdout, stderr, code, err := nativeTTYProbe(ctx, tty)
-	if !ttyProvenIdle(stdout, stderr, code, err) {
-		if err == nil && code == 0 && strings.TrimSpace(stdout) != "" {
-			return "tty busy, surface left alone"
-		}
-		return "surface left open (could not confirm idle)"
+	switch ttyIdleState(stdout, stderr, code, err, tty, os.Getpid()) {
+	case "idle":
+		return closeSurface(ctx, tty)
+	case "busy":
+		return "tty busy, surface left alone"
 	}
-	return closeSurface(ctx, tty)
+	return "surface left open (could not confirm idle)"
 }
 
-func ttyProvenIdle(stdout, stderr string, code int, err error) bool {
-	if err != nil || strings.TrimSpace(stdout) != "" {
-		return false
+// ttyIdleState is "idle" only when ps exited 0 with nothing on stderr, listed
+// this process, and listed nothing else; "busy" when another process is on
+// the tty; anything else is "unknown".
+func ttyIdleState(stdout, stderr string, code int, err error, tty string, self int) string {
+	if err != nil || code != 0 || strings.TrimSpace(stderr) != "" {
+		return "unknown"
 	}
-	stderr = strings.TrimSpace(stderr)
-	return code == 0 || (code == 1 && (stderr == "" || strings.HasSuffix(stderr, "No such file or directory")))
+	selfSeen, busy := false, false
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		pid, perr := strconv.Atoi(f[0])
+		switch {
+		case perr != nil || len(f) != 2:
+			return "unknown"
+		case pid == self:
+			selfSeen = true
+		case f[1] == tty:
+			busy = true
+		default:
+			return "unknown" // a row ps was not asked for
+		}
+	}
+	switch {
+	case !selfSeen:
+		return "unknown"
+	case busy:
+		return "busy"
+	}
+	return "idle"
 }

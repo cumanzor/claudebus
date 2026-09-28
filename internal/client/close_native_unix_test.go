@@ -550,23 +550,28 @@ func TestNativeSweepNeedsPositiveIdleProof(t *testing.T) {
 	}
 }
 
-func TestTTYProvenIdle(t *testing.T) {
+func TestTTYIdleState(t *testing.T) {
+	const self = 4242
 	for _, tc := range []struct {
-		stdout, stderr string
-		code           int
-		err            error
-		want           bool
+		name, stdout, stderr string
+		code                 int
+		err                  error
+		want                 string
 	}{
-		{"", "", 1, nil, true},
-		{"", "ps: /dev/ttys999: No such file or directory", 1, nil, true},
-		{"", "", 0, nil, true},
-		{"4321\n", "", 0, nil, false},
-		{"", "ps: permission denied", 1, nil, false},
-		{"", "", 2, nil, false},
-		{"", "", 0, errors.New("exec: ps not found"), false},
+		{"proven idle", " 4242 ??\n", "", 0, nil, "idle"},
+		{"busy", " 4242 ??\n 777 ttys003\n", "", 0, nil, "busy"},
+		{"sysctl failure still exits 0", "", "ps: Failure calling sysctl: Cannot allocate memory", 0, nil, "unknown"},
+		{"no self row", "", "", 0, nil, "unknown"},
+		{"stderr beside a self row", " 4242 ??\n", "ps: warning", 0, nil, "unknown"},
+		{"device gone", "", "ps: /dev/ttys003: No such file or directory", 1, nil, "unknown"},
+		{"hangup exit looks like an empty selection", "", "", 1, nil, "unknown"},
+		{"nonzero exit", " 4242 ??\n", "", 1, nil, "unknown"},
+		{"exec failure", "", "", 0, errors.New("exec: ps not found"), "unknown"},
+		{"unparsable row", " 4242 ??\n garbage\n", "", 0, nil, "unknown"},
+		{"unrequested row", " 4242 ??\n 777 ttys009\n", "", 0, nil, "unknown"},
 	} {
-		if got := ttyProvenIdle(tc.stdout, tc.stderr, tc.code, tc.err); got != tc.want {
-			t.Errorf("ttyProvenIdle(%q, %q, %d, %v) = %v", tc.stdout, tc.stderr, tc.code, tc.err, got)
+		if got := ttyIdleState(tc.stdout, tc.stderr, tc.code, tc.err, "ttys003", self); got != tc.want {
+			t.Errorf("%s: ttyIdleState = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
