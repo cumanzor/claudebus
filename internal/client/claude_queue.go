@@ -1,6 +1,19 @@
 package client
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+const (
+	claudeNotSubmitted = "not-submitted"
+	claudeUncertain    = "uncertain"
+	claudeSubmitted    = "submitted-unconfirmed"
+)
+
+// A clean socket write waits this long for its transcript row before the
+// attempt is reported uncertain. Lookups continue after it; nothing is resent.
+const claudeReceiptTimeout = 60 * time.Second
 
 // This configuration carries only a reference to the private capability token.
 // ReceiptOffset is a complete-line checkpoint, persisted after positive receipt.

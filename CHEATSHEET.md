@@ -163,8 +163,8 @@ for its resume. `cbus prune` sweeps only legacy (join/tail) peers; a native
 alias stays reserved until `leave`/`unregister`, even after disconnect. On
 uncertain delivery, `cbus connection reconcile` checks evidence on demand;
 `cbus connection abandon CHANNEL/ALIAS --pending CLIENT_ID --reason TEXT`
-releases one named uncertain attempt so later mail can proceed, without
-resolving whether the original one arrived.
+releases one named uncertain or awaiting-receipt attempt so later mail can
+proceed, without resolving whether the original one arrived.
 
 ## Cross-machine (relay-backed) channels
 

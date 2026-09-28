@@ -336,8 +336,8 @@ func TestDaemonLostAcknowledgementNeverBlindlyRetries(t *testing.T) {
 	clientID := c.Pending.ClientID
 	q.enqueueErr = nil
 	for range 2 {
-		if err := d.deliver(c); err == nil {
-			t.Fatal("absence in queue/history must remain uncertain")
+		if err := d.deliver(c); err == nil || !strings.Contains(err.Error(), "enqueue outcome uncertain") {
+			t.Fatalf("absence in queue/history must remain uncertain: %v", err)
 		}
 	}
 	d = reloadDaemonFixture(t, q)
