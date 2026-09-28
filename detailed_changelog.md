@@ -118,11 +118,15 @@ Not covered. There is no real close run against a live peer: a scratch-store
 plan exists and is user-gated, not run. Windows close is unimplemented and
 continues to refuse.
 
-Linux: `go test -count=1 ./...` and `go vet ./...` pass, and the guard printed
-zero unexpected refusals against the one expected. `ps -o pid=,tty= -t TTY -p
-SELF` selects a union on procps (measured: a busy tty prints the self row plus
-its own rows, rc 0), the same semantics D31 measured on darwin's BSD `ps`. A
-Linux tty whose processes have all exited is freed at the kernel level, so
+Linux: `go test -count=1 ./...` and `go vet ./...` both pass on Debian 13
+(kernel 6.12, go1.26.2, procps-ng 4.0.4, ext4), except one test that already
+fails the same way on main and is unrelated to this change:
+TestManagedPresenceRecipientEpochAndMalformedTail/replace. The close guard
+printed zero unexpected refusals against the one expected. `ps -o pid=,tty=
+-t TTY -p SELF` selects a union on procps (measured: a busy tty prints the
+self row plus its own rows, rc 0), the same semantics measured on darwin's
+BSD `ps`. A Linux tty whose processes have all exited is freed at the kernel
+level, so
 `ps` then reports the tty as not found; the idle branch is reachable only
 when the tty stays allocated with no processes left on it (for example a
 tmux pane kept open after its command exits). Outside that case the surface
