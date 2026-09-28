@@ -3,10 +3,12 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -19,7 +21,12 @@ var signalViolations atomic.Int64
 // the run, even if a mutated identity check selected it.
 func installSignalGuard() func() int64 {
 	signalProcess = func(pid int, sig syscall.Signal) error {
-		if pid > 1 && isTestOwned(pid) {
+		// the production refusal as shipped; it only checks, so a mutant that
+		// disables it falls through to the registry below instead of signalling
+		if err := ownAncestryRefusal(pid); err != nil {
+			return err
+		}
+		if isTestOwned(pid) {
 			return syscall.Kill(pid, sig)
 		}
 		signalViolations.Add(1)
@@ -45,5 +52,33 @@ func TestSignalGuardRefusesAnUnregisteredOwner(t *testing.T) {
 	signalViolations.Add(-caught) // expected here; must not fail the run
 	if caught != 1 || rep.Ok || !processRunning(owner) {
 		t.Fatalf("the guard did not stop a signal to an unregistered owner: caught=%d report=%+v", caught, rep)
+	}
+}
+
+// Legacy close resolves a live listener's owner by walking its ancestry. From a
+// process this test starts, that walk climbs through the test binary into
+// whatever launched it; when a harness sits there the production seam must
+// refuse it before the pid registry is even consulted.
+func TestCloseRefusesOwnAncestry(t *testing.T) {
+	root := setupStore(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
+	listener := liveProc(t)
+	owner, ok := ownerFromPid(listener)
+	if !ok || !ownAncestor(owner) {
+		t.Skip("no harness process above this test run")
+	}
+	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(listener), startTokenOf(t, listener))
+	before := signalViolations.Load()
+	rep := ClosePeer("ch", "peer", true)
+	if rep.Ok || !strings.Contains(rep.Detail, errOwnAncestry.Error()) || signalViolations.Load() != before {
+		t.Fatalf("close aimed at its own ancestry was not refused by the production seam: %+v", rep)
+	}
+}
+
+func TestSignalSeamRefusesSelfAndAncestors(t *testing.T) {
+	for _, pid := range []int{0, 1, os.Getpid(), os.Getppid()} {
+		if err := signalUnlessOwnAncestry(pid, 0); !errors.Is(err, errOwnAncestry) {
+			t.Errorf("pid %d was not refused: %v", pid, err)
+		}
 	}
 }

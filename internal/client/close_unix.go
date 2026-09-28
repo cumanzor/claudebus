@@ -4,7 +4,9 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,7 +23,25 @@ var surfaceSweepBudget = 5 * time.Second
 
 // signalProcess is the only way close signals a process. (A var only so tests
 // can confine signals to processes they started.)
-var signalProcess = syscall.Kill
+var signalProcess = signalUnlessOwnAncestry
+
+var errOwnAncestry = errors.New("refusing to signal this process or one of its ancestors")
+
+// No close may end the process running it or anything above it, whatever path
+// resolved the target.
+func signalUnlessOwnAncestry(pid int, sig syscall.Signal) error {
+	if err := ownAncestryRefusal(pid); err != nil {
+		return err
+	}
+	return syscall.Kill(pid, sig)
+}
+
+func ownAncestryRefusal(pid int) error {
+	if pid <= 1 || pid == os.Getpid() || ownAncestor(pid) {
+		return errOwnAncestry
+	}
+	return nil
+}
 
 // ClosePeer tears down the LOCAL peer ch/alias on instruction: SIGTERM its owning
 // claude process (graceful — the SessionEnd hook broadcasts 'left' and removes the
