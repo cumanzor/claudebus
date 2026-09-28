@@ -49,6 +49,16 @@ func (d *busDaemon) observeCompaction(c *ConnectionState) error {
 	if !ok {
 		return errors.New("inspect exact compaction rollout identity")
 	}
+	if c.Compaction != nil && c.Compaction.Dev != dev && devMatches(c.Compaction.Dev, dev) && c.Compaction.Ino == ino && size >= c.Compaction.Offset && c.State != "disconnected" {
+		// The rollout's thread ID was checked above; keep its cursor rather than
+		// re-baselining past compactions that happened while the daemon was down.
+		restamped := cloneConnection(c)
+		restamped.Compaction.Dev = dev
+		if err := d.save(restamped); err != nil {
+			return err
+		}
+		*c = *restamped
+	}
 	next := cloneConnection(c)
 	if c.Compaction == nil || c.Compaction.Dev != dev || c.Compaction.Ino != ino || size < c.Compaction.Offset || c.State == "disconnected" {
 		end, err := rolloutCompleteEnd(f, size)

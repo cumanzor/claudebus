@@ -74,6 +74,12 @@ func inboxRecordMatches(f *os.File, end int64, hash string, floor int64) bool {
 	return fmt.Sprintf("%x", sha256.Sum256(line)) == hash
 }
 
+// For files whose content carries its own identity (a session or thread ID
+// checked by the caller), a device-only change is not an epoch change.
+func devMatches(recorded, current uint64) bool {
+	return current == recorded || devMayRenumber
+}
+
 func inboxEpochRefusal(c *ConnectionState, what string) error {
 	return fmt.Errorf("inbox changed or truncated; %s. Save any unread mail past byte %d of the %s inbox, then run cbus unregister %s and connect again", what, c.Offset, ConnectionTarget(c), ConnectionTarget(c))
 }

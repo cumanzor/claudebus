@@ -4,6 +4,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"time"
 )
@@ -16,8 +17,8 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 	}
 	old, incoming := c.Claude.Binding, cfg.Binding
 	if old.SessionID != incoming.SessionID || old.ConfigHome != incoming.ConfigHome ||
-		old.TranscriptPath != incoming.TranscriptPath || old.TranscriptDev != incoming.TranscriptDev || old.TranscriptIno != incoming.TranscriptIno || incoming.TranscriptSize < old.TranscriptSize {
-		return nil, errors.New("Claude transcript epoch changed; refusing to redirect the existing connection or receipt history")
+		old.TranscriptPath != incoming.TranscriptPath || !devMatches(old.TranscriptDev, incoming.TranscriptDev) || old.TranscriptIno != incoming.TranscriptIno || incoming.TranscriptSize < old.TranscriptSize {
+		return nil, fmt.Errorf("Claude transcript epoch changed; refusing to redirect the existing connection or receipt history. Connect this session under a fresh alias, or save any unread mail past byte %d of the %s inbox, then run cbus unregister %s and connect again", c.Offset, ConnectionTarget(c), ConnectionTarget(c))
 	}
 	if c.Relay != nil && (req.Relay == nil || c.Relay.Base != req.Relay.Base) {
 		return nil, errors.New("relay endpoint changed; refusing to redirect an existing connection")

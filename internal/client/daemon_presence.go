@@ -304,7 +304,9 @@ func appendManagedPresence(channel, from string, p presenceTransition, r presenc
 	}
 	defer func() { err = errors.Join(err, f.Close()) }()
 	dev, ino, _, ok := fileIdentityOf(f)
-	if !ok || dev != r.Dev || ino != r.Ino {
+	// Recipient meta and the event ID scan fence a replay; a renumbered device alone
+	// must not drop the notice.
+	if !ok || !devMatches(r.Dev, dev) || ino != r.Ino {
 		return nil
 	}
 	scan := bufio.NewReaderSize(f, 64<<10)
