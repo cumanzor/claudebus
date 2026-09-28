@@ -72,7 +72,7 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 	}
 	next.State, next.Error = connectionReadyState(next), ""
 	if next.Pending != nil {
-		next.State = "uncertain"
+		next.State = pendingConnectionState(next, time.Now())
 	}
 	if err := d.save(next); err != nil {
 		if refresh {

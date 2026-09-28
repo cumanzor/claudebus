@@ -4,7 +4,6 @@ package client
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -135,8 +134,7 @@ func TestDaemonClaudeBusyReceiptUnblocksFollowingDeliveryAfterRestart(t *testing
 		}
 	}()
 	firstEnd := appendDaemonMessage(t, c, "", "busy task")
-	var awaiting *claudeAwaitingReceiptError
-	if err := d.deliver(c); !errors.As(err, &awaiting) || c.Pending == nil {
+	if err := d.deliver(c); err != nil || c.Pending == nil || c.State != claudeAwaitingReceiptState {
 		t.Fatalf("first submission: %v", err)
 	}
 	firstAttempt := c.Pending.ClientID
@@ -146,8 +144,8 @@ func TestDaemonClaudeBusyReceiptUnblocksFollowingDeliveryAfterRestart(t *testing
 	}
 	secondEnd := firstEnd + appendDaemonMessage(t, c, "", "following task")
 	appendClaudeQueueRow(t, q, `{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","sessionId":"`+claudeTestSession+`"}`+"\n")
-	if err := d.deliver(c); err == nil || c.Pending.ClientID != firstAttempt || c.Accepted != 0 || c.Offset != 0 {
-		t.Fatal("queue removal released uncertain attempt")
+	if err := d.deliver(c); err != nil || c.Pending.ClientID != firstAttempt || c.Accepted != 0 || c.Offset != 0 {
+		t.Fatal("queue removal released the pending attempt")
 	}
 	appendClaudeQueueRow(t, q, claudeBusyReceiptJSON(t, claudeBusyReceiptRow(firstAttempt)))
 	d.closeQueue(c.ID)
@@ -164,7 +162,7 @@ func TestDaemonClaudeBusyReceiptUnblocksFollowingDeliveryAfterRestart(t *testing
 	if err := restarted.deliver(c); err != nil || c.Pending != nil || c.Accepted != 1 || c.Offset != firstEnd || c.LastAccepted.ItemID != firstUUID {
 		t.Fatalf("attachment did not settle pending attempt: %+v %v", c, err)
 	}
-	if err := restarted.deliver(c); !errors.As(err, &awaiting) || c.Pending == nil || c.Pending.ClientID == firstAttempt {
+	if err := restarted.deliver(c); err != nil || c.Pending == nil || c.Pending.ClientID == firstAttempt {
 		t.Fatalf("following message did not submit independently: %v", err)
 	}
 	secondAttempt := c.Pending.ClientID

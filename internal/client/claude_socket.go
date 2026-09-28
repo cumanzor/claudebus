@@ -28,11 +28,8 @@ type claudeSubmission struct {
 }
 
 const (
-	claudeNotSubmitted = "not-submitted"
-	claudeUncertain    = "uncertain"
-	claudeSubmitted    = "submitted-unconfirmed"
-	claudeMaxLine      = 1 << 20
-	claudeMaxScan      = 16 << 20
+	claudeMaxLine = 1 << 20
+	claudeMaxScan = 16 << 20
 )
 
 // Version 8 UUIDs reserve application-defined bits. The namespace prevents an
