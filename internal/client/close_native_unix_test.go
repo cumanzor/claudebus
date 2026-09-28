@@ -38,7 +38,10 @@ func seedNativeClaude(t *testing.T, consumer int, start string) *nativeCloseFixt
 	t.Helper()
 	root := setupStore(t)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
-	f := &nativeCloseFixture{daemon: liveProc(t), consumer: consumer}
+	// behind the fake tree's ppid==1 barrier: no ancestry walk from the daemon pid
+	// can reach a real session
+	daemon, _ := fakeSessionTree(t, "cbusd", "fixture-daemon")
+	f := &nativeCloseFixture{daemon: daemon, consumer: consumer}
 	config := filepath.Join(t.TempDir(), "claude-config")
 	if err := os.MkdirAll(config, 0700); err != nil {
 		t.Fatal(err)

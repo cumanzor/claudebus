@@ -19,6 +19,10 @@ import (
 // (a var, not a const, only so the timeout path is testable in milliseconds.)
 var surfaceSweepBudget = 5 * time.Second
 
+// signalProcess is the only way close signals a process. (A var only so tests
+// can confine signals to processes they started.)
+var signalProcess = syscall.Kill
+
 // ClosePeer tears down the LOCAL peer ch/alias on instruction: SIGTERM its owning
 // claude process (graceful — the SessionEnd hook broadcasts 'left' and removes the
 // registration), wait out a ≤5s grace, then sweep the terminal surface the peer
@@ -70,7 +74,7 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		return CloseReport{target, false, fmt.Sprintf("pid %d does not look like a claude session (pid recycled?) — refusing to signal", pid)}
 	}
 	tty := ttyOf(pid)
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := signalProcess(pid, syscall.SIGTERM); err != nil {
 		if err == syscall.ESRCH {
 			// died between the argv check and the signal — a teardown that finds
 			// nothing to tear down succeeded (idempotent sweeps).
@@ -82,7 +86,7 @@ func ClosePeer(ch, alias string, force bool) CloseReport {
 		if !force {
 			return CloseReport{target, false, fmt.Sprintf("pid %d still running after TERM; use --force", pid)}
 		}
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = signalProcess(pid, syscall.SIGKILL)
 		if !waitGone(pid, 2*time.Second) {
 			return CloseReport{target, false, fmt.Sprintf("pid %d survived SIGKILL", pid)}
 		}

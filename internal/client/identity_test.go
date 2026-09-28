@@ -12,7 +12,13 @@ func TestMain(m *testing.M) {
 	// Running the suite inside Codex inherits its native thread id. Session fixtures
 	// must opt into that identity explicitly instead of accidentally joining the runner.
 	_ = os.Unsetenv("CODEX_THREAD_ID")
-	os.Exit(m.Run())
+	violations := installSignalGuard()
+	code := m.Run()
+	if n := violations(); n > 0 {
+		fmt.Fprintf(os.Stderr, "SIGNAL GUARD: %d signal(s) aimed at processes the tests did not start\n", n)
+		code = 1
+	}
+	os.Exit(code)
 }
 
 func seedMeta(t *testing.T, root, ch, al, sid string) {

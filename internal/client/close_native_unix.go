@@ -91,7 +91,7 @@ func closeNativePeer(ch, alias string, m PeerMeta, force bool) CloseReport {
 	if !stillPinned(consumer) {
 		return CloseReport{target, true, "already gone; connection disconnected, inbox retained"}
 	}
-	if err := syscall.Kill(consumer.pid, syscall.SIGTERM); err != nil {
+	if err := signalProcess(consumer.pid, syscall.SIGTERM); err != nil {
 		if err == syscall.ESRCH {
 			return CloseReport{target, true, "already gone; connection disconnected, inbox retained"}
 		}
@@ -105,7 +105,7 @@ func closeNativePeer(ch, alias string, m PeerMeta, force bool) CloseReport {
 		if !stillPinned(consumer) {
 			return CloseReport{target, true, fmt.Sprintf("disconnected; pid %d is no longer the consumer that got TERM; not killed", consumer.pid)}
 		}
-		_ = syscall.Kill(consumer.pid, syscall.SIGKILL)
+		_ = signalProcess(consumer.pid, syscall.SIGKILL)
 		if !waitIncarnationGone(consumer, 2*time.Second) {
 			return CloseReport{target, false, fmt.Sprintf("disconnected; pid %d survived SIGKILL", consumer.pid)}
 		}

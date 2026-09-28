@@ -44,6 +44,7 @@ func startTracked(t *testing.T, cmd *exec.Cmd) int {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("live fixture %v: %v", cmd.Args, err)
 	}
+	ownTestPid(cmd.Process.Pid)
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()

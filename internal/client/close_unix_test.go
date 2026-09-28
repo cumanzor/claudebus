@@ -85,6 +85,8 @@ func fakeSessionTree(t *testing.T, name, listenerArg string) (ownerPid, childPid
 		t.Fatal("the fake tree never reported its pids")
 	}
 	ownerPid, childPid = parsed[0], parsed[1]
+	ownTestPid(ownerPid)
+	ownTestPid(childPid)
 	t.Cleanup(func() {
 		_ = syscall.Kill(ownerPid, syscall.SIGKILL)
 		_ = syscall.Kill(childPid, syscall.SIGKILL)
