@@ -1545,13 +1545,18 @@ across this whole lifecycle; the observed CLI process pid lives in the
 connection journal as `consumer.pid` instead (§2.2).
 
 **Epoch fence, exact text.** `rearmLoaded` refuses to re-arm a connection
-whose journaled `(dev, ino)` no longer matches the inbox file on disk, or
-whose recorded `offset` exceeds the file's current size:
-`"inbox changed or truncated; refusing to rearm an unknown epoch"`
-(`daemon_scheduler.go:42-43`); the same check guards delivery with
-`"inbox changed or truncated; refusing to replay an unknown epoch"`
-(`daemon.go:865-868`). The refusal is stored as `listenerError` in the
-connection state, visible via `cbus connection status ... --json`.
+whose journaled inode no longer matches the inbox file on disk, or whose
+recorded `offset` exceeds the file's current size:
+`"inbox changed or truncated; refusing to rearm an unknown epoch"`; the same
+check guards delivery with `"inbox changed or truncated; refusing to replay
+an unknown epoch"`, and each refusal goes on to name the recovery (save
+unread mail past the offset, `cbus unregister`, connect again). The journaled
+`dev` must also match, except that on darwin and linux a device-only change
+is accepted when the last consumed record and the pending record are
+byte-identical at their journaled offsets (`inboxEpochDecision`); the new
+`dev` is then saved before delivery uses it. That verifies those two records,
+not the whole consumed prefix. The refusal is stored as `listenerError` in
+the connection state, visible via `cbus connection status ... --json`.
 
 ### 14.4 Claude credential store
 
