@@ -80,23 +80,44 @@ report it after finding nothing left to close, was closed by the same
 wording change, since that string no longer means anything else once the
 ENOENT case has its own.
 
-Live evidence: two scratch-store runs against real Claude peers. The first,
-at the commit that introduced the stat check with its first outcome string,
-confirmed the mechanism fires as designed: the peer's tty device did not
-exist by the time of the sweep, and the close outcome matched. That run also
-reattempted the resume-after-close check left open by the prior milestone's
-live run: neither the resumed session reconnecting nor its queued unread
-message being delivered completed within the run's wait budget (over 3
-minutes and over 1 minute respectively), so that check was still not
-demonstrated.
+Live evidence: four scratch-store runs against real Claude peers, all against
+the final commit and outcome string except the first.
+
+The first, at the commit that introduced the stat check with its first
+outcome string, confirmed the mechanism fires as designed: the peer's tty
+device did not exist by the time of the sweep, and the close outcome
+matched. That run also reattempted the resume-after-close check left open by
+the prior milestone's live run: neither the resumed session reconnecting nor
+its queued unread message being delivered completed within the run's wait
+budget (over 3 minutes and over 1 minute respectively), so that check was
+still not demonstrated.
 
 A second run, against the final commit and outcome string, confirmed the
 final string fires live too: closing one peer reported `surface not swept
 (its terminal no longer exists)`. That run's other peer, meant to repeat the
 resume-after-close attempt, never finished connecting within the run's setup
 budget (over 3 minutes) and was reported already gone at teardown with no
-live process, so the resume check was not attempted at all this time. It
-remains undemonstrated.
+live process, so the resume check was not attempted at all this time.
+
+Two further runs, staggered to give the second peer more time to start, both
+confirmed the outcome string firing on close in both runs' first peer, and
+once more on the second peer in one of the two runs; the other's second peer
+hit the ordinary busy-tty path instead, as intended. Both runs drove the
+resume-after-close check further than before: a resumed session, told to run
+`cbus connect` again, could reload its own transcript, read the instruction
+and submit a shell command. Neither run got past that point to a live
+reconnect. In one, the resumed session ran the plain `cbus connect` on its
+own PATH, which resolved to the installed release binary; that binary
+correctly refused to talk to the scratch daemon, which was running a
+development build with a different version, and told the operator to
+restart the daemon rather than doing so itself. In the other, the resumed
+session was told to run the scratch binary by its full path, and its own
+permission check blocked that as code from outside its trusted set before
+any connect attempt was made. Both outcomes are correct behavior in their
+own right, not defects in this fix or in the daemon's own version check;
+neither is a demonstration of a live reconnect completing. That still needs
+a real release installed on the daemon side, which a scratch run cannot
+provide, and stays open.
 
 ## [2026-09-28 19:07:09 UTC] [Client] end a natively connected peer's consumer with cbus close
 
