@@ -1229,15 +1229,41 @@ roster twice.
   process is gone. The inbox and registration are kept. Check and signal are
   separate system calls, so an exit-and-reuse between them is narrowed, not
   excluded.
-  Outcomes: `already gone; connection disconnected, inbox retained`;
-  `process ended; connection disconnected, inbox retained; <surface detail>`;
-  `disconnect failed, no signal sent: <reason>`; `disconnected, no signal
-  sent: <reason>` (the consumer changed after the disconnect); `disconnected;
-  pid <n> still running after TERM; use --force`; and refusals of the form
-  `<kind>: <reason>; refusing to signal. Inspect with cbus connection status
-  <t> --json; cbus connection disconnect <t> stops delivery without
-  signalling`, where kind is `cannot inspect`, `changed incarnation`,
-  `different loaded session`, `shared daemon` or `this session`.
+  Before the disconnect, close also requires the running daemon to advertise
+  `fencedDisconnect` on `/health`; a daemon started from an older binary does
+  not, and close refuses with `cannot inspect: the running cbus daemon
+  predates fenced disconnects; run cbus daemon restart to load this version,
+  then close again`. A Codex consumer is re-probed on every revalidation,
+  after the disconnect too, since the same process can load another thread.
+  Liveness counts as gone only on proof (no such process, a zombie, or a
+  changed start token); any other inspection failure is an error, and so is a
+  failure to read this process's ancestry.
+  Outcomes:
+  - `already gone; connection disconnected, inbox retained`
+  - `process ended; connection disconnected, inbox retained; <surface detail>`,
+    where the surface detail is `surface unknown (no tty)`, `tty busy, surface
+    left alone`, `surface left open (could not confirm idle)` (ps did not
+    positively show the tty idle or its device gone), `tmux pane closed`,
+    `iTerm2 surface closed`, `surface sweep timed out — left alone` or
+    `surface already closed`
+  - `disconnect failed, no signal sent: <reason>`
+  - `the daemon did not honour the disconnect fence; the connection may have
+    been disconnected; no signal sent` (the reply did not echo the connection
+    ID)
+  - `disconnected, no signal sent: <reason>` (the consumer changed after the
+    disconnect) and `disconnected, no signal sent: cannot inspect: <reason>`
+  - `disconnected; SIGTERM pid <n> failed: <reason>`
+  - `disconnected; SIGTERM sent to pid <n>, outcome unconfirmed: cannot
+    inspect: <reason>` (and the same with `SIGKILL`); no sweep follows
+  - `disconnected; pid <n> still running after TERM; use --force`
+  - `disconnected; pid <n> is no longer the consumer that got TERM; not
+    killed` (with `--force`, when the start token changed before the KILL)
+  - `disconnected; pid <n> survived SIGKILL`
+  - refusals of the form `<kind>: <reason>; refusing to signal. Inspect with
+    cbus connection status <t> --json; cbus connection disconnect <t> stops
+    delivery without signalling`, where kind is `cannot inspect`, `changed
+    incarnation`, `different loaded session`, `shared daemon` or `this
+    session`.
 - **Mechanics, per target:** read `OwnerPid` from the peer's `meta.json`
   (falling back to deriving it from the armed listener's ancestry when
   `OwnerPid` is null — pre-fix registrations, see the quirk below — gated on
@@ -1249,7 +1275,11 @@ roster twice.
   timeout, `--force` escalates to `SIGKILL` (2s further wait) — without
   `--force` a TERM-survivor is reported, not escalated (closing its surface
   would be a disguised kill). A pid whose argv no longer contains `claude`
-  is refused as a probable pid recycle rather than signalled.
+  is refused as a probable pid recycle rather than signalled. For both the
+  legacy and the native path, every signal goes through `signalProcess`,
+  which refuses a pid that is `close`'s own process, one of its ancestors,
+  or not above 1, and refuses when that ancestry cannot be read:
+  `SIGTERM pid <n>: refusing to signal this process or one of its ancestors`.
 - **Surface sweep** (best-effort, after the process is confirmed gone): if
   the captured tty is still busy (a live `ps -t <tty>`), the surface is left
   alone (stranger or TERM-survivor); otherwise a matching tmux pane is
