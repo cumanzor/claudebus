@@ -1242,9 +1242,12 @@ roster twice.
   - `already gone; connection disconnected, inbox retained`
   - `process ended; connection disconnected, inbox retained; <surface detail>`,
     where the surface detail is `surface unknown (no tty)`; `surface already
-    closed` (the tty device no longer exists, as when tmux removed the pane
-    after its process exited; a stat of `/dev/<tty>` failing with ENOENT is
-    the proof, and nothing is swept); `tty busy, surface left alone`;
+    closed`, reached two ways: a stat of `/dev/<tty>` fails with ENOENT (the
+    device is gone, as when tmux removed the pane after its process exited;
+    nothing is swept, and since the check is an observation at stat time it
+    can only skip a sweep, never signal or sweep a later occupant), or ps
+    proved the tty idle and no tmux pane or iTerm2 session matched it;
+    `tty busy, surface left alone`;
     `surface left open (could not confirm idle)` (the device exists or its
     stat failed another way, and the tty counts as idle only when one ps call
     for the tty and for close itself exited 0, printed nothing on stderr, and
