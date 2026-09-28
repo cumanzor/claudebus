@@ -659,7 +659,7 @@ func sweepProbes(t *testing.T) (probed, closed *bool) {
 func TestNativeSweepReportsAGoneDevice(t *testing.T) {
 	probed, closed := sweepProbes(t)
 	stubTTYStat(t, &os.PathError{Op: "stat", Path: "/dev/ttys018", Err: syscall.ENOENT})
-	if got := sweepNativeSurface("ttys018"); got != "surface already closed" || *probed || *closed {
+	if got := sweepNativeSurface("ttys018"); got != "surface not swept (its terminal no longer exists)" || *probed || *closed {
 		t.Fatalf("a gone device: %q (probed=%v closed=%v)", got, *probed, *closed)
 	}
 }

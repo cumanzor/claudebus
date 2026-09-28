@@ -328,10 +328,11 @@ func sweepNativeSurface(tty string) string {
 	if tty == "" {
 		return "surface unknown (no tty)"
 	}
-	// tmux removes a pane when its process exits, so the device can already be
-	// gone. Only a definite ENOENT counts; anything else goes to the ps proof.
+	// A pty node disappears when its session ends, but a terminal set to keep
+	// dead panes can still show one, so this proves only that nothing may be
+	// swept. Only a definite ENOENT counts; anything else goes to the ps proof.
 	if dev := filepath.Join("/dev", tty); strings.HasPrefix(dev, "/dev/") && errors.Is(nativeTTYStat(dev), syscall.ENOENT) {
-		return "surface already closed"
+		return "surface not swept (its terminal no longer exists)"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), surfaceSweepBudget)
 	defer cancel()
