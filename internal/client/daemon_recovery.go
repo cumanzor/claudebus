@@ -101,9 +101,8 @@ func (d *busDaemon) validatePending(c *ConnectionState) error {
 		return err
 	}
 	defer f.Close()
-	dev, ino, size, ok := fileIdentityOf(f)
-	if !ok || dev != c.Dev || ino != c.Ino || size < c.Pending.End {
-		return errors.New("inbox changed or truncated; pending attempt retained")
+	if err := d.adoptInboxEpoch(c, f, c.Pending.End, "pending attempt retained"); err != nil {
+		return err
 	}
 	if _, err = f.Seek(c.Offset, io.SeekStart); err != nil {
 		return err

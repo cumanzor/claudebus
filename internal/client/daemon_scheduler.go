@@ -38,11 +38,15 @@ func (d *busDaemon) rearmLoaded(parent context.Context) {
 				c.State, c.Error = "detached", "registration removed or replaced; delivery stopped"
 				err = d.save(c)
 			} else if err == nil {
-				dev, ino, size, ok := fileIdentity(filepath.Join(d.peerDir(c), "inbox.jsonl"))
-				if !ok || dev != c.Dev || ino != c.Ino || size < c.Offset {
-					err = errors.New("inbox changed or truncated; refusing to rearm an unknown epoch")
+				var f *os.File
+				if f, err = openSharedRead(filepath.Join(d.peerDir(c), "inbox.jsonl")); err != nil {
+					err = inboxEpochRefusal(c, "refusing to rearm an unknown epoch")
 				} else {
-					err = d.armLocked(c)
+					err = d.adoptInboxEpoch(c, f, c.Offset, "refusing to rearm an unknown epoch")
+					f.Close()
+					if err == nil {
+						err = d.armLocked(c)
+					}
 				}
 			}
 			unlock()

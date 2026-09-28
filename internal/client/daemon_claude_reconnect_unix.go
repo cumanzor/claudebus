@@ -31,13 +31,18 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 	if !ok || m.ConnectionID != c.ID || m.SessionID != c.ThreadID || m.Harness != daemonHarnessClaude {
 		return nil, errors.New("Claude alias ownership changed; refusing to update its binding")
 	}
-	dev, ino, size, ok := fileIdentity(filepath.Join(d.peerDir(c), "inbox.jsonl"))
+	inbox, err := openSharedRead(filepath.Join(d.peerDir(c), "inbox.jsonl"))
+	if err != nil {
+		return nil, inboxEpochRefusal(c, "refusing reconnect")
+	}
 	end := c.Offset
 	if c.Pending != nil {
 		end = c.Pending.End
 	}
-	if !ok || dev != c.Dev || ino != c.Ino || size < end {
-		return nil, errors.New("Claude inbox epoch changed; refusing reconnect")
+	err = d.adoptInboxEpoch(c, inbox, end, "refusing reconnect")
+	inbox.Close()
+	if err != nil {
+		return nil, err
 	}
 	previousToken, readErr := readClaudeCredential(d.root, c.Claude.CredentialRef)
 	sameCapability := readErr == nil && previousToken == token
