@@ -1241,13 +1241,16 @@ roster twice.
   Outcomes:
   - `already gone; connection disconnected, inbox retained`
   - `process ended; connection disconnected, inbox retained; <surface detail>`,
-    where the surface detail is `surface unknown (no tty)`, `tty busy, surface
-    left alone`, `surface left open (could not confirm idle)` (the tty counts
-    as idle only when one ps call for the tty and for close itself exited 0,
-    printed nothing on stderr, and listed only close; any other result,
-    including a tty device that no longer exists, leaves the surface open), `tmux pane closed`,
-    `iTerm2 surface closed`, `surface sweep timed out — left alone` or
-    `surface already closed`
+    where the surface detail is `surface unknown (no tty)`; `surface already
+    closed` (the tty device no longer exists, as when tmux removed the pane
+    after its process exited; a stat of `/dev/<tty>` failing with ENOENT is
+    the proof, and nothing is swept); `tty busy, surface left alone`;
+    `surface left open (could not confirm idle)` (the device exists or its
+    stat failed another way, and the tty counts as idle only when one ps call
+    for the tty and for close itself exited 0, printed nothing on stderr, and
+    listed only close; any other result leaves the surface open); `tmux pane
+    closed`; `iTerm2 surface closed`; or `surface sweep timed out — left
+    alone`
   - `disconnect failed, no signal sent: <reason>`
   - `the daemon did not honour the disconnect fence; the connection may have
     been disconnected; no signal sent` (the reply did not echo the connection
