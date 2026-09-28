@@ -19,8 +19,9 @@ and [Codex](codex.md) for capability checks, recovery and receipt semantics.
 After joining, check `cbus list CHANNEL` once (retain `@host` for relays), report
 listening peers and explicitly known roles, then update the observed roster from
 presence events. An alias is not role evidence. Claude's `socket-ready` means an
-available endpoint, not receipt. A successful socket write stays pending until
-its exact session/message UUID appears in the bound transcript. Codex queue
+available endpoint, not receipt. A successful socket write stays pending
+(`awaiting-receipt`) until its exact session/message UUID appears in the bound
+transcript, and becomes `uncertain` if none appears within 60 seconds. Codex queue
 acceptance is likewise separate from history receipt. Receipt is not a reply or
 completed work. Claude can receive messages between foreground tool calls in an
 active turn; its hold/refuse policy still applies. Codex consumes its native queue

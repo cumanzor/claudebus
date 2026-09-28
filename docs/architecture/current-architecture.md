@@ -69,7 +69,9 @@ receives:
 - **Native recipient**: the daemon already holds the connection and pushes
   into the harness's own socket/sidecar (§15), not a fire-and-forget
   append, but the push itself is not receipt. A Claude submission stays
-  pending until its exact transcript receipt appears; Codex sidecar
+  pending (`awaiting-receipt`, checked on each daemon tick) until its exact
+  transcript receipt appears, and turns `uncertain` after 60 seconds
+  without one; Codex sidecar
   acceptance is likewise not receipt until `connection reconcile` finds it
   in history. An unresolved uncertain attempt blocks later mail to that
   peer until it is resolved or abandoned (protocol.md §15,
