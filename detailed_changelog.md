@@ -139,6 +139,116 @@ stand-in. The Windows strict test compiles and is never run. Linux is compiled
 and vetted only, not run, and the Linux device renumbering cases above are
 documented, not measured.
 
+## [2026-09-28 17:36:13 UTC] [Client] poll Claude receipts on the daemon tick instead of the error backoff
+
+[Attempt #1] 17 files. Production: internal/client/claude_queue.go,
+claude_socket.go, daemon.go, daemon_claude.go, daemon_claude_reconnect_unix.go,
+daemon_recovery.go, daemon_scheduler.go. Tests: claude_busy_receipt_test.go,
+daemon_claude_receipt_wait_unix_test.go (new), daemon_claude_unix_test.go,
+daemon_test.go. Docs: docs/claude.md, docs/how-it-works.md,
+docs/architecture/current-architecture.md, CHEATSHEET.md. detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+A clean Claude socket write has no acknowledgement, so the queue reported it as
+an awaiting-receipt error and the scheduler handled it like any failure: the
+connection went `uncertain` with an error text, the sidecar was closed, and the
+next attempt was set for 10 seconds later. The error backoff therefore became
+the receipt polling interval, every good delivery looked uncertain for at least
+10 seconds, and the next inbox message waited behind it.
+
+A clean write (state `submitted-unconfirmed`, no write error) now stamps the
+pending attempt with a new `submittedAt` field in the journal and moves the
+connection to `awaiting-receipt` with no error. The sidecar stays open, so each
+lookup scans on from where the last one stopped, and the scheduler checks for
+the exact transcript receipt on its next tick. When the receipt appears the
+attempt is accepted as before, the retry state is cleared and the next message
+goes out. If none appears within 60 seconds of `submittedAt`
+(`claudeReceiptTimeout`), the attempt takes the old path: `uncertain`, the error
+text, the 10 second backoff. Lookups continue after that and a late exact
+receipt is still accepted. Nothing is ever resent.
+
+Two cases keep the old path: a write that fails partway (an error comes back
+with the state), and an attempt journaled without a submission time, which is
+what an older daemon wrote. Reconnect and `connection reconcile` keep an
+unexpired wait as `awaiting-receipt` and do not restart its deadline. Every new
+branch is gated on the Claude harness; Codex delivery, including the text of its
+pending-absence error, is unchanged.
+
+The daemon logs one stderr line per Claude attempt state change: submitted,
+received with the time since submission, and any error. The three Claude state
+strings moved from claude_socket.go, which is built off Windows only, to
+claude_queue.go, because the untagged daemon.go now names one of them. No
+Windows behavior changes.
+
+docs/claude.md, docs/how-it-works.md and docs/architecture/current-architecture.md
+describe the `awaiting-receipt` state and the 60 second deadline. The
+`connection abandon` wording in docs/how-it-works.md and CHEATSHEET.md now
+covers an attempt still awaiting its receipt.
+
+[Possible Ripple Effects]
+`cbus connection status` for a Claude peer shows `awaiting-receipt` with no error
+for about a second after each send, where it showed `uncertain` with an error for
+about ten. A script or agent that matched `uncertain` right after a send now sees
+the new state first; `uncertain` is left for a timed-out or ambiguous attempt.
+
+A lookup that fails for a reason other than plain absence, inside the 60 second
+window, still shows `uncertain` with the 10 second retry and returns to
+`awaiting-receipt` on the next plain absence. A consumer or compaction
+observation error during a wait behaves the same way, because it joins the
+delivery error. That was left alone; the new per-attempt log is the instrument
+for it if the extra lag reported on one peer turns up again.
+
+The daemon log gains about two lines per Claude delivery. It is opened for
+append and nothing rotates it.
+
+The change takes effect once the daemon runs the new binary. An attempt that an
+older daemon journaled, still pending at that point, has no submission time and
+stays on the `uncertain` path.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...`, `go vet ./...`, and build plus vet for
+linux amd64 and arm64 pass at the final commit in the reviewer's own run, as
+does the windows amd64 build (the coder's earlier run at the fix commit also
+vetted windows). `go test -race -count=3` on the new and related tests passes
+(coder run at the fix commit). New tests cover the clean write waiting on the next
+tick, the deadline turning an absent receipt `uncertain` without a resend and
+still accepting a late receipt, ambiguous and legacy attempts staying
+`uncertain`, reconnect and reconcile keeping an unexpired wait, and a daemon
+restart mid-wait keeping the deadline.
+
+Mutation checks: eleven mutants of the fix each failed the test aimed at them
+(coder run at the fix commit); a twelfth, dropping the zero-time check, is
+equivalent because a zero time plus 60 seconds is never after now. The
+reviewer's first pass found three spots no test pinned (the persisted
+`submittedAt`, the sidecar staying open across waiting ticks, the Claude-only
+gate) and the tests commit closed each. The finding was folded in here, and the
+reviewer re-ran those three mutants at the final commit, each failing on the
+intended assertion.
+
+Field run: a scratch store, two spawned Claude sessions per run, a binary built
+from main against one built from this change, seven pings each: three to an idle
+peer, two sent back to back, and two to a second peer, the first asking it to
+run a 25 second foreground command and the second sent a few seconds later,
+meant to land mid-turn.
+Time from the receipt row appearing in the transcript to the daemon observing
+it: 10.99 to 11.25 seconds before, 0.92 to 1.19 after, on all seven. Send to
+observed for a lone message to an idle peer: 11.5 to 12.2 seconds before, 1.3 to
+1.9 after. For the second of two back-to-back messages: 23.85 seconds before,
+4.07 after. The connection state during the wait went `socket-ready`,
+`uncertain`, `socket-ready` before and `socket-ready`, `awaiting-receipt`,
+`socket-ready` after. The after run's daemon log has 18 lines and no errors. The
+reviewer matched three pings per run against the raw transcript rows, and the
+after run's attempts against its log, and the numbers held.
+
+Not field-proven. A peer that is truly busy mid-turn: the run's busy ping was
+recorded as an ordinary user row, not a queued-command attachment, so that
+receipt path was not exercised outside the tests. The extra lag reported once on
+one peer did not reproduce and nothing here explains it. The binaries were
+deleted after the run, so their hashes could not be re-checked against the exact
+commits; the state trail and the log format, which only the new code produces,
+tie each run to its binary.
+
 ## [2026-09-28 03:27:09 UTC] [Roles] documenter writes the tracker; evidence files, per-pass review files, topic docs; Opus 5.5 defaults
 
 [Attempt #1] 12 files: roles/orchestrator.md, roles/coder.md,
