@@ -115,11 +115,18 @@ description, one legacy behavior undocumented) were folded into the docs
 commits as they were found.
 
 Not covered. There is no real close run against a live peer: a scratch-store
-plan exists and is user-gated, not run. The terminal idle rule's `ps`
-selection semantics are measured on macOS only; Linux `procps` behavior is
-read from its manual, not measured, because the project's container runtime is
-still unavailable, and the check fails closed there rather than open. Windows
-close is unimplemented and continues to refuse.
+plan exists and is user-gated, not run. Windows close is unimplemented and
+continues to refuse.
+
+Linux: `go test -count=1 ./...` and `go vet ./...` pass, and the guard printed
+zero unexpected refusals against the one expected. `ps -o pid=,tty= -t TTY -p
+SELF` selects a union on procps (measured: a busy tty prints the self row plus
+its own rows, rc 0), the same semantics D31 measured on darwin's BSD `ps`. A
+Linux tty whose processes have all exited is freed at the kernel level, so
+`ps` then reports the tty as not found; the idle branch is reachable only
+when the tty stays allocated with no processes left on it (for example a
+tmux pane kept open after its command exits). Outside that case the surface
+is left open, which is the existing fail-closed behavior, not a new gap.
 
 Observed and not explained. During the milestone's own work, its coder
 session was itself terminated by one of its mutation runs: a test mutant sent
