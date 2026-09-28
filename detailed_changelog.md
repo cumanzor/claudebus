@@ -6,12 +6,12 @@ previous repository and may not resolve.
 
 ## [2026-09-28 17:36:13 UTC] [Client] poll Claude receipts on the daemon tick instead of the error backoff
 
-[Attempt #1] 16 files. Production: internal/client/claude_queue.go,
+[Attempt #1] 17 files. Production: internal/client/claude_queue.go,
 claude_socket.go, daemon.go, daemon_claude.go, daemon_claude_reconnect_unix.go,
 daemon_recovery.go, daemon_scheduler.go. Tests: claude_busy_receipt_test.go,
 daemon_claude_receipt_wait_unix_test.go (new), daemon_claude_unix_test.go,
 daemon_test.go. Docs: docs/claude.md, docs/how-it-works.md,
-docs/architecture/current-architecture.md. detailed_changelog.md,
+docs/architecture/current-architecture.md, CHEATSHEET.md. detailed_changelog.md,
 simple_changelog.md.
 
 [What changed]
@@ -47,8 +47,9 @@ claude_queue.go, because the untagged daemon.go now names one of them. No
 Windows behavior changes.
 
 docs/claude.md, docs/how-it-works.md and docs/architecture/current-architecture.md
-describe the `awaiting-receipt` state and the 60 second deadline, and the
-`connection abandon` wording now covers an attempt still awaiting its receipt.
+describe the `awaiting-receipt` state and the 60 second deadline. The
+`connection abandon` wording in docs/how-it-works.md and CHEATSHEET.md now
+covers an attempt still awaiting its receipt.
 
 [Possible Ripple Effects]
 `cbus connection status` for a Claude peer shows `awaiting-receipt` with no error
