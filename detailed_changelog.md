@@ -135,9 +135,20 @@ journaled and on-disk identities and the inbox hash before, reboot, then check
 the re-stamp log line, a status with no listener error, that the pending attempt
 reconciles, that unread mail delivers without replay, and that a resumed Claude
 session reconnects), and the tests edit the journaled device number as a
-stand-in. The Windows strict test compiles and is never run. Linux is compiled
-and vetted only, not run, and the Linux device renumbering cases above are
-documented, not measured.
+stand-in. The Windows strict test compiles and is never run.
+
+Linux: `go test -count=1 ./...` and `go vet ./...` both pass on Debian 13
+(kernel 6.12, go1.26.2, procps-ng 4.0.4, ext4), except one test that already
+fails the same way on main and is unrelated to this change:
+TestManagedPresenceRecipientEpochAndMalformedTail/replace. ext4 reuses an
+inode number on rm and recreate (measured: the same device and inode before
+and after), and the test's "replace" case recreates an observer inbox with
+the same meta, so the presence fence's device, inode and meta-id check
+matches the recreated file and delivers to it. This is pre-existing on main
+and this change does not alter the exposure; candidate follow-up, not filed.
+The Linux device renumbering cases named above (btrfs, device-mapper,
+overlay) are still per kernel documentation, not an observed renumbering
+event.
 
 ## [2026-09-28 17:36:13 UTC] [Client] poll Claude receipts on the daemon tick instead of the error backoff
 
