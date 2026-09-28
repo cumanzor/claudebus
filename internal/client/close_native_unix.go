@@ -36,6 +36,7 @@ var (
 	inspectIncarnation = incarnationGone
 	preSignalCheck     = incarnationGone
 	nativeTTYOf        = ttyOf
+	nativeCloseSurface = closeSurface
 )
 
 // nativeDaemonFences proves the running daemon checks a disconnect fence. An
@@ -325,7 +326,7 @@ func sweepNativeSurface(tty string) string {
 	stdout, stderr, code, err := nativeTTYProbe(ctx, tty)
 	switch ttyIdleState(stdout, stderr, code, err, tty, os.Getpid()) {
 	case "idle":
-		return closeSurface(ctx, tty)
+		return nativeCloseSurface(ctx, tty)
 	case "busy":
 		return "tty busy, surface left alone"
 	}

@@ -540,11 +540,14 @@ func TestNativeSweepNeedsPositiveIdleProof(t *testing.T) {
 	consumer := fakeClaude(t)
 	seedNativeClaude(t, consumer, startTokenOf(t, consumer))
 	prevTTY, prevProbe := nativeTTYOf, nativeTTYProbe
+	prevClose := nativeCloseSurface
 	nativeTTYOf = func(int) string { return "ttys999" }
 	nativeTTYProbe = func(context.Context, string) (string, string, int, error) {
 		return "", "", 0, errors.New("ps: permission denied")
 	}
-	t.Cleanup(func() { nativeTTYOf, nativeTTYProbe = prevTTY, prevProbe })
+	// never a real terminal backend, even when a mutant reaches the close step
+	nativeCloseSurface = func(context.Context, string) string { return "surface closed by the test stub" }
+	t.Cleanup(func() { nativeTTYOf, nativeTTYProbe, nativeCloseSurface = prevTTY, prevProbe, prevClose })
 	if rep := ClosePeer("dev", "worker", false); !rep.Ok || !strings.HasSuffix(rep.Detail, "surface left open (could not confirm idle)") {
 		t.Fatalf("a surface was swept without proof that its tty is idle: %+v", rep)
 	}
@@ -609,5 +612,21 @@ func TestNativeCloseTreatsAnUnechoedFenceAsUnhonoured(t *testing.T) {
 	rep := ClosePeer("dev", "worker", true)
 	if rep.Ok || !strings.Contains(rep.Detail, "may have been disconnected") || strings.Contains(rep.Detail, "surface") || !processRunning(consumer) || len(f.calls) != 1 {
 		t.Fatalf("an unhonoured fence was reported wrongly or still signalled: %+v", rep)
+	}
+}
+
+// The real liveness check, not a stub: an unreadable process is not an exit.
+func TestNativeCloseRealInspectionErrorIsNotGone(t *testing.T) {
+	consumer := fakeClaude(t)
+	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	prev := ownerStartTime
+	ownerStartTime = func(int) (string, error) { return "", errors.New("sysctl: cannot allocate memory") }
+	t.Cleanup(func() { ownerStartTime = prev })
+	if gone, err := incarnationGone(nativeConsumer{consumer, f.binding.Endpoint.StartToken}); gone || err == nil {
+		t.Fatalf("an inspection error read as gone=%v err=%v", gone, err)
+	}
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "cannot inspect") || len(f.calls) != 0 || !processRunning(consumer) {
+		t.Fatalf("an unreadable consumer was disconnected or signalled: %+v", rep)
 	}
 }
