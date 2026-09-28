@@ -6,7 +6,7 @@ previous repository and may not resolve.
 
 ## [2026-09-28 19:07:09 UTC] [Client] end a natively connected peer's consumer with cbus close
 
-[Attempt #1] 16 files. Production: internal/client/close_native_unix.go (new),
+[Attempt #1] 18 files. Production: internal/client/close_native_unix.go (new),
 close_unix.go, daemon.go, daemon_claude.go, codex_runtime_writer.go. Tests:
 close_native_unix_test.go, close_unix_test.go, daemon_disconnect_fence_test.go
 (new), signalguard_unix_test.go (new), signalguard_windows_test.go (new),
@@ -19,13 +19,13 @@ detailed_changelog.md, simple_changelog.md.
 connection ID, because the legacy path it fell through to relies on things a
 native peer does not have: an owner pid in its meta, a listener-pid ancestry
 walk that would reach the daemon rather than the session, and a SessionEnd
-hook that native peers never fire.
+hook that does nothing for daemon-managed peers.
 
 Close now ends the peer's bound Claude or Codex process. The order is: resolve
 the target and refuse on the caller's own session or an unreadable identity;
 fence the disconnect against the daemon's own record of the exact connection
 ID and thread, under the daemon's own lock, so a replacement registration of
-the same alias can never be the one signalled; revalidate the pinned process
+the same alias can never be the one disconnected; revalidate the pinned process
 and its session right before sending anything; SIGTERM; wait for the exit. A
 disconnect that the daemon does not confirm sends no signal. A revalidation
 failure after a confirmed disconnect reports the connection as disconnected
@@ -81,12 +81,11 @@ the same commit. Linux amd64 and arm64 and Windows amd64 build and vet pass,
 checked by the coder, the reviewer and the advisor at various commits across
 the milestone, most recently the advisor at the second-to-last commit (the
 last commit is docs only, one file, and touches nothing that changes those
-results). Every test and mutation run in this milestone was executed from a
-process reparented to init, so a test that walked its own process's real
-ancestry could not reach the session driving the work; the same package-wide
-guard that must never fire in production caught zero unexpected signals across
-every run and printed exactly the one expected refusal each pass had a test
-for.
+results). Every reviewer run, and every coder mutation run after the signal guard
+landed, was executed from a process reparented to init, so a test that walked
+its own process's real ancestry could not reach the session driving the work;
+the same test guard caught zero unexpected signals across every run and
+printed exactly the one expected refusal each pass had a test for.
 
 Mutation checks: coder mutants Q1 through Q33 (one early equivalence claim,
 Q5, was later withdrawn once a killed run was produced) and reviewer mutants
