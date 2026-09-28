@@ -1012,8 +1012,9 @@ of a session.
   (`jsonout.go:50`).
 - `consumerState` and `consumerPid` appear on **native** rows only.
   `consumerState` is the daemon's last consumer observation (`online`,
-  `exited`, `unknown`, `disconnected`), reported as `unknown` when the row is
-  not listening. `consumerPid` is present only while the row is listening
+  `exited`, `unknown`, `disconnected`). An `online` observation on a row that
+  is not listening is reported as `unknown`; the other states keep their
+  names. `consumerPid` is present only while the row is listening
   and the consumer is `online`. `listenerPid` keeps its meaning (the
   daemon's pid for a native row). Both fields are additive; `schemaVersion`
   is unchanged.
