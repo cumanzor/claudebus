@@ -67,9 +67,10 @@ the package-wide signal guard installed and zero unexpected refusals.
 
 Mutation checks: one mutant, forcing every stat error (not only ENOENT) to
 report the gone-terminal outcome, fails the test aimed at it at both the
-first version of the string and the final one; a second mutant, dropping the
-gone-device check entirely, fails the test aimed at it. Both were cut
-independently by the coder and by the reviewer, with matching results.
+first version of the string and the final one, cut independently by the
+coder and by the reviewer with matching results; a second mutant, dropping
+the gone-device check entirely, fails the test aimed at it too, cut by the
+reviewer.
 
 Findings folded in as they closed: the first version's outcome string was
 measured to be false in a real, if uncommon, terminal configuration (review
