@@ -52,9 +52,13 @@ func inboxAnchor(c *ConnectionState) *queueAttempt {
 	return nil
 }
 
-// The record ending at end starts after the previous newline, or at floor.
+// The largest record readDaemonLine accepts, newline included.
+const daemonMaxInboxRecord = daemonMaxInboxLine + 1
+
+// The record ending at end starts after the previous newline, or at floor. The
+// window holds one full record plus the delimiter before it.
 func inboxRecordMatches(f *os.File, end int64, hash string, floor int64) bool {
-	start := max(floor, end-int64(daemonMaxInboxLine)-1)
+	start := max(floor, end-daemonMaxInboxRecord-1)
 	if end <= start || hash == "" {
 		return false
 	}
@@ -69,7 +73,10 @@ func inboxRecordMatches(f *os.File, end int64, hash string, floor int64) bool {
 	if i := bytes.LastIndexByte(buf[:len(buf)-1], '\n'); i >= 0 {
 		line = buf[i+1:]
 	} else if start != floor {
-		return false // longer than any inbox record
+		return false
+	}
+	if len(line) > daemonMaxInboxRecord {
+		return false
 	}
 	return fmt.Sprintf("%x", sha256.Sum256(line)) == hash
 }
