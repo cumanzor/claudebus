@@ -91,7 +91,7 @@ writes your local copy, never the repo file.
 
 Model selection at launch follows this order: a peer's explicit `model` in the
 formation, then its role file's `MODEL:` line, then the harness CLI's own default.
-For example, `"model": "claude-opus-5-5"` overrides `MODEL: fable` in
+For example, `"model": "fable"` overrides `MODEL: claude-opus-5-5` in
 `roles/reviewer.md`; the role still supplies the peer's instructions. Leave the
 formation's `model` empty to inherit the role default. `formation show` displays
 the saved model field; an empty field does not mean the role has no default.

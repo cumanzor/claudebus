@@ -4,6 +4,55 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-28 03:27:09 UTC] [Roles] documenter writes the tracker; evidence files, per-pass review files, topic docs; Opus 5.5 defaults
+
+[Attempt #1] 12 files: roles/orchestrator.md, roles/coder.md,
+roles/reviewer.md, roles/documenter.md, commands/bus-spawn.md,
+commands/bus-branch.md, docs/architecture/command-reference.md,
+docs/formations.md, profiles/README.md, internal/client/role_test.go,
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+Tracker writes move from the orchestrator to the documenter. The orchestrator
+keeps the plan and the rulings and reads back what the documenter records; the
+documenter files the effort item, keeps its record, posts a review row per pass
+and closes it at merge. The documenter also opens the pull request from the
+pushed branch, writes its description from the coder's evidence, posts the
+review summary, and drafts anything that tells a person work is ready to test
+for the user first.
+
+The coder keeps an evidence file (diff, run output, tree state, what still
+needs the user) and writes topic docs as its last step, because it holds the
+rationale; changelogs stay with the documenter. The reviewer writes a file for
+every pass including re-checks, reviews docs with the same weight as code,
+checks a pull request's test claims against the evidence, and keeps a finding
+that only the user can close open until they have.
+
+The orchestrator now loads the repo's knowledge before it briefs (docs,
+history, the code the task touches) instead of relying on an explorer seat,
+writes one brief file per task with a done condition, and a session working
+without a formation uses a reviewer subagent as its gate, never the context
+that wrote the code.
+
+Model defaults move to Opus 5.5 for the orchestrator, coder and reviewer (the
+reviewer was on Fable); the documenter stays on Sonnet. The spawn and branch
+commands and the command reference drop the temporary Opus 4.8 pin and keep its
+lesson: pass the full model id, never the bare `opus` alias, because the alias
+moves to each new release on its own. The formations guide example and the
+profiles guide's current line-up follow, and the role test expects the new
+coder default.
+
+[Possible Ripple Effects]
+Formations started from the installed role files and commands keep the old
+split and the old model defaults until `cbus install-roles --force` (and the
+commands' own install) or a new release. A running orchestrator briefed
+under the old files still writes the tracker until it is told otherwise.
+
+[Testing Notes]
+`go test -run 'Asset|Embed|Role' ./` and `go test ./internal/client/ -run
+Role` pass (embedded role files match source; the coder's MODEL line resolves
+to claude-opus-5-5). The diff was searched for machine, account and tool names.
+
 ## [2026-09-25 23:01:47 UTC] [Docs] stop linking to pull requests and a milestone of the previous repository
 
 [Attempt #1] 5 files: docs/history/acceptance/claude-native-review.md,
