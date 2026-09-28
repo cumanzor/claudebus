@@ -30,8 +30,9 @@ when its CLI is ready.
 Use `cbus connection status CHANNEL/ALIAS --json` or
 `cbus connection reconcile CHANNEL/ALIAS --json` on demand; never blindly resend
 an uncertain submission. `cbus connection abandon CHANNEL/ALIAS --pending
-CLIENT_ID --reason TEXT` releases one named uncertain attempt so later mail
-can proceed, without resolving whether the original one arrived. Disconnect
+CLIENT_ID --reason TEXT` releases one named uncertain or awaiting-receipt
+attempt so later mail can proceed, without resolving whether the original one
+arrived. Disconnect
 retains the inbox. The daemon reconnects
 native relay subscriptions through `/tail/durable-v1`; relay acknowledgment means
 durable local storage, not model receipt. See [relay.md](relay.md).

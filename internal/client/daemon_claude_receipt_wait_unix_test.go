@@ -61,6 +61,15 @@ func TestDaemonClaudeCleanWriteAwaitsReceiptOnNextTick(t *testing.T) {
 	if got := <-wire; !strings.Contains(got, claudeMessageUUID(first)) {
 		t.Fatal("first frame has wrong identity")
 	}
+	sidecar := d.cachedQueue(c.ID)
+	for range 3 {
+		if err := d.deliver(c); err != nil || c.State != claudeAwaitingReceiptState {
+			t.Fatalf("waiting tick failed: %v", err)
+		}
+	}
+	if d.cachedQueue(c.ID) != sidecar {
+		t.Fatal("waiting ticks recreated the sidecar")
+	}
 	appendClaudeQueueRow(t, q, claudeQueueReceiptRow(first))
 	s = scheduleUntil(t, d, c.ID, "first receipt", func(s *ConnectionState) bool { return s.Accepted == 1 })
 	if s.Offset != firstEnd || s.LastAccepted.Attempt.ClientID != first {
@@ -204,5 +213,43 @@ func TestClaudeReconcileKeepsUnexpiredReceiptWait(t *testing.T) {
 	}
 	if got.State != "uncertain" || got.Error == "" || len(q.calls) != 1 {
 		t.Fatalf("reconcile after the deadline: %+v", got)
+	}
+}
+
+func TestDaemonClaudeRestartMidWaitKeepsDeadline(t *testing.T) {
+	d, c, q, wire := claudeWireFixture(t)
+	end := appendDaemonMessage(t, c, "", "restart mid wait")
+	if err := d.deliver(c); err != nil || c.State != claudeAwaitingReceiptState {
+		t.Fatalf("clean write: %v %+v", err, c)
+	}
+	<-wire
+	attempt, submitted := c.Pending.ClientID, c.Pending.SubmittedAt
+	d.closeQueue(c.ID)
+	restarted := newBusDaemon()
+	restarted.start = d.start
+	if err := restarted.load(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.closeQueue(c.ID); restarted.cancel() })
+	c = restarted.connections[c.ID]
+	if c == nil || c.Pending == nil || c.Pending.ClientID != attempt {
+		t.Fatal("restart lost the pending attempt")
+	}
+	if !c.Pending.SubmittedAt.Equal(submitted) || c.State != claudeAwaitingReceiptState {
+		t.Fatalf("restart lost the receipt deadline: %v vs %v, state %s", c.Pending.SubmittedAt, submitted, c.State)
+	}
+	for range 3 {
+		if err := restarted.deliver(c); err != nil || c.State != claudeAwaitingReceiptState || c.Pending.ClientID != attempt {
+			t.Fatalf("restarted wait errored or changed: %v %+v", err, c)
+		}
+	}
+	select {
+	case got := <-wire:
+		t.Fatalf("restart resent the pending attempt: %q", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	appendClaudeQueueRow(t, q, claudeQueueReceiptRow(attempt))
+	if err := restarted.deliver(c); err != nil || c.Pending != nil || c.Offset != end || c.Accepted != 1 {
+		t.Fatalf("receipt after restart did not settle: %v %+v", err, c)
 	}
 }
