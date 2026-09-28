@@ -662,6 +662,18 @@ func refuseRemoteJSON(args []string, jsonMode bool) error {
 // runListLocal renders local peers with listen/off + pid + host + cwd
 // (bin/cbus:589-611); --active shows only live listeners. Text and JSON walk the SAME
 // snapshot, so the two renderings can never disagree about who is listening.
+// A native row never shows the daemon's pid: every native row shares it.
+func listPid(p client.PeerView) string {
+	pid := p.ListenerPid
+	if p.Native {
+		pid = p.ConsumerPid
+	}
+	if pid == 0 || (p.Native && pid < 0) {
+		return "?"
+	}
+	return strconv.Itoa(pid)
+}
+
 func runListLocal(active bool, chosen string, jsonMode bool) int {
 	snap := client.ScanStore()
 	if jsonMode {
@@ -689,11 +701,7 @@ func runListLocal(active bool, chosen string, jsonMode bool) int {
 			if p.Listening {
 				live = "listen"
 			}
-			pid := "?"
-			if p.ListenerPid != 0 {
-				pid = strconv.Itoa(p.ListenerPid)
-			}
-			fmt.Printf("%-7s %-28s pid=%-7s %s  %s\n", live, ch.Name+"/"+p.Alias, pid, orQ(p.Host), orQ(p.Cwd))
+			fmt.Printf("%-7s %-28s pid=%-7s %s  %s\n", live, ch.Name+"/"+p.Alias, listPid(p), orQ(p.Host), orQ(p.Cwd))
 		}
 	}
 	if !any {

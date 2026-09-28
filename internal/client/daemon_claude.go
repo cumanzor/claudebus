@@ -103,3 +103,18 @@ func observeClaudeConsumer(c *ConnectionState) (consumerProbe, error) {
 	return consumerProbe{State: "online", PID: b.Endpoint.PID, StartToken: b.Endpoint.StartToken,
 		Detail: "exact bound Claude process, socket and transcript observed"}, nil
 }
+
+// pinnedConsumer is the consumer incarnation a connection records: the bound
+// Claude endpoint, or the Codex CLI the daemon last observed.
+func pinnedConsumer(c *ConnectionState) (int, string) {
+	if daemonHarness(c.Harness) == daemonHarnessClaude {
+		if c.Claude == nil {
+			return 0, ""
+		}
+		return c.Claude.Binding.Endpoint.PID, c.Claude.Binding.Endpoint.StartToken
+	}
+	if c.Consumer == nil {
+		return 0, ""
+	}
+	return c.Consumer.PID, c.Consumer.StartToken
+}

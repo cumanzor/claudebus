@@ -4,6 +4,235 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-28 19:07:09 UTC] [Client] end a natively connected peer's consumer with cbus close
+
+[Attempt #1] 18 files. Production: internal/client/close_native_unix.go (new),
+close_unix.go, daemon.go, daemon_claude.go, codex_runtime_writer.go. Tests:
+close_native_unix_test.go, close_unix_test.go, daemon_disconnect_fence_test.go
+(new), signalguard_unix_test.go (new), signalguard_windows_test.go (new),
+testowned_test.go (new), identity_test.go, procfixture_test.go. Docs:
+docs/usage.md, docs/architecture/command-reference.md, CHEATSHEET.md.
+detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+`cbus close CH/ALIAS` refused outright on any peer with a daemon-managed
+connection ID, because the legacy path it fell through to relies on things a
+native peer does not have: an owner pid in its meta, a listener-pid ancestry
+walk that would reach the daemon rather than the session, and a SessionEnd
+hook that does nothing for daemon-managed peers.
+
+Close now ends the peer's bound Claude or Codex process. The order is: resolve
+the target and refuse on the caller's own session or an unreadable identity;
+fence the disconnect against the daemon's own record of the exact connection
+ID and thread, under the daemon's own lock, so a replacement registration of
+the same alias can never be the one disconnected; revalidate the pinned process
+and its session right before sending anything; SIGTERM; wait for the exit. A
+disconnect that the daemon does not confirm sends no signal. A revalidation
+failure after a confirmed disconnect reports the connection as disconnected
+with no signal sent, not an automatic reconnect. `--force` follows with
+SIGKILL only after the same incarnation check passes again, so a changed
+start token is never treated as permission to kill whatever process now holds
+that pid. The connection is disconnected, never unregistered, so unread mail
+and the receipt history survive. Windows close still refuses entirely; the
+native path is unix-only.
+
+Identity for Claude is the bound process ID and start token plus a check that
+Claude's own session registry still shows that process running exactly that
+session. Identity for Codex is re-probed fresh after the disconnect: the exact
+interactive process holding that thread's rollout and queue writer, never a
+cached pid, and never the daemon's own app-server sidecar. A caller's own
+session, its own process, or any of its own ancestors can never be signalled,
+refused in production by the single signal path both close paths use; in
+tests, a package-wide guard also fails any run that would signal a process the
+tests did not start. Every inspection that comes back inconclusive
+refuses rather than assuming the target is gone: an unreadable ancestry chain,
+a daemon too old to support the fenced disconnect (checked before any
+disconnect call), and a process or session probe that errors instead of
+returning a clear answer.
+
+The pane or tab is swept only after the process is confirmed exited and the
+terminal is proven idle by one `ps` call that returns exactly the caller
+itself on that tty, with a clean exit, no stderr, and no other row. Anything
+else, including a tty whose device is now gone, leaves the surface open rather
+than closing it. The legacy sweep is factored out to the same function the
+native path now calls, with its own behavior on a `ps` error unchanged.
+
+`docs/usage.md`, `docs/architecture/command-reference.md` and `CHEATSHEET.md`
+describe the native close outcomes, the fenced disconnect, the caller-ancestry
+refusal (which now applies to the legacy path too), and the tty idle rule
+exactly as the code implements it.
+
+[Possible Ripple Effects]
+`cbus close` on a native peer that used to refuse now signals its process.
+Anything that relied on the refusal, or that assumed close was a no-op for a
+native alias, sees different behavior. The daemon gains a fenced `/disconnect`
+capability that an older daemon does not support; against an old daemon,
+native close refuses with a restart hint rather than disconnecting unfenced.
+
+The signal-guard test infrastructure applies to the whole `internal/client`
+test package: any future test in that package that starts a real process and
+expects to signal it must register that process with the guard first, or the
+run fails.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` and `go vet ./...` pass at the final
+commit in the documenter's own run, and again independently by the advisor at
+the same commit. Linux amd64 and arm64 and Windows amd64 build and vet pass,
+checked by the coder, the reviewer and the advisor at various commits across
+the milestone, most recently the advisor at the second-to-last commit (the
+last commit is docs only, one file, and touches nothing that changes those
+results). Every reviewer run, and every coder mutation run after the signal guard
+landed, was executed from a process reparented to init, so a test that walked
+its own process's real ancestry could not reach the session driving the work;
+the same test guard caught zero unexpected signals across every run and
+printed exactly the one expected refusal each pass had a test for.
+
+Mutation checks: coder mutants Q1 through Q33 (one early equivalence claim,
+Q5, was later withdrawn once a killed run was produced) and reviewer mutants
+R1 through R9, S1 through S7, T1b, T2 each failed the test aimed at them, run
+independently across four reviewer passes and confirmed again by the advisor
+at the final head. One of them, S4, at first survived an earlier pass because
+the test it should have caught stubbed a lower seam instead of the real check;
+a later test closed that gap and the same mutant now fails on the intended
+assertion. A further reviewer mutant, S3b, survives on purpose: it replaces
+the real native terminal sweep with its test stub and nothing catches that,
+which is the property the tests are meant to have, since no test should reach
+the real sweep against a real terminal.
+
+Findings and fixes, folded in as they closed rather than left as open items:
+a Codex disconnect did not re-probe the exact thread before trusting it was
+still the same consumer, fixed by re-checking after the disconnect; the native
+terminal sweep treated any failed `ps` call as proof the terminal was idle,
+fixed by requiring a clean, self-only result; an inconclusive process or
+ancestry check was treated as "gone" or "not an ancestor", fixed to refuse
+instead; the test-only process registry that lets tests signal processes they
+started was keyed by a bare pid that a reused pid could satisfy, fixed by
+keying it to a start token; a version-skew gap let an old daemon perform an
+unfenced disconnect that native close then misreported as failed, fixed by
+checking the daemon's fence capability before disconnecting at all. Three
+rounds of documentation findings (missing outcome strings, a stale idle
+description, one legacy behavior undocumented) were folded into the docs
+commits as they were found.
+
+Not covered. There is no real close run against a live peer: a scratch-store
+plan exists and is user-gated, not run. Windows close is unimplemented and
+continues to refuse.
+
+Linux: `go test -count=1 ./...` and `go vet ./...` both pass on Debian 13
+(kernel 6.12, go1.26.2, procps-ng 4.0.4, ext4), except one test that already
+fails the same way on main and is unrelated to this change:
+TestManagedPresenceRecipientEpochAndMalformedTail/replace. The close guard
+printed zero unexpected refusals against the one expected. `ps -o pid=,tty=
+-t TTY -p SELF` selects a union on procps (measured: a busy tty prints the
+self row plus its own rows, rc 0), the same semantics measured on darwin's
+BSD `ps`. A Linux tty whose processes have all exited is freed at the kernel
+level, so
+`ps` then reports the tty as not found; the idle branch is reachable only
+when the tty stays allocated with no processes left on it (for example a
+tmux pane kept open after its command exits). Outside that case the surface
+is left open, which is the existing fail-closed behavior, not a new gap.
+
+Observed and not explained. During the milestone's own work, its coder
+session was itself terminated by one of its mutation runs: a test mutant sent
+a native peer down the legacy owner-pid ancestry walk, and a fixture daemon
+process the test had started turned out to have an ancestry chain that reached
+the operator's own Claude session, which the walk then signalled. This is
+exactly the failure class the caller-ancestry guard above exists to make
+impossible in production, and the incident is source-traced, not proven by a
+captured signal. Separately, two unrelated tests outside this milestone's code
+paths (a Codex writer-discovery test and a directory-deletion test in the
+follower) failed once under load during a review pass and passed in eight
+follow-up runs at the same commit; neither path is touched by this change, and
+the failures are unreproduced, not cleared, and are a candidate follow-up.
+
+## [2026-09-28 17:56:29 UTC] [Client] show the consumer pid for natively connected peers in cbus list
+
+[Attempt #1] 10 files. Production: cmd/cbus/jsonout.go, cmd/cbus/main.go,
+internal/client/roster.go, internal/client/formation_harness.go. Tests:
+cmd/cbus/list_consumer_test.go, internal/client/roster_consumer_test.go,
+internal/client/roster_consumer_unix_test.go (all new). Docs:
+docs/architecture/command-reference.md. detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+For a daemon-managed peer, `meta.json` records the daemon as the listener, so
+every native row in `cbus list` showed the same pid, the daemon's. That pid
+has to stay in `meta.json` because liveness, send, close and layout match it
+against the running daemon, so the fix is in the display only.
+
+`ScanStore` now reads the connection's daemon journal without contacting the
+daemon and reports the consumer the daemon last observed. The text pid column
+of a native row shows that consumer's pid while the row is `listen` and the
+consumer is `online`, and `?` otherwise, and never the daemon's pid. The JSON
+adds `consumerState` (`online`, `exited`, `unknown` or `disconnected`) to native
+rows and `consumerPid` while the consumer is online; `listenerPid` keeps its
+value and `schemaVersion` is unchanged. An `online` observation on a row that
+is not listening is reported as `unknown`, because the daemon is not observing
+it and the journal may be stale. The recorded pid survives an exit in the
+journal, so it counts only while `online`. A missing, unreadable, unparsable or
+mismatched journal reads as unknown and never fails the list. Legacy rows are
+unchanged, and remote rows are out of scope.
+
+The journal read and its identity check (id, channel, alias and session must
+match the registration) moved out of formation save into one function,
+`readManagedJournal`, which both use; the checks and their error text are the
+same.
+
+docs/architecture/command-reference.md describes the pid column and the two
+JSON fields. The review caught the JSON paragraph saying `consumerState` is
+`unknown` whenever the row is not listening, where the code downgrades only an
+`online` observation and a disconnected row reports `disconnected`; the
+sentence now matches the code. The finding was folded in here.
+
+[Possible Ripple Effects]
+The pid column of a native row changes meaning: it was the daemon's pid, the
+same on every native row, and is now the consumer's pid or `?`. Anything that
+read that column to find the daemon will not find it there. A native row that
+is `off` shows `?`.
+
+`cbus list` now opens one small journal file per native peer on each run. It
+takes no lock and asks the daemon nothing; journals are written by temp file
+and rename, so a torn read is not expected. The rule that decides what a row
+shows lives in `ScanStore`; a new consumer of the roster should read
+`ConsumerPid` from it and not recompute the rule.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` and `go vet ./...` pass at the final
+commit in the documenter's own run. At the second commit the coder ran vet for
+linux amd64 and arm64 and windows (the Claude fixture moved to a unix-tagged
+file to build there), and the reviewer re-ran the suite, vet and the linux and
+windows builds and vets. The final commit only rewords one docs sentence.
+
+Mutation checks: six mutants (the online guard, the listening guard, the text
+column showing the daemon's pid, the JSON dropping `consumerPid`, the journal
+identity check, and the native flag unset) each fail the test aimed at them
+(coder run). The identity-check mutant was first killed only through a formation
+test, so the list fixture now carries an online consumer and the re-run fails at
+the list test's own assertion. The reviewer cut four of these independently
+(the listening downgrade, the pid kept for any state, native rows using the
+listener pid, the channel check dropped) and each failed on the aimed line.
+
+Fixtures. The tests for a missing, foreign or unparsable journal are labelled
+defensive fixtures: no cbus code writes those states (connection ids are random
+nonces, journals are written only through the daemon's save and never removed,
+and connect saves the journal before it writes the meta), so only an outside
+edit, copy or restore produces them. The exited, unknown and disconnected cases
+come from real paths. The "daemon gone" case stands in for a dead daemon by
+editing its recorded start token, not by stopping it.
+
+Field run, read-only: `cbus list` and `cbus list --json` on a real store, the
+installed binary against one built at the second commit, 56 rows each. Every
+column other than the pid is identical. The 13 legacy rows keep their pids; the
+43 native rows changed and none shows the daemon's pid. The 12 `consumerPid`
+values all resolve to live processes (11 Claude, 1 Codex) and the session that
+ran the list shows its own pid. In the JSON, 43 native rows carry
+`consumerState`, 12 carry `consumerPid`, none breaks the listening-and-online
+rule, and no legacy row gained a field.
+
+Not covered. Remote rows are out of scope. Linux and Windows are compiled and
+vetted only, not run. The list was not run against a
+peer whose daemon had really died; the fixture stands in for it.
+
 ## [2026-09-28 17:50:13 UTC] [Client] keep native connections across a reboot that renumbers the volume
 
 [Attempt #1] 20 files. Production: internal/client/inbox_epoch.go (new),

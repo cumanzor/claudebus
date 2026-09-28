@@ -951,6 +951,14 @@ listen|off     <ch>/<alias>                 pid=<pid|?>   <host|?>  <cwd|?>
   `liveness.go:102-104`), so `listen` means the daemon holds the connection,
   not that the CLI session is running; a disconnected native peer's
   `listenerPid` reads `-1` and shows `off`.
+- The `pid=` column of a **native** row is the consumer: the Claude or Codex
+  process the daemon last observed online, read from the connection's daemon
+  journal without contacting the daemon (`ScanStore`, `journaledConsumer`).
+  It shows only while the row is `listen` and the consumer is observed
+  online; an exited, unknown or disconnected consumer, a stopped daemon, or a
+  missing, unreadable or mismatched journal shows `pid=?`. A native row never
+  shows the daemon's pid, which every native row shares. Legacy rows keep
+  their listener pid.
 - `--active` / `-a` shows only live listeners. Any other arg is the channel
   filter (last non-flag wins).
 - Legacy v1 entries render as `off <ch>  legacy v1 entry — run: cbus prune`
@@ -1002,6 +1010,14 @@ of a session.
   is itself a real pid-shaped value and would read as one. A disconnected
   native peer emits `listenerPid: -1` explicitly, distinct from omission
   (`jsonout.go:50`).
+- `consumerState` and `consumerPid` appear on **native** rows only.
+  `consumerState` is the daemon's last consumer observation (`online`,
+  `exited`, `unknown`, `disconnected`). An `online` observation on a row that
+  is not listening is reported as `unknown`; the other states keep their
+  names. `consumerPid` is present only while the row is listening
+  and the consumer is `online`. `listenerPid` keeps its meaning (the
+  daemon's pid for a native row). Both fields are additive; `schemaVersion`
+  is unchanged.
 - `scope` is pinned `"local"` for now; the key exists before `"remote"` does so
   a consumer written today keeps working once it appears.
 - A legacy v1 channel entry is rendered **explicitly** (`"legacyV1": true`,
@@ -1193,11 +1209,63 @@ roster twice.
   **local** peer instead.
 - **Self-refusal:** closing this session's own registration is refused:
   `that peer is THIS session — refusing (exit it normally)`.
-- **Daemon-managed refusal:** `close` never signals a native peer's process:
-  `daemon-managed peer — use cbus connection disconnect <t>; close must not
-  signal its shared daemon or terminal` (`close_unix.go:42-44`, quoted
-  verbatim), rc 1: the target's OS process is the shared daemon, not a
-  per-peer process, and its terminal isn't the peer's either.
+- **Native (daemon-managed) peers** take `closeNativePeer`
+  (`close_native_unix.go`). A native peer's listener is the shared daemon,
+  so the legacy owner walk below never runs for it. The consumer comes from
+  the connection's daemon journal: for Claude, the bound endpoint pid and
+  start token; for Codex, the journaled consumer, only if a fresh probe
+  finds that same process as the unique writer of the thread's rollout and
+  queue. Before any signal it must still have the recorded start token, have
+  the right shape (a `claude` process whose Claude session registry names
+  this exact session, or an interactive `codex` CLI outside the desktop
+  app), and be neither the daemon nor this process or one of its ancestors.
+  Order: validate, then disconnect through `/disconnect` fenced to the
+  expected connection ID, thread and consumer incarnation (checked by the
+  daemon under the connection lock, so a re-registered alias is never
+  disconnected), then revalidate, re-read the start token, `SIGTERM`, and on
+  a TERM timeout with `--force` re-read it again before `SIGKILL`. A changed
+  start token means the recorded process is gone; it is never permission to
+  signal the pid's new occupant. The surface is swept only after that
+  process is gone. The inbox and registration are kept. Check and signal are
+  separate system calls, so an exit-and-reuse between them is narrowed, not
+  excluded.
+  Before the disconnect, close also requires the running daemon to advertise
+  `fencedDisconnect` on `/health`; a daemon started from an older binary does
+  not, and close refuses with `cannot inspect: the running cbus daemon
+  predates fenced disconnects; run cbus daemon restart to load this version,
+  then close again`. A Codex consumer is re-probed on every revalidation,
+  after the disconnect too, since the same process can load another thread.
+  Liveness counts as gone only on proof (no such process, a zombie, or a
+  changed start token); any other inspection failure is an error, and so is a
+  failure to read this process's ancestry.
+  Outcomes:
+  - `already gone; connection disconnected, inbox retained`
+  - `process ended; connection disconnected, inbox retained; <surface detail>`,
+    where the surface detail is `surface unknown (no tty)`, `tty busy, surface
+    left alone`, `surface left open (could not confirm idle)` (the tty counts
+    as idle only when one ps call for the tty and for close itself exited 0,
+    printed nothing on stderr, and listed only close; any other result,
+    including a tty device that no longer exists, leaves the surface open), `tmux pane closed`,
+    `iTerm2 surface closed`, `surface sweep timed out — left alone` or
+    `surface already closed`
+  - `disconnect failed, no signal sent: <reason>`
+  - `the daemon did not honour the disconnect fence; the connection may have
+    been disconnected; no signal sent` (the reply did not echo the connection
+    ID)
+  - `disconnected, no signal sent: <reason>` (the consumer changed after the
+    disconnect) and `disconnected, no signal sent: cannot inspect: <reason>`
+  - `disconnected; SIGTERM pid <n> failed: <reason>`
+  - `disconnected; SIGTERM sent to pid <n>, outcome unconfirmed: cannot
+    inspect: <reason>` (and the same with `SIGKILL`); no sweep follows
+  - `disconnected; pid <n> still running after TERM; use --force`
+  - `disconnected; pid <n> is no longer the consumer that got TERM; not
+    killed` (with `--force`, when the start token changed before the KILL)
+  - `disconnected; pid <n> survived SIGKILL`
+  - refusals of the form `<kind>: <reason>; refusing to signal. Inspect with
+    cbus connection status <t> --json; cbus connection disconnect <t> stops
+    delivery without signalling`, where kind is `cannot inspect`, `changed
+    incarnation`, `different loaded session`, `shared daemon` or `this
+    session`.
 - **Mechanics, per target:** read `OwnerPid` from the peer's `meta.json`
   (falling back to deriving it from the armed listener's ancestry when
   `OwnerPid` is null — pre-fix registrations, see the quirk below — gated on
@@ -1209,7 +1277,11 @@ roster twice.
   timeout, `--force` escalates to `SIGKILL` (2s further wait) — without
   `--force` a TERM-survivor is reported, not escalated (closing its surface
   would be a disguised kill). A pid whose argv no longer contains `claude`
-  is refused as a probable pid recycle rather than signalled.
+  is refused as a probable pid recycle rather than signalled. For both the
+  legacy and the native path, every signal goes through `signalProcess`,
+  which refuses a pid that is `close`'s own process, one of its ancestors,
+  or not above 1, and refuses when that ancestry cannot be read:
+  `SIGTERM pid <n>: refusing to signal this process or one of its ancestors`.
 - **Surface sweep** (best-effort, after the process is confirmed gone): if
   the captured tty is still busy (a live `ps -t <tty>`), the surface is left
   alone (stranger or TERM-survivor); otherwise a matching tmux pane is
@@ -2946,11 +3018,9 @@ client; they remain for the homogenization/port record.
     installer (§14); distribution is now `get.sh` + `selfupdate` (§11).
 38. `cbus close` is local-only (a remote peer must be closed on its own host —
     `ClosePeer` cannot express a host, so an accepted remote target would
-    silently close a same-named local peer), refuses a daemon-managed
-    (native-connected) peer outright (`daemon-managed peer — use cbus
-    connection disconnect <t>; close must not signal its shared daemon or
-    terminal`, since a shared daemon must never be torn down by one peer's
-    close), refuses THIS session itself (`that peer is THIS session —
+    silently close a same-named local peer), ends a daemon-managed
+    (native-connected) peer through its journaled consumer, never the shared
+    daemon (see the close section), refuses THIS session itself (`that peer is THIS session —
     refusing (exit it normally)`, close is not how you exit), and refuses a
     pid whose argv no longer contains `claude` (probable pid recycle) rather
     than signalling it. Its null-`ownerPid` fallback derives the owner from the armed
