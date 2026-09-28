@@ -1551,12 +1551,15 @@ recorded `offset` exceeds the file's current size:
 check guards delivery with `"inbox changed or truncated; refusing to replay
 an unknown epoch"`, and each refusal goes on to name the recovery (save
 unread mail past the offset, `cbus unregister`, connect again). The journaled
-`dev` must also match, except that on darwin and linux a device-only change
-is accepted when the last consumed record and the pending record are
-byte-identical at their journaled offsets (`inboxEpochDecision`); the new
-`dev` is then saved before delivery uses it. That verifies those two records,
-not the whole consumed prefix. The refusal is stored as `listenerError` in
-the connection state, visible via `cbus connection status ... --json`.
+`dev` must also match, except that on darwin and linux (`devMayRenumber`,
+fileid_unix.go) a device-only change is accepted when the last consumed
+record and the pending record are byte-identical at their journaled offsets
+(`inboxEpochDecision`); the new `dev` is then saved before delivery uses it.
+That verifies those two records, not the whole consumed prefix. usage.md's
+daemon section names the Linux cases this covers, per kernel documentation
+and not measured at runtime by this project. The refusal is stored as
+`listenerError` in the connection state, visible via `cbus connection
+status ... --json`.
 
 ### 14.4 Claude credential store
 

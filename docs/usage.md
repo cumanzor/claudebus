@@ -139,9 +139,11 @@ through that check.
 
 The daemon journals each inbox by device number, inode and delivery offset.
 On macOS a reboot can give the volume a new device number while the file
-keeps its inode, and on Linux so can btrfs, device-mapper and overlay mounts.
-On macOS and Linux a change of device number alone is accepted when the inode
-matches and the last consumed record and the pending record are
+keeps its inode (measured on macOS). Per the Linux kernel's own documentation,
+a btrfs subvolume, a device-mapper remap or an overlay mount can change a
+file's device number the same way; this project has not measured that at
+runtime. On macOS and Linux a change of device number alone is accepted when
+the inode matches and the last consumed record and the pending record are
 byte-identical at their journaled offsets. The daemon then saves the new
 device number and logs `inbox device changed with the same inode and
 matching records; identity re-stamped`. This checks those two records, not
