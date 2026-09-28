@@ -54,8 +54,7 @@ func TestDaemonClaudeReceiptAloneAdvancesBothCursors(t *testing.T) {
 		wire <- b
 	}()
 	end := appendDaemonMessage(t, c, "", "one actual submission")
-	var awaiting *claudeAwaitingReceiptError
-	if err := d.scheduledOperation(c); !errors.As(err, &awaiting) || c.Pending == nil || c.Accepted != 0 || c.Offset != 0 {
+	if err := d.scheduledOperation(c); err != nil || c.Pending == nil || c.Accepted != 0 || c.Offset != 0 {
 		t.Fatalf("socket write became acceptance: %v", err)
 	}
 	if len(<-wire) == 0 {
@@ -64,8 +63,8 @@ func TestDaemonClaudeReceiptAloneAdvancesBothCursors(t *testing.T) {
 	if err := d.accept(c, nil); err == nil {
 		t.Fatal("accepted socket submission without receipt")
 	}
-	if err := d.deliver(c); err == nil || c.Pending == nil {
-		t.Fatal("absent receipt released uncertainty")
+	if err := d.deliver(c); err != nil || c.Pending == nil || c.State != claudeAwaitingReceiptState {
+		t.Fatal("absent receipt released the pending attempt")
 	}
 	listener.SetDeadline(time.Now().Add(30 * time.Millisecond))
 	if conn, err := listener.AcceptUnix(); err == nil {

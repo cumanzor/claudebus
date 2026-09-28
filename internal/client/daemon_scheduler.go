@@ -271,6 +271,9 @@ func (d *busDaemon) schedule() {
 		go func() {
 			defer finish()
 			if err := d.scheduledOperation(c); err != nil {
+				if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
+					logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
+				}
 				c.Error = err.Error()
 				if c.State != "disconnected" && c.State != "detached" && c.State != "binding-required" {
 					c.State = "error"

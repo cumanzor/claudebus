@@ -159,10 +159,13 @@ func (d *busDaemon) reconcile(target string) (*ConnectionState, error) {
 			}
 			if found.State == codexMessageNotFound {
 				next := *c
-				if next.State != "disconnected" {
-					next.State = "uncertain"
-				}
 				next.Error = "enqueue outcome remains unknown; absence does not prove rejection; no retry performed"
+				if next.State != "disconnected" {
+					next.State = pendingConnectionState(c, time.Now())
+					if next.State == claudeAwaitingReceiptState {
+						next.Error = ""
+					}
+				}
 				if err := d.save(&next); err != nil {
 					return nil, err
 				}

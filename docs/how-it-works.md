@@ -19,8 +19,9 @@ and [Codex](codex.md) for capability checks, recovery and receipt semantics.
 After joining, check `cbus list CHANNEL` once (retain `@host` for relays), report
 listening peers and explicitly known roles, then update the observed roster from
 presence events. An alias is not role evidence. Claude's `socket-ready` means an
-available endpoint, not receipt. A successful socket write stays pending until
-its exact session/message UUID appears in the bound transcript. Codex queue
+available endpoint, not receipt. A successful socket write stays pending
+(`awaiting-receipt`) until its exact session/message UUID appears in the bound
+transcript, and becomes `uncertain` if none appears within 60 seconds. Codex queue
 acceptance is likewise separate from history receipt. Receipt is not a reply or
 completed work. Claude can receive messages between foreground tool calls in an
 active turn; its hold/refuse policy still applies. Codex consumes its native queue
@@ -29,8 +30,9 @@ when its CLI is ready.
 Use `cbus connection status CHANNEL/ALIAS --json` or
 `cbus connection reconcile CHANNEL/ALIAS --json` on demand; never blindly resend
 an uncertain submission. `cbus connection abandon CHANNEL/ALIAS --pending
-CLIENT_ID --reason TEXT` releases one named uncertain attempt so later mail
-can proceed, without resolving whether the original one arrived. Disconnect
+CLIENT_ID --reason TEXT` releases one named uncertain or awaiting-receipt
+attempt so later mail can proceed, without resolving whether the original one
+arrived. Disconnect
 retains the inbox. The daemon reconnects
 native relay subscriptions through `/tail/durable-v1`; relay acknowledgment means
 durable local storage, not model receipt. See [relay.md](relay.md).
