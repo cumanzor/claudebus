@@ -37,6 +37,21 @@ var (
 	nativeTTYOf        = ttyOf
 )
 
+// nativeDaemonFences proves the running daemon checks a disconnect fence. An
+// older daemon would disconnect unfenced and not say so. (A var only for tests.)
+var nativeDaemonFences = func() error {
+	var health struct {
+		FencedDisconnect bool `json:"fencedDisconnect"`
+	}
+	if err := DaemonCall("GET", "/health", nil, &health); err != nil {
+		return err
+	}
+	if !health.FencedDisconnect {
+		return errors.New("the running cbus daemon predates fenced disconnects; run cbus daemon restart to load this version, then close again")
+	}
+	return nil
+}
+
 // nativeConsumer is one process incarnation that consumes a native inbox.
 type nativeConsumer struct {
 	pid   int
@@ -71,13 +86,16 @@ func closeNativePeer(ch, alias string, m PeerMeta, force bool) CloseReport {
 	if err != nil && !gone {
 		return nativeRefusalReport(target, err)
 	}
+	if err := nativeDaemonFences(); err != nil {
+		return nativeRefusalReport(target, refuseNative("cannot inspect", "%v", err))
+	}
 	pid, start := pinnedConsumer(&c)
 	id, err := nativeDisconnect(target, disconnectFence{c.ID, c.ThreadID, pid, start})
-	if err != nil || id != c.ID {
-		if err == nil {
-			err = errors.New("the daemon did not confirm this exact registration")
-		}
+	if err != nil {
 		return CloseReport{target, false, "disconnect failed, no signal sent: " + err.Error()}
+	}
+	if id != c.ID {
+		return CloseReport{target, false, "the daemon did not honour the disconnect fence; the connection may have been disconnected; no signal sent"}
 	}
 	if gone {
 		return CloseReport{target, true, "already gone; connection disconnected, inbox retained"}
@@ -165,7 +183,11 @@ func revalidateNativeConsumer(c *ConnectionState, consumer nativeConsumer, daemo
 	if consumer.pid == daemonPid {
 		return refuseNative("shared daemon", "pid %d is the cbus daemon", consumer.pid)
 	}
-	if consumer.pid == os.Getpid() || ownAncestor(consumer.pid) {
+	ancestor, err := ownAncestor(consumer.pid)
+	if err != nil {
+		return refuseNative("cannot inspect", "%v", err)
+	}
+	if consumer.pid == os.Getpid() || ancestor {
 		return refuseNative("this session", "pid %d is this process or one of its ancestors", consumer.pid)
 	}
 	if gone, err := inspectIncarnation(consumer); err != nil {
@@ -227,18 +249,26 @@ func waitIncarnationGone(consumer nativeConsumer, grace time.Duration) (bool, er
 	}
 }
 
-func ownAncestor(pid int) bool {
-	for p, i := os.Getppid(), 0; p > 1 && i < 256; i++ {
+// ancestryParent reads one step of this process's ancestry. (A var only for tests.)
+var ancestryParent = procParent
+
+// ownAncestor reports whether pid is above this process. It fails closed: a
+// walk that cannot reach init is an error, never "not an ancestor".
+func ownAncestor(pid int) (bool, error) {
+	for p, i := os.Getppid(), 0; p > 1; i++ {
 		if p == pid {
-			return true
+			return true, nil
 		}
-		_, parent, err := procParent(p)
+		if i >= 256 {
+			return false, errors.New("this process's ancestry is deeper than expected")
+		}
+		_, parent, err := ancestryParent(p)
 		if err != nil {
-			return false
+			return false, fmt.Errorf("read this process's ancestry at pid %d: %w", p, err)
 		}
 		p = parent
 	}
-	return false
+	return false, nil
 }
 
 func orDefault(s, fallback string) string {

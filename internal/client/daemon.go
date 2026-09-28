@@ -247,7 +247,7 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 			return
 		}
 		if r.URL.Path == "/health" && r.Method == "GET" {
-			writeDaemonJSON(w, map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version})
+			writeDaemonJSON(w, map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true})
 			return
 		}
 		if r.URL.Path == "/stop" && r.Method == "POST" {

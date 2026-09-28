@@ -68,7 +68,7 @@ func TestCloseRefusesOwnAncestry(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "some-other-session")
 	listener := liveProc(t)
 	owner, ok := ownerFromPid(listener)
-	if !ok || !ownAncestor(owner) {
+	if ancestor, err := ownAncestor(owner); !ok || err != nil || !ancestor {
 		t.Skip("no harness process above this test run")
 	}
 	seedClosePeerWithStart(t, root, "ch", "peer", "sid-peer", "null", strconv.Itoa(listener), startTokenOf(t, listener))
@@ -95,5 +95,27 @@ func TestTestOwnedRegistryRejectsARecycledPid(t *testing.T) {
 	testOwnedPids.Store(pid, "an-earlier-process")
 	if isTestOwned(pid) {
 		t.Fatal("a pid whose start token changed was admitted")
+	}
+}
+
+// failAncestryAtDepth makes the ancestry walk fail on its second step.
+func failAncestryAtDepth(t *testing.T) {
+	t.Helper()
+	prev, calls := ancestryParent, 0
+	ancestryParent = func(pid int) (string, int, error) {
+		calls++
+		if calls >= 2 {
+			return "", 0, errors.New("process table unreadable")
+		}
+		return prev(pid)
+	}
+	t.Cleanup(func() { ancestryParent = prev })
+}
+
+func TestAncestryWalkFailsClosed(t *testing.T) {
+	stranger := liveProc(t) // a child, so never on the ancestry
+	failAncestryAtDepth(t)
+	if err := ownAncestryRefusal(stranger); !errors.Is(err, errOwnAncestry) {
+		t.Fatalf("an unreadable ancestry allowed the signal: %v", err)
 	}
 }

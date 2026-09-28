@@ -72,3 +72,15 @@ func TestDisconnectHandlerCarriesTheFence(t *testing.T) {
 		t.Fatalf("the operator disconnect changed: %d %s", r.Code, r.Body.String())
 	}
 }
+
+func TestHealthAdvertisesFencedDisconnect(t *testing.T) {
+	d, _, _ := daemonFixture(t)
+	r := httptest.NewRecorder()
+	d.handler(func() {}).ServeHTTP(r, httptest.NewRequest("GET", "/health", nil))
+	var h struct {
+		FencedDisconnect bool `json:"fencedDisconnect"`
+	}
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &h) != nil || !h.FencedDisconnect {
+		t.Fatalf("health does not advertise the fenced disconnect: %s", r.Body.String())
+	}
+}

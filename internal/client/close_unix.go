@@ -37,7 +37,14 @@ func signalUnlessOwnAncestry(pid int, sig syscall.Signal) error {
 }
 
 func ownAncestryRefusal(pid int) error {
-	if pid <= 1 || pid == os.Getpid() || ownAncestor(pid) {
+	if pid <= 1 || pid == os.Getpid() {
+		return errOwnAncestry
+	}
+	ancestor, err := ownAncestor(pid)
+	if err != nil {
+		return fmt.Errorf("%w: cannot prove pid %d is not an ancestor: %v", errOwnAncestry, pid, err)
+	}
+	if ancestor {
 		return errOwnAncestry
 	}
 	return nil

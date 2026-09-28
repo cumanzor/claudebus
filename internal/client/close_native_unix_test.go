@@ -65,12 +65,13 @@ func seedNativeClaude(t *testing.T, consumer int, start string) *nativeCloseFixt
 	if err := writeMeta(dir, m); err != nil {
 		t.Fatal(err)
 	}
-	prev := nativeDisconnect
+	prev, prevFences := nativeDisconnect, nativeDaemonFences
 	nativeDisconnect = func(target string, fence disconnectFence) (string, error) {
 		f.calls = append(f.calls, disconnectCall{target, fence, pidAlive(f.consumer) && !procZombie(f.consumer)})
 		return fence.ConnectionID, nil
 	}
-	t.Cleanup(func() { nativeDisconnect = prev })
+	nativeDaemonFences = func() error { return nil }
+	t.Cleanup(func() { nativeDisconnect, nativeDaemonFences = prev, prevFences })
 	return f
 }
 
@@ -567,5 +568,41 @@ func TestTTYProvenIdle(t *testing.T) {
 		if got := ttyProvenIdle(tc.stdout, tc.stderr, tc.code, tc.err); got != tc.want {
 			t.Errorf("ttyProvenIdle(%q, %q, %d, %v) = %v", tc.stdout, tc.stderr, tc.code, tc.err, got)
 		}
+	}
+}
+
+func TestNativeCloseRefusesWhenItsAncestryIsUnreadable(t *testing.T) {
+	consumer := fakeClaude(t)
+	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	failAncestryAtDepth(t)
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "cannot inspect") || len(f.calls) != 0 || !processRunning(consumer) {
+		t.Fatalf("close went ahead without proof the consumer is not its own ancestor: %+v", rep)
+	}
+}
+
+func TestNativeCloseRefusesADaemonThatCannotFence(t *testing.T) {
+	consumer := fakeClaude(t)
+	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	nativeDaemonFences = func() error {
+		return errors.New("the running cbus daemon predates fenced disconnects; run cbus daemon restart")
+	}
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "cbus daemon restart") || len(f.calls) != 0 || !processRunning(consumer) {
+		t.Fatalf("close disconnected through a daemon that cannot fence: %+v", rep)
+	}
+}
+
+// An older daemon disconnects the alias unfenced and returns no connection ID.
+func TestNativeCloseTreatsAnUnechoedFenceAsUnhonoured(t *testing.T) {
+	consumer := fakeClaude(t)
+	f := seedNativeClaude(t, consumer, startTokenOf(t, consumer))
+	nativeDisconnect = func(target string, fence disconnectFence) (string, error) {
+		f.calls = append(f.calls, disconnectCall{target, fence, true})
+		return "", nil
+	}
+	rep := ClosePeer("dev", "worker", true)
+	if rep.Ok || !strings.Contains(rep.Detail, "may have been disconnected") || strings.Contains(rep.Detail, "surface") || !processRunning(consumer) || len(f.calls) != 1 {
+		t.Fatalf("an unhonoured fence was reported wrongly or still signalled: %+v", rep)
 	}
 }
