@@ -42,9 +42,9 @@ session. Identity for Codex is re-probed fresh after the disconnect: the exact
 interactive process holding that thread's rollout and queue writer, never a
 cached pid, and never the daemon's own app-server sidecar. A caller's own
 session, its own process, or any of its own ancestors can never be signalled,
-on both this new path and the existing legacy one: one guard, installed for
-the whole test package, fails any test run in which an unexpected process
-would have been signalled. Every inspection that comes back inconclusive
+refused in production by the single signal path both close paths use; in
+tests, a package-wide guard also fails any run that would signal a process the
+tests did not start. Every inspection that comes back inconclusive
 refuses rather than assuming the target is gone: an unreadable ancestry chain,
 a daemon too old to support the fenced disconnect (checked before any
 disconnect call), and a process or session probe that errors instead of
