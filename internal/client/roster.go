@@ -31,6 +31,11 @@ type PeerView struct {
 	Cwd         string
 	Origin      string
 	Model       string
+	// A native peer's ListenerPid is the daemon. ConsumerPid is the harness
+	// process the daemon last observed online, or 0 when that is not known now.
+	Native        bool
+	ConsumerState string
+	ConsumerPid   int
 }
 
 // ScanStore walks $CBUS_DIR and returns every channel and peer, in the ReadDir order
@@ -72,7 +77,7 @@ func ScanStore() StoreSnapshot {
 				continue
 			}
 			m, _ := ReadPeerMeta(metaPath) // ok is deliberately ignored: see the doc comment
-			view.Peers = append(view.Peers, PeerView{
+			peer := PeerView{
 				Alias:       alE.Name(),
 				SessionID:   m.SessionID,
 				Listening:   MetaListenerAlive(metaPath),
@@ -81,9 +86,32 @@ func ScanStore() StoreSnapshot {
 				Cwd:         m.Cwd,
 				Origin:      m.Origin,
 				Model:       m.Model,
-			})
+			}
+			if m.ConnectionID != "" {
+				peer.Native = true
+				peer.ConsumerState, peer.ConsumerPid = journaledConsumer(chE.Name(), alE.Name(), m)
+				if !peer.Listening && peer.ConsumerState == "online" {
+					// the daemon is not observing it, so the journal may be stale
+					peer.ConsumerState, peer.ConsumerPid = "unknown", 0
+				}
+			}
+			view.Peers = append(view.Peers, peer)
 		}
 		snap.Channels = append(snap.Channels, view)
 	}
 	return snap
+}
+
+// journaledConsumer never fails a list: a missing, unreadable or foreign journal
+// reads as unknown. The recorded PID is kept after an exit, so it counts only
+// while online.
+func journaledConsumer(ch, alias string, m PeerMeta) (state string, pid int) {
+	c, err := readManagedJournal(ch, alias, m)
+	if err != nil || c.Consumer == nil || c.Consumer.State == "" {
+		return "unknown", 0
+	}
+	if c.Consumer.State == "online" {
+		return c.Consumer.State, c.Consumer.PID
+	}
+	return c.Consumer.State, 0
 }

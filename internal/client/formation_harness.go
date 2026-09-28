@@ -56,20 +56,12 @@ func formationManagedBackend(ch, alias string, m PeerMeta) (*formationManagedSna
 	if m.ConnectionID == "" {
 		return nil, nil
 	}
-	if !core.ValidStoreName(m.ConnectionID) {
-		return nil, fmt.Errorf("invalid managed connection id for %s/%s", ch, alias)
-	}
-	b, err := os.ReadFile(filepath.Join(DaemonDir(), "connections", m.ConnectionID+".json"))
+	c, err := readManagedJournal(ch, alias, m)
 	if err != nil {
-		return nil, fmt.Errorf("read managed backend for %s/%s: %w", ch, alias, err)
-	}
-	var c ConnectionState
-	if err = json.Unmarshal(b, &c); err != nil {
-		return nil, fmt.Errorf("read managed backend for %s/%s: %w", ch, alias, err)
+		return nil, err
 	}
 	harness := daemonHarness(c.Harness)
-	if c.ID != m.ConnectionID || c.Channel != ch || c.Alias != alias || c.ThreadID != m.SessionID || m.Alias != alias ||
-		c.Relay != nil || (m.Harness != "" && m.Harness != harness) {
+	if m.Alias != alias || c.Relay != nil || (m.Harness != "" && m.Harness != harness) {
 		return nil, fmt.Errorf("managed backend identity mismatch for %s/%s", ch, alias)
 	}
 	if err := validateDaemonHarness(harness); err != nil {
@@ -101,4 +93,24 @@ func formationManagedBackend(ch, alias string, m PeerMeta) (*formationManagedSna
 	s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"
 	s.LiveSession = c.Consumer == nil || c.Consumer.State != "exited"
 	return s, nil
+}
+
+// readManagedJournal reads a registration's daemon journal without contacting the
+// daemon and checks that it belongs to this exact channel, alias and session.
+func readManagedJournal(ch, alias string, m PeerMeta) (ConnectionState, error) {
+	var c ConnectionState
+	if !core.ValidStoreName(m.ConnectionID) {
+		return c, fmt.Errorf("invalid managed connection id for %s/%s", ch, alias)
+	}
+	b, err := os.ReadFile(filepath.Join(DaemonDir(), "connections", m.ConnectionID+".json"))
+	if err != nil {
+		return c, fmt.Errorf("read managed backend for %s/%s: %w", ch, alias, err)
+	}
+	if err = json.Unmarshal(b, &c); err != nil {
+		return c, fmt.Errorf("read managed backend for %s/%s: %w", ch, alias, err)
+	}
+	if c.ID != m.ConnectionID || c.Channel != ch || c.Alias != alias || c.ThreadID != m.SessionID {
+		return c, fmt.Errorf("managed backend identity mismatch for %s/%s", ch, alias)
+	}
+	return c, nil
 }

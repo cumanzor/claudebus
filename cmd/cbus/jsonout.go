@@ -55,6 +55,10 @@ type peerJSON struct {
 	Scope  string `json:"scope"`
 	Origin string `json:"origin,omitempty"`
 	Model  string `json:"model,omitempty"`
+	// Native rows only. listenerPid stays the daemon's pid; consumerPid is the
+	// harness process, present only while it is observed online.
+	ConsumerState string `json:"consumerState,omitempty"`
+	ConsumerPid   int    `json:"consumerPid,omitempty"`
 }
 
 type channelsJSON struct {
@@ -99,15 +103,17 @@ func emitListJSON(snap client.StoreSnapshot, active bool, chosen string) int {
 				continue
 			}
 			out.Peers = append(out.Peers, peerJSON{
-				Alias:       p.Alias,
-				SessionID:   p.SessionID,
-				Listening:   p.Listening,
-				ListenerPid: p.ListenerPid,
-				Host:        p.Host,
-				Cwd:         p.Cwd,
-				Scope:       "local",
-				Origin:      p.Origin,
-				Model:       p.Model,
+				Alias:         p.Alias,
+				SessionID:     p.SessionID,
+				Listening:     p.Listening,
+				ListenerPid:   p.ListenerPid,
+				Host:          p.Host,
+				Cwd:           p.Cwd,
+				Scope:         "local",
+				Origin:        p.Origin,
+				Model:         p.Model,
+				ConsumerState: p.ConsumerState,
+				ConsumerPid:   p.ConsumerPid,
 			})
 		}
 		// A channel with no peers to show is dropped, matching the text path, which
