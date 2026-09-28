@@ -74,6 +74,8 @@ type queueAttempt struct {
 	Hash     string              `json:"hash"`
 	QueueID  string              `json:"queueId,omitempty"`
 	Evidence *codexMessageLookup `json:"evidence,omitempty"`
+	// Set only after a clean Claude socket write; it anchors the receipt deadline.
+	SubmittedAt time.Time `json:"submittedAt,omitzero"`
 }
 
 type nativeQueue interface {
@@ -948,12 +950,24 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 			if err != nil {
 				return err
 			}
+			if found.State == codexMessageNotFound && daemonHarness(c.Harness) == daemonHarnessClaude {
+				return d.awaitClaudeReceipt(c)
+			}
 			if found.State == codexMessageNotFound {
 				return errors.New("enqueue outcome uncertain; retained message needs reconciliation, not a blind retry")
 			}
 			evidence = &found
 		}
-		return d.accept(c, evidence)
+		if daemonHarness(c.Harness) != daemonHarnessClaude {
+			return d.accept(c, evidence)
+		}
+		attempt := *c.Pending
+		if err := d.accept(c, evidence); err != nil {
+			return err
+		}
+		logClaudeAttempt(c, attempt, "received")
+		d.setRetry(c.ID, time.Time{})
+		return nil
 	}
 	c.Pending = &queueAttempt{ClientID: fmt.Sprintf("cbus-%s-%d-%s", c.ID, c.Offset, hash[:16]), End: end, Hash: hash}
 	c.State = "submitting"
@@ -966,6 +980,23 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		return errors.New("connection detached before enqueue")
 	}
 	queueID, err := q.enqueue(c.ThreadID, c.Pending.ClientID, nativeBusPayload(line, msg))
+	var awaiting *claudeAwaitingReceiptError
+	if daemonHarness(c.Harness) == daemonHarnessClaude && errors.As(err, &awaiting) && awaiting.State == claudeSubmitted && awaiting.Err == nil {
+		// A clean write has no ACK. Wait for its receipt on the scheduler tick
+		// with the sidecar kept, so lookups scan on from where they stopped.
+		next := *c
+		attempt := *c.Pending
+		attempt.SubmittedAt = time.Now()
+		next.Pending = &attempt
+		next.State, next.Error = claudeAwaitingReceiptState, ""
+		if e := d.save(&next); e != nil {
+			d.closeQueue(c.ID)
+			return errors.Join(err, e)
+		}
+		*c = next
+		logClaudeAttempt(c, attempt, "submitted")
+		return nil
+	}
 	if err != nil {
 		var rejection *rpcError
 		var claudeRejected *claudeNotSubmittedError
@@ -988,6 +1019,24 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	}
 	c.Pending.QueueID = queueID
 	return d.accept(c, nil)
+}
+
+// Absence before the deadline is still waiting. After it, the attempt is
+// reported uncertain on the error backoff; lookups continue and nothing is resent.
+func (d *busDaemon) awaitClaudeReceipt(c *ConnectionState) error {
+	if !claudeReceiptWaiting(c, time.Now()) {
+		return errors.New("Claude receipt not observed before the deadline; retained message needs reconciliation, not a blind retry")
+	}
+	if c.State == claudeAwaitingReceiptState && c.Error == "" {
+		return nil
+	}
+	next := *c
+	next.State, next.Error = claudeAwaitingReceiptState, ""
+	if err := d.save(&next); err != nil {
+		return err
+	}
+	*c = next
+	return nil
 }
 
 func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) error {

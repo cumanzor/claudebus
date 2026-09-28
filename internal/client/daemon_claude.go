@@ -3,10 +3,36 @@ package client
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"time"
 )
 
 const daemonHarnessClaude = "claude"
+
+const claudeAwaitingReceiptState = "awaiting-receipt"
+
+// Only a clean write with a persisted submission time waits for its receipt;
+// ambiguous writes and attempts journaled without that time stay uncertain.
+func claudeReceiptWaiting(c *ConnectionState, now time.Time) bool {
+	return daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil &&
+		c.Pending.QueueID == "" && c.Pending.Evidence == nil &&
+		!c.Pending.SubmittedAt.IsZero() && now.Before(c.Pending.SubmittedAt.Add(claudeReceiptTimeout))
+}
+
+func pendingConnectionState(c *ConnectionState, now time.Time) string {
+	if claudeReceiptWaiting(c, now) {
+		return claudeAwaitingReceiptState
+	}
+	return "uncertain"
+}
+
+func logClaudeAttempt(c *ConnectionState, a queueAttempt, outcome string) {
+	if !a.SubmittedAt.IsZero() && outcome != "submitted" {
+		outcome += " after " + time.Since(a.SubmittedAt).Round(time.Millisecond).String()
+	}
+	fmt.Fprintf(os.Stderr, "cbus daemon: %s attempt %s: %s\n", ConnectionTarget(c), a.ClientID, outcome)
+}
 
 // Adapter dispatch is separate from public admission. Claude admission remains
 // disabled until its session-side request and credential handoff are integrated.
