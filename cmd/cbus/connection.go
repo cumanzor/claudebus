@@ -61,6 +61,14 @@ func runConnect(args []string) int {
 	if err != nil {
 		return die("%v", err)
 	}
+	return reportConnect(state, asJSON)
+}
+
+func reportConnect(state client.ConnectionState, asJSON bool) int {
+	if state.Deferred != "" {
+		target := client.ConnectionTarget(&state)
+		fmt.Fprintf(os.Stderr, "cbus: connected as %s, but a step after registration failed and the daemon retries it: %s (cbus connection status %s)\n", target, state.Deferred, target)
+	}
 	if asJSON {
 		return printConnectionJSON(state)
 	}

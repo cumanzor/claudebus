@@ -253,7 +253,7 @@ func waitIncarnationGone(consumer nativeConsumer, grace time.Duration) (bool, er
 }
 
 // ancestryParent reads one step of this process's ancestry. (A var only for tests.)
-var ancestryParent = procParent
+var ancestryParent = procPPID
 
 // ownAncestor reports whether pid is above this process. It fails closed: a
 // walk that cannot reach init is an error, never "not an ancestor".
@@ -265,7 +265,7 @@ func ownAncestor(pid int) (bool, error) {
 		if i >= 256 {
 			return false, errors.New("this process's ancestry is deeper than expected")
 		}
-		_, parent, err := ancestryParent(p)
+		parent, err := ancestryParent(p)
 		if err != nil {
 			return false, fmt.Errorf("read this process's ancestry at pid %d: %w", p, err)
 		}

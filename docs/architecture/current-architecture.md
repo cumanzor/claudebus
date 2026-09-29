@@ -199,7 +199,7 @@ Exact output strings live in command-reference.md; this is the shape.
 | `tail` (arm) | refused, points at `cbus connect` (see command-reference.md for the exact text) | arms the in-process follower |
 | `list` | `listenerPid` = daemon pid while armed, `-1` on disconnect | `listenerPid` = follower pid or null |
 | `leave` | broadcasts `leave` presence, then removes the registration (`leaveSession`, `store.go:461-515`) | same: broadcasts `leave`, removes the peer dir |
-| `unregister` | detaches the connection (journal entry survives with state `detached`, `daemon_scheduler.go:37-39`) and broadcasts `departed` ("unregistered") for every peer, managed included (`store.go:540`) | unconditional removal, broadcasts `departed` (`Unregister`, `store.go:518-543`) |
+| `unregister` | detaches the connection (journal entry survives with state `detached`: `daemon.go:897-902` in delivery, `daemon_presence.go:120-126` for a disconnected connection, and at daemon start `daemon_scheduler.go:37-40`) and broadcasts `departed` ("unregistered") for every peer, managed included (`store.go:540`) | unconditional removal, broadcasts `departed` (`Unregister`, `store.go:518-543`) |
 | `close` | refused, points at `cbus connection disconnect` (see command-reference.md for the exact text) | SIGTERMs the owning process |
 | `prune` | never reaped (`PeerDead` exemption, §6) | reaped once past grace |
 | `hook-exit` | preserves the registration | removes it (graceful SessionEnd) |
