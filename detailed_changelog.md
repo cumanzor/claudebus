@@ -6,23 +6,24 @@ previous repository and may not resolve.
 
 ## [2026-09-29 18:35:00 UTC] [Client] let native close walk its own ancestry through a root-owned login process
 
-[Attempt #1] 7 files. Production: internal/client/close_native_unix.go,
+[Attempt #1] 8 files. Production: internal/client/close_native_unix.go,
 procinfo_darwin.go, procinfo_linux.go. Tests: procinfo_darwin_test.go,
-signalguard_unix_test.go. detailed_changelog.md, simple_changelog.md.
+signalguard_unix_test.go. Docs: docs/architecture/command-reference.md.
+detailed_changelog.md, simple_changelog.md.
 
 [What changed]
 `cbus close` on a natively connected peer refused every time from a macOS
 session started through `/usr/bin/login`, with `cannot inspect: read this
 process's ancestry at pid <n>: operation not permitted; refusing to signal`.
-Close refuses to signal a process that is its own ancestor, and it walks its
-own parent chain to know. That walk read each parent through `proc_info`
+Close refuses to signal its own process or any of its ancestors, and it walks
+its own parent chain to know. That walk read each parent through `proc_info`
 (`PROC_PIDTBSDINFO`), which returns EPERM for a root-owned process when the
 caller is not root. A session started through `login` has a root-owned
 `login` between the terminal server and the shell, so the walk hit an
 unreadable step and, correctly, failed closed. Nothing was signalled, but
-close was unusable from a normal terminal. Earlier tests and live runs all
-started from a shell reparented to init, which has no `login` above it, so
-none reached this.
+close was unusable from a normal terminal. Earlier live runs started
+from a shell reparented to init, which has no `login` above it, and no test
+put a root-owned process in the walk, so none reached this.
 
 The walk only needs the parent pid, not the process name `proc_info` also
 returns. On macOS it now reads the parent through `sysctl KERN_PROC_PID`
@@ -84,8 +85,8 @@ which is why the seam test exists.
 Findings folded in: a review noted that the commit text and a test comment
 claimed every terminal session has a `login` ancestor, which is false for
 sessions spawned without one; both were reworded to a session started
-through `login`. A zero-length reply and an oversized reply were first both
-labeled ESRCH; they are now separate.
+through `login`. A zero-length reply and a reply of any other wrong
+size were first both labeled ESRCH; they are now separate.
 
 Live evidence: from a shell whose chain contained a root-owned `login`, the
 previously released binary refused closing a scratch native peer with the
