@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import socket
 import shlex
 import signal
 import struct
@@ -230,6 +231,20 @@ class MixedCanary(ResumeCanary):
         self.check("codex_rollout_version_matches_expected", meta.get("cli_version") == self.args.expected_codex_version)
 
     def run(self):
+        if self.args.require_init_reparented:
+            parent = os.getppid()
+            grandparent = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(parent)], capture_output=True, text=True).stdout.strip() or 0)
+            if 1 not in (parent, grandparent):
+                raise RuntimeError("--require-init-reparented: this canary's runner is not reparented to init")
+            self.result["initReparented"] = {"parent": parent, "grandparent": grandparent}
+        guard_args = (self.args.guard_cbus, self.args.guard_daemon_pid, self.args.guard_channel)
+        if any(guard_args) and not all(guard_args):
+            raise RuntimeError("--guard-cbus, --guard-daemon-pid and --guard-channel go together")
+        self.guard_before = self.guard_snapshot()
+        if self.guard_before is not None:
+            self.result["guard"] = {"before": self.guard_before}
+            if "cbus daemon serve" not in self.guard_before["daemonCommand"] or self.guard_before["rosterExit"] != 0:
+                raise RuntimeError("guarded daemon or roster is not readable before the run")
         # Refuse an unintended runtime before starting fake providers or the daemon.
         version_env = {"PATH": self.env["PATH"], "HOME": str(self.root), "CODEX_HOME": str(self.home),
                        "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1",
@@ -298,20 +313,228 @@ class MixedCanary(ResumeCanary):
                        if row.get("from") == sender and row.get("to") == recipient and row.get("text") == marker]) == 1)
         self.check("same_daemon_and_both_original_CLIs", self.fixture.health == json.loads(self.fixture.command(["daemon", "status", "--json"])) and self.cc_process.poll() is None and self.process.poll() is None)
         self.check("all_observed_nonlocal_proxy_requests_denied", all(r["status"] == 403 for r in self.blocked))
+        self.check_list_consumers(cc, cx)
+        self.check_disconnect_fence()
+        self.close_codex_peer()
+        self.check_guard("end")
         self.result["passed"] = True
 
+    def daemon_http(self, method, path, body=None):
+        # Raw control-socket request: the CLI has no way to send a fenced disconnect.
+        payload = json.dumps(body).encode() if body is not None else b""
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(10)
+            conn.connect(str(self.bus / ".daemon/control.sock"))
+            conn.sendall(f"{method} {path} HTTP/1.1\r\nHost: cbus\r\nContent-Type: application/json\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode() + payload)
+            data = b""
+            while chunk := conn.recv(65536):
+                data += chunk
+        head, _, rest = data.partition(b"\r\n\r\n")
+        code = int(head.split(b" ", 2)[1])
+        if b"chunked" in head.lower():
+            decoded, rest = b"", rest
+            while rest:
+                size, _, rest = rest.partition(b"\r\n")
+                n = int(size, 16)
+                if n == 0:
+                    break
+                decoded, rest = decoded + rest[:n], rest[n + 2:]
+            rest = decoded
+        return code, rest.decode(errors="replace")
+
+    @staticmethod
+    def start_token(pid):
+        run = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+        return run.stdout.strip() if run.returncode == 0 else ""
+
+    def owned_descendant(self, root_pid, pid):
+        # Independent of the daemon: pid must sit in the process tree the canary started.
+        table = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, check=True).stdout
+        children = {}
+        for line in table.splitlines():
+            child, parent = (int(field) for field in line.split())
+            children.setdefault(parent, []).append(child)
+        tree, frontier = {root_pid}, [root_pid]
+        while frontier:
+            for child in children.get(frontier.pop(), []):
+                if child not in tree:
+                    tree.add(child)
+                    frontier.append(child)
+        return pid in tree
+
+    def codex_witness(self):
+        consumer = self.states()["codex"].get("consumer", {}).get("pid")
+        if not consumer or not self.owned_descendant(self.process.pid, consumer):
+            raise RuntimeError(f"Codex consumer pid {consumer} is not in the process tree this canary started; refusing to act on it")
+        token = self.start_token(consumer)
+        if not token:
+            raise RuntimeError(f"cannot pin the start time of Codex consumer pid {consumer}")
+        return consumer, token
+
+    def guard_snapshot(self):
+        if not self.args.guard_cbus:
+            return None
+        pid = self.args.guard_daemon_pid
+        command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        env = {k: v for k, v in os.environ.items() if k != "CBUS_DIR"}
+        roster = subprocess.run([self.args.guard_cbus, "list", self.args.guard_channel], capture_output=True, text=True, env=env, timeout=15)
+        return {"daemonCommand": command, "roster": roster.stdout, "rosterExit": roster.returncode}
+
+    def check_guard(self, phase):
+        if not self.args.guard_cbus:
+            return
+        now = self.guard_snapshot()
+        self.result.setdefault("guard", {})[phase] = now
+        if now != self.guard_before or "cbus daemon serve" not in now["daemonCommand"]:
+            raise RuntimeError(f"guarded daemon or roster changed at {phase}; aborting")
+
+    def check_list_consumers(self, cc, cx):
+        listing = json.loads(self.fixture.command(["list", self.fixture.channel, "--json"]))
+        peers = {p["alias"]: p for channel in listing["channels"] for p in channel["peers"]}
+        text = self.fixture.command(["list", self.fixture.channel])
+        daemon_pid = self.fixture.health["pid"]
+        codex_consumer, _ = self.codex_witness()
+        self.result["listConsumers"] = {"json": peers, "text": text, "daemonPID": daemon_pid, "codexConsumerPID": codex_consumer}
+        def row(alias):
+            return next((line for line in text.splitlines() if f"/{alias} " in line), "")
+        self.check("list_claude_row_shows_consumer_not_daemon",
+                   peers["receiver"].get("consumerPid") == self.cc_process.pid and peers["receiver"].get("consumerState") == "online"
+                   and peers["receiver"].get("listenerPid") == daemon_pid and f"pid={self.cc_process.pid} " in row("receiver"))
+        self.check("list_codex_row_shows_consumer_not_daemon",
+                   bool(codex_consumer) and codex_consumer != daemon_pid and peers["codex"].get("consumerPid") == codex_consumer
+                   and peers["codex"].get("consumerState") == "online" and peers["codex"].get("listenerPid") == daemon_pid
+                   and f"pid={codex_consumer} " in row("codex"))
+
+    def check_disconnect_fence(self):
+        code, body = self.daemon_http("GET", "/health")
+        self.result["health"] = body
+        self.check("health_advertises_fenced_disconnect", code == 200 and json.loads(body).get("fencedDisconnect") is True)
+        before = self.states()["receiver"]
+        code, body = self.daemon_http("POST", "/disconnect", {"target": self.cc_target, "connectionId": "not-this-registration"})
+        after = self.states()["receiver"]
+        self.result["wrongFenceDisconnect"] = {"status": code, "body": body}
+        self.check("wrong_fence_disconnect_refused", code == 400 and "different registration" in body)
+        self.check("wrong_fence_leaves_registration_unchanged",
+                   after.get("state") == "socket-ready" and all(after.get(k) == before.get(k) for k in ("id", "threadId", "offset", "accepted")))
+
+    def close_codex_peer(self):
+        # Stubs stand in for tmux and osascript so close can never reach a real terminal.
+        stubs = self.root / "close-stubs"
+        stubs.mkdir()
+        for tool in ("tmux", "osascript"):
+            stub = stubs / tool
+            stub.write_text(f"#!/bin/sh\necho \"{tool} $*\" >> {shlex.quote(str(self.root / 'close-stub-calls.log'))}\nexit 1\n")
+            stub.chmod(0o755)
+        consumer, token = self.codex_witness()
+        inbox = self.bus / self.fixture.channel / "codex" / "inbox.jsonl"
+        inbox_before = inbox.read_bytes()
+        env = {**self.fixture.env, "PATH": str(stubs) + os.pathsep + self.fixture.env.get("PATH", "")}
+        self.check_guard("before-close")
+        if self.start_token(consumer) != token or not self.owned_descendant(self.process.pid, consumer):
+            raise RuntimeError("Codex consumer changed between the witness and the close; aborting without closing")
+        self.result["codexCloseWitness"] = {"pid": consumer, "startToken": token, "ownedRoot": self.process.pid}
+        run = subprocess.run([str(self.fixture.binary), "close", self.target], cwd=self.fixture.work, env=env, capture_output=True, text=True, timeout=30)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                os.kill(consumer, 0)
+            except ProcessLookupError:
+                break
+            self.tick_quiet()
+        after = self.states()
+        self.result["codexClose"] = {"exitCode": run.returncode, "stdout": run.stdout, "stderr": run.stderr, "consumerPID": consumer,
+                                     "stubCalls": (self.root / "close-stub-calls.log").read_text() if (self.root / "close-stub-calls.log").exists() else ""}
+        surfaces = ("surface already closed", "surface not swept (its terminal no longer exists)", "tty busy, surface left alone",
+                    "surface left open (could not confirm idle)", "surface unknown (no tty)")
+        self.check("codex_close_reports_ended_and_disconnected", run.returncode == 0
+                   and run.stdout.startswith(self.target + ": process ended; connection disconnected, inbox retained; ")
+                   and any(run.stdout.strip().endswith(surface) for surface in surfaces))
+        try:
+            os.kill(consumer, 0)
+            gone = False
+        except ProcessLookupError:
+            gone = True
+        self.check("codex_close_ended_the_journaled_consumer", gone)
+        self.check("codex_close_disconnected_exact_registration", after["codex"].get("state") == "disconnected" and after["codex"].get("id") == self.result["connections"]["codex"]["id"])
+        self.check("codex_close_kept_inbox", inbox.read_bytes() == inbox_before)
+        self.check("codex_close_left_claude_and_daemon", after["receiver"].get("state") == "socket-ready" and self.cc_process.poll() is None
+                   and self.fixture.health == json.loads(self.fixture.command(["daemon", "status", "--json"])))
+        self.check("codex_close_never_reached_a_real_terminal", all(line.split()[0] in ("tmux", "osascript") for line in self.result["codexClose"]["stubCalls"].splitlines()))
+        self.check_guard("after-close")
+        self.check_offline_rows()
+
+    def check_offline_rows(self):
+        def offline(alias):
+            listing = json.loads(self.fixture.command(["list", self.fixture.channel, "--json"]))
+            peer = next(p for channel in listing["channels"] for p in channel["peers"] if p["alias"] == alias)
+            row = next((line for line in self.fixture.command(["list", self.fixture.channel]).splitlines() if f"/{alias} " in line), "")
+            return peer, row
+        peer, row = offline("codex")
+        self.result.setdefault("offlineRows", {})["codex"] = {"json": peer, "text": row}
+        self.check("list_closed_codex_row_has_no_consumer_pid", "consumerPid" not in peer and "pid=? " in row)
+        self.fixture.command(["connection", "disconnect", self.cc_target])
+        peer, row = offline("receiver")
+        self.result["offlineRows"]["receiver"] = {"json": peer, "text": row}
+        self.check("list_disconnected_claude_row_has_no_consumer_pid", "consumerPid" not in peer and "pid=? " in row)
+
+    def tick_quiet(self):
+        # The closed Codex CLI exits on purpose here; keep draining the Claude PTY only.
+        if self.cc_master is not None and select.select([self.cc_master], [], [], .1)[0]:
+            try:
+                self.cc_output.extend(os.read(self.cc_master, 65536))
+            except OSError:
+                pass
+
+    @staticmethod
+    def group_members(pgid):
+        table = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat=,comm="], capture_output=True, text=True).stdout
+        members = []
+        for line in table.splitlines():
+            fields = line.split(None, 3)
+            if len(fields) == 4 and fields[1] == str(pgid):
+                members.append({"pid": int(fields[0]), "stat": fields[2], "comm": fields[3]})
+        return members
+
+    def signal_group(self, name, process, sig):
+        # Record what the group held; a failed signal is evidence, not a crash.
+        members = self.group_members(process.pid)
+        entry = {"group": name, "pgid": process.pid, "signal": sig.name, "members": members}
+        try:
+            os.killpg(process.pid, sig)
+            entry["result"] = "sent"
+        except ProcessLookupError:
+            entry["result"] = "ESRCH"
+        except PermissionError:
+            entry["result"] = "EPERM"
+        self.result.setdefault("groupSignals", []).append(entry)
+        return entry["result"]
+
     def cleanup(self):
+        try:
+            self.cleanup_inner()
+        except Exception as error:
+            self.result["passed"] = False
+            self.result["cleanupCrash"] = repr(error)
+            (self.root / "result.json").write_text(json.dumps(self.result, indent=2, default=str) + "\n")
+
+    def cleanup_inner(self):
         errors, cleanup = [], {}
         for name, process in (("codex", self.process), ("claude", self.cc_process)):
             if process is not None:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=8)
-                except ProcessLookupError:
-                    pass
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
+                if self.signal_group(name, process, signal.SIGTERM) == "sent":
+                    try:
+                        process.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        self.signal_group(name, process, signal.SIGKILL)
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            errors.append(name + ": still running after SIGKILL")
+                else:
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
                 cleanup[name + "Exited"] = process.poll() is not None
         for master in (self.master, self.cc_master):
             if master is not None:
@@ -357,6 +580,10 @@ def parse_args(argv=None):
     parser.add_argument("--expected-codex-version", default="0.154.0", help="Exact installed and rollout version (default: %(default)s)")
     parser.add_argument("--expected-claude-version", default="2.1.277", help="Exact installed version (default: %(default)s)")
     parser.add_argument("--temp-root", default="/tmp")
+    parser.add_argument("--require-init-reparented", action="store_true", help="Refuse to run unless this canary's parent was reparented to init")
+    parser.add_argument("--guard-cbus", help="Installed cbus binary used only to read the guarded roster")
+    parser.add_argument("--guard-daemon-pid", type=int, help="A live daemon that must be unchanged before and after")
+    parser.add_argument("--guard-channel", help="A live channel whose roster must be unchanged before and after")
     return parser.parse_args(argv)
 
 
@@ -371,7 +598,7 @@ def main():
         canary.result["error"] = str(error)
     finally:
         canary.cleanup()
-    print(json.dumps({"passed": canary.result["passed"], "error": canary.result.get("error"), "checks": canary.result["checks"],
+    print(json.dumps({"passed": canary.result.get("passed"), "cleanupCrash": canary.result.get("cleanupCrash"), "error": canary.result.get("error"), "checks": canary.result["checks"],
                       "expectedVersions": canary.result.get("expectedVersions"), "versions": canary.result.get("versions"),
                       "codexRolloutVersion": canary.result.get("codexRolloutVersion"), "result": str(canary.root / "result.json")}), flush=True)
     return 0 if canary.result["passed"] else 1
