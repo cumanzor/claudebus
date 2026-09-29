@@ -203,12 +203,12 @@ took the port suggestion**: `writeMeta` (`store.go:74-84`) always writes a
 `.meta.tmp.<pid>` sibling then `os.Rename`s it over `meta.json`, atomic on the
 same filesystem; there is no in-place rewrite path left. The daemon's own
 JSON state (`connections/<id>.json` etc.) goes through `durableJSON`
-(`daemon.go:389-414`): `CreateTemp` + `Write` + `Sync` + `Close` + `Rename`,
+(`daemon.go:401-426`): `CreateTemp` + `Write` + `Sync` + `Close` + `Rename`,
 then the containing directory is itself opened and `Sync`'d after the rename,
 fsync included both before AND after the atomic swap, stronger than the plain
 client write, since a daemon crash between write and rename must never leave
 a torn connection record. A daemon-managed peer's own `meta.json` goes through
-this exact same path (`writeDaemonMeta`, `daemon.go:416-422`), not the plain
+this exact same path (`writeDaemonMeta`, `daemon.go:428-434`), not the plain
 `writeMeta` above.
 
 | Field | Type | Written | Meaning |
@@ -221,11 +221,11 @@ this exact same path (`writeDaemonMeta`, `daemon.go:416-422`), not the plain
 | `ownerPid` | null → int/null | join = null; set at tail arm (bin/cbus:502) | pid of the ancestor session process (empty → null). **Go client, native connect:** always null in meta.json; the observed CLI process pid lives in the connection journal instead, as `consumer.pid`, shown by `cbus connection status` (`connection.go:171-172`), never stamped into meta |
 | `host` | string | join | `hostname -s` (fallback `hostname`); Go client: `$CBUS_HOST` overrides when set, same part-before-first-dot rule (`HostLabel()`, command-reference.md's environment variables table) |
 | `ts` | string | join | join time, UTC ISO-8601; never refreshed as a field |
-| `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas. Written at join (`store.go:291-295`), native connect (`daemon.go:722`), and tail arm (`follow.go:192`); also refreshed by `touchActivity` when a session's own registration is the anchor or target of `arrange`/`scatter`/`focus` (`layout.go:340`, `store.go:863-883`, skipped for a daemon-managed peer since the daemon owns its grace). **`send` does NOT write it.** Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
+| `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas. Written at join (`store.go:291-295`), native connect (`daemon.go:724`), and tail arm (`follow.go:192`); also refreshed by `touchActivity` when a session's own registration is the anchor or target of `arrange`/`scatter`/`focus` (`layout.go:340`, `store.go:863-883`, skipped for a daemon-managed peer since the daemon owns its grace). **`send` does NOT write it.** Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
 | `origin` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: `fresh` (spawn) / `fork` (branch) / `joined` (plain join); absent = unknown / hand-maintained |
 | `model` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the model the child was launched on; absent = unknown |
 | `listenerStart` | string, `omitempty` | Go client only; set at tail arm alongside `listenerPid` | the structural identity witness, `procStartTime` of the listener pid at arm time; a listener whose current start time no longer matches this value is treated as dead outright (pid recycling guard), replacing the bash-era argv-string check |
-| `profile` | string, `omitempty` | Go client only; stamped at join ONLY (`store.go:295`) | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude`. Native connect does not set this meta field at all (`daemon.go:722`'s `peerMeta` literal has no `Profile:`); a managed peer's profile is instead derived on demand from the connection binding's `ConfigHome` when something needs it (`formation_harness.go`, command-reference.md §10) |
+| `profile` | string, `omitempty` | Go client only; stamped at join ONLY (`store.go:295`) | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude`. Native connect does not set this meta field at all (`daemon.go:724`'s `peerMeta` literal has no `Profile:`); a managed peer's profile is instead derived on demand from the connection binding's `ConfigHome` when something needs it (`formation_harness.go`, command-reference.md §10) |
 | `harness` | string, `omitempty` | Go client only; stamped at join/connect | `claude` / `codex` / `grok` / `opencode`; empty on legacy templates predating harness identity, in which case `claude` is assumed |
 | `connectionId` | string, `omitempty` | Go client only; stamped on native connect | the key into `.daemon/connections/<connectionId>.json`; present iff this peer is daemon-managed |
 
@@ -867,7 +867,7 @@ against concurrently vanishing peers.
 | `compact-post` | `cbus hook-compact post` (PostCompact hook) | own alias | =from | `compacted[ (manual\|auto)], in-context state was reset` |
 | `join` (Go client, native) | daemon observes the managed CLI session transition to `online` | own alias | =from | `CLI session connected (or resumed)` (`daemon_presence.go:180`) |
 | `departed` (Go client, native) | daemon observes the managed CLI session exit | own alias | =from | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:187`) |
-| `leave` (Go client, native) | `cbus connection disconnect` (explicit, while the consumer was online) | own alias | =from | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:98`) |
+| `leave` (Go client, native) | `cbus connection disconnect` (explicit, while the consumer was online) | own alias | =from | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:99`) |
 
 **Go client additions**: a Codex peer also fires `compact-post` from its own
 observed compaction path, not just Claude's PreCompact/PostCompact hooks. Every
@@ -1483,24 +1483,24 @@ are written fresh as contract, not narrative.
 
 Transport: HTTP/1.1 over a unix socket at `$CBUS_DIR/.daemon/control.sock`
 (mode 0600), one daemon per store, singleton-enforced by an flock on
-`$CBUS_DIR/.daemon/lock` (`RunDaemon`, `daemon.go:164-206`). Every request
+`$CBUS_DIR/.daemon/lock` (`RunDaemon`, `daemon.go:182-190`). Every request
 carrying a non-empty `Origin` header refuses `403 browser requests are not
-supported`: this is local process IPC only (`daemon.go:244-246`).
+supported`: this is local process IPC only (`daemon.go:248-252`).
 
-Routes (`(*busDaemon).handler`, `daemon.go:241-328`):
+Routes (`(*busDaemon).handler`, `daemon.go:246-340`):
 
 | Route | Request | Response |
 |---|---|---|
-| `GET /health` | none | `{"running":true,"pid":<pid>,"start":"<procStartTime>","protocol":<n>,"version":"<v>"}`; `DaemonProtocolVersion` is `3` (`daemon.go:110,248-250`) |
-| `POST /stop` | optional `{"pid":<n>,"start":"<s>"}`, ≤4096 bytes | if both fields are set and either mismatches this daemon's own pid/start: `409 daemon instance changed; nothing stopped`; else `{"stopping":true}`, then the context is cancelled (`daemon.go:252-269`) |
-| `POST /connect` | `connectWireRequest{ConnectRequest, ClaudeToken}`, ≤64 KiB | the new connection's full snapshot (`daemon.go:271-282`) |
-| `GET /connections` | none | `statusSnapshots()` for every managed connection (`daemon.go:283-284`) |
-| `POST /disconnect` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | `{"disconnected":true}` (`daemon.go:285-297`) |
-| `POST /reconcile` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | the reconciled connection's snapshot (`daemon.go:298-311`) |
-| `POST /abandon` | `AbandonRequest`, ≤4096 bytes | the connection's snapshot (`daemon.go:312-323`) |
-| anything else | (none) | `404` (`daemon.go:324-325`) |
+| `GET /health` | none | `{"running":true,"pid":<pid>,"start":"<procStartTime>","protocol":<n>,"version":"<v>","fencedDisconnect":true}`; `DaemonProtocolVersion` is `3` (`daemon.go:115,253-256`) |
+| `POST /stop` | optional `{"pid":<n>,"start":"<s>"}`, ≤4096 bytes | if both fields are set and either mismatches this daemon's own pid/start: `409 daemon instance changed; nothing stopped`; else `{"stopping":true}`, then the context is cancelled (`daemon.go:257-274`) |
+| `POST /connect` | `connectWireRequest{ConnectRequest, ClaudeToken}`, ≤64 KiB | the new connection's full snapshot, plus `deferred` when a step after registration failed (`daemon.go:276-292`) |
+| `GET /connections` | none | `statusSnapshots()` for every managed connection (`daemon.go:293-294`) |
+| `POST /disconnect` | `{"target":"<ch>/<al>"}` plus optional fence fields `connectionId`, `threadId`, `consumerPid`, `consumerStart` (`daemon.go:831-836`), ≤4096 bytes | `{"disconnected":true,"connectionId":"<id>"}` (`daemon.go:295-309`) |
+| `POST /reconcile` | `{"target":"<ch>/<al>"}`, ≤4096 bytes | the reconciled connection's snapshot (`daemon.go:310-323`) |
+| `POST /abandon` | `AbandonRequest`, ≤4096 bytes | the connection's snapshot (`daemon.go:324-335`) |
+| anything else | (none) | `404` (`daemon.go:336-337`) |
 
-`ReadHeaderTimeout: 5s` (`daemon.go:208`) is the only server-level timeout
+`ReadHeaderTimeout: 5s` (`daemon.go:213`) is the only server-level timeout
 (§13 tabulates the relay's own, separate, HTTP server); each route's own
 `MaxBytesReader` cap above is the only body-size limit, and there is no
 separate body-read deadline.
@@ -1510,12 +1510,12 @@ separate body-read deadline.
 One file per managed connection, `$CBUS_DIR/.daemon/connections/<id>.json`
 (§2's layout), written through `durableJSON` (§2.2: temp write, fsync,
 rename, then a directory fsync). `ConnectionState` itself
-(`daemon.go:39-66`) is fully `json`-tagged: `id`, `harness`, `channel`,
+(`daemon.go:41-70`) is fully `json`-tagged: `id`, `harness`, `channel`,
 `alias`, `threadId`, `config`, `claude`, `recordedVersion`, `state`,
 `error`, `listenerError`, `accepted`, `lastQueueId`, `dev`, `ino`, `offset`,
 `pending`, `lastAccepted`, `abandoned`, `resolutions`, `rolloutPath`,
 `consumer`, `presenceSequence`, `presenceOutbox`, `relay`, `relayStatus`,
-`compaction`.
+`compaction`, and `deferred` (set only on the `/connect` reply, never stored).
 
 **Compatibility hazard**: several of its embedded struct types carry NO
 `json` tags at all, so Go's default (the exact exported field name) is what
@@ -1545,12 +1545,12 @@ and `PeerDead`'s managed-peer exemption (§6.1). Two pieces worth stating
 together, precisely:
 
 **meta.json across the connection lifecycle.** Connect:
-`listenerPid: null, ownerPid: null` (`daemon.go:722`'s `peerMeta` literal).
+`listenerPid: null, ownerPid: null` (`daemon.go:724`'s `peerMeta` literal).
 Arm (the daemon registers itself as the live listener):
 `listenerPid: <daemon's own pid>`, `listenerStart: <daemon's own
-procStartTime>`, `ownerPid: null` (`daemon.go:796-798`). Disconnect:
+procStartTime>`, `ownerPid: null` (`daemon.go:811-813`). Disconnect:
 `listenerPid: -1`, `listenerStart: ""` (cleared, not merely left stale),
-`ownerPid: null` (`daemon.go:836`). `ownerPid` is never anything but null
+`ownerPid: null` (`daemon.go:876`). `ownerPid` is never anything but null
 across this whole lifecycle; the observed CLI process pid lives in the
 connection journal as `consumer.pid` instead (§2.2).
 

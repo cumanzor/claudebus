@@ -814,7 +814,7 @@ match); failure → `cbus: no peer "<al>" in your channels — use
 | Listener alive | Accepted |
 | Listener recorded but **dead** | Refused: `cbus: "<ch>/<al>" is not listening; use --force to queue anyway` (exit 1). With `--force`: stderr warning `cbus: warning: "<ch>/<al>" is not listening — sending anyway`, then queues. As of M4 (`cbus-8k9.4`) delivery is no longer best-effort: the next re-arm resumes from the durable `.cursor` boundary rather than seeking the inbox end, so a message queued into a dead gap IS delivered (`TestForceIntoDeadGapDelivers`, behavior-spec.md §8.6) |
 | **Native, connected** | Accepted; the daemon holds the listener slot even after the CLI session itself exits |
-| **Native, disconnected** (`listenerPid: -1`) | Refused, `--force` required (`daemon.go:836`) |
+| **Native, disconnected** (`listenerPid: -1`) | Refused, `--force` required (`send.go:47-51`; the `-1` is written at `daemon.go:876`) |
 | **Native, daemon down** | Refused |
 
 **`from` default chain (in order):** `--from X` (free text, unvalidated) →
@@ -1127,8 +1127,8 @@ at their first arm). The acting session never receives its own event.
 | `departed` | rename's dead-name reclaim | `departed (name reclaimed)` |
 | `compact-pre` | `cbus hook-compact pre` | `about to compact (auto), in-context state will be lost` |
 | `compact-post` | `cbus hook-compact post` | `compacted (auto), in-context state was reset` |
-| `join` (native) | daemon observes the CLI connect (or resume) | `CLI session connected (or resumed)` (`daemon_presence.go:179`) |
-| `departed` (native) | daemon observes CLI exit | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:186`) |
+| `join` (native) | daemon observes the CLI connect (or resume) | `CLI session connected (or resumed)` (`daemon_presence.go:180`) |
+| `departed` (native) | daemon observes CLI exit | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:187`) |
 | `leave` (native) | explicit `cbus connection disconnect` | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:99`) |
 | `compact-post` (Codex) | native compaction observed | Codex reports **completed** compactions separately from Claude's hook-driven pair; see [Codex](../codex.md) |
 

@@ -6,14 +6,14 @@ previous repository and may not resolve.
 
 ## [2026-09-29 20:16:00 UTC] [Client] skip reserved and inbox-less peers in the presence snapshot and report post-registration failures as deferred
 
-[Attempt #1] 13 files. Production: internal/client/daemon_presence.go,
+[Attempt #1] 14 files. Production: internal/client/daemon_presence.go,
 daemon.go, daemon_scheduler.go, daemon_claude_reconnect_unix.go,
 cmd/cbus/connection.go. Tests: daemon_presence_reserved_test.go,
 daemon_connect_deferred_test.go, daemon_connect_deferred_unix_test.go,
 cmd/cbus/connect_deferred_unix_test.go. Docs: docs/architecture/protocol.md,
-docs/architecture/command-reference.md. detailed_changelog.md,
-simple_changelog.md. Five commits on the branch plus a docs commit; two
-milestones, reviewed separately.
+docs/architecture/command-reference.md, docs/architecture/current-architecture.md.
+Changelogs: detailed_changelog.md, simple_changelog.md. Five code and test
+commits plus docs commits; two milestones, reviewed separately.
 
 [What changed]
 Milestone 1, the presence recipient. `preparePresence` walks every live peer
@@ -98,10 +98,18 @@ is written) still returns a plain error and leaves the journal, and possibly
 the meta, on disk. The caller is not registered in that case, so the exit
 status is not a false report; it is a candidate follow-up. The launch failure
 `connection or daemon workers busy; try again` is a separate problem and is not
-addressed. In the architecture docs only the `daemon_presence.go` line
-citations that this change shifted were updated; the `daemon.go` and
-`daemon_scheduler.go` citations were already imprecise before this change and
-were left as they were.
+addressed. In the architecture docs every `daemon.go`, `daemon_scheduler.go` and
+`daemon_presence.go` line citation was checked against the code and now points
+at the construct its sentence names, including the older ones that were already
+off before this change (the 22 existing ones in `daemon.go` and `daemon_scheduler.go` across
+`protocol.md`, `command-reference.md` and `current-architecture.md`). The
+protocol doc also lists `deferred` among the `ConnectionState` fields (set only
+on the `/connect` reply, never stored), notes it on the `/connect` route, and
+shows the `connectionId` the `/disconnect` reply already carried, the optional
+fence fields its request accepts, and `fencedDisconnect` in the `/health` reply.
+The send refusal for a disconnected native peer now cites `send.go`, and the
+`detached` transition cites the delivery and disconnected-connection paths as
+well as daemon start.
 
 [Testing Notes]
 Fixture tests. Milestone 1: six tests in daemon_presence_reserved_test.go go
