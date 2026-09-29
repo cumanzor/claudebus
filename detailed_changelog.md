@@ -6,7 +6,7 @@ previous repository and may not resolve.
 
 ## [2026-09-29 17:39:12 UTC] [Tests] update the wake and mixed-native canaries for awaiting-receipt and the v0.16.0 native changes
 
-[Attempt #1] 4 commits, 4 files. scripts/claude_interactive_wake_canary.py,
+[Attempt #1] 5 commits (4 of scripts, 1 of changelogs), 4 files. scripts/claude_interactive_wake_canary.py,
 scripts/mixed_native_local_canary.py, detailed_changelog.md,
 simple_changelog.md. Test-only, scripts only; the shipped binaries are
 unaffected and no release is needed.
@@ -50,7 +50,7 @@ timing gates and the new checks expect the current behavior. The canaries
 still need a harness and a scratch store; nothing here runs in `go test`.
 
 [Testing Notes]
-Run against the v0.16.0 release build with local fake providers on scratch
+Run against the release build of the v0.16.0 source (identical to the published asset except for the Go build-info module version stamp) with local fake providers on scratch
 stores, Claude Code 2.1.284 and Codex CLI 0.155.1, reparented to init, with the
 installed daemon and live roster unchanged before and after: every wake case
 passed (accepted 0.59 seconds release to acceptance, busy, hold, refuse,
