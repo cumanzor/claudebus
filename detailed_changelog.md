@@ -4,6 +4,72 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-29 17:39:12 UTC] [Tests] update the wake and mixed-native canaries for awaiting-receipt and the v0.16.0 native changes
+
+[Attempt #1] 4 commits, 4 files. scripts/claude_interactive_wake_canary.py,
+scripts/mixed_native_local_canary.py, detailed_changelog.md,
+simple_changelog.md. Test-only, scripts only; the shipped binaries are
+unaffected and no release is needed.
+
+[What changed]
+Since a clean Claude socket write waits for its receipt (`awaiting-receipt`,
+60 second deadline), the wake canary's held and refused cases carried an
+obsolete expectation: `uncertain` two seconds after the write. An early
+`uncertain` would now be a bug. The canary now requires `awaiting-receipt`
+with a recorded `submittedAt`, an unchanged `submittedAt` across a daemon
+restart, a refused changed-runtime rebind and a reconcile, and no resend. New
+cases: `rebind-pending` (the same process and capability reconnect while
+pending; the rebind succeeds and keeps the wait) and `hold-timeout` (still
+`awaiting-receipt` at 55 seconds, `uncertain` by 66, same pending attempt, no
+resend, no receipt). The accepted and busy-tool paths check that a receipt,
+and the next line after a held busy delivery, are accepted inside the old 10
+second backoff.
+
+The wake canary used to gate send-to-acceptance, which on busy-tool included
+the fake tool's intentional hold. It now records send-to-release and
+release-to-accepted separately and gates only the daemon part at 2.5 seconds.
+
+The mixed-native canary was extended, not fixed. In the two-harness run it
+checks that `cbus list` shows each native row's consumer pid, not the
+daemon's, in text and JSON, online and (pid `?`, no `consumerPid`) after close
+and after disconnecting the Claude peer; that `/health` advertises the fenced
+disconnect; that a disconnect fenced to the wrong connection ID leaves the
+registration untouched; and that `cbus close` on the Codex peer ends its
+journaled consumer, disconnects the registration, keeps the inbox and leaves
+the Claude peer and daemon alone, with tmux and osascript stubbed on PATH. The
+close target must sit in the process tree the canary started, its start time is
+pinned, and the run aborts without closing if either changes. The optional
+guard flags refuse to run unless the runner was reparented to init and check a
+named live daemon and roster before, around and after the close. Cleanup
+records each process-group signal (members, then sent, ESRCH or EPERM) instead
+of crashing, and a crash inside cleanup still writes `result.json`.
+
+[Possible Ripple Effects]
+A canary run against a build older than v0.16.0 now fails on purpose: the
+timing gates and the new checks expect the current behavior. The canaries
+still need a harness and a scratch store; nothing here runs in `go test`.
+
+[Testing Notes]
+Run against the v0.16.0 release build with local fake providers on scratch
+stores, Claude Code 2.1.284 and Codex CLI 0.155.1, reparented to init, with the
+installed daemon and live roster unchanged before and after: every wake case
+passed (accepted 0.59 seconds release to acceptance, busy, hold, refuse,
+restart, resume, rebind-pending, hold-timeout, clear, autostart) and the mixed
+canary passed all checks. The same wake gates run against a v0.15.0 build
+failed as intended (accepted 10.08 seconds against 0.59; busy-tool 10.91 and
+10.90 seconds against the candidate's following line at 0.41).
+
+Not covered. Accepting a Claude-held message after it is released is not
+evidenced: no harness mechanism releases a held message, so the queued-delivery
+timing uses the busy-tool path. The busy-tool first-message number (about 9.4
+seconds) does not discriminate, because the fake tool keeps running about 10
+seconds after the send and the row timestamp is the harness's own; busy-tool is
+judged on the following message and a daemon log with no error. On macOS a
+process-group signal on the canary's own closed Codex group returned EPERM with
+its only member a zombie; that is a correlation, not a proven kernel cause. A
+simulated device-number mismatch across real harnesses is not exercised by any
+canary.
+
 ## [2026-09-28 22:18:21 UTC] [Client] report a vanished native terminal surface accurately instead of as uncertain
 
 [Attempt #1] 5 files. Production: internal/client/close_native_unix.go. Tests:
