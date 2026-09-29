@@ -4,6 +4,95 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-29 18:35:00 UTC] [Client] let native close walk its own ancestry through a root-owned login process
+
+[Attempt #1] 7 files. Production: internal/client/close_native_unix.go,
+procinfo_darwin.go, procinfo_linux.go. Tests: procinfo_darwin_test.go,
+signalguard_unix_test.go. detailed_changelog.md, simple_changelog.md.
+
+[What changed]
+`cbus close` on a natively connected peer refused every time from a macOS
+session started through `/usr/bin/login`, with `cannot inspect: read this
+process's ancestry at pid <n>: operation not permitted; refusing to signal`.
+Close refuses to signal a process that is its own ancestor, and it walks its
+own parent chain to know. That walk read each parent through `proc_info`
+(`PROC_PIDTBSDINFO`), which returns EPERM for a root-owned process when the
+caller is not root. A session started through `login` has a root-owned
+`login` between the terminal server and the shell, so the walk hit an
+unreadable step and, correctly, failed closed. Nothing was signalled, but
+close was unusable from a normal terminal. Earlier tests and live runs all
+started from a shell reparented to init, which has no `login` above it, so
+none reached this.
+
+The walk only needs the parent pid, not the process name `proc_info` also
+returns. On macOS it now reads the parent through `sysctl KERN_PROC_PID`
+(`procPPID`), which any user may read for any process. The `ancestryParent`
+seam is now `func(int) (int, error)` and is used only by `ownAncestor`, so
+both callers of the ancestry check ride on it. Other callers of `procParent`
+need the name and keep `proc_info` unchanged. Linux keeps `/proc/<pid>/stat`
+(`procPPID` there wraps the existing reader) and Windows is untouched.
+
+The repo has no dependencies and already hand-rolls darwin syscall offsets,
+so the record layout is read by hand: a `kinfo_proc` is 648 bytes and
+`e_ppid` sits at offset 560, the same on arm64 and amd64.
+
+Fail-closed behavior is kept and made more specific:
+- a sysctl error is an error;
+- a zero-length reply, which is how the kernel answers a pid that no longer
+  exists, is `ESRCH`, so a vanished pid can never read as parent 0 and end
+  the walk as "not an ancestor";
+- a reply of any other size is a distinct layout error that names the size,
+  so the refusal points at the real cause instead of "no such process";
+- before the hand-rolled offset is trusted, the process's own `e_ppid` read
+  through it must equal `Getppid`; only a pass is cached, so a failed check
+  is retried and never sticks.
+
+The layout guard is a runtime check rather than a compile-time one, which
+would have needed cgo.
+
+[Possible Ripple Effects]
+A native close from a login-started session now proceeds to the signal
+instead of refusing; it still refuses for a genuinely unreadable chain, and
+for a chain that contains the target. A future macOS with a larger
+`kinfo_proc` would make the sysctl fail with ENOMEM and refuse, mislabeled
+as an allocation error rather than a layout mismatch. That case still
+refuses without signalling and was left as is, since the struct has been
+stable for years and handling it would add code for a hypothetical.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` passes on darwin arm64; the
+`internal/client` package passes as an amd64 binary under Rosetta. Linux
+amd64 and arm64 and Windows amd64 `go vet` pass. The Linux runtime path was
+compile-checked only, since its change is a three-line wrapper over the
+existing reader.
+
+New tests: `TestProcPPIDReadsRootOwnedProcess` reads the parent of live
+root-owned pids and compares it with `ps`; `TestAncestryParentReadsRootOwnedProcess`
+does the same through the production seam, so wiring the walk back to
+`proc_info` fails the suite and not only the field; `TestProcPPIDMissingPidIsAnError`,
+`TestKinfoRecordPPIDSizes` (empty, short and long replies) and
+`TestAncestryWalkRefusesAnUninspectableMiddleStep` cover the fail-closed
+cases.
+
+Mutation checks, each with the diff confirmed non-empty and the baseline
+restored: the seam pointed back at `procParent`, the size check removed, the
+offset moved, a walk that swallows errors, a layout error reported as ESRCH,
+the empty case removed, and the parser bypassing the size helper each fail
+the test aimed at them. The pointed-back seam initially survived the suite,
+which is why the seam test exists.
+
+Findings folded in: a review noted that the commit text and a test comment
+claimed every terminal session has a `login` ancestor, which is false for
+sessions spawned without one; both were reworded to a session started
+through `login`. A zero-length reply and an oversized reply were first both
+labeled ESRCH; they are now separate.
+
+Live evidence: from a shell whose chain contained a root-owned `login`, the
+previously released binary refused closing a scratch native peer with the
+EPERM error above, and the binary built from this change ended the same kind
+of peer (exit 0, peer process gone, inbox retained, terminal surface left
+alone because its tty was busy). The transcript was read by the reviewer.
+
 ## [2026-09-28 22:18:21 UTC] [Client] report a vanished native terminal surface accurately instead of as uncertain
 
 [Attempt #1] 5 files. Production: internal/client/close_native_unix.go. Tests:
