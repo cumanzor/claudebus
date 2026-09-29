@@ -27,8 +27,9 @@ Status, reconcile, disconnect and abandon all accept a relay-qualified target
 (`CHANNEL@HOST/ALIAS`) for a connection made through `connect CHANNEL@HOST
 ALIAS`.
 
-If a step after registration fails (arming the listener, the presence snapshot or
-fanout, the compaction check, or the relay connect), `cbus connect` still exits 0.
+If a step after registration fails (the presence snapshot or fanout, the compaction
+check, the relay connect, or, when reconnecting an existing session, arming the
+listener), `cbus connect` still exits 0.
 The connection is registered, and the daemon retries the step on its next tick.
 The CLI prints one stderr line:
 
@@ -37,7 +38,8 @@ The CLI prints one stderr line:
 `--json` output carries the same text as `deferred`. `cbus connection status` shows
 `connected; retrying after connect: ERROR` in `error` until a scheduled tick
 succeeds, and the daemon log has one line for it. A failure before registration
-exits 1 as before.
+exits 1 as before; on a fresh connect that includes arming the listener, which runs
+before registration.
 
 Native join/exit/resume/disconnect and completed-compaction events reach peers.
 Real events may invoke a recipient model turn; idle supervision does not.

@@ -137,7 +137,7 @@ base: `TestConsumerWriterDiscoveryExitResumeAndReadOnlyExclusion` flakes on
 both (tracked as issue #15), one relay test timed out once waiting for a
 separately built relay binary's health check under load, and a rare nil-map
 panic in the relay stop cleanup (`daemon_relay.go`, `relayViews` written
-without the lazy initialisation `setRelayView` has) was seen on this branch's
+without the lazy initialisation `relayState` has) was seen on this branch's
 runs. From source it needs a shutdown race and neither milestone changes the
 relay path in a way that makes it easier to reach; it is not fixed here.
 
