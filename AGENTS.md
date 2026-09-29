@@ -17,6 +17,12 @@ permission and collaboration procedures remain in their skills and commands.
   Open and Pointers. Update at milestone boundaries and before compaction. Use
   dated one-line notes for events; attach longer evidence. Keep internal IDs out
   of public PR prose. In worktrees, pass the project explicitly.
+- Put the evidence in the PR as well: the command and trimmed output showing a
+  new test fail on the old code and pass on the fix, mutation results, canary
+  summary lines with result-file hashes, and live-run excerpts, each in a
+  `<details>` block under an Evidence section. Scrub every excerpt as the
+  public content rules below require. Keep the raw artifacts locally too; the
+  PR carries an excerpt, not the only copy.
 - Human review/merge and release/install are separate gates. A feature flag must
   name its owner, checks, enablement criteria and removal milestone; it does not
   excuse a large PR. Preserve unrelated work in dirty checkouts.
