@@ -4,6 +4,175 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-29 20:16:00 UTC] [Client] skip reserved and inbox-less peers in the presence snapshot and report post-registration failures as deferred
+
+[Attempt #1] 14 files. Production: internal/client/daemon_presence.go,
+daemon.go, daemon_scheduler.go, daemon_claude_reconnect_unix.go,
+cmd/cbus/connection.go. Tests: daemon_presence_reserved_test.go,
+daemon_connect_deferred_test.go, daemon_connect_deferred_unix_test.go,
+cmd/cbus/connect_deferred_unix_test.go. Docs: docs/architecture/protocol.md,
+docs/architecture/command-reference.md, docs/architecture/current-architecture.md.
+Changelogs: detailed_changelog.md, simple_changelog.md. Five code and test
+commits plus docs commits; two milestones, reviewed separately.
+
+[What changed]
+Milestone 1, the presence recipient. `preparePresence` walks every live peer
+in the channel to build the recipient list for a join, departed or leave
+transition and failed the whole transition when one of them had a `meta.json`
+but no `inbox.jsonl`. A launch reservation (`ReserveAlias`, used by spawn and
+formation launch) is exactly that until its child connects, and a never-armed
+peer counts as live for the unarmed grace window, so a connect racing a
+sibling's launch exited 1 with `snapshot presence recipient CH/ALIAS inbox`
+while already registered. From a source trace the same error also broke explicit leave, and an
+abandoned reservation put every other peer's connection in state `error` and
+delayed its presence until the grace window ended.
+
+The snapshot now skips a recipient when it is a launch placeholder (session id
+`reserved`, no connection id), or when its `inbox.jsonl` does not exist. The
+second case also covers removal: on APFS the directory listing returns
+`inbox.jsonl` before `meta.json`, so `RemoveAll` of a peer dir always passes
+through meta present, inbox gone, and leave and unregister do that to managed
+peers without the snapshot holding recipient locks. Fanout never recreates a
+missing inbox, so such a recipient could not have received the event anyway.
+Any other failure to identify the inbox (a dangling symlink, a symlink loop,
+a target behind an unsearchable directory) stays fatal. Recipients that do
+have an inbox keep the same snapshot fields, epoch and session and connection
+fence. The placeholder is skipped even when mail has created its inbox: it has
+no session to announce to, presence is never replayed to a later arrival, and
+skipping only when the inbox is missing would make what a reserved child
+inherits depend on whether anyone mailed it. A reserved peer that later
+connects rewrites its session id and is an ordinary recipient from then on; it
+misses only the events from before its own session, as any later arrival does.
+
+Milestone 2, the connect outcome. Once connect has registered the connection
+(meta written, listener armed, connection journaled), a later step that failed
+returned the same plain error as a connect that never happened. The CLI exited
+1 and told the caller it had not joined while it was registered and receiving
+mail, and the daemon wrote no log line. Each step after registration is now
+run and its error collected. Connect succeeds, the daemon logs one line, the
+stored connection's `error` says what is being retried, and the response
+carries a `deferred` field that the CLI prints as one stderr line and includes
+in `--json`. Exit status is 0. There is no rollback, which would discard mail
+already queued to the reservation.
+
+Sites covered, each retried by the scheduler on its next tick: on a fresh
+connect after register, `connectPresence`, `observeCompaction`,
+`flushPresence` and `connectRelay`; on reconnect of an existing Codex thread
+after its save, the arm step plus the same four; on `reconnectClaude` after
+its save, `armLocked` plus presence, flush and relay, with the peer lock still
+released before presence runs. Presence is re-prepared by `observeConsumer`
+while the announced state is offline, and it ends in `flushPresence`;
+compaction runs every tick; the relay start runs every tick for a relay
+connection; arm is re-run by deliver when the meta's listener start is not
+this daemon's. No post-registration step was found without a retry, so none
+keeps a non-zero exit. `deferred` is set only on the copy connect returns, so
+it is never journaled and `cbus connection status` never shows it. An older CLI
+against this daemon exits 0 without the stderr line; a newer CLI against an
+older daemon behaves as before. `reportConnect` was split out of `runConnect`
+so a test can feed it a decoded daemon response.
+
+Review of milestone 2 found that the retry text (`connected; retrying after
+connect: ...`) and a failed tick's own error stayed in the stored error, and
+state stayed `error`, after the retry had succeeded. Status kept reporting a
+pending retry on a healthy connection, the journal carried it across restarts,
+and the tick log, which deduplicated on the stored error, stayed silent when
+the same failure came back. A successful tick now clears the stored error when
+it is the deferred-connect text or the last tick error this daemon logged for
+the connection, and moves state `error` back to `ready`. An error set anywhere
+else stays. The tick log deduplicates on the daemon's own record of the last
+logged error, which a successful tick resets. That record is in memory: after
+a daemon restart a journaled tick error stays until the next delivery or
+reconnect clears it, as before. This finding was folded into the milestone
+before it was approved.
+
+[Possible Ripple Effects]
+A launch placeholder and a peer without an inbox are no longer presence
+recipients, so a peer in either state receives no join or departed line for
+events that happen while it is in that state. A peer with an inbox is
+unaffected. A connect that used to fail hard after registration now returns 0,
+so a script that treated a non-zero exit as "not joined" no longer sees that
+for these steps; it can read `deferred` or the stderr line. Known and not
+handled here: on a fresh connect, a failure after the connection journal is
+saved but before registration (`writeDaemonMeta`, or `armLocked` after the meta
+is written) still returns a plain error and leaves the journal, and possibly
+the meta, on disk. The caller is not registered in that case, so the exit
+status is not a false report; it is a candidate follow-up. The launch failure
+`connection or daemon workers busy; try again` is a separate problem and is not
+addressed. In the architecture docs every `daemon.go`, `daemon_scheduler.go` and
+`daemon_presence.go` line citation was checked against the code and now points
+at the construct its sentence names, including the older ones that were already
+off before this change (the 22 existing ones in `daemon.go` and `daemon_scheduler.go` across
+`protocol.md`, `command-reference.md` and `current-architecture.md`). The
+protocol doc also lists `deferred` among the `ConnectionState` fields (set only
+on the `/connect` reply, never stored), notes it on the `/connect` route, and
+shows the `connectionId` the `/disconnect` reply already carried, the optional
+fence fields its request accepts, and `fencedDisconnect` in the `/health` reply.
+The send refusal for a disconnected native peer now cites `send.go`, and the
+`detached` transition cites the delivery and disconnected-connection paths as
+well as daemon start.
+
+[Testing Notes]
+Fixture tests. Milestone 1: six tests in daemon_presence_reserved_test.go go
+through the real connect and presence path: a reserved sibling does not fail
+another peer's connect; an abandoned reservation neither errors nor delays
+others; a reserved peer whose inbox was created by a real send still gets
+nothing before its claim; a reserved sibling that later joins receives a
+third peer's join; a peer whose inbox is gone is skipped; an unidentifiable
+inbox still fails. Against the previous code five of the six fail with the
+original error text or the aimed assertion; the sixth pins the fatal branch and
+passes on both. Mutation checks, each with the diff confirmed and the baseline
+restored: dropping the placeholder skip, dropping the missing-inbox skip and
+reading the inbox with `Stat` instead of `Lstat` are each killed on the aimed
+assertion. Two mutants survive and are recorded rather than covered: dropping
+the no-connection-id half of the placeholder guard, since no writer produces a
+`reserved` session id with a connection id, and skipping on any `Lstat` error,
+since a non-`ENOENT` failure there needs an unsearchable peer dir and then the
+meta read already skips it.
+Milestone 2: tests for the fresh, Codex-reconnect and Claude-reconnect
+deferral, the handler returning `deferred` only from connect, a failure that
+repeats being logged once per change, the cmd-level stderr line and exit 0
+from a decoded response, and the clearing tests (a successful tick clears the
+deferred text and the last tick error and restores `ready`; an error set
+elsewhere is kept). Mutation checks killed on their aimed assertions: the
+fresh path fatal again, the handler dropping `deferred`, no stored error, the
+Claude reconnect fatal again, the scheduler logging every tick, the stderr line
+skipped, clearing any error, no state flip, no dedupe reset, no prefix clause,
+no save.
+Gates: gofmt clean; `go vet ./...` and `go vet` for linux amd64, linux arm64
+and windows amd64 pass; `go test -race ./internal/client` reports no data
+race. The full `go test ./...` is not reliably green on this branch or on its
+base: `TestConsumerWriterDiscoveryExitResumeAndReadOnlyExclusion` flakes on
+both (tracked as issue #15), one relay test timed out once waiting for a
+separately built relay binary's health check under load, and a rare nil-map
+panic in the relay stop cleanup (`daemon_relay.go`, `relayViews` written
+without the lazy initialisation `relayState` has) was seen on this branch's
+runs. From source it needs a shutdown race and neither milestone changes the
+relay path in a way that makes it easier to reach; it is not fixed here.
+
+Live evidence, from real Claude sessions against scratch stores with their own
+daemons, in a private detached terminal server, torn down afterwards with the
+real store checked for the scratch channel. On the released v0.16.1: a spawn
+was reserved and its child killed before booting, then a joiner's connect exited
+1 with `snapshot presence recipient demo/sib inbox` while `cbus list` showed it
+listening, its connection in state `error` with the consumer unknown, no
+presence delivered, and an empty daemon log. On the milestone 2 build: the same
+setup plus a peer with a dangling inbox symlink gave connect exit 0 with the
+deferred step reported and logged; after the peer was repaired, the join
+reached the live peers and not the reserved one, whose inbox a real send had
+created. The stored state stayed `error` with the raw tick error, which is the
+gap the clearing fix closes. On the final build: two back-to-back spawns, one
+of which failed with the unrelated `connection or daemon workers busy` error and
+left its alias reserved with no inbox, then the next peer's connect exited 0,
+its join reached the observer and not the reserved peer, state `socket-ready`,
+error null, consumer online. That is the reserved-then-joiner shape from the
+field reports passing on the branch. Not verified live: the clearing of a stored
+error on a successful tick. It is covered by the unit tests and mutation checks
+above only. The removal-window case is source-traced and its directory ordering
+was measured on a scratch store, but it was not reproduced end to end and has no
+measured rate. One earlier run of the reserved scenario was discarded before
+counting because its setup keystrokes reached the terminal before the shell was
+ready and no reservation was made.
+
 ## [2026-09-29 18:35:00 UTC] [Client] let native close walk its own ancestry through a root-owned login process
 
 [Attempt #1] 8 files. Production: internal/client/close_native_unix.go,

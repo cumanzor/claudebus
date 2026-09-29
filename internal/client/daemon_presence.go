@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,11 +218,17 @@ func (d *busDaemon) preparePresence(c *ConnectionState, event, text string) erro
 		}
 		dir := filepath.Join(CBUSDir(), c.Channel, e.Name())
 		m, ok := ReadPeerMeta(filepath.Join(dir, "meta.json"))
-		if !ok || PeerDead(filepath.Join(dir, "meta.json")) {
+		// a launch placeholder has no session yet, and presence is never replayed to a later arrival
+		if !ok || m.SessionID == "reserved" && m.ConnectionID == "" || PeerDead(filepath.Join(dir, "meta.json")) {
 			continue
 		}
-		dev, ino, _, ok := fileIdentity(filepath.Join(dir, "inbox.jsonl"))
+		inbox := filepath.Join(dir, "inbox.jsonl")
+		dev, ino, _, ok := fileIdentity(inbox)
 		if !ok {
+			// a peer mid-removal: fanout never recreates a missing inbox
+			if _, err := os.Lstat(inbox); errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
 			return fmt.Errorf("snapshot presence recipient %s/%s inbox", c.Channel, e.Name())
 		}
 		p.Recipients = append(p.Recipients, presenceRecipient{Alias: e.Name(), SessionID: m.SessionID, ConnectionID: m.ConnectionID, Dev: dev, Ino: ino})

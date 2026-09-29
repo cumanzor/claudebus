@@ -27,6 +27,20 @@ Status, reconcile, disconnect and abandon all accept a relay-qualified target
 (`CHANNEL@HOST/ALIAS`) for a connection made through `connect CHANNEL@HOST
 ALIAS`.
 
+If a step after registration fails (the presence snapshot or fanout, the compaction
+check, the relay connect, or, when reconnecting an existing session, arming the
+listener), `cbus connect` still exits 0.
+The connection is registered, and the daemon retries the step on its next tick.
+The CLI prints one stderr line:
+
+    cbus: connected as CH/ALIAS, but a step after registration failed and the daemon retries it: ERROR (cbus connection status CH/ALIAS)
+
+`--json` output carries the same text as `deferred`. `cbus connection status` shows
+`connected; retrying after connect: ERROR` in `error` until a scheduled tick
+succeeds, and the daemon log has one line for it. A failure before registration
+exits 1 as before; on a fresh connect that includes arming the listener, which runs
+before registration.
+
 Native join/exit/resume/disconnect and completed-compaction events reach peers.
 Real events may invoke a recipient model turn; idle supervision does not.
 Compaction notices are local-only and pre-compaction hooks are deferred.
@@ -800,7 +814,7 @@ match); failure → `cbus: no peer "<al>" in your channels — use
 | Listener alive | Accepted |
 | Listener recorded but **dead** | Refused: `cbus: "<ch>/<al>" is not listening; use --force to queue anyway` (exit 1). With `--force`: stderr warning `cbus: warning: "<ch>/<al>" is not listening — sending anyway`, then queues. As of M4 (`cbus-8k9.4`) delivery is no longer best-effort: the next re-arm resumes from the durable `.cursor` boundary rather than seeking the inbox end, so a message queued into a dead gap IS delivered (`TestForceIntoDeadGapDelivers`, behavior-spec.md §8.6) |
 | **Native, connected** | Accepted; the daemon holds the listener slot even after the CLI session itself exits |
-| **Native, disconnected** (`listenerPid: -1`) | Refused, `--force` required (`daemon.go:836`) |
+| **Native, disconnected** (`listenerPid: -1`) | Refused, `--force` required (`send.go:47-51`; the `-1` is written at `daemon.go:876`) |
 | **Native, daemon down** | Refused |
 
 **`from` default chain (in order):** `--from X` (free text, unvalidated) →
@@ -1113,9 +1127,9 @@ at their first arm). The acting session never receives its own event.
 | `departed` | rename's dead-name reclaim | `departed (name reclaimed)` |
 | `compact-pre` | `cbus hook-compact pre` | `about to compact (auto), in-context state will be lost` |
 | `compact-post` | `cbus hook-compact post` | `compacted (auto), in-context state was reset` |
-| `join` (native) | daemon observes the CLI connect (or resume) | `CLI session connected (or resumed)` (`daemon_presence.go:178`) |
-| `departed` (native) | daemon observes CLI exit | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:185`) |
-| `leave` (native) | explicit `cbus connection disconnect` | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:98`) |
+| `join` (native) | daemon observes the CLI connect (or resume) | `CLI session connected (or resumed)` (`daemon_presence.go:180`) |
+| `departed` (native) | daemon observes CLI exit | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:187`) |
+| `leave` (native) | explicit `cbus connection disconnect` | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:99`) |
 | `compact-post` (Codex) | native compaction observed | Codex reports **completed** compactions separately from Claude's hook-driven pair; see [Codex](../codex.md) |
 
 Native presence frames carry a short guidance paragraph alongside the event
