@@ -144,21 +144,31 @@ refuses new connects and `daemon start` rather than being silently reused; see
 [install.md](install.md) for the exact refusal text. `send`/`list` do not go
 through that check.
 
-A daemon log line `restore daemon listener: inbox changed or truncated;
-refusing to rearm an unknown epoch` (surfaced too in `cbus connection status
-CH/AL --json`) means the daemon's journaled file identity for that inbox
-(device, inode, and the saved delivery offset) no longer matches what it
-finds on disk: same fence, same message, whether the device or inode
-changed, or the inbox is now shorter than the last delivered offset
-(`daemon_scheduler.go:42-43`). On macOS a reboot alone can cause the
-device-number case with the inbox intact: the volume's device number
-changes while the file (same inode) does not. `cbus connection disconnect
-CH/AL` stops the retries and keeps the inbox. To resume delivery, save any
-unread mail first (the inbox can hold undelivered lines), then `cbus
-unregister CH/AL` and connect again from that exact session, or connect under
-a fresh alias. For Codex connections, reconnecting alone does not clear it
-(the reconnect path reuses the same journal); the Claude reconnect path is
-not traced here, and Linux is not observed.
+The daemon journals each inbox by device number, inode and delivery offset.
+On macOS a reboot can give the volume a new device number while the file
+keeps its inode (measured on macOS). Per the Linux kernel's own documentation,
+a btrfs subvolume, a device-mapper remap or an overlay mount can change a
+file's device number the same way; this project has not measured that at
+runtime. On macOS and Linux a change of device number alone is accepted when
+the inode matches and the last consumed record and the pending record are
+byte-identical at their journaled offsets. The daemon then saves the new
+device number and logs `inbox device changed with the same inode and
+matching records; identity re-stamped`. This checks those two records, not
+every byte already delivered. The bound Claude transcript, presence
+recipients and the Codex rollout also accept a device-only change with the
+same inode, but not by that record check: each is matched by its own identity
+instead (the transcript's Claude session ID, the recipient's session and
+connection IDs with the event ID scan, the rollout's thread ID). On Windows
+the volume serial number stays part of the identity.
+
+A different inode, an inbox shorter than the delivered offset, or a changed
+record is still refused. The daemon log and `cbus connection status CH/AL
+--json` then show `inbox changed or truncated; refusing to rearm an unknown
+epoch` (or `replay` on delivery), followed by the recovery. `cbus connection
+disconnect CH/AL` stops the retries and keeps the inbox. To resume delivery,
+save any unread mail past the journaled offset first, then `cbus unregister
+CH/AL` and connect again from that exact session, or connect under a fresh
+alias.
 
 ## Presence & session-end announcements
 

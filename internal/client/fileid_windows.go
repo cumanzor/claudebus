@@ -11,6 +11,9 @@ import (
 // persists, so nothing about the on-disk format changes. Size travels with the
 // identity because GetFileInformationByHandle returns it in the same call.
 
+// The volume serial number changes only on reformat, so it stays part of identity.
+const devMayRenumber = false
+
 // fileIdentity is the identity of the file at path.
 //
 // It goes through openSharedRead rather than os.Open, and the share mode is the whole

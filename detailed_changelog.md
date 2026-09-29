@@ -233,6 +233,152 @@ Not covered. Remote rows are out of scope. Linux and Windows are compiled and
 vetted only, not run. The list was not run against a
 peer whose daemon had really died; the fixture stands in for it.
 
+## [2026-09-28 17:50:13 UTC] [Client] keep native connections across a reboot that renumbers the volume
+
+[Attempt #1] 20 files. Production: internal/client/inbox_epoch.go (new),
+claudeconnect_identity.go, daemon.go, daemon_claude_reconnect_unix.go,
+daemon_compaction.go, daemon_presence.go, daemon_recovery.go, daemon_relay.go,
+daemon_scheduler.go, fileid_unix.go, fileid_windows.go. Tests:
+inbox_epoch_test.go, inbox_epoch_unix_test.go, inbox_epoch_windows_test.go,
+reboot_epoch_unix_test.go (all new). Docs: docs/usage.md,
+docs/architecture/current-architecture.md, docs/architecture/protocol.md.
+detailed_changelog.md, simple_changelog.md. This work sits on top of the Claude
+receipt polling change and shares its base.
+
+[What changed]
+The daemon fences a managed inbox by the device number, inode and size it
+journaled. macOS can give a volume a new st_dev on reboot while the inode and
+bytes survive (measured on macOS in issue #5), and Linux can on btrfs,
+device-mapper and overlay mounts (documented, not measured here). A connection
+that lived across such a reboot was refused on rearm, delivery, reconnect and
+pending-attempt recovery, with a message saying the inbox had changed when it
+had not, and the only way out was `cbus unregister`, which discards the receipt
+history.
+
+One helper, `inboxEpochDecision`, now decides every inbox site (rearm, deliver,
+reconnect, pending validation) on the file handle the caller reads. The inode
+must match and the size must cover the caller's own bound: the committed offset
+for rearm and deliver, the pending attempt's end for reconnect and recovery.
+With an unchanged device that is all, as before. With a changed device on
+darwin and linux, the change is accepted only when the last consumed record and
+the pending record hash to the journaled values at their journaled offsets. The
+last consumed record is whichever accepted or abandoned attempt ends at the
+current offset; an offset past zero with no such record is refused, and an
+offset of zero with no pending attempt is accepted. The new device number is
+saved under the peer lock before any delivery relies on it, a failed save
+refuses, and the daemon logs one line per inbox re-stamp. Windows keeps the volume
+serial number strict (`devMayRenumber` is false there).
+
+The guarantee is exactly that: the two records match. It does not verify the
+whole consumed prefix, and a reused inode that reproduced both records would
+pass.
+
+Relay appends compare the connection's own snapshot, never their goroutine's
+copy, and return a retryable error on a device change until the connection's
+delivery verifies and re-stamps; a relay append never re-stamps. A refusal now
+names the recovery: save unread mail past the journaled byte offset, run
+`cbus unregister` for the alias, connect again. It carries the channel, alias
+and offset and no paths.
+
+A reboot stranded three other files the same way, and each already carries its
+own identity, so on darwin and linux a device-only change with the same inode
+is accepted for them by that check and not by the record check above. The bound
+Claude transcript (session ID): receipt lookups refused it, so a pending attempt
+could not be reconciled, and reconnect refused it; both accept it now and
+reconnect stores the fresh binding. Presence recipients (session and connection
+IDs plus the event ID scan): replay treated a renumbered recipient as replaced
+and marked the notice done without writing it, so queued presence was dropped
+silently; it is delivered now. The Codex rollout (thread ID): compaction
+observation re-baselined to the end of the rollout and skipped compactions
+written while the daemon was down; it re-stamps its cursor instead.
+
+A max-size inbox record starting after another record was falsely refused as an
+anchor, because the backward read window held one record's bytes and no newline
+before it. The window now holds one full record plus its delimiter and the
+extracted record is capped at the largest size `readDaemonLine` accepts. The
+advisor found this with a probe. The finding was folded into this milestone.
+
+docs/usage.md, current-architecture.md and protocol.md stop saying every
+device change trips the fence with unregister as the only way out. They
+describe the accepted case, the two-record guarantee, that Windows stays
+strict, and the recovery for a real change; the reboot false positive leaves
+the known-defects list. The review caught usage.md saying the transcript,
+presence recipients and rollout are accepted "the same way" as the inbox, which
+is wrong (they use their own ID checks); reworded and folded in, along with the
+`reconnectClaude` comment, which now covers an attempt that is awaiting its
+receipt as well as an uncertain one.
+
+[Possible Ripple Effects]
+The refusal text keeps its opening (`inbox changed or truncated; refusing to
+rearm an unknown epoch`, or `replay`, `reconnect`, `pending attempt retained`)
+and gains a recovery sentence. Anything comparing the whole string will miss;
+a prefix match still works. The reconnect transcript refusal gained the same
+kind of sentence.
+
+The daemon log gains one line at each inbox re-stamp. Connections already fenced by
+an earlier reboot go through the same check the next time the daemon restores
+them; that has not been tried on a real fenced journal. Under an unchanged
+device nothing changes, and a different inode or a shorter inbox is still
+refused.
+
+The change is in the daemon, so it applies once the daemon runs the new binary.
+
+[Testing Notes]
+Gates: the coder and the reviewer each ran the suite, vet and the linux amd64,
+linux arm64 and windows checks at the second-to-last commit (the coder ran vet
+for those targets and `go test -c` for windows, the reviewer ran build and
+vet), and the reviewer ran the client suite five more times there, with no
+failures. The last commit changes one docs paragraph and a code comment; the
+documenter's own `go test -count=1 ./...` and `go vet ./...` at it pass.
+
+Mutation checks: fifteen mutants each fail the test aimed at them (coder run):
+nine on the inbox rule (anchor check, inode check, size bounds, pending record
+check, abandoned-record anchor, unsaved re-stamp, device tolerance, relay
+device check, delivery-path device check), four on the transcript, reconnect,
+presence and compaction paths, and two on the anchor window and record length
+guards. The first cuts of two of them did not compile and were re-cut; those
+runs are not counted. A fifth non-inbox mutant, dropping the inode clause of the
+compaction re-stamp, is equivalent, because the next check in the same call
+re-baselines on an inode change. The reviewer re-ran eleven of them at the
+second code commit and the two window and length mutants after it, each failing
+on the aimed assertion.
+
+Amendment. An early coder report called `Pending.End` beyond the end of the
+inbox a state no code writes. That was too strong. It is reachable by
+truncating the inbox after a pending attempt is saved (reproduced by the advisor
+on the unchanged-device path, which this change leaves as it was), and a crash
+could plausibly leave it too, because the local inbox append does not sync while
+the journal save does (source inference, tracked in issue #11). The startup
+test that uses it builds the state directly, so it proves the branch runs, not
+that the state is reached in practice.
+
+Observed and not explained. `TestCodexQueueCloseAndStderrAreBounded` failed
+once under the load of a mutant run and passed 3 of 3 alone. One relay
+goroutine panic appeared in one full run of a mutated tree; the saved trace has
+lost its header, so the cause is unknown, and it did not recur in four clean
+coder runs or five reviewer runs of the client suite. The coder calls it
+unrelated; that is not verified.
+
+Not covered. There is no real reboot run: a test plan exists (record the
+journaled and on-disk identities and the inbox hash before, reboot, then check
+the re-stamp log line, a status with no listener error, that the pending attempt
+reconciles, that unread mail delivers without replay, and that a resumed Claude
+session reconnects), and the tests edit the journaled device number as a
+stand-in. The Windows strict test compiles and is never run.
+
+Linux: `go test -count=1 ./...` and `go vet ./...` both pass on Debian 13
+(kernel 6.12, go1.26.2, procps-ng 4.0.4, ext4), except one test that already
+fails the same way on main and is unrelated to this change:
+TestManagedPresenceRecipientEpochAndMalformedTail/replace. ext4 reuses an
+inode number on rm and recreate (measured: the same device and inode before
+and after), and the test's "replace" case recreates an observer inbox with
+the same meta, so the presence fence's device, inode and meta-id check
+matches the recreated file and delivers to it. This is pre-existing on main
+and this change does not alter the exposure; candidate follow-up, not filed.
+The Linux device renumbering cases named above (btrfs, device-mapper,
+overlay) are still per kernel documentation, not an observed renumbering
+event.
+
 ## [2026-09-28 17:36:13 UTC] [Client] poll Claude receipts on the daemon tick instead of the error backoff
 
 [Attempt #1] 17 files. Production: internal/client/claude_queue.go,

@@ -147,12 +147,13 @@ A managed peer's `meta.json` moves through null → daemon-pid-and-start →
 (protocol.md §2.2, §14.3). The **epoch fence** refuses to re-arm or replay
 a connection whose journaled inbox identity no longer matches the file on
 disk (`"inbox changed or truncated; refusing to rearm an unknown epoch"`,
-`daemon_scheduler.go:42-43`). **Known defect**: on macOS, a plain reboot
-can trip this fence on its own, with the inbox itself completely intact,
-because the volume's device number changes across the reboot while the
-inode does not; the daemon's dev+ino comparison cannot tell that apart from
-a genuine replacement. Operator recovery steps are in
-[usage.md](../usage.md)'s daemon section; no code fix is claimed here.
+`inboxEpochDecision`). A reboot can renumber the volume's device while the
+inode survives, so on macOS and Linux a device-only change is accepted when
+the last consumed record and the pending record are byte-identical at their
+journaled offsets, and the new device number is saved before delivery uses
+it. That verifies those two records, not the whole consumed prefix. Windows
+keeps the volume serial strict. Operator recovery for a real epoch change is
+in [usage.md](../usage.md)'s daemon section.
 
 ## 6. Send gate & liveness
 
@@ -214,9 +215,6 @@ Exact output strings live in command-reference.md; this is the shape.
   ancestor walk never reaches a recognized harness process. Only the
   caller's own pane (`selfPane`) resolves. See command-reference.md's
   arrange section for the exact resolution failure text.
-- **Epoch fence false-positive after a macOS reboot** (§5, above): the
-  fence compares device number and inode together, so a reboot-induced
-  device-number change alone trips it even though the inbox is untouched.
 - **Connection journal json-tag hazard** (§4, above): three embedded
   config structs have no `json` tags, so their on-disk keys are bare Go
   field names, a silent compatibility break waiting on any future field

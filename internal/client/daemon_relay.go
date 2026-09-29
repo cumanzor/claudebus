@@ -572,9 +572,14 @@ func (d *busDaemon) appendRelay(ctx context.Context, c *ConnectionState, frame r
 		return err
 	}
 	defer func() { err = errors.Join(err, f.Close()) }()
+	// Compare the lane-owned snapshot, never this goroutine's copy, and leave
+	// any re-stamp to the lane owner.
 	dev, ino, size, ok := fileIdentityOf(f)
-	if !ok || dev != c.Dev || ino != c.Ino || size < current.Offset {
+	if !ok || ino != current.Ino || size < current.Offset {
 		return errors.New("relay inbox epoch changed")
+	}
+	if dev != current.Dev {
+		return errors.New("relay inbox device changed; waiting for the connection to verify and re-stamp it")
 	}
 	reader := bufio.NewReaderSize(f, 64<<10)
 	for {

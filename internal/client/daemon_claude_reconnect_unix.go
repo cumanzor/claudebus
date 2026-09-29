@@ -4,20 +4,20 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"time"
 )
 
-// The caller holds the connection lane. Retain the old receipt source until an
-// uncertain attempt has been positively reconciled or explicitly abandoned.
+// the caller holds the connection lane; keep the old receipt source until a pending attempt (uncertain or awaiting-receipt) is reconciled or abandoned.
 func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg *ClaudeConnectionConfig, token string) (*ConnectionState, error) {
 	if c.Claude == nil || cfg == nil {
 		return nil, errors.New("existing Claude binding is unavailable; refusing implicit adoption")
 	}
 	old, incoming := c.Claude.Binding, cfg.Binding
 	if old.SessionID != incoming.SessionID || old.ConfigHome != incoming.ConfigHome ||
-		old.TranscriptPath != incoming.TranscriptPath || old.TranscriptDev != incoming.TranscriptDev || old.TranscriptIno != incoming.TranscriptIno || incoming.TranscriptSize < old.TranscriptSize {
-		return nil, errors.New("Claude transcript epoch changed; refusing to redirect the existing connection or receipt history")
+		old.TranscriptPath != incoming.TranscriptPath || !devMatches(old.TranscriptDev, incoming.TranscriptDev) || old.TranscriptIno != incoming.TranscriptIno || incoming.TranscriptSize < old.TranscriptSize {
+		return nil, fmt.Errorf("Claude transcript epoch changed; refusing to redirect the existing connection or receipt history. Connect this session under a fresh alias, or save any unread mail past byte %d of the %s inbox, then run cbus unregister %s and connect again", c.Offset, ConnectionTarget(c), ConnectionTarget(c))
 	}
 	if c.Relay != nil && (req.Relay == nil || c.Relay.Base != req.Relay.Base) {
 		return nil, errors.New("relay endpoint changed; refusing to redirect an existing connection")
@@ -31,13 +31,18 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 	if !ok || m.ConnectionID != c.ID || m.SessionID != c.ThreadID || m.Harness != daemonHarnessClaude {
 		return nil, errors.New("Claude alias ownership changed; refusing to update its binding")
 	}
-	dev, ino, size, ok := fileIdentity(filepath.Join(d.peerDir(c), "inbox.jsonl"))
+	inbox, err := openSharedRead(filepath.Join(d.peerDir(c), "inbox.jsonl"))
+	if err != nil {
+		return nil, inboxEpochRefusal(c, "refusing reconnect")
+	}
 	end := c.Offset
 	if c.Pending != nil {
 		end = c.Pending.End
 	}
-	if !ok || dev != c.Dev || ino != c.Ino || size < end {
-		return nil, errors.New("Claude inbox epoch changed; refusing reconnect")
+	err = d.adoptInboxEpoch(c, inbox, end, "refusing reconnect")
+	inbox.Close()
+	if err != nil {
+		return nil, err
 	}
 	previousToken, readErr := readClaudeCredential(d.root, c.Claude.CredentialRef)
 	sameCapability := readErr == nil && previousToken == token

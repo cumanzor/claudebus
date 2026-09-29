@@ -897,11 +897,12 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	}
 	inbox := filepath.Join(d.peerDir(c), "inbox.jsonl")
 	dev, ino, size, ok := fileIdentity(inbox)
-	if !ok || dev != c.Dev || ino != c.Ino || size < c.Offset {
-		return errors.New("inbox changed or truncated; refusing to replay an unknown epoch")
+	if !ok || ino != c.Ino || size < c.Offset {
+		return inboxEpochRefusal(c, "refusing to replay an unknown epoch")
 	}
 	// Do not start a sidecar or query the harness merely because it is idle.
-	if size == c.Offset && c.Pending == nil {
+	// A changed device is decided below, on the handle delivery reads.
+	if size == c.Offset && c.Pending == nil && dev == c.Dev {
 		if m, _ := ReadPeerMeta(filepath.Join(d.peerDir(c), "meta.json")); m.ListenerStart != d.start {
 			return d.armLocked(c)
 		}
@@ -912,9 +913,8 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		return err
 	}
 	defer f.Close()
-	openedDev, openedIno, openedSize, openedOK := fileIdentityOf(f)
-	if !openedOK || openedDev != c.Dev || openedIno != c.Ino || openedSize < c.Offset {
-		return errors.New("opened inbox does not match connection epoch")
+	if err := d.adoptInboxEpoch(c, f, c.Offset, "refusing to replay an unknown epoch"); err != nil {
+		return err
 	}
 	if _, err = f.Seek(c.Offset, io.SeekStart); err != nil {
 		return err

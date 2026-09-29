@@ -11,6 +11,10 @@ import (
 // same stat saw. Size travels WITH the identity because every caller needs both and
 // a second stat to fetch it would open a window where the two disagree.
 
+// macOS can renumber a volume's st_dev on reboot, and Linux can on btrfs,
+// device-mapper and overlay mounts, while the inode and bytes survive.
+const devMayRenumber = true
+
 // fileIdentity is the identity of the file at path.
 func fileIdentity(path string) (dev, ino uint64, size int64, ok bool) {
 	fi, err := os.Stat(path)

@@ -188,7 +188,7 @@ func openBoundClaudeTranscript(binding ClaudeConnectBinding) (*os.File, error) {
 	}
 	info, statErr := f.Stat()
 	dev, ino, _, ok := fileIdentityOf(f)
-	if statErr != nil || !trustedClaudeTranscriptInfo(info) || info.Size() < binding.TranscriptSize || !ok || dev != binding.TranscriptDev || ino != binding.TranscriptIno {
+	if statErr != nil || !trustedClaudeTranscriptInfo(info) || info.Size() < binding.TranscriptSize || !ok || !devMatches(binding.TranscriptDev, dev) || ino != binding.TranscriptIno {
 		f.Close()
 		return nil, errors.New("opened Claude transcript no longer matches its bound file identity")
 	}
