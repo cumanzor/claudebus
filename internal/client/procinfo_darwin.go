@@ -157,8 +157,6 @@ func procPPID(pid int) (int, error) {
 	return kinfoPPID(pid)
 }
 
-// kinfoPPID: a missing pid comes back as success with no data, so anything
-// but a whole record is ESRCH.
 func kinfoPPID(pid int) (int, error) {
 	mib := [4]int32{_CTL_KERN, _KERN_PROC, _KERN_PROC_PID, int32(pid)}
 	var buf [_sizeof_kinfo_proc]byte
@@ -167,8 +165,17 @@ func kinfoPPID(pid int) (int, error) {
 		uintptr(unsafe.Pointer(&mib[0])), 4, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0, 0); errno != 0 {
 		return 0, errno
 	}
-	if size != _sizeof_kinfo_proc {
+	return kinfoRecordPPID(buf[:], size)
+}
+
+// kinfoRecordPPID reads e_ppid from a sysctl reply of size bytes. A missing pid
+// comes back as success with no data (ESRCH); any other size is a layout mismatch.
+func kinfoRecordPPID(buf []byte, size uintptr) (int, error) {
+	switch {
+	case size == 0:
 		return 0, syscall.ESRCH
+	case size != _sizeof_kinfo_proc || len(buf) < _sizeof_kinfo_proc:
+		return 0, fmt.Errorf("kinfo_proc reply is %d bytes, expected %d", size, _sizeof_kinfo_proc)
 	}
 	return int(int32(binary.LittleEndian.Uint32(buf[_off_kp_e_ppid:]))), nil
 }
