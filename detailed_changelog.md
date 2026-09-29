@@ -4,6 +4,46 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-29 21:33:26 UTC] [Client] create the daemon's relay maps up front so a worker stopped before its first step cannot panic
+
+[Attempt #1] 4 files. Production: internal/client/daemon.go. Tests:
+internal/client/daemon_relay_test.go. Changelogs: detailed_changelog.md,
+simple_changelog.md. One commit.
+
+[What changed]
+`newBusDaemon` left `relays`, `relayViews` and `tickErrors` nil. Each was
+created lazily by its first writer, and every writer checked for nil except
+one: the deferred cleanup in `runRelay`, which marks a stopped worker's view as
+`stopped` with `d.relayViews[id] = v`. `relayViews` is first created by
+`relayState`, which a worker calls on its first dial attempt, connect or
+reconnect, and which `stopRelay` calls. So on a daemon that had never recorded
+any relay status, a worker that exited before its own first step panicked with
+`assignment to entry in nil map`. The confirmed path is shutdown: `shutdown`
+cancels the daemon context and stops every worker without removing it from
+`relays`, and a worker whose goroutine first runs after that cancellation skips
+its loop entirely and goes straight to the cleanup. There is no `recover` in
+the daemon, so the panic ended the process mid-shutdown, possibly before the
+native Codex queues were closed. The constructor now creates all three maps;
+it is the only place a `busDaemon` is built, so the lazy checks that remain are
+now redundant but harmless.
+
+[Possible Ripple Effects]
+None expected. The maps were already created on first use; they now exist from
+construction. Readers of a nil map and of an empty map behave the same.
+
+[Testing Notes]
+`TestRunRelayStoppedBeforeFirstStepRecordsStopped` runs `runRelay` on a fresh
+daemon with an already-cancelled context and the worker registered in
+`relays`, then requires the view to read `stopped` and the worker to be gone
+from `relays`. On the previous code it fails on its recover assertion with
+`assignment to entry in nil map`, the #25 panic; with the fix it passes. `go
+vet` is clean for darwin arm64 and amd64, linux amd64 and arm64, and windows
+amd64; `go test -race` on `internal/client` and `go test ./...` are green on
+darwin arm64. The panic had shown up intermittently in the package suite,
+whose tests start and stop daemons with relay connections; no rate was
+measured, so this fix is judged by the deterministic test, not by the suite no
+longer failing.
+
 ## [2026-09-29 20:16:00 UTC] [Client] skip reserved and inbox-less peers in the presence snapshot and report post-registration failures as deferred
 
 [Attempt #1] 14 files. Production: internal/client/daemon_presence.go,

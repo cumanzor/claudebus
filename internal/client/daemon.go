@@ -120,7 +120,8 @@ func daemonSocket() string { return filepath.Join(DaemonDir(), "control.sock") }
 func newBusDaemon() *busDaemon {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &busDaemon{root: DaemonDir(), version: "dev", connections: map[string]*ConnectionState{}, queues: map[string]nativeQueue{}, nextTry: map[string]time.Time{},
-		ctx: ctx, cancel: cancel, lanes: map[string]*sync.Mutex{}, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations)}
+		ctx: ctx, cancel: cancel, lanes: map[string]*sync.Mutex{}, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
+		relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
 	d.openQueue = func(c CodexQueueConfig) (nativeQueue, error) { return newCodexQueueContext(d.ctx, c) }
 	return d
 }

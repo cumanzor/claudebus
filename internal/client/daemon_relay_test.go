@@ -372,3 +372,31 @@ func TestDaemonRelayEndpointHandshakeAndLegacyRefusal(t *testing.T) {
 		})
 	}
 }
+
+// A worker that stops before its first relayState call (the daemon was told to
+// stop right after starting it) must record the view as stopped, not panic.
+func TestRunRelayStoppedBeforeFirstStepRecordsStopped(t *testing.T) {
+	d := newBusDaemon()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sub := &relaySubscription{cancel: func() {}, done: make(chan struct{})}
+	if d.relays == nil {
+		d.relays = map[string]*relaySubscription{}
+	}
+	d.relays["relay-conn"] = sub
+	d.relayWorkers.Add(1)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("runRelay panicked on a daemon with no relay state yet: %v", r)
+			}
+		}()
+		d.runRelay(ctx, "relay-conn", sub, nil)
+	}()
+	if got := d.relayViews["relay-conn"].State; got != "stopped" {
+		t.Fatalf("relay view state = %q, want stopped", got)
+	}
+	if _, ok := d.relays["relay-conn"]; ok {
+		t.Fatal("stopped worker is still registered in relays")
+	}
+}
