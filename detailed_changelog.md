@@ -4,6 +4,30 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-29 22:08:03 UTC] [Docs] ask for verification evidence in the PR
+
+[Attempt #1] 3 files. Docs: AGENTS.md. Changelogs: detailed_changelog.md,
+simple_changelog.md. One commit.
+
+[What changed]
+AGENTS.md's delivery milestones gain one rule: the evidence that a change was
+verified goes into its PR, not only into the maintainer's tracker. That is the
+command and trimmed output of a new test failing on the old code and passing
+on the fix, mutation results, canary summary lines with result-file hashes,
+and live-run excerpts, each in a `<details>` block under an Evidence section.
+Every excerpt is scrubbed as the public content rules require, and the raw
+artifacts are still kept locally, so the PR carries an excerpt and not the only
+copy. The previous rule said only to attach longer evidence to the tracker,
+which left a reader of a public PR with claims and no way to check them, and
+one release's canary artifacts were deleted during cleanup with no public copy.
+
+[Possible Ripple Effects]
+None in code. PRs get longer; the `<details>` blocks keep them readable.
+
+[Testing Notes]
+Docs only. `CLAUDE.md` imports AGENTS.md, so both harness entry points see the
+rule; no other file mirrors this text.
+
 ## [2026-09-29 21:33:26 UTC] [Client] create the daemon's relay maps up front so a worker stopped before its first step cannot panic
 
 [Attempt #1] 4 files. Production: internal/client/daemon.go. Tests:
