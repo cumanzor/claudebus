@@ -107,6 +107,7 @@ type busDaemon struct {
 	probeConsumer func(context.Context, *ConnectionState) (consumerProbe, error)
 	relays        map[string]*relaySubscription
 	relayViews    map[string]relayObservation
+	tickErrors    map[string]string // last logged tick error per connection, guarded by mu
 	relayWorkers  sync.WaitGroup
 	dialRelay     func(context.Context, *ConnectionState) (relaySocket, error)
 }
@@ -738,6 +739,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	return connectResult(c, deferred), nil
 }
 
+const connectDeferredPrefix = "connected; retrying after connect: "
+
 // deferConnect reports post-registration steps that failed. The connection is
 // registered and the scheduler retries each of them, so connect still succeeds.
 func (d *busDaemon) deferConnect(c *ConnectionState, errs ...error) string {
@@ -746,7 +749,7 @@ func (d *busDaemon) deferConnect(c *ConnectionState, errs ...error) string {
 		return ""
 	}
 	deferred := strings.ReplaceAll(err.Error(), "\n", "; ")
-	c.Error = "connected; retrying after connect: " + deferred
+	c.Error = connectDeferredPrefix + deferred
 	fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), c.Error)
 	if saveErr := d.save(c); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s: %v\n", ConnectionTarget(c), saveErr)

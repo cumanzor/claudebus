@@ -275,19 +275,45 @@ func (d *busDaemon) schedule() {
 		}
 		go func() {
 			defer finish()
-			if err := d.scheduledOperation(c); err != nil {
-				d.scheduledFailure(c, err)
-			}
+			d.runScheduled(c)
 		}()
 	}
 }
 
-// scheduledFailure logs a tick error when it changes, so a failure that repeats
-// every retry writes one line rather than one per tick.
+func (d *busDaemon) runScheduled(c *ConnectionState) {
+	if err := d.scheduledOperation(c); err != nil {
+		d.scheduledFailure(c, err)
+		return
+	}
+	d.mu.Lock()
+	last, failed := d.tickErrors[c.ID]
+	delete(d.tickErrors, c.ID)
+	d.mu.Unlock()
+	// only errors a tick or a deferred connect recorded; a failure from elsewhere stays
+	if strings.HasPrefix(c.Error, connectDeferredPrefix) || failed && c.Error == last {
+		c.Error = ""
+		if c.State == "error" {
+			c.State = connectionReadyState(c)
+		}
+		if err := d.save(c); err != nil {
+			fmt.Fprintf(os.Stderr, "cbus daemon: persist %s: %v\n", ConnectionTarget(c), err)
+		}
+	}
+}
+
+// scheduledFailure logs a tick error once until a tick succeeds, so a failure
+// that repeats every retry writes one line rather than one per tick.
 func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
+	d.mu.Lock()
+	logged := d.tickErrors[c.ID] == err.Error()
+	if d.tickErrors == nil {
+		d.tickErrors = map[string]string{}
+	}
+	d.tickErrors[c.ID] = err.Error()
+	d.mu.Unlock()
 	if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
 		logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
-	} else if c.Error != err.Error() {
+	} else if !logged {
 		fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), strings.ReplaceAll(err.Error(), "\n", "; "))
 	}
 	c.Error = err.Error()

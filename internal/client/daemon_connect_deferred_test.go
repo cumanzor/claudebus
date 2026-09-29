@@ -128,4 +128,46 @@ func TestDaemonScheduledFailureLogsOncePerChange(t *testing.T) {
 	if c.State != "error" || c.Error != "second failure" {
 		t.Fatalf("state=%s error=%q", c.State, c.Error)
 	}
+	c.Consumer.ObservedAt = ""
+	log = captureStderr(t, func() { d.runScheduled(c) })
+	if c.State != "queue-ready" || c.Error != "" {
+		t.Fatalf("a successful tick left the tick failure: state=%s error=%q", c.State, c.Error)
+	}
+	log += captureStderr(t, func() { d.scheduledFailure(c, second) })
+	if strings.Count(log, "cbus daemon: dev/worker: second failure") != 1 {
+		t.Fatalf("a failure that recurred after a successful tick was not logged again: %q", log)
+	}
+}
+
+func TestDaemonScheduledSuccessClearsDeferredConnectError(t *testing.T) {
+	d, q, req := daemonFixture(t)
+	observer := presencePeer(t, req.Channel, "observer")
+	repair := brokenPresencePeer(t, req.Channel)
+	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
+	var got *ConnectionState
+	captureStderr(t, func() { got, _ = d.connect(req) })
+	c := d.connections[got.ID]
+	repair()
+	c.Consumer.ObservedAt = ""
+	d.runScheduled(c)
+	if c.Error != "" || c.State == "error" {
+		t.Fatalf("healed connection still reports: state=%s error=%q", c.State, c.Error)
+	}
+	if reloaded := reloadDaemonFixture(t, q).connections[c.ID]; reloaded == nil || reloaded.Error != "" {
+		t.Fatalf("journal kept the stale deferred error: %+v", reloaded)
+	}
+	if got := strings.Join(presenceEvents(t, observer), ","); got != "dev/worker join" {
+		t.Fatalf("observer presence=%s", got)
+	}
+}
+
+func TestDaemonScheduledSuccessKeepsOtherErrors(t *testing.T) {
+	d, _, req := daemonFixture(t)
+	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
+	c := mustDaemonConnect(t, d, req)
+	c.Error = "set elsewhere"
+	d.runScheduled(c)
+	if c.Error != "set elsewhere" {
+		t.Fatalf("a successful tick cleared an error it did not set: %q", c.Error)
+	}
 }
