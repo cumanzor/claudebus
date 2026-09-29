@@ -439,7 +439,7 @@ only `kind=` reaches the frame header; the event type is inferable only from the
 
 **Go client additions to the presence shape** (all additive, no bash-era field
 removed): a daemon-originated presence line carries an `eventId` formatted
-`cbus-presence-<connectionId>-<sequence>` (`daemon_presence.go:202`), used for
+`cbus-presence-<connectionId>-<sequence>` (`daemon_presence.go:203`), used for
 de-duplication across a fanout; a message delivered through the native relay
 path into a local inbox carries a `relayId` field tying it back to its spool
 identity for the same reason (`daemon_relay.go:549,592-597`); and a native
@@ -865,9 +865,9 @@ against concurrently vanishing peers.
 | `departed` | `cbus unregister` | removed alias | =from | `unregistered` |
 | `compact-pre` | `cbus hook-compact pre` (PreCompact hook) | own alias | =from | `about to compact[ (manual\|auto)], in-context state will be lost` |
 | `compact-post` | `cbus hook-compact post` (PostCompact hook) | own alias | =from | `compacted[ (manual\|auto)], in-context state was reset` |
-| `join` (Go client, native) | daemon observes the managed CLI session transition to `online` | own alias | =from | `CLI session connected (or resumed)` (`daemon_presence.go:179`) |
-| `departed` (Go client, native) | daemon observes the managed CLI session exit | own alias | =from | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:186`) |
-| `leave` (Go client, native) | `cbus connection disconnect` (explicit, while the consumer was online) | own alias | =from | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:97`) |
+| `join` (Go client, native) | daemon observes the managed CLI session transition to `online` | own alias | =from | `CLI session connected (or resumed)` (`daemon_presence.go:180`) |
+| `departed` (Go client, native) | daemon observes the managed CLI session exit | own alias | =from | `CLI session exited; durable inbox and alias retained for resume` (`daemon_presence.go:187`) |
+| `leave` (Go client, native) | `cbus connection disconnect` (explicit, while the consumer was online) | own alias | =from | `disconnected; durable inbox and alias retained for resume` (`daemon_presence.go:98`) |
 
 **Go client additions**: a Codex peer also fires `compact-post` from its own
 observed compaction path, not just Claude's PreCompact/PostCompact hooks. Every
@@ -875,6 +875,16 @@ daemon-fired event above carries the `eventId` de-dup key from §3.2 and is
 subject to the daemon's own fanout epoch bookkeeping, so a peer that misses a
 daemon restart mid-broadcast does not receive a duplicate on the daemon's next
 attempt.
+
+**Native recipient snapshot**: the daemon takes its recipient list when it records a
+transition (`preparePresence`). It applies the same non-dead rule and additionally
+skips two kinds of peer: a launch placeholder (`sessionId` `reserved`, no
+`connectionId`), whether or not mail has already created its inbox, and any peer
+whose `inbox.jsonl` does not exist, such as one that leave or unregister is
+removing. A reserved child therefore never receives presence from before its own
+session, the same as any later arrival, which reads the roster after it connects.
+An inbox that exists but cannot be identified, such as a dangling symlink, still
+fails the snapshot, and the daemon retries the transition on its next tick.
 
 Receiver rendering (local frame): `◀ cbus msg from=<ch>/<al> to=<ch>/<you> ts=<iso>
 kind=presence` + text + end marker.
