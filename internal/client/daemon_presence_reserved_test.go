@@ -67,8 +67,12 @@ func TestManagedPresenceReservedInboxGetsNothingBeforeClaim(t *testing.T) {
 	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model"); err != nil {
 		t.Fatal(err)
 	}
-	reserved := &ConnectionState{Channel: req.Channel, Alias: "sibling"}
-	appendDaemonMessage(t, reserved, "", "queued before launch")
+	if _, _, _, err := LocalSend(req.Channel+"/sibling", "dev/sender", false, "queued before launch"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, ok := fileIdentity(InboxPath(req.Channel, "sibling")); !ok {
+		t.Fatal("send did not give the reservation an inbox")
+	}
 	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
 	mustDaemonConnect(t, d, req)
 	if got := presenceEvents(t, InboxPath(req.Channel, "sibling")); len(got) != 0 {
@@ -122,16 +126,41 @@ func TestManagedPresenceSkipsPeerWhoseInboxIsGone(t *testing.T) {
 }
 
 func TestManagedPresenceUnreadableInboxStillFails(t *testing.T) {
-	d, _, req := daemonFixture(t)
-	inbox := presencePeer(t, req.Channel, "broken")
-	if err := os.Remove(inbox); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(filepath.Dir(inbox), "missing-target"), inbox); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
-	if _, err := d.connect(req); err == nil || err.Error() != "snapshot presence recipient dev/broken inbox" {
-		t.Fatalf("an inbox that exists but cannot be identified must stay fatal, got %v", err)
+	for _, kind := range []string{"dangling", "loop", "unsearchable target"} {
+		t.Run(kind, func(t *testing.T) {
+			d, _, req := daemonFixture(t)
+			inbox := presencePeer(t, req.Channel, "broken")
+			if err := os.Remove(inbox); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(filepath.Dir(inbox), "missing-target")
+			switch kind {
+			case "loop":
+				target = inbox
+			case "unsearchable target":
+				locked := filepath.Join(t.TempDir(), "locked")
+				if err := os.MkdirAll(locked, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(locked, "inbox.jsonl"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(locked, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+				if _, err := os.Stat(filepath.Join(locked, "inbox.jsonl")); err == nil {
+					t.Skip("permissions not enforced for this user")
+				}
+				target = filepath.Join(locked, "inbox.jsonl")
+			}
+			if err := os.Symlink(target, inbox); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
+			if _, err := d.connect(req); err == nil || err.Error() != "snapshot presence recipient dev/broken inbox" {
+				t.Fatalf("an inbox that exists but cannot be identified must stay fatal, got %v", err)
+			}
+		})
 	}
 }
