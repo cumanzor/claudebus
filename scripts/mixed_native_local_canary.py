@@ -485,18 +485,56 @@ class MixedCanary(ResumeCanary):
             except OSError:
                 pass
 
+    @staticmethod
+    def group_members(pgid):
+        table = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat=,comm="], capture_output=True, text=True).stdout
+        members = []
+        for line in table.splitlines():
+            fields = line.split(None, 3)
+            if len(fields) == 4 and fields[1] == str(pgid):
+                members.append({"pid": int(fields[0]), "stat": fields[2], "comm": fields[3]})
+        return members
+
+    def signal_group(self, name, process, sig):
+        # Record what the group held; a failed signal is evidence, not a crash.
+        members = self.group_members(process.pid)
+        entry = {"group": name, "pgid": process.pid, "signal": sig.name, "members": members}
+        try:
+            os.killpg(process.pid, sig)
+            entry["result"] = "sent"
+        except ProcessLookupError:
+            entry["result"] = "ESRCH"
+        except PermissionError:
+            entry["result"] = "EPERM"
+        self.result.setdefault("groupSignals", []).append(entry)
+        return entry["result"]
+
     def cleanup(self):
+        try:
+            self.cleanup_inner()
+        except Exception as error:
+            self.result["passed"] = False
+            self.result["cleanupCrash"] = repr(error)
+            (self.root / "result.json").write_text(json.dumps(self.result, indent=2, default=str) + "\n")
+
+    def cleanup_inner(self):
         errors, cleanup = [], {}
         for name, process in (("codex", self.process), ("claude", self.cc_process)):
             if process is not None:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=8)
-                except ProcessLookupError:
-                    pass
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
+                if self.signal_group(name, process, signal.SIGTERM) == "sent":
+                    try:
+                        process.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        self.signal_group(name, process, signal.SIGKILL)
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            errors.append(name + ": still running after SIGKILL")
+                else:
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
                 cleanup[name + "Exited"] = process.poll() is not None
         for master in (self.master, self.cc_master):
             if master is not None:
@@ -560,7 +598,7 @@ def main():
         canary.result["error"] = str(error)
     finally:
         canary.cleanup()
-    print(json.dumps({"passed": canary.result["passed"], "error": canary.result.get("error"), "checks": canary.result["checks"],
+    print(json.dumps({"passed": canary.result.get("passed"), "cleanupCrash": canary.result.get("cleanupCrash"), "error": canary.result.get("error"), "checks": canary.result["checks"],
                       "expectedVersions": canary.result.get("expectedVersions"), "versions": canary.result.get("versions"),
                       "codexRolloutVersion": canary.result.get("codexRolloutVersion"), "result": str(canary.root / "result.json")}), flush=True)
     return 0 if canary.result["passed"] else 1
