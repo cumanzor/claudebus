@@ -53,7 +53,7 @@ def main():
     parser.add_argument("--cbus", default=os.environ.get("CBUS_TEST_BINARY"))
     parser.add_argument("--cbus-sha256")
     parser.add_argument("--cbus-revision")
-    parser.add_argument("--cbus-case", choices=("accepted", "busy", "busy-tool", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "hold-timeout", "clear", "autostart"), default="accepted")
+    parser.add_argument("--cbus-case", choices=("accepted", "busy", "busy-tool", "hold", "refuse", "restart-received", "restart-pending", "resume-received", "resume-pending", "hold-timeout", "rebind-pending", "clear", "autostart"), default="accepted")
     parser.add_argument("--cbus-shared-fixture", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.idle_seconds < 10:
@@ -69,7 +69,7 @@ def main():
     if args.cbus_shared_fixture and args.transport != "cbus":
         parser.error("--cbus-shared-fixture requires --transport cbus")
     runtime_case = args.cbus_case if args.transport == "cbus" else args.socket_case
-    runtime_case = {"restart-received": "accepted", "restart-pending": "hold", "resume-received": "accepted", "resume-pending": "hold", "hold-timeout": "hold"}.get(runtime_case, runtime_case)
+    runtime_case = {"restart-received": "accepted", "restart-pending": "hold", "resume-received": "accepted", "resume-pending": "hold", "hold-timeout": "hold", "rebind-pending": "hold"}.get(runtime_case, runtime_case)
     selected_binary = os.environ.get("CLAUDE_TEST_BINARY") or shutil.which("claude")
     if not selected_binary:
         parser.error("claude not found; set CLAUDE_TEST_BINARY")
@@ -505,14 +505,19 @@ def main():
                 for p in (root / "terminal.log", root / "debug.log", root / "provider-requests.json"))
         result["passed"] = all(result["checks"].values())
 
-    def acceptance_latency(sent_at):
-        # lastAccepted.observedAt has one-second resolution; the old error
-        # backoff put the first receipt lookup at least 10s after the send.
+    def receipt_latency(sent_at, label):
+        # Only the daemon's part is gated: from the exact receipt row (the moment
+        # Claude released the message, after any tool hold) to acceptance. The
+        # old error backoff put the first lookup about 10s after the write, and
+        # observedAt has one-second resolution, so the gate allows for a tick.
         from datetime import datetime
-        observed = bus_probe.receipt_snapshot["status"]["lastAccepted"]["observedAt"]
-        latency = datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp() - sent_at
-        result.setdefault("acceptanceLatencySeconds", []).append(latency)
-        return latency
+        status = bus_probe.receipt_snapshot["status"]
+        row = bus_probe.receipt_rows(transcript_rows(), status)[0]
+        released = datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")).timestamp()
+        accepted = datetime.fromisoformat(status["lastAccepted"]["observedAt"].replace("Z", "+00:00")).timestamp()
+        result.setdefault("receiptLatency", []).append({"message": label, "rowType": row.get("type"),
+            "sendToReleaseSeconds": released - sent_at, "releaseToAcceptedSeconds": accepted - released})
+        return accepted - released
 
     def run_cbus():
         nonlocal marker, master, process, session
@@ -579,15 +584,41 @@ def main():
             result["checks"]["reconcile_keeps_waiting_with_the_same_deadline"] = (reconciled.get("state") == "awaiting-receipt"
                 and reconciled.get("pending") == current.get("pending"))
             result["checks"]["reconcile_does_not_resend"] = (root / "debug.log").read_text().count(decision) == held and not receipts()
+            if args.cbus_case == "rebind-pending":
+                # The same process and capability reconnect while the attempt is
+                # pending: the rebind is allowed and must not restart the wait.
+                count = state["mainRequests"]
+                state["busReconnectNext"] = True
+                result["driverInputs"] = [seed + "_REBIND"]
+                os.write(master, (seed + "_REBIND").encode())
+                pump(.3)
+                os.write(master, b"\r")
+                wait(lambda: state["mainRequests"] >= count + 2, "same-runtime Bash reconnect while pending", 30)
+                pump(.5)
+                rebound = bus_probe.status()
+                bus_probe.result["afterRebind"] = rebound
+                outputs = [block for r in requests if r.get("mainRequest") for message in r["body"].get("messages", [])
+                           for block in message.get("content", []) if isinstance(block, dict)
+                           and block.get("type") == "tool_result" and block.get("tool_use_id") == "toolu_cbus_reconnect"]
+                result["checks"].update({
+                    "same_runtime_rebind_succeeds": bool(outputs) and not any(block.get("is_error") for block in outputs),
+                    "same_runtime_rebind_keeps_awaiting_receipt_and_submittedAt": rebound.get("state") == "awaiting-receipt"
+                        and rebound.get("pending") == current.get("pending") and rebound.get("id") == current.get("id")
+                        and rebound["claude"]["binding"]["Endpoint"]["PID"] == process.pid,
+                    "same_runtime_rebind_does_not_resend": (root / "debug.log").read_text().count(decision) == held and not receipts(),
+                })
             if args.cbus_case == "hold-timeout":
                 from datetime import datetime
                 submitted = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", current["pending"]["submittedAt"]).replace("Z", "+00:00")).timestamp()
-                wait(lambda: time.time() > submitted + 62, "receipt deadline passes", 90)
-                pump(12)  # one scheduler pass after the deadline, plus its error backoff
+                wait(lambda: time.time() > submitted + 55, "just before the receipt deadline", 75)
+                early = bus_probe.status()
+                bus_probe.result["beforeDeadline"] = {"at": time.time() - submitted, "status": early}
+                wait(lambda: time.time() > submitted + 66, "just past the receipt deadline", 20)
                 expired = bus_probe.status()
-                bus_probe.result["afterDeadline"] = expired
+                bus_probe.result["afterDeadline"] = {"at": time.time() - submitted, "status": expired}
                 result["checks"].update({
-                    "unreceived_submission_turns_uncertain_after_deadline": expired.get("state") == "uncertain" and expired.get("pending") == current.get("pending"),
+                    "still_awaiting_receipt_at_55s": early.get("state") == "awaiting-receipt" and early.get("pending") == current.get("pending"),
+                    "unreceived_submission_turns_uncertain_by_66s": expired.get("state") == "uncertain" and expired.get("pending") == current.get("pending"),
                     "deadline_does_not_resend": (root / "debug.log").read_text().count(decision) == held,
                     "deadline_leaves_no_receipt_or_ack": not receipts() and not bus_probe.acknowledgments() and not expired.get("lastAccepted"),
                 })
@@ -596,7 +627,7 @@ def main():
             wait(lambda: bool(bus_probe.acknowledgments()), "verifier inbox acknowledgment", 10)
             wait(lambda: bus_probe.receipt_ready(transcript_rows()), "daemon exact transcript receipt", 15)
             result["checks"].update(bus_probe.check_receipt(transcript_rows(), process.pid))
-            result["checks"]["receipt_accepted_without_error_backoff"] = acceptance_latency(sent_at) < 8
+            result["checks"]["receipt_accepted_without_error_backoff"] = receipt_latency(sent_at, "first") <= 2.5
         if runtime_case == "busy-tool":
             prior = bus_probe.receipt_snapshot["status"]
             original_marker, original_ack = marker, bus_probe.ack
@@ -620,7 +651,7 @@ def main():
             bus_probe.command(["send", bus_probe.target, "--from", bus_probe.sender, marker])
             wait(lambda: bool(bus_probe.acknowledgments()), "following message real bus reply", 25)
             wait(lambda: bus_probe.receipt_ready(transcript_rows(), prior["accepted"] + 1), "following exact UUID receipt", 15)
-            result["checks"]["following_line_accepted_without_error_backoff"] = acceptance_latency(following_sent_at) < 8
+            result["checks"]["following_line_accepted_without_error_backoff"] = receipt_latency(following_sent_at, "following") <= 2.5
             result["checks"].update({"following_" + k: v for k, v in bus_probe.check_receipt(transcript_rows(), process.pid).items()})
             old_acks = [json.loads(line) for line in bus_probe.inbox.read_text().splitlines() if json.loads(line).get("text") == original_ack]
             old_rows = [r for r in transcript_rows() if r.get("sessionId") == session and (
@@ -706,7 +737,8 @@ def main():
                 for message in history for block in message.get("content", []))
             if args.cbus_case == "resume-pending":
                 result["checks"]["pending_resume_does_not_replace_old_epoch"] = all(resumed.get(k) == prior.get(k) for k in ("id", "threadId", "claude", "offset", "accepted", "pending"))
-                result["checks"]["pending_rebind_keeps_awaiting_receipt_and_submittedAt"] = (resumed.get("state") == "awaiting-receipt"
+                # A changed runtime is refused while pending; the refusal leaves the wait alone.
+                result["checks"]["pending_changed_runtime_refusal_keeps_awaiting_receipt_and_submittedAt"] = (resumed.get("state") == "awaiting-receipt"
                     and bool(prior.get("pending", {}).get("submittedAt"))
                     and resumed.get("pending", {}).get("submittedAt") == prior.get("pending", {}).get("submittedAt"))
                 result["checks"]["pending_resume_creates_no_credential"] = refs_before == sorted(p.name for p in credential_dir.glob("*.token"))
