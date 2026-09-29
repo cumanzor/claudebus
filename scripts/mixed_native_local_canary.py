@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import socket
 import shlex
 import signal
 import struct
@@ -298,7 +299,110 @@ class MixedCanary(ResumeCanary):
                        if row.get("from") == sender and row.get("to") == recipient and row.get("text") == marker]) == 1)
         self.check("same_daemon_and_both_original_CLIs", self.fixture.health == json.loads(self.fixture.command(["daemon", "status", "--json"])) and self.cc_process.poll() is None and self.process.poll() is None)
         self.check("all_observed_nonlocal_proxy_requests_denied", all(r["status"] == 403 for r in self.blocked))
+        self.check_list_consumers(cc, cx)
+        self.check_disconnect_fence()
+        self.close_codex_peer()
         self.result["passed"] = True
+
+    def daemon_http(self, method, path, body=None):
+        # Raw control-socket request: the CLI has no way to send a fenced disconnect.
+        payload = json.dumps(body).encode() if body is not None else b""
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(10)
+            conn.connect(str(self.bus / ".daemon/control.sock"))
+            conn.sendall(f"{method} {path} HTTP/1.1\r\nHost: cbus\r\nContent-Type: application/json\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode() + payload)
+            data = b""
+            while chunk := conn.recv(65536):
+                data += chunk
+        head, _, rest = data.partition(b"\r\n\r\n")
+        code = int(head.split(b" ", 2)[1])
+        if b"chunked" in head.lower():
+            decoded, rest = b"", rest
+            while rest:
+                size, _, rest = rest.partition(b"\r\n")
+                n = int(size, 16)
+                if n == 0:
+                    break
+                decoded, rest = decoded + rest[:n], rest[n + 2:]
+            rest = decoded
+        return code, rest.decode(errors="replace")
+
+    def check_list_consumers(self, cc, cx):
+        listing = json.loads(self.fixture.command(["list", self.fixture.channel, "--json"]))
+        peers = {p["alias"]: p for channel in listing["channels"] for p in channel["peers"]}
+        text = self.fixture.command(["list", self.fixture.channel])
+        daemon_pid = self.fixture.health["pid"]
+        codex_consumer = self.states()["codex"].get("consumer", {}).get("pid")
+        self.result["listConsumers"] = {"json": peers, "text": text, "daemonPID": daemon_pid, "codexConsumerPID": codex_consumer}
+        def row(alias):
+            return next((line for line in text.splitlines() if f"/{alias} " in line), "")
+        self.check("list_claude_row_shows_consumer_not_daemon",
+                   peers["receiver"].get("consumerPid") == self.cc_process.pid and peers["receiver"].get("consumerState") == "online"
+                   and peers["receiver"].get("listenerPid") == daemon_pid and f"pid={self.cc_process.pid} " in row("receiver"))
+        self.check("list_codex_row_shows_consumer_not_daemon",
+                   bool(codex_consumer) and codex_consumer != daemon_pid and peers["codex"].get("consumerPid") == codex_consumer
+                   and peers["codex"].get("consumerState") == "online" and peers["codex"].get("listenerPid") == daemon_pid
+                   and f"pid={codex_consumer} " in row("codex"))
+
+    def check_disconnect_fence(self):
+        code, body = self.daemon_http("GET", "/health")
+        self.result["health"] = body
+        self.check("health_advertises_fenced_disconnect", code == 200 and json.loads(body).get("fencedDisconnect") is True)
+        before = self.states()["receiver"]
+        code, body = self.daemon_http("POST", "/disconnect", {"target": self.cc_target, "connectionId": "not-this-registration"})
+        after = self.states()["receiver"]
+        self.result["wrongFenceDisconnect"] = {"status": code, "body": body}
+        self.check("wrong_fence_disconnect_refused", code == 400 and "different registration" in body)
+        self.check("wrong_fence_leaves_registration_unchanged",
+                   after.get("state") == "socket-ready" and all(after.get(k) == before.get(k) for k in ("id", "threadId", "offset", "accepted")))
+
+    def close_codex_peer(self):
+        # Stubs stand in for tmux and osascript so close can never reach a real terminal.
+        stubs = self.root / "close-stubs"
+        stubs.mkdir()
+        for tool in ("tmux", "osascript"):
+            stub = stubs / tool
+            stub.write_text(f"#!/bin/sh\necho \"{tool} $*\" >> {shlex.quote(str(self.root / 'close-stub-calls.log'))}\nexit 1\n")
+            stub.chmod(0o755)
+        consumer = self.states()["codex"]["consumer"]["pid"]
+        inbox = self.bus / self.fixture.channel / "codex" / "inbox.jsonl"
+        inbox_before = inbox.read_bytes()
+        env = {**self.fixture.env, "PATH": str(stubs) + os.pathsep + self.fixture.env.get("PATH", "")}
+        run = subprocess.run([str(self.fixture.binary), "close", self.target], cwd=self.fixture.work, env=env, capture_output=True, text=True, timeout=30)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                os.kill(consumer, 0)
+            except ProcessLookupError:
+                break
+            self.tick_quiet()
+        after = self.states()
+        self.result["codexClose"] = {"exitCode": run.returncode, "stdout": run.stdout, "stderr": run.stderr, "consumerPID": consumer,
+                                     "stubCalls": (self.root / "close-stub-calls.log").read_text() if (self.root / "close-stub-calls.log").exists() else ""}
+        surfaces = ("surface already closed", "surface not swept (its terminal no longer exists)", "tty busy, surface left alone",
+                    "surface left open (could not confirm idle)", "surface unknown (no tty)")
+        self.check("codex_close_reports_ended_and_disconnected", run.returncode == 0
+                   and run.stdout.startswith(self.target + ": process ended; connection disconnected, inbox retained; ")
+                   and any(run.stdout.strip().endswith(surface) for surface in surfaces))
+        try:
+            os.kill(consumer, 0)
+            gone = False
+        except ProcessLookupError:
+            gone = True
+        self.check("codex_close_ended_the_journaled_consumer", gone)
+        self.check("codex_close_disconnected_exact_registration", after["codex"].get("state") == "disconnected" and after["codex"].get("id") == self.result["connections"]["codex"]["id"])
+        self.check("codex_close_kept_inbox", inbox.read_bytes() == inbox_before)
+        self.check("codex_close_left_claude_and_daemon", after["receiver"].get("state") == "socket-ready" and self.cc_process.poll() is None
+                   and self.fixture.health == json.loads(self.fixture.command(["daemon", "status", "--json"])))
+        self.check("codex_close_never_reached_a_real_terminal", all(line.split()[0] in ("tmux", "osascript") for line in self.result["codexClose"]["stubCalls"].splitlines()))
+
+    def tick_quiet(self):
+        # The closed Codex CLI exits on purpose here; keep draining the Claude PTY only.
+        if self.cc_master is not None and select.select([self.cc_master], [], [], .1)[0]:
+            try:
+                self.cc_output.extend(os.read(self.cc_master, 65536))
+            except OSError:
+                pass
 
     def cleanup(self):
         errors, cleanup = [], {}
