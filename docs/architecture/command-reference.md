@@ -1289,6 +1289,10 @@ roster twice.
   which refuses a pid that is `close`'s own process, one of its ancestors,
   or not above 1, and refuses when that ancestry cannot be read:
   `SIGTERM pid <n>: refusing to signal this process or one of its ancestors`.
+  The walk reads only each step's parent pid (sysctl `KERN_PROC_PID` on
+  macOS, `/proc/<pid>/stat` on Linux), so a root-owned `login` above the
+  session does not block it; a vanished step or a malformed reply is still a
+  refusal.
 - **Surface sweep** (best-effort, after the process is confirmed gone): if
   the captured tty is still busy (a live `ps -t <tty>`), the surface is left
   alone (stranger or TERM-survivor); otherwise a matching tmux pane is
