@@ -547,6 +547,7 @@ func TestNativeSweepNeedsPositiveIdleProof(t *testing.T) {
 	}
 	// never a real terminal backend, even when a mutant reaches the close step
 	nativeCloseSurface = func(context.Context, string) string { return "surface closed by the test stub" }
+	stubTTYStat(t, nil) // the device exists, so the ps proof decides
 	t.Cleanup(func() { nativeTTYOf, nativeTTYProbe, nativeCloseSurface = prevTTY, prevProbe, prevClose })
 	if rep := ClosePeer("dev", "worker", false); !rep.Ok || !strings.HasSuffix(rep.Detail, "surface left open (could not confirm idle)") {
 		t.Fatalf("a surface was swept without proof that its tty is idle: %+v", rep)
@@ -628,5 +629,53 @@ func TestNativeCloseRealInspectionErrorIsNotGone(t *testing.T) {
 	rep := ClosePeer("dev", "worker", true)
 	if rep.Ok || !strings.Contains(rep.Detail, "cannot inspect") || len(f.calls) != 0 || !processRunning(consumer) {
 		t.Fatalf("an unreadable consumer was disconnected or signalled: %+v", rep)
+	}
+}
+
+func stubTTYStat(t *testing.T, err error) {
+	t.Helper()
+	prev := nativeTTYStat
+	nativeTTYStat = func(string) error { return err }
+	t.Cleanup(func() { nativeTTYStat = prev })
+}
+
+// sweepProbes stubs the ps proof and the close step, recording whether each ran.
+func sweepProbes(t *testing.T) (probed, closed *bool) {
+	t.Helper()
+	probed, closed = new(bool), new(bool)
+	prevProbe, prevClose := nativeTTYProbe, nativeCloseSurface
+	nativeTTYProbe = func(context.Context, string) (string, string, int, error) {
+		*probed = true
+		return "", "", 1, nil
+	}
+	nativeCloseSurface = func(context.Context, string) string {
+		*closed = true
+		return "surface closed by the test stub"
+	}
+	t.Cleanup(func() { nativeTTYProbe, nativeCloseSurface = prevProbe, prevClose })
+	return probed, closed
+}
+
+func TestNativeSweepReportsAGoneDevice(t *testing.T) {
+	probed, closed := sweepProbes(t)
+	stubTTYStat(t, &os.PathError{Op: "stat", Path: "/dev/ttys018", Err: syscall.ENOENT})
+	if got := sweepNativeSurface("ttys018"); got != "surface not swept (its terminal no longer exists)" || *probed || *closed {
+		t.Fatalf("a gone device: %q (probed=%v closed=%v)", got, *probed, *closed)
+	}
+}
+
+func TestNativeSweepOtherStatErrorsKeepThePsProof(t *testing.T) {
+	for name, err := range map[string]error{
+		"permission": &os.PathError{Op: "stat", Path: "/dev/ttys018", Err: syscall.EACCES},
+		"not a dir":  &os.PathError{Op: "stat", Path: "/dev/ttys018", Err: syscall.ENOTDIR},
+		"present":    nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			probed, closed := sweepProbes(t)
+			stubTTYStat(t, err)
+			if got := sweepNativeSurface("ttys018"); got != "surface left open (could not confirm idle)" || !*probed || *closed {
+				t.Fatalf("%s: %q (probed=%v closed=%v)", name, got, *probed, *closed)
+			}
+		})
 	}
 }

@@ -4,6 +4,122 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-28 22:18:21 UTC] [Client] report a vanished native terminal surface accurately instead of as uncertain
+
+[Attempt #1] 5 files. Production: internal/client/close_native_unix.go. Tests:
+close_native_unix_test.go (updated and extended). Docs:
+docs/architecture/command-reference.md. detailed_changelog.md,
+simple_changelog.md.
+
+[What changed]
+A live run of the native close feature this project shipped in the prior
+milestone found that closing a peer almost always reported `surface left
+open (could not confirm idle)`, even though the peer's terminal pane was
+already gone. tmux removes a pane's tty device as soon as the process on it
+exits, so by the time close's positive-idle `ps` proof runs, the tty is
+usually already gone; that proof requires a same-call self-row as a positive
+control and could not tell a genuinely gone tty apart from any other
+inconclusive result, so both landed on the same cautious message.
+
+`sweepNativeSurface` now stats the tty device (`/dev/<tty>`) before running
+the `ps` proof. A stat that fails with `syscall.ENOENT` reports `surface not
+swept (its terminal no longer exists)` and returns without running `ps` or
+touching any terminal backend. Any other stat result, including the device
+still existing, falls through to the existing `ps` proof unchanged. The
+ENOENT check runs only after the peer's original process incarnation is
+confirmed gone, and it can only ever skip a sweep, never trigger one; nothing
+about it can signal or sweep a later occupant of a reused tty name. The
+legacy (non-native) close path is untouched.
+
+A first version of this fix reported `surface already closed`, the wording
+the legacy path already uses when its own idle proof finds nothing left to
+close. Review measured that a terminal configured to keep dead panes on
+screen (tmux with `remain-on-exit on`; likely also an iTerm2 profile that
+keeps a session's tab open after exit, though that was not measured, since
+measuring it would have opened a window) can still show a pane on a tty that
+has already gone ENOENT, so `surface already closed` would be false in that
+configuration: nothing was closed by this check, so nothing should say it
+was. The outcome string changed once more, to `surface not swept (its
+terminal no longer exists)`, which is exactly what the stat proves and
+nothing more; `surface already closed` reverts to its original meaning, the
+legacy sweep's own idle-proof-found-nothing-to-close case, which a native
+close can still reach through the unchanged `ps` proof path.
+
+docs/architecture/command-reference.md lists the new outcome separately from
+`surface already closed`, notes that the check is a stat-time observation
+that can only skip a sweep, and that a terminal which keeps dead panes may
+still be showing one.
+
+[Possible Ripple Effects]
+Any caller that matched the exact string `surface left open (could not
+confirm idle)` to detect an uncertain native close will now see it far less
+often; the common case (a tmux pane whose sole process just exited) now
+reports the new string instead. A caller matching `surface already closed`
+sees it in fewer cases too, since the common gone-tty case that used to reach
+it briefly (in the first version of this fix) now has its own string.
+
+[Testing Notes]
+Fixture tests: `go test -count=1 ./...` and `go vet ./...` pass at the final
+commit, run independently by the documenter, the reviewer and the advisor.
+Linux amd64 and arm64 and Windows amd64 vet pass, checked by the reviewer and
+the advisor. All runs were executed from a process reparented to init, with
+the package-wide signal guard installed and zero unexpected refusals.
+
+Mutation checks: one mutant, forcing every stat error (not only ENOENT) to
+report the gone-terminal outcome, fails the test aimed at it at both the
+first version of the string and the final one, cut independently by the
+coder and by the reviewer with matching results; a second mutant, dropping
+the gone-device check entirely, fails the test aimed at it too, cut by the
+reviewer.
+
+Findings folded in as they closed: the first version's outcome string was
+measured to be false in a real, if uncommon, terminal configuration (review
+finding, closed by the final commits); a second review finding, that the
+shared `surface already closed` string does not on its own prove ENOENT or
+that no backend cleanup was attempted, since the legacy sweep can still
+report it after finding nothing left to close, was closed by the same
+wording change, since that string no longer means anything else once the
+ENOENT case has its own.
+
+Live evidence: four scratch-store runs against real Claude peers, all against
+the final commit and outcome string except the first.
+
+The first, at the commit that introduced the stat check with its first
+outcome string, confirmed the mechanism fires as designed: the peer's tty
+device did not exist by the time of the sweep, and the close outcome
+matched. That run also reattempted the resume-after-close check left open by
+the prior milestone's live run: neither the resumed session reconnecting nor
+its queued unread message being delivered completed within the run's wait
+budget (over 3 minutes and over 1 minute respectively), so that check was
+still not demonstrated.
+
+A second run, against the final commit and outcome string, confirmed the
+final string fires live too: closing one peer reported `surface not swept
+(its terminal no longer exists)`. That run's other peer, meant to repeat the
+resume-after-close attempt, never finished connecting within the run's setup
+budget (over 3 minutes) and was reported already gone at teardown with no
+live process, so the resume check was not attempted at all this time.
+
+Two further runs, staggered to give the second peer more time to start, both
+confirmed the outcome string firing on close in both runs' first peer, and
+once more on the second peer in one of the two runs; the other's second peer
+hit the ordinary busy-tty path instead, as intended. Both runs drove the
+resume-after-close check further than before: a resumed session, told to run
+`cbus connect` again, could reload its own transcript, read the instruction
+and submit a shell command. Neither run got past that point to a live
+reconnect. In one, the resumed session ran the plain `cbus connect` on its
+own PATH, which resolved to the installed release binary; that binary
+correctly refused to talk to the scratch daemon, which was running a
+development build with a different version, and told the operator to
+restart the daemon rather than doing so itself. In the other, the resumed
+session was told to run the scratch binary by its full path, and its own
+permission check blocked that as code from outside its trusted set before
+any connect attempt was made. Both outcomes are correct behavior in their
+own right, not defects in this fix or in the daemon's own version check;
+neither is a demonstration of a live reconnect completing. That still needs
+a real release installed on the daemon side, which a scratch run cannot
+provide, and stays open.
+
 ## [2026-09-28 19:07:09 UTC] [Client] end a natively connected peer's consumer with cbus close
 
 [Attempt #1] 18 files. Production: internal/client/close_native_unix.go (new),

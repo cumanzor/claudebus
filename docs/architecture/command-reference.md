@@ -1241,13 +1241,20 @@ roster twice.
   Outcomes:
   - `already gone; connection disconnected, inbox retained`
   - `process ended; connection disconnected, inbox retained; <surface detail>`,
-    where the surface detail is `surface unknown (no tty)`, `tty busy, surface
-    left alone`, `surface left open (could not confirm idle)` (the tty counts
-    as idle only when one ps call for the tty and for close itself exited 0,
-    printed nothing on stderr, and listed only close; any other result,
-    including a tty device that no longer exists, leaves the surface open), `tmux pane closed`,
-    `iTerm2 surface closed`, `surface sweep timed out — left alone` or
-    `surface already closed`
+    where the surface detail is `surface unknown (no tty)`; `surface not
+    swept (its terminal no longer exists)` (a stat of `/dev/<tty>` failed
+    with ENOENT, as when tmux removed the pane after its process exited;
+    nothing is swept, and a terminal that keeps dead panes, such as tmux with
+    `remain-on-exit`, may still show the pane; the check is an observation at
+    stat time, so it can only skip a sweep, never signal or sweep a later
+    occupant); `tty busy, surface left alone`;
+    `surface left open (could not confirm idle)` (the device exists or its
+    stat failed another way, and the tty counts as idle only when one ps call
+    for the tty and for close itself exited 0, printed nothing on stderr, and
+    listed only close; any other result leaves the surface open); `tmux pane
+    closed`; `iTerm2 surface closed`; `surface already closed` (ps proved the
+    tty idle and no tmux pane or iTerm2 session matched it); or `surface
+    sweep timed out — left alone`
   - `disconnect failed, no signal sent: <reason>`
   - `the daemon did not honour the disconnect fence; the connection may have
     been disconnected; no signal sent` (the reply did not echo the connection

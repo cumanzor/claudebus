@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -300,6 +301,12 @@ func observedCodexMatches(c *ConnectionState, consumer nativeConsumer) error {
 	return nil
 }
 
+// nativeTTYStat stats a tty device path. (A var only for tests.)
+var nativeTTYStat = func(path string) error {
+	_, err := os.Stat(path)
+	return err
+}
+
 // nativeTTYProbe lists the processes on tty together with this process, which
 // must appear as a positive control. (A var only for tests.)
 var nativeTTYProbe = func(ctx context.Context, tty string) (stdout, stderr string, exitCode int, err error) {
@@ -320,6 +327,12 @@ var nativeTTYProbe = func(ctx context.Context, tty string) (stdout, stderr strin
 func sweepNativeSurface(tty string) string {
 	if tty == "" {
 		return "surface unknown (no tty)"
+	}
+	// A pty node disappears when its session ends, but a terminal set to keep
+	// dead panes can still show one, so this proves only that nothing may be
+	// swept. Only a definite ENOENT counts; anything else goes to the ps proof.
+	if dev := filepath.Join("/dev", tty); strings.HasPrefix(dev, "/dev/") && errors.Is(nativeTTYStat(dev), syscall.ENOENT) {
+		return "surface not swept (its terminal no longer exists)"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), surfaceSweepBudget)
 	defer cancel()
