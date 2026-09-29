@@ -4,6 +4,7 @@ package client
 
 import (
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,5 +65,53 @@ func TestProcStartTimeOffsetSanity(t *testing.T) {
 	// spawn time. A wrong offset lands astronomically outside it.
 	if delta := time.Since(time.Unix(started, 0)); delta < -2*time.Minute || delta > 2*time.Minute {
 		t.Errorf("child tvsec %d is %v from now — offset likely wrong (token %q)", started, delta, tok)
+	}
+}
+
+// proc_info refuses a root-owned pid to an ordinary user; the ancestry walk
+// crosses one (login) in a session started through /usr/bin/login.
+func TestProcPPIDReadsRootOwnedProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every pid; the refusal under test needs an ordinary user")
+	}
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,uid=").Output()
+	if err != nil {
+		t.Fatalf("ps: %v", err)
+	}
+	checked := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 || f[2] != "0" || f[1] == "0" || checked == 3 {
+			continue
+		}
+		pid, _ := strconv.Atoi(f[0])
+		want, _ := strconv.Atoi(f[1])
+		got, err := procPPID(pid)
+		if err == syscall.ESRCH {
+			continue // exited since ps ran
+		}
+		if err != nil || got != want {
+			t.Errorf("procPPID(root-owned pid %d) = %d, %v; ps says ppid %d", pid, got, err, want)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("precondition: ps listed no root-owned process with a parent")
+	}
+	if got, err := procPPID(os.Getpid()); err != nil || got != os.Getppid() {
+		t.Errorf("procPPID(self) = %d, %v; want %d", got, err, os.Getppid())
+	}
+}
+
+// sysctl answers a missing pid with success and no data; a ppid of 0 there
+// would end the ancestry walk as "not an ancestor".
+func TestProcPPIDMissingPidIsAnError(t *testing.T) {
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("precondition: %v", err)
+	}
+	gone := cmd.Process.Pid
+	if got, err := procPPID(gone); err == nil {
+		t.Fatalf("procPPID(exited pid %d) = %d with no error", gone, got)
 	}
 }

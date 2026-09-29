@@ -102,10 +102,10 @@ func TestTestOwnedRegistryRejectsARecycledPid(t *testing.T) {
 func failAncestryAtDepth(t *testing.T) {
 	t.Helper()
 	prev, calls := ancestryParent, 0
-	ancestryParent = func(pid int) (string, int, error) {
+	ancestryParent = func(pid int) (int, error) {
 		calls++
 		if calls >= 2 {
-			return "", 0, errors.New("process table unreadable")
+			return 0, errors.New("process table unreadable")
 		}
 		return prev(pid)
 	}
@@ -117,5 +117,26 @@ func TestAncestryWalkFailsClosed(t *testing.T) {
 	failAncestryAtDepth(t)
 	if err := ownAncestryRefusal(stranger); !errors.Is(err, errOwnAncestry) {
 		t.Fatalf("an unreadable ancestry allowed the signal: %v", err)
+	}
+}
+
+// a chain whose middle step denies inspection must still refuse, not end the walk
+func TestAncestryWalkRefusesAnUninspectableMiddleStep(t *testing.T) {
+	stranger := liveProc(t)
+	prev := ancestryParent
+	chain := map[int]int{os.Getppid(): 700, 700: 600, 600: 1}
+	ancestryParent = func(pid int) (int, error) {
+		if pid == 700 {
+			return 0, syscall.EPERM
+		}
+		if parent, ok := chain[pid]; ok {
+			return parent, nil
+		}
+		return 0, syscall.ESRCH
+	}
+	t.Cleanup(func() { ancestryParent = prev })
+	err := ownAncestryRefusal(stranger)
+	if !errors.Is(err, errOwnAncestry) || !strings.Contains(err.Error(), "at pid 700") {
+		t.Fatalf("an EPERM step at pid 700 did not refuse the signal: %v", err)
 	}
 }

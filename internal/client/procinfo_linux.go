@@ -75,6 +75,13 @@ func procParent(pid int) (comm string, ppid int, err error) {
 	return comm, ppid, err
 }
 
+// procPPID returns pid's parent pid. /proc/<pid>/stat is world-readable, so
+// this is procParent without the comm.
+func procPPID(pid int) (int, error) {
+	_, ppid, err := procParent(pid)
+	return ppid, err
+}
+
 // procZombie reports whether pid is a zombie: state field 'Z' in /proc/<pid>/stat
 // (the field right after the parenthesized comm). Unreadable => false, matching
 // the darwin impl's posture (a doubt is not a zombie).

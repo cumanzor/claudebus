@@ -5,17 +5,27 @@ package client
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
 
 // darwin process inspection WITHOUT spawning ps: argv via sysctl KERN_PROCARGS2,
-// parent/comm via the proc_info syscall. Zero ps-spawns (Decision 1a).
+// parent/comm via the proc_info syscall, and the ancestry walk's ppid via sysctl
+// KERN_PROC_PID. Zero ps-spawns (Decision 1a).
 
 const (
 	_CTL_KERN       = 1
 	_KERN_PROCARGS2 = 49
+	_KERN_PROC      = 14
+	_KERN_PROC_PID  = 1
+
+	// struct kinfo_proc, identical on darwin amd64 and arm64
+	_sizeof_kinfo_proc = 648
+	_off_kp_e_ppid     = 560 // kp_eproc.e_ppid
 
 	// proc_info(2) — <sys/proc_info.h>
 	_SYS_proc_info     = 336
@@ -116,6 +126,51 @@ func procParent(pid int) (comm string, ppid int, err error) {
 		c = c[:i]
 	}
 	return string(c), ppid, nil
+}
+
+// kinfoLayoutOK is set once the hand-rolled kinfo_proc layout has read this
+// process's own ppid correctly; until then every read rechecks, so a moved
+// field fails closed and a reparenting race is not cached as a failure.
+var kinfoLayoutOK atomic.Bool
+
+func kinfoLayoutErr() error {
+	if kinfoLayoutOK.Load() {
+		return nil
+	}
+	got, err := kinfoPPID(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("kinfo_proc layout check: %w", err)
+	}
+	if want := os.Getppid(); got != want {
+		return fmt.Errorf("kinfo_proc layout check: e_ppid reads %d, runtime ppid is %d", got, want)
+	}
+	kinfoLayoutOK.Store(true)
+	return nil
+}
+
+// procPPID returns pid's parent via sysctl KERN_PROC_PID. Unlike proc_info it
+// reads a root-owned process (login) for an ordinary user.
+func procPPID(pid int) (int, error) {
+	if err := kinfoLayoutErr(); err != nil {
+		return 0, err
+	}
+	return kinfoPPID(pid)
+}
+
+// kinfoPPID: a missing pid comes back as success with no data, so anything
+// but a whole record is ESRCH.
+func kinfoPPID(pid int) (int, error) {
+	mib := [4]int32{_CTL_KERN, _KERN_PROC, _KERN_PROC_PID, int32(pid)}
+	var buf [_sizeof_kinfo_proc]byte
+	size := uintptr(len(buf))
+	if _, _, errno := syscall.Syscall6(syscall.SYS___SYSCTL,
+		uintptr(unsafe.Pointer(&mib[0])), 4, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&size)), 0, 0); errno != 0 {
+		return 0, errno
+	}
+	if size != _sizeof_kinfo_proc {
+		return 0, syscall.ESRCH
+	}
+	return int(int32(binary.LittleEndian.Uint32(buf[_off_kp_e_ppid:]))), nil
 }
 
 // procZombie reports whether pid is a zombie (pbi_status == SZOMB). It is a
