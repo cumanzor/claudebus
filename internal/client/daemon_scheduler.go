@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -275,23 +276,31 @@ func (d *busDaemon) schedule() {
 		go func() {
 			defer finish()
 			if err := d.scheduledOperation(c); err != nil {
-				if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
-					logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
-				}
-				c.Error = err.Error()
-				if c.State != "disconnected" && c.State != "detached" && c.State != "binding-required" {
-					c.State = "error"
-					if c.Pending != nil {
-						c.State = "uncertain"
-					}
-				}
-				if saveErr := d.save(c); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "cbus daemon: persist %s/%s: %v\n", c.Channel, c.Alias, saveErr)
-				}
-				d.setRetry(c.ID, time.Now().Add(10*time.Second))
+				d.scheduledFailure(c, err)
 			}
 		}()
 	}
+}
+
+// scheduledFailure logs a tick error when it changes, so a failure that repeats
+// every retry writes one line rather than one per tick.
+func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
+	if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
+		logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
+	} else if c.Error != err.Error() {
+		fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), strings.ReplaceAll(err.Error(), "\n", "; "))
+	}
+	c.Error = err.Error()
+	if c.State != "disconnected" && c.State != "detached" && c.State != "binding-required" {
+		c.State = "error"
+		if c.Pending != nil {
+			c.State = "uncertain"
+		}
+	}
+	if saveErr := d.save(c); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s/%s: %v\n", c.Channel, c.Alias, saveErr)
+	}
+	d.setRetry(c.ID, time.Now().Add(10*time.Second))
 }
 
 func (d *busDaemon) scheduledOperation(c *ConnectionState) error {

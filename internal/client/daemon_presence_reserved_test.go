@@ -158,8 +158,14 @@ func TestManagedPresenceUnreadableInboxStillFails(t *testing.T) {
 				t.Skipf("symlink unavailable: %v", err)
 			}
 			d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
-			if _, err := d.connect(req); err == nil || err.Error() != "snapshot presence recipient dev/broken inbox" {
-				t.Fatalf("an inbox that exists but cannot be identified must stay fatal, got %v", err)
+			var got *ConnectionState
+			var err error
+			captureStderr(t, func() { got, err = d.connect(req) })
+			if err != nil {
+				t.Fatalf("registered connect must succeed: %v", err)
+			}
+			if got.Deferred != "snapshot presence recipient dev/broken inbox" {
+				t.Fatalf("an inbox that exists but cannot be identified must stay fatal to the snapshot, got %q", got.Deferred)
 			}
 		})
 	}

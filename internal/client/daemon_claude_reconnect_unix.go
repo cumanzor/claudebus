@@ -86,19 +86,9 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 		return nil, err
 	}
 	*c = *next
-	if err := d.armLocked(c); err != nil {
-		return nil, err
-	}
+	armErr := d.armLocked(c)
 	unlock() // Presence fanout acquires its own ordered peer locks.
-	if err := d.connectPresence(c, false); err != nil {
-		return nil, err
-	}
-	if err := d.flushPresence(c); err != nil {
-		return nil, err
-	}
-	if err := d.connectRelay(c); err != nil {
-		return nil, err
-	}
+	deferred := d.deferConnect(c, armErr, d.connectPresence(c, false), d.flushPresence(c), d.connectRelay(c))
 	d.setRetry(c.ID, time.Time{})
-	return cloneConnection(c), nil
+	return connectResult(c, deferred), nil
 }

@@ -66,6 +66,7 @@ type ConnectionState struct {
 	Relay            *RelayConfig            `json:"relay,omitempty"`
 	RelayStatus      *relayObservation       `json:"relayStatus,omitempty"`
 	Compaction       *compactionObservation  `json:"compaction,omitempty"`
+	Deferred         string                  `json:"deferred,omitempty"` // set only on the copy a connect returns, never stored
 }
 
 type queueAttempt struct {
@@ -282,7 +283,12 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 				http.Error(w, err.Error(), 400)
 				return
 			}
-			writeDaemonJSON(w, d.snapshot(c.ID))
+			s := d.snapshot(c.ID)
+			if s == nil {
+				s = c
+			}
+			s.Deferred = c.Deferred
+			writeDaemonJSON(w, s)
 		case r.URL.Path == "/connections" && r.Method == "GET":
 			writeDaemonJSON(w, d.statusSnapshots())
 		case r.URL.Path == "/disconnect" && r.Method == "POST":
@@ -622,22 +628,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 				return nil, err
 			}
 			*c = next
-			if err := d.arm(c); err != nil {
-				return nil, err
-			}
-			if err := d.connectPresence(c, false); err != nil {
-				return nil, err
-			}
-			if err := d.observeCompaction(c); err != nil {
-				return nil, err
-			}
-			if err := d.flushPresence(c); err != nil {
-				return nil, err
-			}
-			if err := d.connectRelay(c); err != nil {
-				return nil, err
-			}
-			return cloneConnection(c), nil
+			deferred := d.deferConnect(c, d.arm(c), d.connectPresence(c, false), d.observeCompaction(c), d.flushPresence(c), d.connectRelay(c))
+			return connectResult(c, deferred), nil
 		}
 	}
 	id, err := randNonce()
@@ -741,20 +733,31 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	d.register(c)
 	keep = true
 	unlock() // Presence fanout acquires source and recipient locks in canonical order.
-	if err := d.connectPresence(c, true); err != nil {
-		return nil, err
+	deferred := d.deferConnect(c, d.connectPresence(c, true), d.observeCompaction(c), d.flushPresence(c), d.connectRelay(c, ready))
+	ready = nil // connectRelay starts or aborts it on every path
+	return connectResult(c, deferred), nil
+}
+
+// deferConnect reports post-registration steps that failed. The connection is
+// registered and the scheduler retries each of them, so connect still succeeds.
+func (d *busDaemon) deferConnect(c *ConnectionState, errs ...error) string {
+	err := errors.Join(errs...)
+	if err == nil {
+		return ""
 	}
-	if err := d.observeCompaction(c); err != nil {
-		return nil, err
+	deferred := strings.ReplaceAll(err.Error(), "\n", "; ")
+	c.Error = "connected; retrying after connect: " + deferred
+	fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), c.Error)
+	if saveErr := d.save(c); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s: %v\n", ConnectionTarget(c), saveErr)
 	}
-	if err := d.flushPresence(c); err != nil {
-		return nil, err
-	}
-	if err := d.connectRelay(c, ready); err != nil {
-		return nil, err
-	}
-	ready = nil
-	return cloneConnection(c), nil
+	return deferred
+}
+
+func connectResult(c *ConnectionState, deferred string) *ConnectionState {
+	out := cloneConnection(c)
+	out.Deferred = deferred
+	return out
 }
 
 func (d *busDaemon) peerDir(c *ConnectionState) string {
