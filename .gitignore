@@ -13,3 +13,5 @@ relay/deploy.local
 # local Python acceptance canary caches
 __pycache__/
 *.pyc
+
+docs/nugget/
