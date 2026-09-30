@@ -1,6 +1,6 @@
 ---
 description: Open a fresh session in a new window, both sides joined to a cbus channel
-argument-hint: "[window|tab|tmux|pane] [channel|ch@host] [--model m] [--name n]"
+argument-hint: "[window|tab|tmux|pane] [channel|ch@host] [--model m] [--name n] [--role r]"
 allowed-tools: Bash(cbus:*), AskUserQuestion
 ---
 
@@ -32,12 +32,16 @@ it becomes the child's bus alias, its session title, and (tmux target) the
 tmux window name (alias charset: [A-Za-z0-9._-]). Omitted: a local channel auto-reserves an alias (main/fork-N)
 and titles the child with it; a remote channel leaves the child to pick its
 own alias, titling it with the address.
+If the user names a role (e.g. "spawn a reviewer"), append `--role <r>`: the
+child is briefed with `roles/<r>.md` (the alias and model default to the
+role's), and its launch prompt names this session as its coordinator when this
+session is on that local channel.
 
 1. Connect this session first with `cbus connect CHANNEL [ALIAS] --json`.
    For a relay, use an explicit alias. If already connected, preserve the exact
    address. Follow `/bus-join` for capability errors, roster and presence handling.
    Do not create a Monitor or tail loop.
-2. Run `cbus spawn <target> <channel> [--model m] [--name n]`. The child receives
+2. Run `cbus spawn <target> <channel> [--model m] [--name n] [--role r]`. The child receives
    native connect instructions and uses its assigned alias (claiming the launch
    reservation for a local channel).
    Terminal placement is independent of delivery.
