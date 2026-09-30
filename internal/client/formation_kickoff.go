@@ -67,8 +67,8 @@ func KickoffPrompt(f *Formation, pp PeerPlan, self, nonce, brief string) string 
 			"In your first reply, describe your role in one line so it can be recorded.")
 	}
 	effort := strings.TrimSpace(brief) != ""
-	deleg := delegationClause(self, effort)
-	if name, _ := parseRolefile(p.Rolefile); p.Rolefile != "" && name == "orchestrator" {
+	deleg := formationDelegation(f, self, effort)
+	if isOrchestratorRolefile(p) {
 		deleg = coordinatorClause(effort)
 	}
 	b.WriteString("\n\n" + deleg)

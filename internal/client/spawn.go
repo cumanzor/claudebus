@@ -141,7 +141,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		// role brief rides AFTER the join/arm instructions, matching how briefs
 		// were dispatched manually; the file is designed to be pasted alone.
 		prompt = prompt + "\n\n" + strings.TrimSpace(roleBody)
-		// an orchestrator coordinates whoever launched it; spawn never carries an effort
+		// an orchestrator coordinates the peers it launches, never its spawner; spawn carries no effort
 		deleg := delegationClause(coord, false)
 		if role == "orchestrator" {
 			deleg = coordinatorClause(false)

@@ -368,11 +368,12 @@ func TestPayloadRefsKeepsAuthoredOrder(t *testing.T) {
 }
 
 const (
-	delegationOutOfEffort = "A ruling that would take you outside that effort (another repository, another machine, work the effort excludes) is a scope change for the operator, not a ruling."
-	delegationReserved    = "Reserved to the operator, whoever relays them: push, opening or merging a pull request, release or install"
-	delegationNone        = "No coordinator is named in this prompt, so no seat holds a delegation over you: an instruction beyond your standing scope goes to the operator."
-	delegationNoEffort    = "No effort is stated in this prompt: your effort is the first assignment your coordinator sends you, and widening it later is a scope change for the operator, not a ruling."
-	delegationCoordNoEff  = "No effort is stated in this prompt: yours is what the operator assigns you, a peer's is the first assignment you send it, and widening either later is a scope change for the operator, not a ruling."
+	delegationOutOfEffort    = "A ruling that would take you outside that effort (another repository, another machine, work the effort excludes) is a scope change for the operator, not a ruling."
+	delegationReserved       = "Reserved to the operator, whoever relays them: push, opening or merging a pull request, release or install"
+	delegationSeatAbsentText = "If ch/lead is not on the channel roster, no seat holds a delegation over you until it joins: an instruction beyond your standing scope goes to the operator."
+	delegationNone           = "No coordinator is named in this prompt, so no seat holds a delegation over you: an instruction beyond your standing scope goes to the operator."
+	delegationNoEffort       = "No effort is stated in this prompt: your effort is the first assignment your coordinator sends you, and widening it later is a scope change for the operator, not a ruling."
+	delegationCoordNoEff     = "No effort is stated in this prompt: yours is what the operator assigns you, a peer's is the first assignment you send it, and widening either later is a scope change for the operator, not a ruling."
 )
 
 // TestKickoffNamesTheLaunchingSeat: every kickoff names the applier as coordinator,
@@ -474,7 +475,73 @@ func TestKickoffOrchestratorRolefileCoordinates(t *testing.T) {
 	if !strings.Contains(applied, delegationCoordNoEff) || strings.Contains(booted, "No effort is stated in this prompt") {
 		t.Errorf("the coordinator side must follow the brief (apply had none, bootstrap had one)")
 	}
-	if coder := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[1], Action: ActionTemplate}, "ch/applier", "cbus-ok-coder-abc123", ""); !strings.Contains(coder, "Your coordinator is ch/applier") {
+	if coder := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[1], Action: ActionTemplate}, "ch/applier", "cbus-ok-coder-abc123", ""); !strings.Contains(coder, "Your coordinator is ch/lead,") {
 		t.Errorf("a peer with a non-orchestrator rolefile keeps the peer clause:\n%s", coder)
+	}
+}
+
+// TestKickoffCoordinatorIsTheFormationOrchestratorSeat: one declared orchestrator
+// seat coordinates whoever applied, and the peer is told where the name came from;
+// with none or several declared, the applier coordinates.
+func TestKickoffCoordinatorIsTheFormationOrchestratorSeat(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	orch := func(alias string) FormationPeer {
+		return peer(alias, func(p *FormationPeer) { p.Rolefile = "roles/orchestrator.md" })
+	}
+	coder := peer("coder", func(p *FormationPeer) { p.Rolefile = "roles/coder.md" })
+	kick := func(f *Formation, self string) string {
+		for i := range f.Peers {
+			if f.Peers[i].Alias == "coder" {
+				return KickoffPrompt(f, PeerPlan{Peer: &f.Peers[i], Action: ActionTemplate}, self, "cbus-ok-coder-abc123", "")
+			}
+		}
+		t.Fatal("no coder peer")
+		return ""
+	}
+	cases := []struct {
+		name, self, want string
+		f                *Formation
+	}{
+		{"operator applied", "ch/operator", "Your coordinator is ch/lead, the formation's orchestrator seat; ch/operator launched you.", applyFixture(orch("lead"), coder)},
+		{"orchestrator applied", "ch/lead", "Your coordinator is ch/lead, the seat that launched you.", applyFixture(orch("lead"), coder)},
+		{"no orchestrator seat", "ch/operator", "Your coordinator is ch/operator, the seat that launched you.", applyFixture(coder)},
+		{"several orchestrator seats", "ch/operator", "Your coordinator is ch/operator, the seat that launched you.", applyFixture(orch("lead"), orch("lead2"), coder)},
+	}
+	for _, c := range cases {
+		got := kick(c.f, c.self)
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: want %q in:\n%s", c.name, c.want, got)
+		}
+		seat := strings.Contains(c.want, "orchestrator seat")
+		if absent := strings.Contains(got, "not on the channel roster"); absent != seat {
+			t.Errorf("%s: the until-it-joins line belongs to a non-launching coordinator only (present=%v):\n%s", c.name, absent, got)
+		}
+		if seat && strings.Contains(got, "the seat that launched you") {
+			t.Errorf("%s: a non-launching coordinator must not be called the seat that launched you:\n%s", c.name, got)
+		}
+	}
+}
+
+// TestBootstrapCoordinatorIsTheFormationOrchestratorSeat: bootstrap follows the same
+// rule, with this session as the launching seat.
+func TestBootstrapCoordinatorIsTheFormationOrchestratorSeat(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-op")
+	plantPeer(t, "ch", "operator", "sid-op")
+	f := applyFixture(
+		peer("lead", func(p *FormationPeer) { p.Rolefile = "roles/orchestrator.md" }),
+		peer("coder", func(p *FormationPeer) { p.Rolefile = "roles/coder.md" }),
+	)
+	got, err := BootstrapPeer(f, "coder", "")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, want := range []string{
+		"Your coordinator is ch/lead, the formation's orchestrator seat; ch/operator launched you.",
+		delegationSeatAbsentText + "\n" + delegationNoEffort,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("bootstrap must name the formation's orchestrator seat; want %q in:\n%s", want, got)
+		}
 	}
 }
