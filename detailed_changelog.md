@@ -4,6 +4,48 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-30 16:56:58 UTC] [Client] formation peers are local when their transcript is here
+
+[Attempt #1] 6 files. Code: internal/client/formation_plan.go,
+internal/client/formation_resume.go. Tests: formation_plan_test.go,
+formation_resume_test.go, launch_intent_test.go. Changelogs: both.
+
+[What changed]
+A formation records each peer's machine as the host label at save time
+(`CBUS_HOST`, else the short hostname). `formation resume` refused the anchor
+and `formation apply` skipped every peer whose label differed from the current
+one. On macOS without a HostName set (`scutil --get HostName` reports "not
+set"), the kernel hostname is taken from reverse DNS of the DHCP address, so
+the same laptop gets one name at home and another on a different network, and
+formations saved on one network would not resume on the other.
+
+The label was standing in for a question the transcript answers directly: is
+this peer's session on this machine. The new `PlanWorld.PeerHere` keeps the
+label as the fast path (empty or equal means here) and, on a mismatch, treats a
+Claude peer as local when its transcript is found under its recorded profile or
+by the CCS instance sweep. The anchor gate, apply's per-peer machine gate and
+the kickoff roster's `Here` flag all use it, so the roster, the `--only`
+example and apply agree. `SidState` already checked the transcript before the
+label and is unchanged.
+
+[Possible Ripple Effects]
+A formation whose peer really lives on another machine is still skipped: that
+machine's transcript is not on this disk. The exception is a transcript copied
+or synced between machines, which now reads as local. Codex peers and peers
+with no recorded session still go by the label. Saved records keep their old
+label; nothing is rewritten.
+
+[Testing Notes]
+New plan cases (mismatched label with the transcript present under the
+recorded profile, found only by the instance sweep, and absent) and a resume
+case with a changed host label fail on the old code and pass on the fix. Three
+existing tests that asserted the old rule with a transcript present now remove
+the transcript for their other-machine case, and the roster mirror test now
+expects the `--only` example to name the peer whose transcript is readable.
+`go test ./...` passes; linux and windows builds compile. Built binary run
+against a real formation store with `CBUS_HOST` set to a different label:
+`apply --dry-run` planned all seven peers where v0.16.3 skipped all seven.
+
 ## [2026-09-29 22:08:03 UTC] [Docs] ask for verification evidence in the PR
 
 [Attempt #1] 3 files. Docs: AGENTS.md. Changelogs: detailed_changelog.md,

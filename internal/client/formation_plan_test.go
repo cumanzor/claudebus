@@ -130,6 +130,35 @@ func TestPlanModeResolution(t *testing.T) {
 			want:   ActionSkip,
 			reason: `recorded on "laptop", this host is "test-host"`,
 		},
+		{
+			name: "another label with the transcript on this disk is local (hostname followed the network)",
+			peer: peer("a", func(p *FormationPeer) {
+				p.Machine, p.Mode, p.SessionID, p.Origin = "laptop-dhcp", ModeResume, "sid-here", OriginFresh
+			}),
+			world: func() *PlanWorld { return withTranscripts(testWorld(), "sid-here") },
+			want:  ActionResume,
+		},
+		{
+			name: "another label with the transcript under an unrecorded profile is local",
+			peer: peer("a", func(p *FormationPeer) {
+				p.Machine, p.Mode, p.SessionID, p.Origin = "laptop-dhcp", ModeTemplate, "sid-here", OriginFresh
+			}),
+			world: func() *PlanWorld {
+				w := testWorld()
+				w.InstanceProfiles = func(sid string) []string { return []string{"alpha"} }
+				return w
+			},
+			want: ActionTemplate,
+		},
+		{
+			name: "another label without the transcript is still skipped",
+			peer: peer("a", func(p *FormationPeer) {
+				p.Machine, p.Mode, p.SessionID, p.Origin = "server", ModeResume, "sid-there", OriginFresh
+			}),
+			world:  func() *PlanWorld { return withTranscripts(testWorld(), "sid-other") },
+			want:   ActionSkip,
+			reason: `recorded on "server"`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := testWorld()

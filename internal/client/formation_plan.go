@@ -104,6 +104,23 @@ type PlanWorld struct {
 	InstanceProfiles func(sid string) []string
 }
 
+// PeerHere reports whether p's session lives on this machine. A matching label says
+// so, but a label alone is not proof either way: on a Mac the hostname follows the
+// network (reverse DNS), so the same machine records under several names. A Claude
+// transcript on this disk is the stronger evidence and overrides a label mismatch.
+func (w *PlanWorld) PeerHere(p *FormationPeer) bool {
+	if p.Machine == "" || p.Machine == w.Host {
+		return true
+	}
+	if formationHarness(p) != "claude" || p.CodexBackend != nil || p.SessionID == "" || p.SessionID == "reserved" {
+		return false
+	}
+	if w.HasTranscript != nil && w.HasTranscript(p.Profile, p.SessionID) {
+		return true
+	}
+	return w.InstanceProfiles != nil && len(w.InstanceProfiles(p.SessionID)) > 0
+}
+
 // GatherPlanWorld collects the live state. This is the I/O half; BuildPlan is the
 // decision half. An ABSENT channel is an empty roster, not an error: applying a
 // template to a channel nobody has joined yet (the first thing a new user does) must
@@ -253,9 +270,7 @@ func decidePeer(p *FormationPeer, f *Formation, w *PlanWorld, live map[string]bo
 	if live[p.Alias] {
 		return PeerPlan{Peer: p, Action: ActionPresent, Reason: "already live on the channel"}
 	}
-	// Strict equality, never a fuzzy match: an empty machine means "here" (a
-	// hand-authored file that omits it), anything else must equal this host exactly.
-	if p.Machine != "" && p.Machine != w.Host {
+	if !w.PeerHere(p) {
 		return PeerPlan{Peer: p, Action: ActionSkip,
 			Reason: fmt.Sprintf("recorded on %q, this host is %q (cross-machine launch is not in v1)", p.Machine, w.Host)}
 	}
