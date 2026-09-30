@@ -366,3 +366,54 @@ func TestPayloadRefsKeepsAuthoredOrder(t *testing.T) {
 		t.Errorf("torn payload = %q, want it handed over as-is", got)
 	}
 }
+
+const (
+	delegationOutOfEffort = "A ruling that would take you outside that effort (another repository, another machine, work the effort excludes) is a scope change for the operator, not a ruling."
+	delegationReserved    = "Reserved to the operator, whoever relays them: push, opening or merging a pull request, release or install"
+	delegationNone        = "No coordinator is named for you"
+)
+
+// TestKickoffNamesTheLaunchingSeat: every kickoff names the applier as coordinator,
+// never the anchor (they differ here) and never claims the operator picked it.
+func TestKickoffNamesTheLaunchingSeat(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.SessionID = "sid-1"; p.Role = strptr("You implement things.") }))
+	for _, action := range []PeerAction{ActionTemplate, ActionResume, ActionFork} {
+		got := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[0], Action: action}, "ch/applier", "cbus-ok-coder-abc123", "Build the thing.")
+		if !strings.Contains(got, "Your coordinator is ch/applier, the seat that launched you.") {
+			t.Errorf("%s: kickoff must name the launching seat as coordinator:\n%s", action, got)
+		}
+		if strings.Contains(got, "coordinator is ch/orchestrator") {
+			t.Errorf("%s: kickoff named the anchor, not the seat that launched the peer:\n%s", action, got)
+		}
+		if !strings.Contains(got, delegationReserved) {
+			t.Errorf("%s: kickoff must keep push, PRs, release and install reserved to the operator:\n%s", action, got)
+		}
+		if !strings.Contains(got, delegationOutOfEffort) {
+			t.Errorf("%s: kickoff must treat a ruling outside the effort as a scope change:\n%s", action, got)
+		}
+		role, deleg, effort := strings.Index(got, "--- your role ---"), strings.Index(got, "--- delegation ---"), strings.Index(got, "--- the effort ---")
+		if role < 0 || deleg < role || effort < deleg {
+			t.Errorf("%s: delegation must sit between the role and the effort (role=%d delegation=%d effort=%d)", action, role, deleg, effort)
+		}
+	}
+}
+
+// TestBootstrapDelegatesToTheAnchorWhenNotOnChannel: off the channel, the peer
+// answers the anchor, so the anchor is the coordinator it is told about.
+func TestBootstrapDelegatesToTheAnchorWhenNotOnChannel(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-elsewhere")
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.Role = strptr("You implement things.") }))
+	got, err := BootstrapPeer(f, "coder", "")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if !strings.Contains(got, "Your coordinator is ch/orchestrator, the seat that launched you.") {
+		t.Errorf("bootstrap off the channel must name the anchor as coordinator:\n%s", got)
+	}
+	if !strings.Contains(got, delegationOutOfEffort) || !strings.Contains(got, delegationReserved) {
+		t.Errorf("bootstrap must carry the out-of-effort and reserved lines:\n%s", got)
+	}
+}

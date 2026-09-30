@@ -679,3 +679,24 @@ func TestResumeAnchorOtherMachineWithoutTranscriptRefuses(t *testing.T) {
 		t.Error("nothing may launch for an anchor that lives on another machine")
 	}
 }
+
+// TestAnchorKickoffStatesTheCoordinatorSide: the anchor is told what it may rule on
+// and that the out-of-effort and reserved limits bind it as well as its peers.
+func TestAnchorKickoffStatesTheCoordinatorSide(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
+	for _, want := range []string{
+		"You coordinate this formation.",
+		"rulings on scope, contract and precedence inside the effort are yours to give",
+		delegationOutOfEffort + " Hold it and say so. That holds for you as for them.",
+		delegationReserved,
+		"needs the operator's own word, not your relay of it",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("anchor kickoff missing coordinator line %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Your coordinator is") {
+		t.Errorf("the anchor must not be told it has a coordinator:\n%s", prompt)
+	}
+}

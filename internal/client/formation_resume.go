@@ -277,6 +277,7 @@ func anchorKickoff(f *Formation, p *FormationPeer, brief string, rows []anchorRo
 		"not against this snapshot, which was composed when your window opened. Peers apply launches are briefed to answer YOU.")
 	b.WriteString("\n\nOnce the fleet has answered, refresh the checkpoint so the next restore starts from what you decided:\n" +
 		"  cbus formation save " + f.Name + " " + f.Channel)
+	b.WriteString("\n\n" + delegationCoordinator)
 	if s := strings.TrimSpace(brief); s != "" {
 		b.WriteString("\n\n--- the effort ---\n")
 		b.WriteString(s)
