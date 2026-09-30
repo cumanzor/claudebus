@@ -448,3 +448,33 @@ func TestKickoffWithoutBriefFixesTheEffort(t *testing.T) {
 		}
 	}
 }
+
+// TestKickoffOrchestratorRolefileCoordinates: an orchestrator launched by apply or
+// bootstrap coordinates its peers; it is not handed a peer clause naming the applier.
+func TestKickoffOrchestratorRolefileCoordinates(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-elsewhere")
+	f := applyFixture(
+		peer("lead", func(p *FormationPeer) { p.Rolefile = "roles/orchestrator.md@b3a806e" }),
+		peer("coder", func(p *FormationPeer) { p.Rolefile = "roles/coder.md@b3a806e" }),
+	)
+	applied := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[0], Action: ActionTemplate}, "ch/applier", "cbus-ok-lead-abc123", "")
+	booted, err := BootstrapPeer(f, "lead", "Build the thing.")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for name, got := range map[string]string{"apply": applied, "bootstrap": booted} {
+		if !strings.Contains(got, "You coordinate the peers you launch.") {
+			t.Errorf("%s: an orchestrator rolefile must get the coordinator side:\n%s", name, got)
+		}
+		if strings.Contains(got, "Your coordinator is") || strings.Contains(got, "No coordinator is named") {
+			t.Errorf("%s: an orchestrator must not be given a peer or unknown clause:\n%s", name, got)
+		}
+	}
+	if !strings.Contains(applied, delegationCoordNoEff) || strings.Contains(booted, "No effort is stated in this prompt") {
+		t.Errorf("the coordinator side must follow the brief (apply had none, bootstrap had one)")
+	}
+	if coder := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[1], Action: ActionTemplate}, "ch/applier", "cbus-ok-coder-abc123", ""); !strings.Contains(coder, "Your coordinator is ch/applier") {
+		t.Errorf("a peer with a non-orchestrator rolefile keeps the peer clause:\n%s", coder)
+	}
+}
