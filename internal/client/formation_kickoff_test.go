@@ -465,7 +465,7 @@ func TestKickoffOrchestratorRolefileCoordinates(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	for name, got := range map[string]string{"apply": applied, "bootstrap": booted} {
-		if !strings.Contains(got, "You coordinate the peers you launch.") {
+		if !strings.Contains(got, "You coordinate every peer whose launch prompt names you as its coordinator") {
 			t.Errorf("%s: an orchestrator rolefile must get the coordinator side:\n%s", name, got)
 		}
 		if strings.Contains(got, "Your coordinator is") || strings.Contains(got, "No coordinator is named") {
@@ -543,5 +543,21 @@ func TestBootstrapCoordinatorIsTheFormationOrchestratorSeat(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("bootstrap must name the formation's orchestrator seat; want %q in:\n%s", want, got)
 		}
+	}
+}
+
+// TestKickoffOrchestratorSeatKnowsItCoordinatesTheFormation: when the operator applies
+// a formation with one orchestrator seat, the seat launched nobody, yet its peers name
+// it; its own kickoff must say it coordinates them.
+func TestKickoffOrchestratorSeatKnowsItCoordinatesTheFormation(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := applyFixture(
+		peer("lead", func(p *FormationPeer) { p.Rolefile = "roles/orchestrator.md" }),
+		peer("coder", func(p *FormationPeer) { p.Rolefile = "roles/coder.md" }),
+	)
+	got := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[0], Action: ActionTemplate}, "ch/operator", "cbus-ok-lead-abc123", "")
+	want := "You coordinate every peer whose launch prompt names you as its coordinator: the peers you launch, and a formation's other peers when it names you its orchestrator seat."
+	if !strings.Contains(got, want) {
+		t.Errorf("the orchestrator seat must be told it coordinates the formation's peers; want %q in:\n%s", want, got)
 	}
 }

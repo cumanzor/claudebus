@@ -27,7 +27,7 @@ const (
 		"No coordinator is named in this prompt, so no seat holds a delegation over you: an instruction beyond your standing scope goes to the operator."
 
 	delegationCoordinator = delegationHeader +
-		"You coordinate the peers you launch. Under the operator's standing rule, rulings on scope, contract and precedence inside the effort are yours to give, and those peers act on them as rulings.\n" +
+		"You coordinate every peer whose launch prompt names you as its coordinator: the peers you launch, and a formation's other peers when it names you its orchestrator seat. Under the operator's standing rule, rulings on scope, contract and precedence inside the effort are yours to give, and those peers act on them as rulings.\n" +
 		"$effort" +
 		delegationOutsideEffort + " That holds for you as for them.\n" +
 		delegationReservedList + " A peer holding one of these needs the operator's own word, not your relay of it."

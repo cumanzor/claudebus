@@ -1771,7 +1771,7 @@ records the same rationale for a reimplementation.)
 Opens a **fresh, blank-transcript** session, not a fork, whose opening
 prompt tells it to `cbus connect` on its own (`SpawnPrompt`/`SpawnPromptAliased`,
 the same native template `bootstrap` and `branch` use). Go-native, no bash counterpart. Handler `runSpawn`
-(main.go:545); mechanics `client.Spawn` / `client.SpawnWithOptions`
+(`cmd/cbus/main.go`); mechanics `client.Spawn` / `client.SpawnWithOptions`
 (spawn.go:39,50). Same terminal launch as
 `branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
 blank transcript.
@@ -2079,10 +2079,13 @@ variants:
   instruction beyond your standing scope goes to the operator.`
 - **The coordinator's side.** The restored anchor's first turn
   (`anchorKickoff`), a formation peer whose `rolefile` is the orchestrator role,
-  and `spawn --role orchestrator` (whoever spawned it) read `You coordinate the
-  peers you launch.` They get the same effort fence and reserved list, and are
-  told that a peer holding a reserved action needs the operator's own word, not
-  the coordinator's relay of it. Without a brief, the coordinator's own effort
+  and `spawn --role orchestrator` (whoever spawned it) read `You coordinate every
+  peer whose launch prompt names you as its coordinator: the peers you launch,
+  and a formation's other peers when it names you its orchestrator seat.` The
+  line holds in every topology, including the operator applying a formation
+  whose orchestrator seat launched nobody. They get the same effort fence and
+  reserved list, and are told that a peer holding a reserved action needs the
+  operator's own word, not the coordinator's relay of it. Without a brief, the coordinator's own effort
   is what the operator assigns it, and a peer's effort is the first assignment
   the coordinator sends that peer.
 
@@ -2669,9 +2672,10 @@ git toplevel basename, else `global`. `--model`/`--name` pass through
 verbatim on request (same values and pinned-Opus caveat as `/bus-branch`);
 omitted, a local channel auto-reserves `main`/`fork-N` and titles the child
 with it, a remote channel leaves the child to pick its own alias. A named
-role adds `--role <r>`: the child is briefed from `roles/<r>.md`, and because
-step 1 joined this session to the local channel, the child's delegation section
-names this session as its coordinator.
+role adds `--role <r>`: the child is briefed from `roles/<r>.md`. For a local
+channel, step 1 joined this session to it, so the child's delegation section
+names this session as its coordinator; a remote `spawn --role` names no
+coordinator (except `--role orchestrator`, which gets the coordinator's side).
 
 1. Connect this session first (`cbus connect CHANNEL [ALIAS] --json`,
    `/bus-join` guidance for capability errors/roster/presence); no Monitor or

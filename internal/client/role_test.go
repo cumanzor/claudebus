@@ -270,7 +270,7 @@ func TestSpawnRoleFixesTheEffortAndOrchestratorCoordinates(t *testing.T) {
 			t.Fatal(err)
 		}
 		prompt := f.spec.Argv[len(f.spec.Argv)-1]
-		if !strings.Contains(prompt, "You coordinate the peers you launch.") || !strings.Contains(prompt, delegationCoordNoEff) {
+		if !strings.Contains(prompt, "You coordinate every peer whose launch prompt names you as its coordinator") || !strings.Contains(prompt, delegationCoordNoEff) {
 			t.Fatalf("%s: spawn --role orchestrator must get the coordinator side:\n%s", addr, prompt)
 		}
 		if strings.Contains(prompt, "Your coordinator is") || strings.Contains(prompt, "No coordinator is named") {

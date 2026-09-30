@@ -686,7 +686,7 @@ func TestAnchorKickoffStatesTheCoordinatorSide(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
 	for _, want := range []string{
-		"You coordinate the peers you launch.",
+		"You coordinate every peer whose launch prompt names you as its coordinator",
 		"rulings on scope, contract and precedence inside the effort are yours to give",
 		delegationOutOfEffort + " Hold it and say so. That holds for you as for them.",
 		delegationReserved,
