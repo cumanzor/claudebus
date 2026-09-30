@@ -205,7 +205,7 @@ Exact output strings live in command-reference.md; this is the shape.
 | `hook-exit` | preserves the registration | removes it (graceful SessionEnd) |
 | `hook-compact` | native Claude routes through it; Codex has its own separate compaction path | broadcasts `compact-pre`/`compact-post`, local only |
 | `rename` | refused, not supported for a managed alias | renames in place, re-arms |
-| `branch`/`spawn`/`bootstrap` | the child is always told to `cbus connect` on its own opening turn (`bootstrap_prompt.go:12-15`, `spawn.go:11-22`); there is no legacy child prompt | describes the *parent's own* registration: a `branch` parent that is not already daemon-managed falls back to a legacy `Join` for itself (`harness.go:237-248`) |
+| `branch`/`spawn`/`bootstrap` | the child is always told to `cbus connect` on its own opening turn (`bootstrapNativePrompt`, `SpawnPromptAliased`); there is no legacy child prompt | describes the *parent's own* registration: a `branch` parent that is not already daemon-managed falls back to a legacy `Join` for itself (`harness.go:237-248`) |
 
 ## 10. Known defects (current behavior, not a fix commitment)
 
