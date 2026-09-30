@@ -859,8 +859,8 @@ func TestBootstrapPromptDelegatesToTheParent(t *testing.T) {
 		if !strings.Contains(got, "The launch prompt above this line was your parent's; this one supersedes it.") {
 			t.Errorf("fork prompt must disown the inherited launch prompt: %q", got)
 		}
-		if !strings.Contains(got, delegationOutOfEffort) || !strings.Contains(got, delegationReserved) {
-			t.Errorf("fork prompt must carry the out-of-effort and reserved lines: %q", got)
+		if !strings.Contains(got, delegationOutOfEffort) || !strings.Contains(got, delegationReserved) || !strings.Contains(got, delegationNoEffort) {
+			t.Errorf("fork prompt must carry the no-effort, out-of-effort and reserved lines: %q", got)
 		}
 	}
 }

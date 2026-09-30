@@ -66,7 +66,7 @@ func KickoffPrompt(f *Formation, pp PeerPlan, self, nonce, brief string) string 
 		b.WriteString("\n\n--- your role ---\nThe formation records no role for you. " +
 			"In your first reply, describe your role in one line so it can be recorded.")
 	}
-	b.WriteString("\n\n" + delegationClause(self))
+	b.WriteString("\n\n" + delegationClause(self, strings.TrimSpace(brief) != ""))
 	if s := strings.TrimSpace(brief); s != "" {
 		b.WriteString("\n\n--- the effort ---\n")
 		b.WriteString(s)

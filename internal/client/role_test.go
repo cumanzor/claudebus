@@ -224,7 +224,7 @@ func TestSpawnRoleWithoutSpawnerOnChannelNamesNoCoordinator(t *testing.T) {
 			t.Fatal(err)
 		}
 		prompt := f.spec.Argv[len(f.spec.Argv)-1]
-		if !strings.Contains(prompt, delegationNone) || strings.Contains(prompt, "Your coordinator is") {
+		if !strings.Contains(prompt, delegationNone) || strings.Contains(prompt, "Your coordinator is") || strings.Contains(prompt, "nobody on the bus") {
 			t.Fatalf("%s: a spawner off the channel must not be named coordinator:\n%s", addr, prompt)
 		}
 	}
@@ -243,5 +243,38 @@ func TestSpawnWithoutRoleCarriesNoDelegation(t *testing.T) {
 	}
 	if prompt := f.spec.Argv[len(f.spec.Argv)-1]; strings.Contains(prompt, "--- delegation ---") {
 		t.Fatalf("a spawn without a role must not carry a delegation:\n%s", prompt)
+	}
+}
+
+// TestSpawnRoleFixesTheEffortAndOrchestratorCoordinates: spawn carries no effort, so
+// the first assignment fixes it; an orchestrator gets the coordinator side whether or
+// not its spawner is on the channel.
+func TestSpawnRoleFixesTheEffortAndOrchestratorCoordinates(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-spawner")
+	t.Chdir(t.TempDir())
+	plantPeer(t, "dev", "lead", "sid-spawner")
+	writeRoleFile(t, os.Getenv("CBUS_DIR"), "documenter", "# documenter\nMODEL: sonnet\n\n## Mission\nwrite entries.\n")
+	writeRoleFile(t, os.Getenv("CBUS_DIR"), "orchestrator", "# orchestrator\nMODEL: sonnet\n\n## Mission\ncoordinate.\n")
+	f := &fakeForker{}
+	if _, _, err := Spawn("window", "dev", "", "", "documenter", f); err != nil {
+		t.Fatal(err)
+	}
+	if prompt := f.spec.Argv[len(f.spec.Argv)-1]; !strings.Contains(prompt, delegationNoEffort) {
+		t.Fatalf("spawn --role must fix the effort to the first assignment:\n%s", prompt)
+	}
+	for _, addr := range []string{"dev", "solo"} {
+		f := &fakeForker{}
+		if _, _, err := Spawn("window", addr, "", "", "orchestrator", f); err != nil {
+			t.Fatal(err)
+		}
+		prompt := f.spec.Argv[len(f.spec.Argv)-1]
+		if !strings.Contains(prompt, "You coordinate the peers you launch.") || !strings.Contains(prompt, delegationCoordNoEff) {
+			t.Fatalf("%s: spawn --role orchestrator must get the coordinator side:\n%s", addr, prompt)
+		}
+		if strings.Contains(prompt, "Your coordinator is") || strings.Contains(prompt, "No coordinator is named") {
+			t.Fatalf("%s: an orchestrator must not be given a peer or unknown clause:\n%s", addr, prompt)
+		}
 	}
 }

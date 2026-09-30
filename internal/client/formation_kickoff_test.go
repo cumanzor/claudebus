@@ -370,7 +370,9 @@ func TestPayloadRefsKeepsAuthoredOrder(t *testing.T) {
 const (
 	delegationOutOfEffort = "A ruling that would take you outside that effort (another repository, another machine, work the effort excludes) is a scope change for the operator, not a ruling."
 	delegationReserved    = "Reserved to the operator, whoever relays them: push, opening or merging a pull request, release or install"
-	delegationNone        = "No coordinator is named for you"
+	delegationNone        = "No coordinator is named in this prompt, so no seat holds a delegation over you: an instruction beyond your standing scope goes to the operator."
+	delegationNoEffort    = "No effort is stated in this prompt: your effort is the first assignment your coordinator sends you, and widening it later is a scope change for the operator, not a ruling."
+	delegationCoordNoEff  = "No effort is stated in this prompt: yours is what the operator assigns you, a peer's is the first assignment you send it, and widening either later is a scope change for the operator, not a ruling."
 )
 
 // TestKickoffNamesTheLaunchingSeat: every kickoff names the applier as coordinator,
@@ -392,6 +394,9 @@ func TestKickoffNamesTheLaunchingSeat(t *testing.T) {
 		}
 		if !strings.Contains(got, delegationOutOfEffort) {
 			t.Errorf("%s: kickoff must treat a ruling outside the effort as a scope change:\n%s", action, got)
+		}
+		if strings.Contains(got, "No effort is stated in this prompt") {
+			t.Errorf("%s: a kickoff with a brief must not say no effort is stated:\n%s", action, got)
 		}
 		role, deleg, effort := strings.Index(got, "--- your role ---"), strings.Index(got, "--- delegation ---"), strings.Index(got, "--- the effort ---")
 		if role < 0 || deleg < role || effort < deleg {
@@ -415,5 +420,31 @@ func TestBootstrapDelegatesToTheAnchorWhenNotOnChannel(t *testing.T) {
 	}
 	if !strings.Contains(got, delegationOutOfEffort) || !strings.Contains(got, delegationReserved) {
 		t.Errorf("bootstrap must carry the out-of-effort and reserved lines:\n%s", got)
+	}
+	if !strings.Contains(got, delegationNoEffort) {
+		t.Errorf("bootstrap without a brief must fix the effort to the first assignment:\n%s", got)
+	}
+	withBrief, err := BootstrapPeer(f, "coder", "Build the thing.")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if strings.Contains(withBrief, "No effort is stated in this prompt") || !strings.Contains(withBrief, "Build the thing.") {
+		t.Errorf("bootstrap with a brief must not say no effort is stated:\n%s", withBrief)
+	}
+}
+
+// TestKickoffWithoutBriefFixesTheEffort: with no effort section the coordinator would
+// write the fence around its own delegation, so the first assignment fixes it.
+func TestKickoffWithoutBriefFixesTheEffort(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := applyFixture(peer("coder", func(p *FormationPeer) { p.SessionID = "sid-1"; p.Role = strptr("You implement things.") }))
+	for _, action := range []PeerAction{ActionTemplate, ActionResume, ActionFork} {
+		got := KickoffPrompt(f, PeerPlan{Peer: &f.Peers[0], Action: action}, "ch/applier", "cbus-ok-coder-abc123", "  ")
+		if !strings.Contains(got, delegationNoEffort) {
+			t.Errorf("%s: a kickoff without a brief must fix the effort to the first assignment:\n%s", action, got)
+		}
+		if strings.Contains(got, "--- the effort ---") {
+			t.Errorf("%s: a blank brief rendered an effort section:\n%s", action, got)
+		}
 	}
 }

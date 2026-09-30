@@ -686,7 +686,7 @@ func TestAnchorKickoffStatesTheCoordinatorSide(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	prompt := anchorPrompt(t, fleetFixture(), fleetWorld())
 	for _, want := range []string{
-		"You coordinate this formation.",
+		"You coordinate the peers you launch.",
 		"rulings on scope, contract and precedence inside the effort are yours to give",
 		delegationOutOfEffort + " Hold it and say so. That holds for you as for them.",
 		delegationReserved,
@@ -699,4 +699,26 @@ func TestAnchorKickoffStatesTheCoordinatorSide(t *testing.T) {
 	if strings.Contains(prompt, "Your coordinator is") {
 		t.Errorf("the anchor must not be told it has a coordinator:\n%s", prompt)
 	}
+}
+
+// TestAnchorKickoffEffortLine: without a brief the anchor is told what fixes the
+// effort; with one, the brief is the effort and the line is absent.
+func TestAnchorKickoffEffortLine(t *testing.T) {
+	t.Run("no brief", func(t *testing.T) {
+		t.Setenv("CBUS_DIR", t.TempDir())
+		if prompt := anchorPrompt(t, fleetFixture(), fleetWorld()); !strings.Contains(prompt, delegationCoordNoEff) {
+			t.Errorf("anchor kickoff without a brief must fix the effort:\n%s", prompt)
+		}
+	})
+	t.Run("brief", func(t *testing.T) {
+		t.Setenv("CBUS_DIR", t.TempDir())
+		fk := &recForker{}
+		if _, _, err := resumeAnchorWorld(fleetFixture(), "Ship the thing.", fk, fleetWorld()); err != nil {
+			t.Fatalf("resume: %v", err)
+		}
+		argv := fk.specs[0].Argv
+		if prompt := argv[len(argv)-1]; strings.Contains(prompt, "No effort is stated in this prompt") || !strings.Contains(prompt, "Ship the thing.") {
+			t.Errorf("anchor kickoff with a brief must not say no effort is stated:\n%s", prompt)
+		}
+	})
 }
