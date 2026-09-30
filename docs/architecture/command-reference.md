@@ -2672,10 +2672,11 @@ git toplevel basename, else `global`. `--model`/`--name` pass through
 verbatim on request (same values and pinned-Opus caveat as `/bus-branch`);
 omitted, a local channel auto-reserves `main`/`fork-N` and titles the child
 with it, a remote channel leaves the child to pick its own alias. A named
-role adds `--role <r>`: the child is briefed from `roles/<r>.md`. For a local
-channel, step 1 joined this session to it, so the child's delegation section
-names this session as its coordinator; a remote `spawn --role` names no
-coordinator (except `--role orchestrator`, which gets the coordinator's side).
+role adds `--role <r>`: the child is briefed from `roles/<r>.md`. Except for
+`--role orchestrator`, which gets the coordinator's side on either kind of
+channel: for a local channel, step 1 joined this session to it, so the child's
+delegation section names this session as its coordinator; a remote `spawn
+--role` names no coordinator.
 
 1. Connect this session first (`cbus connect CHANNEL [ALIAS] --json`,
    `/bus-join` guidance for capability errors/roster/presence); no Monitor or
