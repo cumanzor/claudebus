@@ -198,7 +198,10 @@ func TestResumeAnchorRefusals(t *testing.T) {
 	}{
 		{"no anchor alias", func(f *Formation, w *PlanWorld) { f.AnchorAlias = "" }, "no anchorAlias"},
 		{"anchor not a peer", func(f *Formation, w *PlanWorld) { f.AnchorAlias = "ghost" }, "names no peer"},
-		{"wrong machine", func(f *Formation, w *PlanWorld) { w.Host = "host-b" }, "run this there"},
+		{"wrong machine", func(f *Formation, w *PlanWorld) {
+			w.Host = "host-b"
+			w.HasTranscript = func(string, string) bool { return false }
+		}, "run this there"},
 		{"no sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "" }, "no session recorded"},
 		{"reserved sid", func(f *Formation, w *PlanWorld) { f.Peers[0].SessionID = "reserved" }, "no session recorded"},
 		{"duplicate sid", func(f *Formation, w *PlanWorld) {
@@ -501,17 +504,20 @@ func TestAnchorRosterMirrorsSidState(t *testing.T) {
 		}
 	}
 
-	// The same peer, two different claims, both true: the ROSTER reports its transcript
-	// honestly (present, it really is readable here), and the EXAMPLE leaves it out,
-	// because apply's machine gate would skip it and a named alias promises apply will
-	// act on it. This fixture is the only one where the two can disagree.
+	// A readable transcript outranks the recorded label (the hostname can follow the
+	// network), so apply resumes "seen" and the example must name it; "unseen" has no
+	// transcript here and stays out.
 	t.Setenv("CBUS_DIR", t.TempDir())
 	prompt := anchorPrompt(t, f, world)
 	if !strings.Contains(rosterLine(t, prompt, "seen"), "transcript=present") {
 		t.Errorf("the roster stopped reporting a readable transcript as present:\n%s", prompt)
 	}
-	if ln := onlyLine(prompt); ln != "" {
-		t.Errorf("the resume example names a peer recorded on another machine, which apply would skip: %s", ln)
+	ln := onlyLine(prompt)
+	if !strings.Contains(ln, "--only seen") {
+		t.Errorf("the resume example must name the peer whose transcript is here: %q", ln)
+	}
+	if strings.Contains(ln, "unseen") {
+		t.Errorf("the resume example names a peer whose transcript is not on this machine: %s", ln)
 	}
 }
 
@@ -638,5 +644,38 @@ func TestResumeAnchorSweepEndToEnd(t *testing.T) {
 	}
 	if argv := fk.specs[0].Argv; argv[0] != "ccs" || argv[1] != "beta" {
 		t.Errorf("argv = %v, want a ccs beta prefix", argv[:2])
+	}
+}
+
+// TestResumeAnchorSurvivesHostnameChange: on a Mac without a fixed HostName the
+// hostname comes from reverse DNS, so moving networks renames the machine between
+// save and resume. The transcript on this disk proves the session is here.
+func TestResumeAnchorSurvivesHostnameChange(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := resumeFixture()
+	w := resumeWorld()
+	w.Host = "host-a-othernet"
+	fk := &recForker{ids: []string{"surface-1"}}
+	if _, _, err := resumeAnchorWorld(f, "", fk, w); err != nil {
+		t.Fatalf("resume refused after a hostname change with the transcript present: %v", err)
+	}
+	if len(fk.specs) != 1 {
+		t.Fatalf("specs=%d, want 1 launch", len(fk.specs))
+	}
+}
+
+func TestResumeAnchorOtherMachineWithoutTranscriptRefuses(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	f := resumeFixture()
+	w := resumeWorld()
+	w.Host = "server"
+	w.HasTranscript = func(profile, sid string) bool { return false }
+	fk := &recForker{ids: []string{"surface-1"}}
+	_, _, err := resumeAnchorWorld(f, "", fk, w)
+	if err == nil || !strings.Contains(err.Error(), `was recorded on "host-a"`) {
+		t.Fatalf("err = %v, want the other-machine refusal", err)
+	}
+	if len(fk.specs) != 0 {
+		t.Error("nothing may launch for an anchor that lives on another machine")
 	}
 }

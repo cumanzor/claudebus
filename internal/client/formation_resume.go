@@ -49,8 +49,8 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	if err := formationHarnessRefusal(p); err != nil {
 		return "", "", err
 	}
-	if p.Machine != "" && p.Machine != world.Host {
-		return "", "", fmt.Errorf("anchor %q was recorded on %q, this host is %q — run this there", p.Alias, p.Machine, world.Host)
+	if !world.PeerHere(p) {
+		return "", "", fmt.Errorf("anchor %q was recorded on %q, this host is %q, and its transcript is not on this machine — run this there", p.Alias, p.Machine, world.Host)
 	}
 	if p.SessionID == "" || p.SessionID == "reserved" {
 		return "", "", fmt.Errorf("anchor %q has no session recorded — nothing to resume; start a fresh session, join %s, and run apply from it", p.Alias, f.Channel)
@@ -201,7 +201,7 @@ func anchorRoster(f *Formation, anchorAlias string, world *PlanWorld) []anchorRo
 		row := anchorRow{
 			Alias: p.Alias, Mode: p.Mode, Origin: p.Origin,
 			Machine: p.Machine, IsAnchor: p.Alias == anchorAlias,
-			Here: p.Machine == "" || p.Machine == world.Host,
+			Here: world.PeerHere(p),
 		}
 		switch {
 		case p.SessionID == "" || p.SessionID == "reserved":

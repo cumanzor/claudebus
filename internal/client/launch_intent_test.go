@@ -496,7 +496,11 @@ func TestResumeWritesNoIntentWhenItRefuses(t *testing.T) {
 		{"fork-born anchor", func(f *Formation) { f.Peers[0].Origin = OriginFork }, resumeWorld},
 		{"unrecorded origin", func(f *Formation) { f.Peers[0].Origin = "" }, resumeWorld},
 		{"no session recorded", func(f *Formation) { f.Peers[0].SessionID = "" }, resumeWorld},
-		{"wrong machine", func(f *Formation) { f.Peers[0].Machine = "host-b" }, resumeWorld},
+		{"wrong machine", func(f *Formation) { f.Peers[0].Machine = "host-b" }, func() *PlanWorld {
+			w := resumeWorld()
+			w.HasTranscript = func(profile, sid string) bool { return false }
+			return w
+		}},
 		{"live-armed sid", func(f *Formation) {}, func() *PlanWorld {
 			w := resumeWorld()
 			w.LiveSids = map[string]string{"sid-anchor": "dd/orchestrator"}
