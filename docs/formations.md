@@ -46,6 +46,15 @@ cbus formation rm myeffort                # delete a saved formation
   hand — the path for a peer `apply` won't launch itself (recorded on another
   machine; cross-machine launch isn't in v1) or for previewing a brief before
   opening a fleet.
+- Every kickoff says who coordinates the peer. That is the seat that launched
+  it, or the formation's orchestrator seat when the file declares exactly one
+  and someone else ran `apply`. The kickoff says the coordinator's rulings on
+  scope, contract and precedence inside the effort bind; with no `--brief`,
+  the effort is the first assignment the coordinator sends. It says that
+  leaving the effort is a scope change for you, and that push, pull requests,
+  release, install and anything outward or irreversible stay yours however
+  they are relayed. The wording is fixed in the binary. See
+  `docs/architecture/command-reference.md` §10 for each variant.
 - A `pane`-target peer's split chains off the largest pane made so far
   (applier plus this run's created panes), a self-balancing grid instead of
   always splitting the applier. A peer's `"split": "right"|"down"` in the

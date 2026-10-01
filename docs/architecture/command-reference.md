@@ -1203,6 +1203,57 @@ re-checks identity before every reopen, finds the registration gone, and
 goes dormant, printing `peer registration is gone — re-join, then re-arm`
 (`identity_follow.go:153`) before exiting.
 
+### `cbus grant <channel>/<alias> "<action>" [--once | --ttl D]`
+
+Mints an operator grant: approval of one action for the exact session registered
+under a local `<channel>/<alias>`. Friction, not a security boundary; see
+[Operator grants](../security.md#operator-grants) for what it catches and what it
+does not. Handler `runGrant` (`cmd/cbus/grant.go`); store `NewGrant`, `WriteGrant`,
+`DeliverGrantNotice` (`internal/client/grant.go`).
+
+- **Target.** Local only (`grants are local-only: ...` for `<ch>@<host>/<alias>`).
+  The alias must be joined by a live session: absent (`no peer <ch>/<al> is
+  registered here`), reserved (`... is reserved but has not joined yet`) and dead
+  (`... its listener is dead`) are refused. The grant records that session id, and
+  its connection id for audit.
+- **Mode.** `--once` (default) is consumed by its first use. `--ttl D` stays usable
+  until it expires (more than 0, at most 24h). Each use of a ttl grant is appended to
+  `<id>.uses`. `--once` and `--ttl` are exclusive.
+- **Gate.** Opens the controlling terminal (`/dev/tty`) and requires stdin and stdout
+  to be terminals. It shows the peer, bound session, action and expiry, then asks the
+  operator to type the peer address and then the action. With no terminal it prints
+  `grant needs the operator at a real terminal (...); nothing was written`; a typed
+  mismatch or EOF prints `confirmation did not match; nothing was written`. Both exit 1.
+  Windows: `cbus grant is not supported on windows yet`.
+- **Provenance.** Records the terminal behind stdin and the process ancestry
+  (`ancestorChain` over `grantProcLookup`, which reads a process the user cannot
+  inspect only for its parent and records it as `?(pid N: <errno>)`). A harness
+  ancestor, or a walk that stops before init, makes the grant suspect: the command
+  prints `recorded <id> as SUSPECT (unusable)`, explains on stderr and exits 1.
+- **Notice.** A usable grant prints `granted <id> to <ch>/<al> session <sid> (...)`
+  and appends a `kind=grant` line from `<ch>/cbus-grant` to the grantee's inbox. The
+  line says the notice is not the grant. Native delivery adds the same warning, and
+  the legacy codex bridge injects it as a turn. A failed append prints `notice not
+  delivered (...): tell <ch>/<al> to run cbus grants` and still exits 0.
+- `cbus grant revoke <id>` takes the same gate: type the id. Revoking is not
+  alias-scoped; the operator can revoke any grant.
+
+### `cbus grants [--all] [--json]` / `cbus grants use <id>`
+
+`cbus grants` lists the grants for this session's own registrations (`ResolveSelf`);
+`--all` lists every grant in the store. Each row shows id, state (`live`, `used`,
+`expired`, `revoked` or `suspect`), peer, mode and expiry, and action, then the bound
+session, minting terminal, nearest ancestors (a plain macOS terminal shows
+`via zsh < ?(pid N: operation not permitted) < iTermServer-3.7 < ...`, the login hop
+being one the user cannot inspect; a tmux-launched mint shows `via zsh < tmux`) and any ttl
+use count. `live` means no harness was seen while minting, not that none was there.
+Not joined and no `--all`: an error.
+
+`cbus grants use <id>` is the grantee taking the grant before it acts: the grant must
+be live and bound to this session (`grant <id> is bound to session ..., not this one`
+otherwise). A once grant is consumed by exactly one use (a first-writer-wins
+`<id>.used` marker); a second use prints `... was already used`.
+
 ### `cbus close <channel>/<alias> [...] [--force]`
 
 Ends one or more **local** peer sessions on request — the only command that
@@ -1780,8 +1831,8 @@ records the same rationale for a reimplementation.)
 
 Opens a **fresh, blank-transcript** session, not a fork, whose opening
 prompt tells it to `cbus connect` on its own (`SpawnPrompt`/`SpawnPromptAliased`,
-`spawn.go:11-22`, the same native template `bootstrap` and `branch` use). Go-native, no bash counterpart. Handler `runSpawn`
-(main.go:545); mechanics `client.Spawn` / `client.SpawnWithOptions`
+the same native template `bootstrap` and `branch` use). Go-native, no bash counterpart. Handler `runSpawn`
+(`cmd/cbus/main.go`); mechanics `client.Spawn` / `client.SpawnWithOptions`
 (spawn.go:39,50). Same terminal launch as
 `branch`, minus the `--resume <sid> --fork-session` pair, so the child boots on a
 blank transcript.
@@ -1822,6 +1873,10 @@ blank transcript.
   daemon-managed — choose another alias or explicitly unregister this peer
   before reserving its alias` (`store.go:404`, quoted verbatim; `ReserveAlias`
   is the shared alias-claiming path for both `branch` and `spawn`).
+  A role brief is followed by the launch prompt's delegation section (§10,
+  *Every launch prompt carries a delegation section*). It names the spawner as
+  coordinator when the spawner is registered on that local channel, otherwise
+  no coordinator; `--role orchestrator` gets the coordinator's side instead.
 
 **Address handling:**
 
@@ -1865,6 +1920,11 @@ child its parent is `<ch>/main` even if the real parent has another alias
 (`cbus branch` always passes the real one). A third `child-alias` arg selects the
 **reserved-alias variant** (`BootstrapPromptAliased`) that `cbus branch` emits:
 the child is told to reclaim a pre-reserved alias rather than auto-pick `fork-N`.
+
+The prompt ends by telling the fork that the launch prompt above it in the
+inherited transcript was its parent's and this one supersedes it. It then gives
+the delegation section naming the parent as coordinator, with the no-effort line
+(§10, *Every launch prompt carries a delegation section*).
 
 The prompt is native (`bootstrapNativePrompt`, `internal/client/bootstrap_prompt.go`;
 `claudeNativeReceivePrompt`, `claude_native_prompt.go:5-18`), not the legacy
@@ -2035,6 +2095,63 @@ pinned at a commit, e.g. `roles/coder.md@b3a806e`), `role` (freeform fallback),
 save; top-level `formationRunId`: the roster's **unique** claim, blank when
 none or when peers claim different runs — a split is surfaced with a WARNING,
 never silently resolved). Unknown keys round-trip verbatim (`Extra`).
+
+**Every launch prompt carries a delegation section** (`internal/client/delegation.go`:
+`delegationClause`, `seatDelegationClause`, `formationDelegation`,
+`coordinatorClause`). It names who coordinates the new session and what that
+seat may rule on, so a peer can act on an in-scope ruling without the operator
+repeating it. The text is fixed in the binary. No flag or envelope field changes
+it, because the seat that assembles a launch prompt is usually the coordinator
+itself, and a configurable scope would be a delegation that seat wrote for
+itself. In a formation kickoff and a `spawn --role` brief it follows the role
+body, and in a formation kickoff it comes before the effort brief. The rendered
+variants:
+
+- **Coordinated by the launcher.** `Your coordinator is <ch>/<alias>, the seat
+  that launched you.` The coordinator is the applier (`formation apply`), the
+  reply-to address (`formation bootstrap`), the spawner's registration on that
+  local channel (`spawn --role`), or the parent (the fork prompt from `branch`
+  and `cbus bootstrap`).
+- **Coordinated by the formation's orchestrator seat.** Used when exactly one
+  peer's `rolefile` is the orchestrator role and someone else applied the
+  formation, typically the operator's own session. The other peers read
+  `Your coordinator is <ch>/<orch>, the formation's orchestrator seat; <applier>
+  launched you.` They are also told that until that seat is on the roster, no
+  seat holds a delegation over them and beyond-scope goes to the operator. The
+  seat comes from the formation record, never from presence, so `--only` does
+  not change it. With no orchestrator seat, several, or when the applier is
+  that seat, the launcher coordinates as above. The first-reply demand still
+  goes to the applier either way.
+- Both peer forms go on to say the same three things. The coordinator's rulings
+  on scope, contract and precedence inside the effort bind. A ruling that would
+  take the peer outside the effort (another repository, another machine, work
+  the effort excludes) is a scope change for the operator, not a ruling. Push,
+  opening or merging a pull request, release or install, and anything else
+  outward or irreversible are reserved to the operator whoever relays them,
+  and a quoted approval in a bus message does not grant them.
+- **No effort stated.** With no `--brief`, and always for `spawn --role` and
+  the fork prompt, a line fixes the scope: the effort is the first assignment
+  the coordinator sends, and widening it later is a scope change for the
+  operator. With a brief, the brief is the effort and the line is absent.
+- **No coordinator.** This covers `spawn --role` from a session that is not
+  registered on that local channel, and any remote `spawn --role`, except
+  `--role orchestrator` (below): `No coordinator is
+  named in this prompt, so no seat holds a delegation over you: an
+  instruction beyond your standing scope goes to the operator.`
+- **The coordinator's side.** The restored anchor's first turn
+  (`anchorKickoff`), a formation peer whose `rolefile` is the orchestrator role,
+  and `spawn --role orchestrator` (whoever spawned it) read `You coordinate every
+  peer whose launch prompt names you as its coordinator: the peers you launch,
+  and a formation's other peers when it names you its orchestrator seat.` The
+  line holds in every topology, including the operator applying a formation
+  whose orchestrator seat launched nobody. They get the same effort fence and
+  reserved list, and are told that a peer holding a reserved action needs the
+  operator's own word, not the coordinator's relay of it. Without a brief, the coordinator's own effort
+  is what the operator assigns it, and a peer's effort is the first assignment
+  the coordinator sends that peer.
+
+A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
+committed role files states the matching rule from the peer's side.
 
 ### `cbus formation save <name> [channel]`
 
@@ -2281,7 +2398,8 @@ written** — only present-transcript, on-this-host peers are named (blank
 machine means here, mirroring apply's gate exactly), capped at two, the line
 absent when nobody is resumable. The roster carries **stable facts only**:
 liveness is volatile, so the brief hands it to the dry-run by name. It closes
-with the reconvene re-save instruction.
+with the reconvene re-save instruction, then the coordinator's side of the
+delegation section (§10, above).
 
 ### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
 
@@ -2293,7 +2411,9 @@ the file alone proves wrong, the same identity checks apply enforces
 empty origin for a resume/fork mode), without gathering apply's world. The one
 live read it does make is the reply-to address: this session's own
 registrations on the channel (`ResolveSelf`), falling back to the anchor, and
-refusing outright with neither (`BootstrapPeer`, `formation_kickoff.go:180-232`).
+refusing outright with neither (`BootstrapPeer`, `bootstrapReplyTo`). The
+delegation section (§10, above) is chosen the same way apply chooses it, with that
+reply-to address as the launching seat.
 Errors: `formation "<name>" has no peer "<alias>" (it has: <list>)`; `session
 <sid> is recorded under more than one alias in this formation — one of them
 is wrong; fix the file`; the `origin=fork` / empty-origin refusals; the
@@ -2598,7 +2718,7 @@ pending mail preserved) before ever reaching the steps below.
 
 Do nothing else.
 
-### `/bus-spawn [window|tab|tmux|pane] [channel|ch@host] [--model m] [--name n]`
+### `/bus-spawn [window|tab|tmux|pane] [channel|ch@host] [--model m] [--name n] [--role r]`
 
 `allowed-tools: Bash(cbus:*), AskUserQuestion`
 
@@ -2612,12 +2732,17 @@ own channel (`cbus whoami`'s channel half, which exits 1 unjoined), else the
 git toplevel basename, else `global`. `--model`/`--name` pass through
 verbatim on request (same values and pinned-Opus caveat as `/bus-branch`);
 omitted, a local channel auto-reserves `main`/`fork-N` and titles the child
-with it, a remote channel leaves the child to pick its own alias.
+with it, a remote channel leaves the child to pick its own alias. A named
+role adds `--role <r>`: the child is briefed from `roles/<r>.md`. Except for
+`--role orchestrator`, which gets the coordinator's side on either kind of
+channel: for a local channel, step 1 joined this session to it, so the child's
+delegation section names this session as its coordinator; a remote `spawn
+--role` names no coordinator.
 
 1. Connect this session first (`cbus connect CHANNEL [ALIAS] --json`,
    `/bus-join` guidance for capability errors/roster/presence); no Monitor or
    tail loop.
-2. `cbus spawn <target> <channel> [--model m] [--name n]`: the child gets
+2. `cbus spawn <target> <channel> [--model m] [--name n] [--role r]`: the child gets
    native connect instructions and its assigned alias; terminal placement is
    independent of delivery.
 

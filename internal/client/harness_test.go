@@ -832,3 +832,19 @@ func TestPrecheckIsTheOnlySurfaceAuthority(t *testing.T) {
 		})
 	}
 }
+
+// TestBootstrapPromptDelegatesToTheParent: a fork's coordinator is the parent that
+// launched it, and the fork is told the inherited launch prompt was the parent's.
+func TestBootstrapPromptDelegatesToTheParent(t *testing.T) {
+	for _, got := range []string{BootstrapPrompt("myrepo", "lead"), BootstrapPromptAliased("myrepo", "lead", "fork-1")} {
+		if !strings.Contains(got, "Your coordinator is myrepo/lead, the seat that launched you.") {
+			t.Errorf("fork prompt must name the parent as coordinator: %q", got)
+		}
+		if !strings.Contains(got, "The launch prompt above this line was your parent's; this one supersedes it.") {
+			t.Errorf("fork prompt must disown the inherited launch prompt: %q", got)
+		}
+		if !strings.Contains(got, delegationOutOfEffort) || !strings.Contains(got, delegationReserved) || !strings.Contains(got, delegationNoEffort) {
+			t.Errorf("fork prompt must carry the no-effort, out-of-effort and reserved lines: %q", got)
+		}
+	}
+}

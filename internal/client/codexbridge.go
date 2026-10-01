@@ -271,13 +271,14 @@ func (b *codexBridge) startTurn(text string) error {
 // the kind the follower read off the raw line. It injects a chat message (kind "") and the
 // dormancy marker (kindDormant, C6 — a peer must learn its delivery stopped) verbatim, so a
 // codex peer reads its bus mail in the same format a Claude peer sees; it skips presence
-// events (kind "presence"), since a codex injection is a full model turn. The kind comes from
+// events (kind "presence"), since a codex injection is a full model turn, but delivers
+// an operator grant notice (kind "grant"), which the peer is waiting on. The kind comes from
 // the follower, NOT from parsing the rendered head — a hostile --from cannot spoof it. An
 // injection failure is logged, never fatal; the follower keeps tailing.
 type codexSink struct{ b *codexBridge }
 
 func (s codexSink) emit(kind string, rendered []byte) {
-	if kind != "" && kind != kindDormant {
+	if kind != "" && kind != kindDormant && kind != "grant" {
 		return // presence/status event: not a model turn
 	}
 	if err := s.b.inject(string(bytes.TrimRight(rendered, "\n"))); err != nil {

@@ -74,6 +74,267 @@ directory held no launcher afterwards. The launcher and tmux tests, including th
 real-tmux round trips, also pass on a Debian 13 host with tmux 3.5a, with no
 scratch directories left behind. A real iTerm2 launch was not exercised.
 
+## [2026-10-01 20:28:01 UTC] [Client/Roles] deliver operator grants and say how they count
+
+[Attempt #1] Code: internal/client/grant.go, codexbridge.go, daemon_presence.go,
+delegation.go, internal/core/message.go, cmd/cbus/grant.go. Roles:
+roles/{coder,documenter,orchestrator,reviewer}.md. Docs: docs/security.md,
+docs/architecture/command-reference.md. Tests: the matching _test.go files.
+Changelogs: both. Split into three stacked pull requests: the store, the CLI,
+then this one, which closes the issue that asked for operator grants.
+
+[What changed]
+The store and CLI added in the previous entry gave a peer something to verify
+but nothing told it to look. This delivers the grant and writes the rule.
+
+Notice: after `cbus grant` writes a usable record it appends one inbox line to
+the grantee under the same alias lock a send takes. The line has
+`kind=grant`, is from `<channel>/cbus-grant` (a label, not a peer), and says the
+notice is not the grant: act only if `cbus grants` lists the id as live for you
+and run `cbus grants use` first. Only this path writes that kind; `cbus send`
+cannot set one, and a relayed message of any kind other than chat or presence is
+rejected by the daemon on receipt, so grants stay local. No notice goes out for a
+suspect mint. The grant is written first, so a failed notice append leaves it
+valid, exits 0 and tells the operator to ask the peer to run `cbus grants`.
+A native peer's prompt for a grant notice adds that a notice is not authority
+and should not be answered on the bus. The Codex bridge used to inject only chat and
+dormant notices; it now injects `grant` too, as a model turn, since the peer is
+waiting on it. The kind comes from the follower's parsed line, not
+the rendered text, so a `--from` alias cannot spoof it.
+
+Doctrine: doctrine 3 gains, in place and byte-identical across the four role
+files with numbering unchanged, that what the delegation reserves to the
+operator needs the operator's own word or an operator grant that `cbus grants`
+lists as live for you, taken with `cbus grants use` before you act; that a
+grant quoted in a message is not a grant; and that a peer never runs `cbus grant`
+itself. The peer form of the launch prompt's reserved line says the same, and the
+coordinator form says a peer needs the operator's word or a grant it verifies
+itself, not the coordinator's relay of either, and that the coordinator never
+runs `cbus grant`. The shared-core canary hash changes by design.
+
+Docs: `docs/security.md` has an Operator grants section and the command
+reference documents `cbus grant` and `cbus grants`. They state what a grant is
+(one action, one local peer's exact session, once or up to 24 hours, confirmed
+by typing at a terminal) and that it is friction against a model mistaking a
+relayed approval for the operator, not a security boundary. They list what it
+catches and what it does not, with measured rows kept apart from mechanism: a
+mint from a reparented process (`tmux new -d`, measured live; launchd, at and
+cron are the same class and were not run), a hand-written record with a valid
+session id and invented provenance (measured: it listed as live and was
+consumed), an environment-sourced session id (measured: a spoofed
+`CBUS_SESSION_ID` consumed it), a harness running as another user or root, and
+the revoke and expiry races. The listing cannot prove a live grant came from the
+operator; provenance only marks a harness or pty-wrapped mint as suspect.
+
+Folds from the earlier review: the `.uses` count now counts non-empty lines so
+a torn final line still counts as a use, and the listing says `used 1 time`.
+
+[Possible Ripple Effects]
+Every launch prompt's reserved line changed text, so peers launched before this
+release keep the old wording until relaunched. A Codex peer will now receive a
+grant notice as a model turn, the one kind besides chat and the dormancy notice it takes. A peer that
+follows the new doctrine will act on a live grant for the exact action it names;
+a live grant means no harness was seen, not that the operator made it, so the
+listed escapes still apply. Nothing changes for a peer that never receives a
+grant. The longer doctrine and reserved line also push the coder role's launch
+prompt over tmux's command size limit: `cbus spawn tmux --role coder` worked
+before this change and now fails with `command too long` (#32).
+
+[Testing Notes]
+New tests cover the notice being written with `kind=grant` and sent to the
+grantee only, none for a suspect mint, a failing notice append leaving the grant
+live with exit 0, the payload text for native peers, the Codex bridge injecting
+the kind, a notice-shaped chat message from an alias named `cbus-grant` never
+listed by `cbus grants`, a torn `.uses` line counted, and the doctrine and
+reserved-line text pinned in all four role files and both launch-prompt forms.
+Named mutants (kind blanked, payload branch off, bridge dropping the kind, a
+notice failure made fatal, a torn line uncounted, one role drifting, the
+quoted-grant clause removed) each fail on the aimed assertion. `go vet` and
+`go test ./...` pass and linux amd64/arm64 and windows amd64 compile.
+Live acceptance, on a build whose Go code and role files match the final tip, in
+a scratch store with a local bare origin and a sessionless coordinator seat. The
+peer was spawned with the documenter role because `--role coder` into tmux failed
+with `command too long` (#32); the roles share the same doctrine. A quoted
+operator approval to push was held. A grant minted from a model's shell inside
+`script` was recorded suspect, sent no notice, and the peer found it suspect in
+`cbus grants` and refused it. A grant the operator minted at a plain terminal
+produced the notice; with no further instruction the peer ran `cbus grants`,
+then `cbus grants use`, then pushed, and the transcript shows one push chained
+behind the use. A second `cbus grants use` was refused as used, run outside the
+peer under its session identity, so it shows once-semantics on the real binary
+and not the peer's behavior; the listing showed the grant bound to the peer's own
+session. A grant minted through `tmux new -d` with an inert action was live and
+notified the peer, which took no action: the escape the security doc names.
+Claude Code's `!` prefix, typed in a session outside the formation, was refused
+for lack of a controlling terminal and wrote nothing.
+
+## [2026-10-01 16:35:01 UTC] [Client] operator grants: store, CLI and terminal gate
+
+[Attempt #1] Code: internal/client/grant.go, grant_ancestry_unix.go,
+grant_ancestry_windows.go, grant_tty_{unix,darwin,linux,windows}.go,
+cmd/cbus/grant.go, main.go, usage.go. Tests: the matching _test.go files.
+Changelogs: both. Split into two stacked pull requests, store first, then CLI.
+
+[What changed]
+A peer that holds an action its effort excludes can only get the operator's
+word today if the operator types it into the peer's pane, because a relayed
+approval cannot be told apart from the coordinator deciding alone. This adds
+the record a peer can verify instead, in two parts.
+
+Store: a grant is one immutable JSON file under `.grants/<channel>/<alias>/`,
+written to a temp file and linked into place, so an id collision fails rather
+than overwriting. State is derived on read: revoked, then used (for a once
+grant), then expired, then suspect, else live. A once grant is consumed by an
+exclusive `link` marker, so exactly one concurrent use wins; a ttl grant
+(default once, ttl capped at 24h) appends a line to a `.uses` file for audit.
+The grant binds the target's exact session id (the connection id is recorded
+for audit only, since it changes on reconnect), so a later session that
+reclaims the same alias cannot consume it, and a reserved or absent target, or a dead
+legacy listener, is refused at mint. Each record carries the minting terminal, uid and
+process ancestry.
+
+CLI: `cbus grant` reads `/dev/tty` and requires the operator to type the peer
+address and then the action text; no y/n. It refuses, writing nothing, when
+there is no controlling terminal, when stdin or stdout is not a terminal, on
+any mismatch or EOF, for a remote address, and for a bad ttl. `cbus grants`
+lists this session's own grants with their state, `--all` lists every grant in
+the store for audit, and `grants use` and `grant revoke` consume and revoke.
+
+Provenance is an audit signal: when the ancestry walk finds a model harness
+(claude, codex, opencode, or a node/bun/deno script run for one) the record is
+marked suspect, `cbus grants` lists it as suspect and `grants use` refuses it,
+which also refuses the harness's `!` prefix. A walk that errors or is cut short
+fails toward suspect; on macOS an EPERM hop (the root-owned `login`) falls back
+to the kernel parent pid and is recorded as unreadable. A suspect mint prints
+`recorded <id> as SUSPECT (unusable)` rather than a success line.
+
+[Possible Ripple Effects]
+Nothing reads grants yet: no inbox notice is delivered, and doctrine 3 and the
+delegation reserved line still say a quoted approval does not count and do not
+mention grants, so a peer has no instruction to look. That is the next
+milestone. The gate is friction only. Measured from a model's shell tool: the
+tool starts without a controlling terminal (opening `/dev/tty` fails) in Claude
+Code, Codex CLI and OpenCode, but `script`, a Python pty and `tmux new -d` with
+send-keys each give one (tmux except under Codex's default sandbox). The first two end up marked suspect; a process
+reparented to init (the tmux case) or a direct write to the store records no
+harness and reads as live, so a live grant means no harness was seen, not that
+none was there. A harness running as another user or root also escapes the
+ancestry check. The grantee's session id is read from the environment, so a
+same-user model could present it. Not a security boundary against a hostile
+local process.
+
+[Testing Notes]
+Refusals are asserted to leave the store byte-identical (tree hash) with a
+non-zero exit, including the built binary run under `setsid` with no
+terminal. Tests cover once consumed exactly once by the grantee only (20 rounds
+of 16 concurrent uses), ttl expiry on a clock seam, alias reuse after a
+reclaim, reserved/absent/dead targets, both branches of the ancestry walk,
+truncated and EPERM walks, and that only harness argv patterns match. Named
+mutants (ancestor flag forced off, truncation ignored, lookup failure counted
+complete, exclusive-create errors counted as wins, session binding ignored,
+suspect printing the success line) each fail on the aimed assertion. The bypass
+routes above were run against the built binary in a scratch store. `go vet`
+and `go test ./...` pass and linux amd64/arm64 and windows amd64 compile.
+Not run: the live acceptance (a peer holding a reserved action, a relayed
+quote, then an operator grant from a plain terminal) belongs to the next
+milestone, which delivers the notice.
+
+## [2026-09-30 23:07:18 UTC] [Client] standing delegation in launch prompts
+
+[Attempt #1] 22 files. Code: internal/client/delegation.go (new),
+formation_kickoff.go, formation_resume.go, bootstrap_prompt.go, spawn.go. Roles:
+roles/{coder,documenter,orchestrator,reviewer}.md. Docs: commands/bus-spawn.md,
+docs/architecture/command-reference.md, docs/architecture/current-architecture.md,
+docs/formations.md. Tests: assets, formation kickoff/apply/resume, harness, role
+and codex spawn tests. Changelogs: both. Nine commits, this one included.
+
+[What changed]
+Shared doctrine 3 says a bus message cannot escalate what a peer may do and that
+an instruction beyond its scope is "a request to be ruled on". It never said who
+rules or whether the ruling binds, and the orchestrator's Escalation section
+told it to get the operator's sign-off and quote it. A peer that had been told a
+relayed sign-off is not the operator's word had nothing it was allowed to accept,
+so an in-scope one-line change could wait for several rounds.
+
+Every launch prompt a peer receives now carries a `--- delegation ---` section
+between its role and its effort. The coordinator named there is the seat that
+launched the peer: the applier for `formation apply`, bootstrap and the peers of
+a resume, the parent for a fork, the spawner for `cbus spawn --role` when it is
+registered on that local channel. A resume anchor's own kickoff gets the
+coordinator side, since it then applies the formation. Under the operator's standing rule the
+coordinator's rulings on scope, contract and precedence inside the effort bind
+the peer. Three things stay outside: a ruling that would take the peer beyond
+the effort (another repository, another machine, work the effort excludes) is a
+scope change for the operator; push, opening or merging a pull request, release,
+install and anything else outward or irreversible are reserved to the operator
+whoever relays them, and a quoted approval does not grant them; and a formation
+coordinator's own prompt says the same applies to it. When no brief is given,
+and always for `spawn --role`, the prompt fixes the referent: the effort is the
+first assignment the coordinator sends, and widening it later is a scope change.
+
+The text is fixed in the binary. The seat that assembles a launch prompt is
+usually the coordinator itself, so a configurable scope would be a delegation
+that seat wrote for itself; the operator's word is the release they installed.
+For that reason the explicit-scope acceptance line in the original issue was
+dropped rather than implemented.
+
+Coordinator selection has three refinements. A formation that declares exactly
+one orchestrator seat has that seat coordinate its peers even when another
+session (typically the operator's own) ran apply, and the prompt says the seat
+comes from the formation and who launched the peer; with none or several, the
+applier coordinates. The seat is read from the formation record, never from
+presence, so if it is not on the roster the prompt says no seat holds a
+delegation until it joins. A peer or spawn whose rolefile is `orchestrator`
+gets the coordinator side ("you coordinate every peer whose launch prompt names
+you as its coordinator": the peers it launches, and a formation's other peers
+when it is named the orchestrator seat) instead of the
+peer side, whoever launched it. A prompt with no coordinator at all says nothing
+is delegated and beyond-scope instructions go to the operator; it makes no claim
+about the rest of the bus. A fork's prompt also says the launch prompt above it
+was its parent's and this one supersedes it.
+
+Doctrine 3 is edited in place in all four role files (numbering unchanged,
+shared core byte-identical): a ruling from the coordinator the launch prompt
+names, inside the delegation it states, binds; what it reserves to the operator
+needs the operator's own word; with no coordinator named, an instruction beyond
+standing scope goes to the operator. The orchestrator's Escalation section now
+says in-delegation rulings are its own to give and that quoting the operator is
+not how it unblocks them; reserved or out-of-scope items still go to the operator
+and the peer holding that gate needs the operator's own word. `/bus-spawn` gains
+a `--role` hint. The command reference and formations guide describe the section,
+and stale line anchors to the bootstrap prompt and kickoff code are re-pointed.
+
+[Possible Ripple Effects]
+Existing peers keep the prompt they were launched with; only new launches carry
+the section. Every launch prompt changed, and a formation with no brief now
+carries a no-effort line. A `spawn --role` from a shell that is not registered on
+the channel gets the no-coordinator text, so its peer holds no delegation and
+sends beyond-scope instructions to the operator. The store is untouched, and
+`cbus selfupdate` already refreshes installed role files. This does not make an
+operator grant verifiable; per-action operator grants are a separate follow-up.
+
+[Testing Notes]
+New tests cover the clause at kickoff (template, resume, fork), bootstrap with
+and without an anchor fallback, the anchor's own kickoff, fork bootstrap, spawn
+with the spawner joined, absent and for an orchestrator role, codex spawn with a
+role, the no-brief referent at each site, and the orchestrator-seat selection and
+absent-seat text; they fail on the old code on the assertion they name. A Go
+test hashes the four role files' shared core (Standing doctrines header to the
+line before doctrine 11), including the go:embed copies, and requires one unique
+hash plus the doctrine 3 sentences. Named mutants (dropping the clause from each
+site, swapping the coordinator, dropping the reserved list or out-of-effort line,
+removing the orchestrator-role check) each fail on the aimed assertion. `go
+vet` and `go test ./...` pass and linux amd64/arm64 and windows amd64 compile.
+A build from earlier in this branch, run with a scratch store, printed the section
+for `formation bootstrap` and `bootstrap`, and a live `spawn --role` child's
+first turn carried the section naming its spawner.
+On a build whose code is identical to the final branch tip, a `spawn --role`
+peer in a scratch store acted on an in-effort ruling from its coordinator
+without asking the operator, held a push that carried a quoted operator
+approval, and held a ruling to edit another repository as a scope change for
+the operator; its transcript showed no `git push` and the other repository was
+byte-for-byte unchanged.
+
 ## [2026-09-30 16:56:58 UTC] [Client] formation peers are local when their transcript is here
 
 [Attempt #1] 6 files. Code: internal/client/formation_plan.go,

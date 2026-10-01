@@ -99,6 +99,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 	if strings.Contains(addr, "/") {
 		return "", "", fmt.Errorf("spawn takes a channel or channel@host, no alias — use --name to fix the child's alias")
 	}
+	coord := spawnerAddress(addr)
 	childEnv := codexLaunch.env
 	var unsetEnv []string
 	if opts.Harness == "claude" {
@@ -140,6 +141,12 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		// role brief rides AFTER the join/arm instructions, matching how briefs
 		// were dispatched manually; the file is designed to be pasted alone.
 		prompt = prompt + "\n\n" + strings.TrimSpace(roleBody)
+		// an orchestrator coordinates the peers it launches, never its spawner; spawn carries no effort
+		deleg := delegationClause(coord, false)
+		if role == "orchestrator" {
+			deleg = coordinatorClause(false)
+		}
+		prompt = prompt + "\n\n" + deleg
 	}
 	spec := ForkSpec{
 		Target:   target,

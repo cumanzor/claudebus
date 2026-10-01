@@ -816,3 +816,32 @@ func TestApplyDryRunNeedsNoJoinNorChannel(t *testing.T) {
 		t.Error("a real apply with no joined applier must still refuse")
 	}
 }
+
+// TestApplyOnlyStillNamesTheFormationOrchestrator: the coordinator comes from the
+// formation record, so a peer launched with --only while the orchestrator seat is
+// neither launched nor present still names it, and still answers the applier.
+func TestApplyOnlyStillNamesTheFormationOrchestrator(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	applierOn(t, "ch", "applier")
+	f := applyFixture(
+		peer("lead", func(p *FormationPeer) { p.Machine = thisHost(); p.Rolefile = "roles/orchestrator.md" }),
+		peer("coder", func(p *FormationPeer) { p.Machine = thisHost(); p.Rolefile = "roles/coder.md" }),
+	)
+	fk := &recForker{}
+	if _, err := applyWith(t, f, ApplyOptions{Only: []string{"coder"}}, fk, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(fk.specs) != 1 {
+		t.Fatalf("--only launched %d peers", len(fk.specs))
+	}
+	prompt := fk.specs[0].Argv[len(fk.specs[0].Argv)-1]
+	for _, want := range []string{
+		"Your coordinator is ch/lead, the formation's orchestrator seat; ch/applier launched you.",
+		"If ch/lead is not on the channel roster, no seat holds a delegation over you until it joins",
+		"cbus send ch/applier '...'",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("--only kickoff missing %q:\n%s", want, prompt)
+		}
+	}
+}

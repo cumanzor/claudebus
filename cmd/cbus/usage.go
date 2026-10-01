@@ -189,6 +189,13 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus rename <new-alias> [channel]  rename this session's legacy alias (mv dir +
                                    meta); re-arm the Monitor on the new address
   cbus unregister <channel>/<alias>  force-remove any peer
+  cbus grant <channel>/<alias> "<action>" [--once | --ttl D]   operator approves
+                                   one action for one local peer, confirmed by
+                                   typing at a real terminal (friction, not a
+                                   security boundary); cbus grant revoke <id>
+  cbus grants [--all] [--json]     grants for this session's address; a peer acts
+                                   only on one listed live; cbus grants use <id>
+                                   takes it first (a once grant is consumed)
   cbus close <channel>/<alias> [...] [--force]   end peer sessions: SIGTERM the
                                    owning process, then sweep its terminal surface
                                    once the tty is dead (local only — a remote peer
