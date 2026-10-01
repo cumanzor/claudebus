@@ -110,7 +110,7 @@ func TestCodexLaunchScrubsInheritedIdentityInBothTerminalCommands(t *testing.T) 
 	args = append(args, "-c", `test -z "$CODEX_THREAD_ID$CBUS_ALIAS$CODEX_EXEC_SERVER_URL" && test "$CODEX_HOME" = "$EXPECTED_HOME" && printf OK`)
 	c.env["EXPECTED_HOME"] = c.env["CODEX_HOME"]
 	spec := ForkSpec{Argv: args, Env: c.env, Dir: t.TempDir()}
-	for _, script := range []string{forkShellCommand(spec), launcherScript(spec, filepath.Join(t.TempDir(), "launcher"))} {
+	for _, script := range []string{launcherScript(spec, filepath.Join(t.TempDir(), "launcher"))} {
 		out, err := exec.Command("/bin/bash", "-c", script).CombinedOutput()
 		if err != nil || string(out) != "OK" {
 			t.Fatalf("terminal launch leaked caller identity: %v %s", err, out)

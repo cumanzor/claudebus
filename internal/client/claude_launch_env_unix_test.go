@@ -55,18 +55,14 @@ func TestClaudeLaunchCommandsPreserveStoreAndClearTerminalIdentity(t *testing.T)
 			if _, ok := ReadPeerMeta(filepath.Join(bus, "launch-test", "child", "meta.json")); !ok {
 				t.Fatal("launcher did not reserve the chosen store")
 			}
-			for _, backend := range []string{"tmux", "iterm"} {
+			// tmux and iTerm2 both run this launcher now, so one leg covers both
+			for _, backend := range []string{"launcher"} {
 				t.Run(backend, func(t *testing.T) {
-					var cmd *exec.Cmd
-					if backend == "tmux" {
-						cmd = exec.Command("/bin/sh", "-c", terminalCommand(f.spec))
-					} else {
-						path := filepath.Join(t.TempDir(), "launch.sh")
-						if err := os.WriteFile(path, []byte(launcherScript(f.spec, path)), 0700); err != nil {
-							t.Fatal(err)
-						}
-						cmd = exec.Command("/bin/bash", path)
+					path := filepath.Join(t.TempDir(), "launch.sh")
+					if err := os.WriteFile(path, []byte(launcherScript(f.spec, path)), 0700); err != nil {
+						t.Fatal(err)
 					}
+					cmd := exec.Command("/bin/bash", path)
 					cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/wrong-home", "CBUS_DIR=/wrong-bus",
 						"CLAUDE_CONFIG_DIR=/wrong-config", "ANTHROPIC_BASE_URL=http://fixture-provider", "KEEP_CONFIG=chosen"}
 					for _, key := range identityKeys {
