@@ -50,12 +50,11 @@ one started through node, bun or deno) or could not be walked to init.
 
 **What it catches.** Measured against the real binary:
 
-- No controlling terminal, as in a harness's shell tool, `setsid` or `nohup`: refused, nothing written.
-- A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1.
+- No controlling terminal, as in a harness's shell tool, a harness's `!` prefix, `setsid` or `nohup`: refused, nothing written.
+- A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1, and no notice reaches the peer.
 
 Established by tests (in-process, through the real code paths):
 
-- A suspect mint sends no notice to the peer.
 - A later session holding the same alias (a formation recreating the peer, or a reclaimed dead peer): it cannot use a grant bound to the earlier session.
 - A grant quoted in a message, or a notice-shaped message from any sender (including an alias named `cbus-grant`): not a grant. `cbus send` cannot set a message kind, so only `cbus grant` writes the `kind=grant` notice.
 
@@ -68,7 +67,6 @@ Established by tests (in-process, through the real code paths):
 - **Races** (by mechanism, not measured). Revoke against use, and expiry against use, are check-then-claim: a use can win in the same instant as a revoke.
 - **The opencode match is loose.** Any script path containing `opencode` counts as a harness. This fails safe: a false positive reads suspect.
 - **Dead targets.** The refusal to bind a dead target covers peers with a listener process. A daemon-managed peer whose session has exited still reads as registered; the grant binds that exact session, which can only use it if it resumes.
-- **The `!` prefix** of a harness: not yet measured on the real binary. It is expected to be refused (no controlling terminal) or recorded suspect (harness ancestor), never live.
 - **Not supported:** Windows (refused) and remote peers (refused at mint; a `kind=grant` frame arriving over a relay is rejected by the daemon on receipt).
 
 **The boundary is doctrine.** The committed role files tell a peer to act on a
