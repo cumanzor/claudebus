@@ -54,20 +54,25 @@ type GrantProvenance struct {
 
 // Grant is the write-once record at .grants/<channel>/<alias>/<id>.json.
 type Grant struct {
-	ID        string          `json:"id"`
-	Channel   string          `json:"channel"`
-	Alias     string          `json:"alias"`
-	Action    string          `json:"action"`
-	Mode      string          `json:"mode"`
-	CreatedAt time.Time       `json:"createdAt"`
-	ExpiresAt time.Time       `json:"expiresAt"`
-	GrantedBy GrantProvenance `json:"grantedBy"`
+	ID      string `json:"id"`
+	Channel string `json:"channel"`
+	Alias   string `json:"alias"`
+	// SessionID is the grantee's exact session at mint; a later holder of the alias
+	// is someone else. ConnectionID is recorded for audit when daemon-managed.
+	SessionID    string          `json:"sessionId"`
+	ConnectionID string          `json:"connectionId,omitempty"`
+	Action       string          `json:"action"`
+	Mode         string          `json:"mode"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	ExpiresAt    time.Time       `json:"expiresAt"`
+	GrantedBy    GrantProvenance `json:"grantedBy"`
 }
 
 // GrantView is a grant with its state derived at read time.
 type GrantView struct {
 	Grant
 	State     GrantState `json:"state"`
+	Uses      int        `json:"uses,omitempty"`
 	UsedBy    string     `json:"usedBy,omitempty"`
 	UsedAt    string     `json:"usedAt,omitempty"`
 	RevokedAt string     `json:"revokedAt,omitempty"`
@@ -110,6 +115,10 @@ func NewGrant(target, action, mode string, ttl time.Duration) (Grant, error) {
 	if err := checkStoreName("alias", alias); err != nil {
 		return Grant{}, err
 	}
+	sid, connID, err := grantee(ch, alias)
+	if err != nil {
+		return Grant{}, err
+	}
 	action = strings.TrimSpace(action)
 	switch {
 	case action == "":
@@ -124,7 +133,7 @@ func NewGrant(target, action, mode string, ttl time.Duration) (Grant, error) {
 		return Grant{}, err
 	}
 	now := grantNow().UTC().Truncate(time.Second)
-	g := Grant{ID: id, Channel: ch, Alias: alias, Action: action, Mode: mode, CreatedAt: now}
+	g := Grant{ID: id, Channel: ch, Alias: alias, SessionID: sid, ConnectionID: connID, Action: action, Mode: mode, CreatedAt: now}
 	switch mode {
 	case GrantOnce:
 		g.ExpiresAt = now.Add(GrantMaxTTL)
@@ -137,6 +146,23 @@ func NewGrant(target, action, mode string, ttl time.Duration) (Grant, error) {
 		return Grant{}, fmt.Errorf("grant mode must be %s or %s, got %q", GrantOnce, GrantTTL, mode)
 	}
 	return g, nil
+}
+
+// grantee resolves the session registered as ch/alias right now. A reserved alias
+// has no session yet, an absent one has nobody to bind to, and a dead one would bind
+// a session that is gone.
+func grantee(ch, alias string) (sid, connID string, err error) {
+	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
+	m, ok := ReadPeerMeta(metaPath)
+	switch {
+	case !ok:
+		return "", "", fmt.Errorf("no peer %s/%s is registered here: a grant binds to a joined session", ch, alias)
+	case m.SessionID == "" || m.SessionID == "reserved":
+		return "", "", fmt.Errorf("%s/%s is reserved but has not joined yet: a grant binds to a joined session", ch, alias)
+	case PeerDead(metaPath):
+		return "", "", fmt.Errorf("%s/%s is registered but its listener is dead: a grant binds to a live session", ch, alias)
+	}
+	return m.SessionID, m.ConnectionID, nil
 }
 
 func newGrantID() (string, error) {
@@ -241,11 +267,15 @@ func readGrantView(dir, id string) (GrantView, error) {
 	if m, ok := readMarker(filepath.Join(dir, id+".used")); ok {
 		v.UsedBy, v.UsedAt = m.By, m.At
 	}
+	if b, err := os.ReadFile(filepath.Join(dir, id+".uses")); err == nil {
+		v.Uses = strings.Count(string(b), "\n")
+	}
 	v.State = grantState(v)
 	return v, nil
 }
 
 // grantState: revoked, then used (a once grant), then expired, then suspect, else live.
+// A record with no bound session is suspect: no code path writes one.
 // live means no harness was seen, not that none was there: a reparented process escapes.
 func grantState(v GrantView) GrantState {
 	switch {
@@ -255,7 +285,7 @@ func grantState(v GrantView) GrantState {
 		return GrantUsed
 	case !grantNow().Before(v.ExpiresAt):
 		return GrantExpired
-	case v.GrantedBy.HarnessAncestor || v.GrantedBy.AncestryTruncated:
+	case v.GrantedBy.HarnessAncestor || v.GrantedBy.AncestryTruncated || v.SessionID == "":
 		return GrantSuspect
 	}
 	return GrantLive
@@ -318,8 +348,9 @@ func findGrant(id string, regs []LocalReg) (GrantView, string, error) {
 }
 
 // UseGrant is the grantee taking a grant before acting on it. A once grant is
-// consumed by exactly one caller; a ttl grant stays usable until it expires. Only a
-// session registered as the grantee can use it: regs are this session's own.
+// consumed by exactly one caller; a ttl grant stays usable until it expires, and
+// each use is appended to <id>.uses for audit. Only the session the grant was bound
+// to can use it, even if another session later holds the alias.
 func UseGrant(id, sessionID string, regs []LocalReg) (GrantView, error) {
 	v, dir, err := findGrant(id, regs)
 	if errors.Is(err, errGrantNotFound) {
@@ -334,8 +365,15 @@ func UseGrant(id, sessionID string, regs []LocalReg) (GrantView, error) {
 	if v.State != GrantLive {
 		return v, fmt.Errorf("grant %s is %s, not live: do not act on it", id, v.State)
 	}
+	if sessionID != v.SessionID {
+		return v, fmt.Errorf("grant %s is bound to session %s, not this one (%s): a later holder of %s/%s cannot use it",
+			id, v.SessionID, sessionID, v.Channel, v.Alias)
+	}
 	if v.Mode != GrantOnce {
-		return v, nil
+		if err := appendUse(filepath.Join(dir, id+".uses"), sessionID); err != nil {
+			return v, err
+		}
+		return readGrantView(dir, id)
 	}
 	won, err := claimMarker(filepath.Join(dir, id+".used"), sessionID)
 	if err != nil {
@@ -346,6 +384,19 @@ func UseGrant(id, sessionID string, regs []LocalReg) (GrantView, error) {
 	}
 	v, _ = readGrantView(dir, id)
 	return v, nil
+}
+
+func appendUse(path, by string) error {
+	b, _ := json.Marshal(grantMarker{By: by, At: grantNow().UTC().Format(time.RFC3339)})
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func findGrantAnywhere(id string) (GrantView, string, error) {
