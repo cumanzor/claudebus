@@ -1203,6 +1203,55 @@ re-checks identity before every reopen, finds the registration gone, and
 goes dormant, printing `peer registration is gone — re-join, then re-arm`
 (`identity_follow.go:153`) before exiting.
 
+### `cbus grant <channel>/<alias> "<action>" [--once | --ttl D]`
+
+Mints an operator grant: approval of one action for the exact session registered
+under a local `<channel>/<alias>`. Friction, not a security boundary; see
+[Operator grants](../security.md#operator-grants) for what it catches and what it
+does not. Handler `runGrant` (`cmd/cbus/grant.go`); store `NewGrant`, `WriteGrant`,
+`DeliverGrantNotice` (`internal/client/grant.go`).
+
+- **Target.** Local only (`grants are local-only: ...` for `<ch>@<host>/<alias>`).
+  The alias must be joined by a live session: absent (`no peer <ch>/<al> is
+  registered here`), reserved (`... is reserved but has not joined yet`) and dead
+  (`... its listener is dead`) are refused. The grant records that session id, and
+  its connection id for audit.
+- **Mode.** `--once` (default) is consumed by its first use. `--ttl D` stays usable
+  until it expires (more than 0, at most 24h). Each use of a ttl grant is appended to
+  `<id>.uses`. `--once` and `--ttl` are exclusive.
+- **Gate.** Opens the controlling terminal (`/dev/tty`) and requires stdin and stdout
+  to be terminals. It shows the peer, bound session, action and expiry, then asks the
+  operator to type the peer address and then the action. With no terminal it prints
+  `grant needs the operator at a real terminal (...); nothing was written`; a typed
+  mismatch or EOF prints `confirmation did not match; nothing was written`. Both exit 1.
+  Windows: `cbus grant is not supported on windows yet`.
+- **Provenance.** Records the terminal behind stdin and the process ancestry
+  (`ancestorChain` over `grantProcLookup`, which reads a process the user cannot
+  inspect only for its parent and records it as `?(pid N: <errno>)`). A harness
+  ancestor, or a walk that stops before init, makes the grant suspect: the command
+  prints `recorded <id> as SUSPECT (unusable)`, explains on stderr and exits 1.
+- **Notice.** A usable grant prints `granted <id> to <ch>/<al> session <sid> (...)`
+  and appends a `kind=grant` line from `<ch>/cbus-grant` to the grantee's inbox. The
+  line says the notice is not the grant. Native delivery adds the same warning, and
+  the legacy codex bridge injects it as a turn. A failed append prints `notice not
+  delivered (...): tell <ch>/<al> to run cbus grants` and still exits 0.
+- `cbus grant revoke <id>` takes the same gate: type the id. Revoking is not
+  alias-scoped; the operator can revoke any grant.
+
+### `cbus grants [--all] [--json]` / `cbus grants use <id>`
+
+`cbus grants` lists the grants for this session's own registrations (`ResolveSelf`);
+`--all` lists every grant in the store. Each row shows id, state (`live`, `used`,
+`expired`, `revoked` or `suspect`), peer, mode and expiry, and action, then the bound
+session, minting terminal, nearest ancestors (`via zsh < login < ...`) and any ttl
+use count. `live` means no harness was seen while minting, not that none was there.
+Not joined and no `--all`: an error.
+
+`cbus grants use <id>` is the grantee taking the grant before it acts: the grant must
+be live and bound to this session (`grant <id> is bound to session ..., not this one`
+otherwise). A once grant is consumed by exactly one use (a first-writer-wins
+`<id>.used` marker); a second use prints `... was already used`.
+
 ### `cbus close <channel>/<alias> [...] [--force]`
 
 Ends one or more **local** peer sessions on request — the only command that
