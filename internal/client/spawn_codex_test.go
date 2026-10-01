@@ -117,3 +117,22 @@ func TestCodexLaunchScrubsInheritedIdentityInBothTerminalCommands(t *testing.T) 
 		}
 	}
 }
+
+// TestCodexSpawnRoleCarriesDelegation: the codex prompt path is separate, and the
+// role brief it carries still names the coordinator.
+func TestCodexSpawnRoleCarriesDelegation(t *testing.T) {
+	prepareCodexSpawn(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-spawner")
+	t.Chdir(t.TempDir())
+	plantPeer(t, "codex-test", "lead", "sid-spawner")
+	writeRoleFile(t, os.Getenv("CBUS_DIR"), "helper", "# helper\n\n## Mission\nhelp.\n")
+	f := &fakeForker{}
+	if _, _, err := SpawnWithOptions("pane", "codex-test", "", "", "helper", SpawnOptions{Harness: "codex"}, f); err != nil {
+		t.Fatal(err)
+	}
+	prompt := f.spec.Argv[len(f.spec.Argv)-1]
+	if !strings.Contains(prompt, "Your coordinator is codex-test/lead, the seat that launched you.") ||
+		!strings.Contains(prompt, delegationOutOfEffort) || !strings.Contains(prompt, delegationReserved) {
+		t.Fatalf("codex spawn --role must carry the delegation:\n%s", prompt)
+	}
+}

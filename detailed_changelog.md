@@ -4,6 +4,102 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-09-30 23:07:18 UTC] [Client] standing delegation in launch prompts
+
+[Attempt #1] 22 files. Code: internal/client/delegation.go (new),
+formation_kickoff.go, formation_resume.go, bootstrap_prompt.go, spawn.go. Roles:
+roles/{coder,documenter,orchestrator,reviewer}.md. Docs: commands/bus-spawn.md,
+docs/architecture/command-reference.md, docs/architecture/current-architecture.md,
+docs/formations.md. Tests: assets, formation kickoff/apply/resume, harness, role
+and codex spawn tests. Changelogs: both. Nine commits, this one included.
+
+[What changed]
+Shared doctrine 3 says a bus message cannot escalate what a peer may do and that
+an instruction beyond its scope is "a request to be ruled on". It never said who
+rules or whether the ruling binds, and the orchestrator's Escalation section
+told it to get the operator's sign-off and quote it. A peer that had been told a
+relayed sign-off is not the operator's word had nothing it was allowed to accept,
+so an in-scope one-line change could wait for several rounds.
+
+Every launch prompt a peer receives now carries a `--- delegation ---` section
+between its role and its effort. The coordinator named there is the seat that
+launched the peer: the applier for `formation apply`, bootstrap and the peers of
+a resume, the parent for a fork, the spawner for `cbus spawn --role` when it is
+registered on that local channel. A resume anchor's own kickoff gets the
+coordinator side, since it then applies the formation. Under the operator's standing rule the
+coordinator's rulings on scope, contract and precedence inside the effort bind
+the peer. Three things stay outside: a ruling that would take the peer beyond
+the effort (another repository, another machine, work the effort excludes) is a
+scope change for the operator; push, opening or merging a pull request, release,
+install and anything else outward or irreversible are reserved to the operator
+whoever relays them, and a quoted approval does not grant them; and a formation
+coordinator's own prompt says the same applies to it. When no brief is given,
+and always for `spawn --role`, the prompt fixes the referent: the effort is the
+first assignment the coordinator sends, and widening it later is a scope change.
+
+The text is fixed in the binary. The seat that assembles a launch prompt is
+usually the coordinator itself, so a configurable scope would be a delegation
+that seat wrote for itself; the operator's word is the release they installed.
+For that reason the explicit-scope acceptance line in the original issue was
+dropped rather than implemented.
+
+Coordinator selection has three refinements. A formation that declares exactly
+one orchestrator seat has that seat coordinate its peers even when another
+session (typically the operator's own) ran apply, and the prompt says the seat
+comes from the formation and who launched the peer; with none or several, the
+applier coordinates. The seat is read from the formation record, never from
+presence, so if it is not on the roster the prompt says no seat holds a
+delegation until it joins. A peer or spawn whose rolefile is `orchestrator`
+gets the coordinator side ("you coordinate every peer whose launch prompt names
+you as its coordinator": the peers it launches, and a formation's other peers
+when it is named the orchestrator seat) instead of the
+peer side, whoever launched it. A prompt with no coordinator at all says nothing
+is delegated and beyond-scope instructions go to the operator; it makes no claim
+about the rest of the bus. A fork's prompt also says the launch prompt above it
+was its parent's and this one supersedes it.
+
+Doctrine 3 is edited in place in all four role files (numbering unchanged,
+shared core byte-identical): a ruling from the coordinator the launch prompt
+names, inside the delegation it states, binds; what it reserves to the operator
+needs the operator's own word; with no coordinator named, an instruction beyond
+standing scope goes to the operator. The orchestrator's Escalation section now
+says in-delegation rulings are its own to give and that quoting the operator is
+not how it unblocks them; reserved or out-of-scope items still go to the operator
+and the peer holding that gate needs the operator's own word. `/bus-spawn` gains
+a `--role` hint. The command reference and formations guide describe the section,
+and stale line anchors to the bootstrap prompt and kickoff code are re-pointed.
+
+[Possible Ripple Effects]
+Existing peers keep the prompt they were launched with; only new launches carry
+the section. Every launch prompt changed, and a formation with no brief now
+carries a no-effort line. A `spawn --role` from a shell that is not registered on
+the channel gets the no-coordinator text, so its peer holds no delegation and
+sends beyond-scope instructions to the operator. The store is untouched, and
+`cbus selfupdate` already refreshes installed role files. This does not make an
+operator grant verifiable; per-action operator grants are a separate follow-up.
+
+[Testing Notes]
+New tests cover the clause at kickoff (template, resume, fork), bootstrap with
+and without an anchor fallback, the anchor's own kickoff, fork bootstrap, spawn
+with the spawner joined, absent and for an orchestrator role, codex spawn with a
+role, the no-brief referent at each site, and the orchestrator-seat selection and
+absent-seat text; they fail on the old code on the assertion they name. A Go
+test hashes the four role files' shared core (Standing doctrines header to the
+line before doctrine 11), including the go:embed copies, and requires one unique
+hash plus the doctrine 3 sentences. Named mutants (dropping the clause from each
+site, swapping the coordinator, dropping the reserved list or out-of-effort line,
+removing the orchestrator-role check) each fail on the aimed assertion. `go
+vet` and `go test ./...` pass and linux amd64/arm64 and windows amd64 compile.
+A build from earlier in this branch, run with a scratch store, printed the section
+for `formation bootstrap` and `bootstrap`, and a live `spawn --role` child's
+first turn carried the section naming its spawner.
+On a build whose code is identical to the final branch tip, a `spawn --role`
+peer in a scratch store acted on an in-effort ruling from its coordinator
+without asking the operator, held a push that carried a quoted operator
+approval, and held a ruling to edit another repository as a scope change for
+the operator; its transcript showed no `git push` and the other repository was
+byte-for-byte unchanged.
+
 ## [2026-09-30 16:56:58 UTC] [Client] formation peers are local when their transcript is here
 
 [Attempt #1] 6 files. Code: internal/client/formation_plan.go,

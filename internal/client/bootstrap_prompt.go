@@ -12,5 +12,6 @@ func BootstrapPromptAliased(channel, parentAlias, childAlias string) string {
 func bootstrapNativePrompt(channel, parentAlias, childAlias string) string {
 	return "You are a forked Claude Code session on the cbus message bus. " + claudeNativeReceivePrompt(channel, childAlias) +
 		" Your parent is '" + channel + "/" + parentAlias + "'; it sees your join through presence, so no manual announcement is needed. " +
-		"When your assigned task finishes, send the parent a short result summary. An inherited background-task note belongs to the parent; do not restart its listener."
+		"When your assigned task finishes, send the parent a short result summary. An inherited background-task note belongs to the parent; do not restart its listener. " +
+		"The launch prompt above this line was your parent's; this one supersedes it.\n\n" + delegationClause(channel+"/"+parentAlias, false)
 }

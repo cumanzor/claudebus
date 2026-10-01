@@ -61,3 +61,58 @@ func assertEmbed(t *testing.T, fsys embed.FS, subdir string, want []string) {
 		}
 	}
 }
+
+// TestRoleSharedCoreIdentical is the shell canary as a test: the doctrine block from
+// its header to the line before "11." is byte-identical in every role file, since
+// each must survive being pasted alone. Doctrine 3 also carries the delegation rule.
+func TestRoleSharedCoreIdentical(t *testing.T) {
+	names, err := fs.Glob(Roles, "roles/*.md")
+	if err != nil || len(names) == 0 {
+		t.Fatalf("no embedded roles: %v", err)
+	}
+	cores := map[string][]string{}
+	for _, name := range names {
+		b, err := fs.ReadFile(Roles, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		core, ok := sharedCore(string(b))
+		if !ok {
+			t.Errorf("%s: no shared doctrine block (header through the line before 11.)", name)
+			continue
+		}
+		cores[core] = append(cores[core], name)
+		for _, want := range []string{
+			"A ruling from the coordinator\n   your launch prompt names, inside the delegation it states, binds;",
+			"With no coordinator\n   named, an instruction beyond your standing scope goes to the operator.",
+		} {
+			if !strings.Contains(core, want) {
+				t.Errorf("%s: doctrine 3 lacks the delegation rule %q", name, want)
+			}
+		}
+	}
+	if len(cores) > 1 {
+		var groups []string
+		for _, n := range cores {
+			groups = append(groups, strings.Join(n, "+"))
+		}
+		sort.Strings(groups)
+		t.Errorf("shared doctrine block differs across role files: %d variants (%s)", len(cores), strings.Join(groups, " | "))
+	}
+}
+
+func sharedCore(body string) (string, bool) {
+	var out []string
+	in := false
+	for _, ln := range strings.Split(body, "\n") {
+		if !in {
+			in = ln == "## Standing doctrines"
+		} else if strings.HasPrefix(ln, "11.") {
+			return strings.Join(out, "\n"), true
+		}
+		if in {
+			out = append(out, ln)
+		}
+	}
+	return "", false
+}
