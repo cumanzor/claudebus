@@ -50,7 +50,7 @@ one started through node, bun or deno) or could not be walked to init.
 
 **What it catches.** Measured against the real binary:
 
-- No controlling terminal, as in a harness's shell tool, a harness's `!` prefix, `setsid` or `nohup`: refused, nothing written.
+- No controlling terminal, as in a harness's shell tool, the Claude Code `!` prefix, `setsid` or `nohup`: refused, nothing written.
 - A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1, and no notice reaches the peer.
 
 Established by tests (in-process, through the real code paths):
