@@ -75,6 +75,11 @@ func runGrant(args []string) int {
 		fmt.Printf("recorded %s as SUSPECT (unusable)\n", g.ID)
 	} else {
 		fmt.Printf("granted %s to %s/%s session %s (%s, expires %s)\n", g.ID, g.Channel, g.Alias, g.SessionID, g.Mode, g.ExpiresAt.Format(time.RFC3339))
+		if err := client.DeliverGrantNotice(g); err != nil {
+			fmt.Fprintf(os.Stderr, "cbus: notice not delivered (%v): tell %s/%s to run cbus grants\n", err, g.Channel, g.Alias)
+		} else {
+			fmt.Printf("notice delivered to %s/%s\n", g.Channel, g.Alias)
+		}
 	}
 	switch {
 	case g.GrantedBy.HarnessAncestor:
@@ -198,8 +203,11 @@ func connSuffix(conn string) string {
 }
 
 func usesSuffix(n int) string {
-	if n == 0 {
+	switch n {
+	case 0:
 		return ""
+	case 1:
+		return ", used 1 time"
 	}
 	return fmt.Sprintf(", used %d times", n)
 }

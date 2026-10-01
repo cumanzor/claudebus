@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"claudebus/internal/core"
 )
 
 // An operator grant approves one action for one local peer. It is friction against
@@ -268,7 +270,12 @@ func readGrantView(dir, id string) (GrantView, error) {
 		v.UsedBy, v.UsedAt = m.By, m.At
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, id+".uses")); err == nil {
-		v.Uses = strings.Count(string(b), "\n")
+		// count lines, not newlines, so a torn final line still counts as a use
+		for _, l := range strings.Split(string(b), "\n") {
+			if strings.TrimSpace(l) != "" {
+				v.Uses++
+			}
+		}
 	}
 	v.State = grantState(v)
 	return v, nil
@@ -515,4 +522,32 @@ func procIdentity(r procRecord) string {
 		return commBase(f[0])
 	}
 	return "?"
+}
+
+// GrantNoticeFrom labels the notice sender; it is not a peer and is never replied to.
+const GrantNoticeFrom = "cbus-grant"
+
+func grantNoticeText(g Grant) string {
+	return fmt.Sprintf("operator grant %s for %s/%s (session %s): %s. This notice is not the grant: act only if cbus grants lists %s as live for you, and run cbus grants use %s before acting.",
+		g.ID, g.Channel, g.Alias, g.SessionID, g.Action, g.ID, g.ID)
+}
+
+// DeliverGrantNotice appends a kind=grant line to the grantee's inbox, under the
+// same alias lock a send takes. Best-effort: the grant is valid without it.
+func DeliverGrantNotice(g Grant) error {
+	unlock, err := lockPeer(g.Channel, g.Alias)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	dir := filepath.Join(CBUSDir(), g.Channel, g.Alias)
+	if !fileExists(filepath.Join(dir, "meta.json")) {
+		return fmt.Errorf("%s/%s is no longer registered", g.Channel, g.Alias)
+	}
+	line, err := json.Marshal(core.Message{From: g.Channel + "/" + GrantNoticeFrom, To: g.Channel + "/" + g.Alias,
+		TS: Now(), Kind: "grant", Text: grantNoticeText(g)})
+	if err != nil {
+		return err
+	}
+	return appendInbox(filepath.Join(dir, "inbox.jsonl"), line)
 }

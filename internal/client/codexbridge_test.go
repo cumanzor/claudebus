@@ -479,3 +479,16 @@ func TestBridgeAttachToleratesWriterHeld(t *testing.T) {
 		t.Errorf("a live thread must not get an opener turn: %v", f.recorded())
 	}
 }
+
+// TestCodexSinkDeliversAGrantNotice: a grant notice is something the peer is holding
+// for, so it is injected like a chat frame, not skipped like presence.
+func TestCodexSinkDeliversAGrantNotice(t *testing.T) {
+	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+		s.reply(req["id"], map[string]any{"turn": map[string]any{"id": "x"}})
+	})
+	sink := codexSink{bridgeOn(t, f, "T")}
+	sink.emit("grant", []byte("<= cbus msg from=z/cbus-grant to=z/b ts=T kind=grant\n  operator grant g-1\n<= cbus end\n"))
+	if got := f.recorded(); !reflect.DeepEqual(got, []string{"turn/start"}) {
+		t.Fatalf("a grant notice must be injected, calls = %v", got)
+	}
+}
