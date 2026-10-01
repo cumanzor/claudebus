@@ -690,7 +690,7 @@ func TestAnchorKickoffStatesTheCoordinatorSide(t *testing.T) {
 		"rulings on scope, contract and precedence inside the effort are yours to give",
 		delegationOutOfEffort + " Hold it and say so. That holds for you as for them.",
 		delegationReserved,
-		"needs the operator's own word, not your relay of it",
+		"needs the operator's own word or an operator grant it verifies itself, not your relay of either; never run cbus grant yourself.",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("anchor kickoff missing coordinator line %q:\n%s", want, prompt)

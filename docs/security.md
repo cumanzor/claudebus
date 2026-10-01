@@ -30,6 +30,55 @@ design is honest about that line.
   multi-user isolation, no message signing, no broadcast. It's a coordination bus for one
   operator's machines, not a shared messaging service.
 
+## Operator grants
+
+`cbus grant` lets the operator approve one action for one local peer mid-run, in a
+form the peer checks itself (`cbus grants`) instead of trusting a quoted approval.
+It is **friction, not a security boundary**: it stops a model from mistaking a
+relayed approval for the operator's word, or from minting a grant by running the
+command the ordinary way. It does not stop a same-user process that sets out to get
+around it. Command details: [command reference](architecture/command-reference.md#cbus-grant-channelalias-action---once----ttl-d).
+
+**What a grant is.** One action, for the exact session registered under a local
+`<channel>/<alias>` when it is minted, either `--once` (consumed by its first
+`cbus grants use`) or `--ttl` (at most 24h). The operator confirms it by typing the
+peer address and then the action at the controlling terminal. The record is written
+once under `$CBUS_DIR/.grants/<channel>/<alias>/` with its provenance: the minting
+terminal and the process ancestry. A grant is **suspect**, and never usable, when
+that ancestry contains a model harness (Claude Code, Codex CLI, OpenCode, including
+one started through node, bun or deno) or could not be walked to init.
+
+**What it catches.** Measured against the real binary:
+
+- No controlling terminal, as in a harness's shell tool, the Claude Code `!` prefix, `setsid` or `nohup`: refused, nothing written.
+- A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1, and no notice reaches the peer.
+
+Established by tests (in-process, through the real code paths):
+
+- A later session holding the same alias (a formation recreating the peer, or a reclaimed dead peer): it cannot use a grant bound to the earlier session.
+- A grant quoted in a message, or a notice-shaped message from any sender (including an alias named `cbus-grant`): not a grant. `cbus send` cannot set a message kind, so only `cbus grant` writes the `kind=grant` notice.
+
+**What it does not stop:**
+
+- **Reparenting.** Anything whose parent chain no longer contains the harness. `tmux new -d` plus `send-keys` produced a live grant in testing (its listing shows `via zsh < tmux`); launchd, `at` and `cron` were not run but are the same class.
+- **A direct write of a grant record** (measured). Every file under `$CBUS_DIR` is writable by the same user. A hand-written record with a valid session id lists as live, and it carries whatever provenance its writer invents: one claiming `minted on /dev/ttys000 via zsh < login` looks exactly like an operator's grant. Only a record with no bound session is suspect.
+- **A claimed identity at use time** (measured). `cbus grants use` reads the caller's session id from the environment (`CBUS_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), so a same-user process can claim to be the grantee: with the grantee's id set, `cbus grants use` consumed a hand-written grant.
+- **A harness running as root or another user** (by mechanism, not measured). An ancestor the user cannot inspect is recorded as `?` and the walk continues past it.
+- **Races** (by mechanism, not measured). Revoke against use, and expiry against use, are check-then-claim: a use can win in the same instant as a revoke.
+- **The opencode match is loose.** Any script path containing `opencode` counts as a harness. This fails safe: a false positive reads suspect.
+- **Dead targets.** The refusal to bind a dead target covers peers with a listener process. A daemon-managed peer whose session has exited still reads as registered; the grant binds that exact session, which can only use it if it resumes.
+- **Not supported:** Windows (refused) and remote peers (refused at mint; a `kind=grant` frame arriving over a relay is rejected by the daemon on receipt).
+
+**The boundary is doctrine.** The committed role files tell a peer to act on a
+reserved action only on the operator's own word or on a grant `cbus grants` lists as
+live for it, taken with `cbus grants use` first, and never to run `cbus grant` itself.
+A model that writes under `.grants/`, wraps the command to escape the ancestry check,
+or sets another session's id is breaking that rule. Provenance written by `cbus grant`
+itself shows a harness or pty-wrapped mint as suspect, and `cbus grants --all` lists
+it with its session, minting terminal and nearest ancestors. But a hand-written record
+can claim any provenance, and a reparented mint reads like an ordinary terminal
+multiplexer, so the listing cannot prove that a live grant came from the operator.
+
 ## Deploying a relay
 
 The relay listens on `127.0.0.1` only. Anything that puts it on a network (a tunnel, a

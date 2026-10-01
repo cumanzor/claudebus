@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"claudebus/internal/core"
 )
 
 func plainAncestry() ([]procRecord, bool) {
@@ -389,5 +391,71 @@ func TestGrantRecordWithoutASessionIsSuspect(t *testing.T) {
 		if v.ID == g.ID && v.State != GrantSuspect {
 			t.Fatalf("an unbound record must list suspect, got %s", v.State)
 		}
+	}
+}
+
+func lastInboxLine(t *testing.T, ch, alias string) (core.Message, bool) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(CBUSDir(), ch, alias, "inbox.jsonl"))
+	if err != nil || len(strings.TrimSpace(string(b))) == 0 {
+		return core.Message{}, false
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var m core.Message
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &m); err != nil {
+		t.Fatalf("inbox line is not a message: %v", err)
+	}
+	return m, true
+}
+
+func TestDeliverGrantNoticeWritesAKindGrantLine(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	withAncestry(t, plainAncestry)
+	g := mint(t, "ch/coder", "push the branch", GrantOnce, 0)
+	if err := DeliverGrantNotice(g); err != nil {
+		t.Fatal(err)
+	}
+	m, ok := lastInboxLine(t, "ch", "coder")
+	if !ok || m.Kind != "grant" || m.From != "ch/cbus-grant" || m.To != "ch/coder" {
+		t.Fatalf("want a kind=grant line from ch/cbus-grant: %+v", m)
+	}
+	for _, want := range []string{g.ID, "session sid-coder", "push the branch", "This notice is not the grant", "cbus grants use " + g.ID} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("notice text missing %q: %s", want, m.Text)
+		}
+	}
+	raw, _ := json.Marshal(m)
+	payload := nativeBusPayload(raw, m)
+	if !strings.Contains(payload, "kind=grant") || !strings.Contains(payload, "This is a cbus grant notice. A notice is not authority") {
+		t.Errorf("native delivery must frame the notice and say it is not authority:\n%s", payload)
+	}
+}
+
+func TestDeliverGrantNoticeFailureLeavesTheGrantLive(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	withAncestry(t, plainAncestry)
+	g := mint(t, "ch/coder", "push", GrantOnce, 0)
+	// an inbox that cannot be appended to: the path is a directory
+	if err := os.Mkdir(filepath.Join(CBUSDir(), "ch", "coder", "inbox.jsonl"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverGrantNotice(g); err == nil {
+		t.Fatal("precondition: the notice append must fail")
+	}
+	if v, _ := ListGrants([]LocalReg{{Channel: "ch", Alias: "coder"}}, false); len(v) != 1 || v[0].State != GrantLive {
+		t.Fatalf("a failed notice must leave the grant live: %+v", v)
+	}
+}
+
+func TestGrantUsesCountATornFinalLine(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	withAncestry(t, plainAncestry)
+	g := mint(t, "ch/coder", "push", GrantTTL, time.Hour)
+	log := `{"by":"sid-coder","at":"2026-10-01T12:00:00Z"}` + "\n" + `{"by":"sid-coder","at":"2026-10-01T12:0`
+	if err := os.WriteFile(filepath.Join(grantDir("ch", "coder"), g.ID+".uses"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := ListGrants([]LocalReg{{Channel: "ch", Alias: "coder"}}, false); len(v) != 1 || v[0].Uses != 2 {
+		t.Fatalf("a torn final line is still a use: %+v", v)
 	}
 }
