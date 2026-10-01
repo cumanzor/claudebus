@@ -1243,7 +1243,9 @@ does not. Handler `runGrant` (`cmd/cbus/grant.go`); store `NewGrant`, `WriteGran
 `cbus grants` lists the grants for this session's own registrations (`ResolveSelf`);
 `--all` lists every grant in the store. Each row shows id, state (`live`, `used`,
 `expired`, `revoked` or `suspect`), peer, mode and expiry, and action, then the bound
-session, minting terminal, nearest ancestors (`via zsh < login < ...`) and any ttl
+session, minting terminal, nearest ancestors (a plain macOS terminal shows
+`via zsh < ?(pid N: operation not permitted) < iTermServer-3.7 < ...`, the login hop
+being one the user cannot inspect; a tmux-launched mint shows `via zsh < tmux`) and any ttl
 use count. `live` means no harness was seen while minting, not that none was there.
 Not joined and no `--all`: an error.
 

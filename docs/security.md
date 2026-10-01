@@ -48,18 +48,22 @@ terminal and the process ancestry. A grant is **suspect**, and never usable, whe
 that ancestry contains a model harness (Claude Code, Codex CLI, OpenCode, including
 one started through node, bun or deno) or could not be walked to init.
 
-**What it catches** (measured against the real binary):
+**What it catches.** Measured against the real binary:
 
 - No controlling terminal, as in a harness's shell tool, `setsid` or `nohup`: refused, nothing written.
-- A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1, no notice to the peer.
+- A harness's shell wrapping the command in a pty (`script`, a python pty, `nohup` plus `script`): written as suspect, exit 1.
+
+Established by tests (in-process, through the real code paths):
+
+- A suspect mint sends no notice to the peer.
 - A later session holding the same alias (a formation recreating the peer, or a reclaimed dead peer): it cannot use a grant bound to the earlier session.
 - A grant quoted in a message, or a notice-shaped message from any sender (including an alias named `cbus-grant`): not a grant. `cbus send` cannot set a message kind, so only `cbus grant` writes the `kind=grant` notice.
 
 **What it does not stop:**
 
 - **Reparenting.** Anything whose parent chain no longer contains the harness. `tmux new -d` plus `send-keys` produced a live grant in testing (its listing shows `via zsh < tmux`); launchd, `at` and `cron` were not run but are the same class.
-- **A direct write of a grant record.** Every file under `$CBUS_DIR` is writable by the same user. A hand-written record with a valid session id lists as live; only one with no bound session is suspect.
-- **A claimed identity at use time.** `cbus grants use` reads the caller's session id from the environment (`CBUS_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), so a same-user process can claim to be the grantee.
+- **A direct write of a grant record** (measured). Every file under `$CBUS_DIR` is writable by the same user. A hand-written record with a valid session id lists as live, and it carries whatever provenance its writer invents: one claiming `minted on /dev/ttys000 via zsh < login` looks exactly like an operator's grant. Only a record with no bound session is suspect.
+- **A claimed identity at use time** (measured). `cbus grants use` reads the caller's session id from the environment (`CBUS_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), so a same-user process can claim to be the grantee: with the grantee's id set, `cbus grants use` consumed a hand-written grant.
 - **A harness running as root or another user** (by mechanism, not measured). An ancestor the user cannot inspect is recorded as `?` and the walk continues past it.
 - **Races** (by mechanism, not measured). Revoke against use, and expiry against use, are check-then-claim: a use can win in the same instant as a revoke.
 - **The opencode match is loose.** Any script path containing `opencode` counts as a harness. This fails safe: a false positive reads suspect.
@@ -71,9 +75,11 @@ one started through node, bun or deno) or could not be walked to init.
 reserved action only on the operator's own word or on a grant `cbus grants` lists as
 live for it, taken with `cbus grants use` first, and never to run `cbus grant` itself.
 A model that writes under `.grants/`, wraps the command to escape the ancestry check,
-or sets another session's id is breaking that rule. The record's provenance and
-`cbus grants --all` (session, minting terminal and nearest ancestors per grant) help
-an audit find it.
+or sets another session's id is breaking that rule. Provenance written by `cbus grant`
+itself shows a harness or pty-wrapped mint as suspect, and `cbus grants --all` lists
+it with its session, minting terminal and nearest ancestors. But a hand-written record
+can claim any provenance, and a reparented mint reads like an ordinary terminal
+multiplexer, so the listing cannot prove that a live grant came from the operator.
 
 ## Deploying a relay
 
