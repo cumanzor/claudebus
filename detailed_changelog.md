@@ -4,6 +4,77 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-01 16:35:01 UTC] [Client] operator grants: store, CLI and terminal gate
+
+[Attempt #1] Code: internal/client/grant.go, grant_ancestry_unix.go,
+grant_ancestry_windows.go, grant_tty_{unix,darwin,linux,windows}.go,
+cmd/cbus/grant.go, main.go, usage.go. Tests: the matching _test.go files.
+Changelogs: both. Split into two stacked pull requests, store first, then CLI.
+
+[What changed]
+A peer that holds an action its effort excludes can only get the operator's
+word today if the operator types it into the peer's pane, because a relayed
+approval cannot be told apart from the coordinator deciding alone. This adds
+the record a peer can verify instead, in two parts.
+
+Store: a grant is one immutable JSON file under `.grants/<channel>/<alias>/`,
+written to a temp file and linked into place, so an id collision fails rather
+than overwriting. State is derived on read: revoked, then used (for a once
+grant), then expired, then suspect, else live. A once grant is consumed by an
+exclusive `link` marker, so exactly one concurrent use wins; a ttl grant
+(default once, ttl capped at 24h) appends a line to a `.uses` file for audit.
+The grant binds the target's exact session id (the connection id is recorded
+for audit only, since it changes on reconnect), so a later session that
+reclaims the same alias cannot consume it, and a reserved or absent target, or a dead
+legacy listener, is refused at mint. Each record carries the minting terminal, uid and
+process ancestry.
+
+CLI: `cbus grant` reads `/dev/tty` and requires the operator to type the peer
+address and then the action text; no y/n. It refuses, writing nothing, when
+there is no controlling terminal, when stdin or stdout is not a terminal, on
+any mismatch or EOF, for a remote address, and for a bad ttl. `cbus grants`
+lists this session's own grants with their state, `--all` lists every grant in
+the store for audit, and `grants use` and `grant revoke` consume and revoke.
+
+Provenance is an audit signal: when the ancestry walk finds a model harness
+(claude, codex, opencode, or a node/bun/deno script run for one) the record is
+marked suspect, `cbus grants` lists it as suspect and `grants use` refuses it,
+which also refuses the harness's `!` prefix. A walk that errors or is cut short
+fails toward suspect; on macOS an EPERM hop (the root-owned `login`) falls back
+to the kernel parent pid and is recorded as unreadable. A suspect mint prints
+`recorded <id> as SUSPECT (unusable)` rather than a success line.
+
+[Possible Ripple Effects]
+Nothing reads grants yet: no inbox notice is delivered, and doctrine 3 and the
+delegation reserved line still say a quoted approval does not count and do not
+mention grants, so a peer has no instruction to look. That is the next
+milestone. The gate is friction only. Measured from a model's shell tool: the
+tool starts without a controlling terminal (opening `/dev/tty` fails) in Claude
+Code, Codex CLI and OpenCode, but `script`, a Python pty and `tmux new -d` with
+send-keys each give one (tmux except under Codex's default sandbox). The first two end up marked suspect; a process
+reparented to init (the tmux case) or a direct write to the store records no
+harness and reads as live, so a live grant means no harness was seen, not that
+none was there. A harness running as another user or root also escapes the
+ancestry check. The grantee's session id is read from the environment, so a
+same-user model could present it. Not a security boundary against a hostile
+local process.
+
+[Testing Notes]
+Refusals are asserted to leave the store byte-identical (tree hash) with a
+non-zero exit, including the built binary run under `setsid` with no
+terminal. Tests cover once consumed exactly once by the grantee only (20 rounds
+of 16 concurrent uses), ttl expiry on a clock seam, alias reuse after a
+reclaim, reserved/absent/dead targets, both branches of the ancestry walk,
+truncated and EPERM walks, and that only harness argv patterns match. Named
+mutants (ancestor flag forced off, truncation ignored, lookup failure counted
+complete, exclusive-create errors counted as wins, session binding ignored,
+suspect printing the success line) each fail on the aimed assertion. The bypass
+routes above were run against the built binary in a scratch store. `go vet`
+and `go test ./...` pass and linux amd64/arm64 and windows amd64 compile.
+Not run: the live acceptance (a peer holding a reserved action, a relayed
+quote, then an operator grant from a plain terminal) belongs to the next
+milestone, which delivers the notice.
+
 ## [2026-09-30 23:07:18 UTC] [Client] standing delegation in launch prompts
 
 [Attempt #1] 22 files. Code: internal/client/delegation.go (new),
