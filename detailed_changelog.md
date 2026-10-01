@@ -4,6 +4,76 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-01 22:30:34 UTC] [Client] pass the tmux launch command through a launcher file
+
+[Attempt #1] 10 files. Code: internal/client/harness.go, pane.go. Tests:
+tmux_launch_unix_test.go (new), harness_test.go, pane_test.go,
+claude_launch_env_unix_test.go, spawn_codex_test.go. Docs: docs/architecture/command-reference.md. Changelogs: both. The fix and
+the docs are separate commits.
+
+[What changed]
+`forkTmuxWindow` and `forkTmuxPane` built the child command with
+`terminalCommand`, which inlined every argument, including the launch prompt, as
+one shell-quoted argument to `tmux new-window` or `split-window`. tmux sends the
+parsed command from client to server in a single message and refuses one past
+about 16KB with `command too long`. The committed role files are 9 to 13KB, so
+on builds carrying the delegation section from the standing-delegation work, a
+coder or reviewer kickoff with the join text and a brief crossed the limit. A
+formation apply failed those peers on such a build, and
+`cbus spawn tmux --role coder` failed the same way. The iTerm2 backends already
+handed the terminal a launcher file, so they did not fail.
+
+Both tmux paths now call `writeLauncher`, which writes the self-deleting
+launcher (the one `osaForkITerm` already wrote, factored out) to a private temp
+file, 0700 and created exclusively, and pass tmux `/bin/bash <tmpfile>`. The
+tmux argument is a few dozen bytes whatever the prompt. The pane's sizing retry
+reuses the same file. If every dispatch attempt fails the file is removed, since
+the launcher never ran and cannot delete itself. `terminalCommand` and
+`forkShellCommand` are removed.
+
+The launcher now removes itself as its first line, before the `cd`, so a failed
+`cd` no longer leaks the file; bash keeps reading the open script after the
+unlink. This also changes the iTerm2 launcher, strictly for the better. Because
+the command is handed over bare, a temp directory whose path needs quoting (a
+space or a quote in `TMPDIR`) falls back to `/tmp`; this applies to iTerm2 too.
+
+[Possible Ripple Effects]
+The launch prompt now sits in a file in the temp directory for the moment
+between the write and the child deleting it, readable by the same user, which is
+the bus's existing trust boundary; it carries no token. A tmux server whose
+`/tmp` differs from the launching process's (a Linux user service with a private
+`/tmp`) could not read the launcher; that is inferred, not measured. If tmux
+returns an error after it has created the window, the file is removed and the
+window shows `No such file`; the launch is reported as failed.
+
+[Testing Notes]
+A test starts a real tmux server on a private socket (so the operator's server
+is never touched) and launches a window and a pane whose child writes its last
+argument to a file, with 20KB and 64KB prompts of quotes, `$`, backticks,
+newlines, non-ASCII bytes, a leading dash and an empty argument; the file equals
+the prompt byte for byte and the launcher is gone. On `main` the same test fails
+with `command too long`. Other tests cover the child environment (variables the
+server holds for stale session ids are absent, the chosen ones are present),
+the temp-directory fallback, removal when dispatch fails for the window and for
+the pane including its retry, the launcher deleting itself when `cd` fails, mode
+and content, and the byte-exact launcher script. Named mutants (the inline
+command restored, a second launcher written on retry, the self-removal dropped,
+the unset lines dropped, the fallback removed) each fail on the aimed assertion.
+`go vet` and `go test ./...` pass and linux amd64/arm64 and windows amd64
+compile. One full run showed `TestFollowDirDeletionNeverExits` failing once, a
+test in an untouched file that an open issue (#15) already names as
+load-sensitive; the change's effect on its rate was not established.
+Checked live on two builds that carry the largest role files (the grant
+changes), with a private tmux server, a scratch store and the roles copied in
+(coder 11317 bytes, orchestrator 13150): without this change `cbus spawn tmux
+--role coder` and `--role orchestrator` both failed with `command too long` and
+the store held only the coordinator seat afterwards; with this change merged in a
+scratch worktree (never committed there) both launched, the first turn of each
+peer held its role file verbatim and the delegation section, and the scratch temp
+directory held no launcher afterwards. The launcher and tmux tests, including the
+real-tmux round trips, also pass on a Debian 13 host with tmux 3.5a, with no
+scratch directories left behind. A real iTerm2 launch was not exercised.
+
 ## [2026-09-30 16:56:58 UTC] [Client] formation peers are local when their transcript is here
 
 [Attempt #1] 6 files. Code: internal/client/formation_plan.go,
