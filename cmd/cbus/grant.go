@@ -59,8 +59,8 @@ func runGrant(args []string) int {
 		return 1
 	}
 	defer tty.Close()
-	fmt.Fprintf(tty, "operator grant for %s/%s\n  action: %s\n  mode:   %s, expires %s\n",
-		g.Channel, g.Alias, g.Action, g.Mode, g.ExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(tty, "operator grant for %s/%s\n  session: %s%s\n  action:  %s\n  mode:    %s, expires %s\n",
+		g.Channel, g.Alias, g.SessionID, connSuffix(g.ConnectionID), g.Action, g.Mode, g.ExpiresAt.Format(time.RFC3339))
 	in := bufio.NewReader(tty)
 	if !confirmTyped(tty, in, "Type the peer address to confirm", g.Channel+"/"+g.Alias) ||
 		!confirmTyped(tty, in, "Type the action exactly", g.Action) {
@@ -70,7 +70,12 @@ func runGrant(args []string) int {
 	if err := client.WriteGrant(g); err != nil {
 		return die("%v", err)
 	}
-	fmt.Printf("granted %s to %s/%s (%s, expires %s)\n", g.ID, g.Channel, g.Alias, g.Mode, g.ExpiresAt.Format(time.RFC3339))
+	if g.GrantedBy.HarnessAncestor || g.GrantedBy.AncestryTruncated {
+		// never print the success line here: it is the string a peer would relay
+		fmt.Printf("recorded %s as SUSPECT (unusable)\n", g.ID)
+	} else {
+		fmt.Printf("granted %s to %s/%s session %s (%s, expires %s)\n", g.ID, g.Channel, g.Alias, g.SessionID, g.Mode, g.ExpiresAt.Format(time.RFC3339))
+	}
 	switch {
 	case g.GrantedBy.HarnessAncestor:
 		fmt.Fprintf(os.Stderr, "cbus: this ran inside a %s process tree, so %s is recorded as suspect and cannot be used; run cbus grant from a plain terminal\n",
@@ -168,6 +173,7 @@ func runGrants(args []string) int {
 	for _, v := range views {
 		fmt.Printf("%s  %-7s  %s/%s  %s until %s  %s\n", v.ID, v.State, v.Channel, v.Alias, v.Mode,
 			v.ExpiresAt.Format(time.RFC3339), v.Action)
+		fmt.Printf("    session %s, minted on %s via %s%s\n", v.SessionID, v.GrantedBy.TTY, topAncestors(v.GrantedBy.Ancestors, 4), usesSuffix(v.Uses))
 	}
 	return 0
 }
@@ -182,4 +188,30 @@ func runGrantsUse(args []string) int {
 	}
 	fmt.Printf("using %s for %s/%s: %s\n", v.ID, v.Channel, v.Alias, v.Action)
 	return 0
+}
+
+func connSuffix(conn string) string {
+	if conn == "" {
+		return ""
+	}
+	return " (connection " + conn + ")"
+}
+
+func usesSuffix(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", used %d times", n)
+}
+
+// topAncestors shows the nearest few minting ancestors, so a chain that a terminal
+// multiplexer reparented (zsh < tmux) reads differently from a login shell's.
+func topAncestors(chain []string, n int) string {
+	if len(chain) == 0 {
+		return "(none recorded)"
+	}
+	if len(chain) > n {
+		return strings.Join(chain[:n], " < ") + " < ..."
+	}
+	return strings.Join(chain, " < ")
 }

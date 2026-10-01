@@ -133,10 +133,10 @@ func TestGrantConfirmedAtTheTerminalWritesALiveGrant(t *testing.T) {
 	tty := operatorTypes(t, "ch/coder\npush the branch\n")
 	var rc int
 	out := captureStdout(t, func() { rc = run([]string{"grant", "ch/coder", "push the branch"}) })
-	if rc != 0 || !strings.Contains(out, "granted g-") {
+	if rc != 0 || !strings.Contains(out, "granted g-") || !strings.Contains(out, "session sid-coder") {
 		t.Fatalf("rc=%d out=%q", rc, out)
 	}
-	for _, want := range []string{"operator grant for ch/coder", "action: push the branch", "Type the peer address", "Type the action exactly"} {
+	for _, want := range []string{"operator grant for ch/coder", "session: sid-coder", "action:  push the branch", "Type the peer address", "Type the action exactly"} {
 		if !strings.Contains(tty.out.String(), want) {
 			t.Errorf("the terminal prompt is missing %q:\n%s", want, tty.out.String())
 		}
@@ -157,9 +157,13 @@ func TestGrantFromAHarnessIsRecordedSuspectAndFails(t *testing.T) {
 		return client.GrantProvenance{TTY: dev, Harness: "claude", HarnessAncestor: true}
 	}
 	var rc int
-	stderr := captureStderr(t, func() { captureStdout(t, func() { rc = run([]string{"grant", "ch/coder", "push"}) }) })
+	var stdout string
+	stderr := captureStderr(t, func() { stdout = captureStdout(t, func() { rc = run([]string{"grant", "ch/coder", "push"}) }) })
 	if rc == 0 || !strings.Contains(stderr, "inside a claude process tree") {
 		t.Fatalf("rc=%d stderr=%q", rc, stderr)
+	}
+	if !strings.Contains(stdout, "as SUSPECT (unusable)") || strings.Contains(stdout, "granted") {
+		t.Fatalf("a suspect mint must never print the success line, stdout=%q", stdout)
 	}
 	views, _ := client.ListGrants(nil, true)
 	if len(views) != 1 || views[0].State != client.GrantSuspect {
@@ -232,5 +236,59 @@ func TestGrantTerminalErrorIsReported(t *testing.T) {
 	grantTerminal = func() (io.ReadWriteCloser, string, error) { return nil, "", errors.New("device not configured") }
 	if stderr := captureStderr(t, func() { run([]string{"grant", "revoke", "g-0000000000"}) }); !strings.Contains(stderr, "grant needs the operator at a real terminal") {
 		t.Errorf("revoke must take the same gate: %q", stderr)
+	}
+}
+
+func TestGrantRefusesUnbindableTargets(t *testing.T) {
+	root := grantStore(t)
+	if _, err := client.ReserveAlias("ch", "fresh", client.OriginFresh, ""); err != nil {
+		t.Fatal(err)
+	}
+	// an armed peer whose listener has gone: the pid no longer runs
+	dead := filepath.Join(root, "ch", "dead")
+	if err := os.MkdirAll(dead, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"alias":"dead","channel":"ch","sessionId":"sid-dead","listenerPid":2147483646,"listenerStart":"1","ownerPid":null,"host":"h","ts":"2026-10-01T00:00:00Z","lastActivity":"2026-10-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(dead, "meta.json"), []byte(meta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := storeHash(t, root)
+	for target, want := range map[string]string{
+		"ch/nobody": "no peer ch/nobody is registered",
+		"ch/fresh":  "reserved but has not joined",
+		"ch/dead":   "listener is dead",
+	} {
+		operatorTypes(t, target+"\npush\n")
+		var rc int
+		stderr := captureStderr(t, func() { rc = run([]string{"grant", target, "push"}) })
+		if rc == 0 || !strings.Contains(stderr, want) {
+			t.Errorf("%s: rc=%d stderr=%q, want %q", target, rc, stderr, want)
+		}
+	}
+	if storeHash(t, root) != before {
+		t.Error("a refused grant changed the store")
+	}
+}
+
+func TestGrantsListingShowsHowEachGrantWasMinted(t *testing.T) {
+	grantStore(t)
+	mintWith := func(action string, ancestors []string) {
+		operatorTypes(t, "ch/coder\n"+action+"\n")
+		grantProvenance = func(string) client.GrantProvenance {
+			return client.GrantProvenance{TTY: "/dev/ttys004", Ancestors: ancestors}
+		}
+		captureStdout(t, func() { run([]string{"grant", "ch/coder", action}) })
+	}
+	mintWith("from-login", []string{"zsh", "?(pid 9: operation not permitted)", "iTermServer-3.7", "iTerm2", "extra"})
+	mintWith("from-tmux", []string{"zsh", "tmux"})
+	out := captureStdout(t, func() { run([]string{"grants", "--all"}) })
+	for _, want := range []string{
+		"session sid-coder, minted on /dev/ttys004 via zsh < ?(pid 9: operation not permitted) < iTermServer-3.7 < iTerm2 < ...",
+		"session sid-coder, minted on /dev/ttys004 via zsh < tmux\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the listing must show the minting chain %q:\n%s", want, out)
+		}
 	}
 }
