@@ -4,6 +4,50 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-02 00:37:24 UTC] [Release] v0.17.0: coordinator delegation, operator grants, tmux launcher file
+
+[Attempt #1] Range v0.16.4..4ba5aa8 (pull requests #31, #33, #34, #35, #36).
+2 files: detailed_changelog.md, simple_changelog.md. Written after the tag,
+so the tag does not include this entry.
+
+[What changed]
+- Standing delegation (#31, closes #29): formation apply, bootstrap,
+  resume, fork and `cbus spawn --role` prompts add a `--- delegation ---`
+  section. It names the coordinator (the seat that launched the peer, or a
+  formation's single orchestrator seat when someone else applied it), says
+  its rulings on scope, contract and precedence inside the effort bind, that
+  leaving the effort is a scope change for the operator, and that push, pull
+  requests, release, install and anything outward or irreversible stay
+  reserved to the operator. The text is fixed in the binary.
+- Operator grants (#33, #34, #35, closes #30): `cbus grant <ch>/<alias>
+  "<action>" [--once|--ttl]` binds one action to the grantee's exact
+  session, requires typing the address and action at a terminal, records
+  provenance, and marks a grant minted inside a harness process tree or a
+  pty wrapper as suspect and unusable. `cbus grants` lists, `cbus grants
+  use` consumes once. A usable grant sends the grantee a notice that is not
+  itself the grant. Doctrine 3 says an operator grant counts only when
+  `cbus grants` lists it as live and the peer takes it with `cbus grants
+  use`, and that a seat never runs `cbus grant`.
+- tmux launcher file (#36, closes #32): new-window and split-window launches
+  hand tmux `/bin/bash <file>` instead of the whole command, the same
+  launcher iTerm2 already used, now deleting itself before `cd`.
+
+[Possible Ripple Effects]
+- Role files changed: selfupdate refreshes `$CBUS_DIR/roles`; sessions
+  launched before the update keep the old doctrine 3 text.
+- A grant is friction, not a security boundary: a reparented process, a
+  direct store write or a claimed session id beats it (docs/security.md).
+- Daemons need `cbus daemon restart` to load the new binary.
+
+[Testing Notes]
+- Each pull request carries red/green, mutation and live acceptance
+  evidence. Release: the five assets from a fresh clone at the tag matched
+  the published bytes and the local build; `SHA256SUMS` uploaded with
+  `gh release upload` because `make release` does not produce it; selfupdate
+  then installed v0.17.0 on laptop and server, commands and roles refreshed,
+  and `cbus daemon restart` brought both daemons to v0.17.0 protocol 3 with
+  every connection still listening.
+
 ## [2026-10-01 22:30:34 UTC] [Client] pass the tmux launch command through a launcher file
 
 [Attempt #1] 10 files. Code: internal/client/harness.go, pane.go. Tests:
