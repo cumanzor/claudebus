@@ -4,6 +4,41 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-02 21:43:12 UTC] [Release] v0.17.1: work-conserving scheduler pass
+
+[Attempt #1] Range v0.17.0..565df7e (pull request #47). 2 files:
+detailed_changelog.md, simple_changelog.md. Written after the tag, so the tag
+does not include this entry.
+
+[What changed]
+- The daemon scheduler visits every connection each tick and resumes a pass
+  when a slot frees, instead of advancing its rotation one connection per
+  tick (#47, closes #38). Exited Claude consumers without a pending attempt
+  stop retrying delivery and back off a minute; inbox epoch refusals back
+  off 5 minutes; Codex consumer probes throttle to 30 s.
+
+[Possible Ripple Effects]
+- Daemons need `cbus daemon restart` to load the new binary. Connections,
+  pending attempts and cursors are retained across it.
+- Control operations still share the slot pool, so #19 remains open (#39).
+- Stale connection records still accumulate until the lifecycle work in the
+  same milestone lands.
+
+[Testing Notes]
+The fix's own evidence is in #47 (red/green, mutants, race, Linux container
+and a live before/after with about 90 stale records: 58.0 s mean append to
+accept on v0.17.0, 1.89 s on the fix). Release gate: the five assets built
+twice from fresh clones at the tag were byte-identical, the published assets
+matched the uploaded `SHA256SUMS`, and the version string reads `v0.17.1`.
+The Claude pair canary (`scripts/claude_cbus_pair_canary.py`) on the release
+asset passed 2 of 4 runs; the same canary on an exact v0.17.0 build passed 0
+of 3 with the same failure (the second session's receiver never gets a
+managed connection), filed as #48. After the laptop daemon restart: 110 of
+110 connections, 5 of 5 pending attempts, no cursor moved back, no inbox
+identity changed; the one consumer that went from online to exited was a
+Claude process that had exited. The server selfupdated and its daemon
+restarted on v0.17.1.
+
 ## [2026-10-02 21:27:34 UTC] [Daemon] visit every connection each tick instead of rotating by one
 
 [Attempt #1] 8 files. Code: internal/client/daemon.go, daemon_scheduler.go,
