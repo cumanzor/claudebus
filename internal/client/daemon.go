@@ -107,7 +107,10 @@ type busDaemon struct {
 	closing       bool
 	rotation      int           // next connection a pass visits, guarded by mu
 	passLeft      int           // connections the current pass has yet to visit, guarded by mu
-	slotFreed     chan struct{} // wakes the main loop to resume a pass that ran out of slots
+	kick          chan struct{} // wakes the scheduler loop: a wake, a freed slot or a released lane
+	ready         map[string]struct{}
+	due           map[string]time.Time // receipt follow-ups, guarded by mu
+	followups     map[string]int
 	probeConsumer func(context.Context, *ConnectionState) (consumerProbe, error)
 	relays        map[string]*relaySubscription
 	relayViews    map[string]relayObservation
@@ -125,7 +128,7 @@ func newBusDaemon() *busDaemon {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &busDaemon{root: DaemonDir(), version: "dev", connections: map[string]*ConnectionState{}, queues: map[string]nativeQueue{}, nextTry: map[string]time.Time{},
 		ctx: ctx, cancel: cancel, lanes: map[string]chan struct{}{}, connectGate: make(chan struct{}, 1), controlWait: daemonControlWait, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
-		slotFreed: make(chan struct{}, 1), relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
+		kick: make(chan struct{}, 1), ready: map[string]struct{}{}, due: map[string]time.Time{}, followups: map[string]int{}, relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
 	d.openQueue = func(c CodexQueueConfig) (nativeQueue, error) { return newCodexQueueContext(d.ctx, c) }
 	return d
 }
@@ -220,7 +223,15 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 	go func() { done <- srv.Serve(l) }()
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	loopCtx, stopLoop := context.WithCancel(ctx)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.scheduleLoop(loopCtx, tick.C)
+	}()
 	shutdown := func() error {
+		stopLoop()
+		<-loopDone
 		c, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		err := d.shutdown(c)
@@ -242,10 +253,6 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 				return stopErr
 			}
 			return err
-		case <-tick.C:
-			d.schedule()
-		case <-d.slotFreed:
-			d.continueSchedule()
 		}
 	}
 }
@@ -620,7 +627,11 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 				return nil, fmt.Errorf("this thread is already connected as %s/%s", c.Channel, c.Alias)
 			}
 			if req.Harness == daemonHarnessClaude {
-				return d.reconnectClaude(c, req, claude, token)
+				state, err := d.reconnectClaude(c, req, claude, token)
+				if err == nil {
+					d.wake(c.ID)
+				}
+				return state, err
 			}
 			if c.Config.SQLiteHome != "" && c.Config.SQLiteHome != req.Config.SQLiteHome {
 				return nil, errors.New("Codex queue store changed; refusing to redirect an existing connection or its pending deliveries")
@@ -661,6 +672,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			}
 			*c = next
 			deferred := d.deferConnect(c, d.arm(c), d.connectPresence(c, false), d.observeCompaction(c), d.flushPresence(c), d.connectRelay(c))
+			d.wake(c.ID)
 			return connectResult(c, deferred), nil
 		}
 	}
@@ -767,6 +779,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	unlock() // Presence fanout acquires source and recipient locks in canonical order.
 	deferred := d.deferConnect(c, d.connectPresence(c, true), d.observeCompaction(c), d.flushPresence(c), d.connectRelay(c, ready))
 	ready = nil // connectRelay starts or aborts it on every path
+	d.wake(c.ID)
 	return connectResult(c, deferred), nil
 }
 

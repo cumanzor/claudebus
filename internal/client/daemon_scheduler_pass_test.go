@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-// schedulerTick mirrors RunDaemon: one tick, then a resume per freed slot,
-// until no worker is running.
+// schedulerTick mirrors scheduleLoop: one tick, then a drive per kick, until
+// no worker is running.
 func schedulerTick(t *testing.T, d *busDaemon) {
 	t.Helper()
 	d.schedule()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		select {
-		case <-d.slotFreed:
-			d.continueSchedule()
+		case <-d.kick:
+			d.drive()
 		case <-time.After(20 * time.Millisecond):
 			if len(d.slots) == 0 {
 				return

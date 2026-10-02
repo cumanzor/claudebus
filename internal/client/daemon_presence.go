@@ -275,6 +275,9 @@ func (d *busDaemon) flushPresence(c *ConnectionState) error {
 			if !owns {
 				return nil
 			}
+			if r.ConnectionID != "" {
+				d.wake(r.ConnectionID)
+			}
 		}
 		next := cloneConnection(c)
 		if index < 0 {
