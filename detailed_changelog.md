@@ -4,6 +4,84 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-02 21:27:34 UTC] [Daemon] visit every connection each tick instead of rotating by one
+
+[Attempt #1] 8 files. Code: internal/client/daemon.go, daemon_scheduler.go,
+daemon_presence.go, inbox_epoch.go. Tests: daemon_scheduler_pass_test.go
+(new), daemon_scheduler_park_unix_test.go (new), inbox_epoch_unix_test.go,
+daemon_claude_receipt_wait_unix_test.go. Changelogs: both, separate commit.
+Interim fix ahead of the event-driven scheduler (#38, milestone "Daemon
+delivery latency and lifecycle").
+
+[What changed]
+`schedule()` ran once a second, walked every connection from a rotation
+pointer, and moved the pointer one connection per tick. The first
+`daemonMaxOperations` (4) eligible connections took every slot, and the cheap
+idle check only ran inside a slot. So a connection was served in one burst per
+cycle, and the cycle lasted as many seconds as there were connection records.
+Records are never removed today, so a store with ~100 stale records put 20 to
+100 seconds between an inbox append and the submit.
+
+A tick now starts a pass over every connection from where the last pass
+stopped. When `beginOperation` reports the slots full (a new
+`errDaemonSlotsFull`, which still matches `errDaemonBusy`), the pass stops in
+place. `finish()` signals `slotFreed`, and the main loop resumes the pass. A
+busy lane skips that connection for this pass. `deliver`, `accept`, the
+journal, the lane and the slot bound are unchanged.
+
+Visiting every connection each pass made three existing costs run at their
+nominal rate, so they were bounded:
+- A Claude connection whose consumer was observed exited and that holds no
+  pending attempt (`parkedClaude`) no longer calls `deliver`. Before, one
+  unread line kept it in a 10 s error loop forever with four durable writes
+  per retry. It still observes the consumer and drains its presence outbox,
+  and it backs off a minute. Reconnect already clears the retry. A pending
+  attempt keeps its receipt lookups, since the transcript outlives the
+  process.
+- Inbox epoch refusals (`inboxEpochError`) back off 5 minutes instead of 10 s.
+  Only unregister and connect clear them.
+- Codex consumer probes run `lsof`, so they are throttled to 30 s instead of
+  5 s.
+
+[Possible Ripple Effects]
+- Each tick now holds the slots for the length of a pass. A control operation
+  arriving inside that window still gets `errDaemonBusy` (#19), now slightly
+  more often. #39 removes control operations from the slot pool.
+- Consumer exits are noticed within the probe interval instead of once per
+  rotation, so `departed` presence goes out sooner.
+- An exited Claude peer's mail now waits for a reconnect without its state
+  changing to `error`; `cbus connection status` shows the consumer as exited.
+- Latency is now bounded by the 1 s tick plus the Claude receipt, not by the
+  record count. Stale records still grow without bound until the lifecycle
+  work lands.
+
+[Testing Notes]
+New tests, each red on `main` on the aimed assertion:
+`TestDaemonSchedulerLatencyIsIndependentOfRecordCount` (48 connections, mail
+for the one the rotation reaches last, delivered within 2 ticks),
+`TestDaemonSchedulerParksExitedClaudeConsumer` (no submit, no journal write
+and a retry of at least 30 s across 20 ticks) and
+`TestDaemonSchedulerEpochRefusalBacksOff`. Named mutants (no slot-freed
+signal, pass stopping after the first admission, no park in
+`scheduledOperation`, no park retry, no epoch backoff) each fail on the aimed
+assertion. `scheduleUntil` now waits for in-flight workers, which removes a
+race between a test reading the live connection and a worker writing it.
+`go vet` and `go test ./...` pass; linux amd64/arm64 and windows amd64 vet
+or compile; `-race` over the daemon, Claude and epoch tests passed 10 runs.
+In a Linux arm64 container the full suite shows the same five failures on
+`main` and on the branch (root defeats the ancestry EPERM tests, and the
+known inode-reuse presence test); the scheduler, Claude and epoch tests passed
+5 runs there.
+
+Live: a scratch daemon on a scratch store seeded with copies of the stale
+records from a real store (pending and live records excluded), one spawned
+Claude Code peer, six probe sends at varied gaps, timed from append to
+accept. v0.17.0 with 94 records: 75.4, 71.0, 54.0, 82.0, 64.1 and 1.9 s
+(the last landed in the same burst as the one before). This change with 92
+records: 1.37, 2.04, 1.93, 2.03, 1.91 and 2.08 s. Copying a record changes its
+inbox inode, so the seeded error records refused on the epoch check rather
+than the session registry check.
+
 ## [2026-10-02 00:37:24 UTC] [Release] v0.17.0: coordinator delegation, operator grants, tmux launcher file
 
 [Attempt #1] Range v0.16.4..4ba5aa8 (pull requests #31, #33, #34, #35, #36).
