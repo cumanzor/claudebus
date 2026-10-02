@@ -14,6 +14,13 @@ import (
 
 const daemonMaxOperations = 4
 
+const (
+	// longer than one Claude submit (5 s) plus its peer-lock wait (5 s)
+	daemonControlWait = 12 * time.Second
+	// below the CLI's 90 s daemon request timeout, so a queued connect still answers
+	daemonConnectWait = 60 * time.Second
+)
+
 var errDaemonBusy = errors.New("connection or daemon workers busy; try again")
 var errDaemonSlotsFull = fmt.Errorf("%w", errDaemonBusy)
 var errDaemonStopping = errors.New("daemon is stopping")
@@ -55,7 +62,7 @@ func (d *busDaemon) rearmLoaded(parent context.Context) {
 		}
 		if err != nil {
 			c.ListenerError = "restore daemon listener: " + err.Error()
-			fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), c.ListenerError)
+			daemonLogf("%s: %s", ConnectionTarget(c), c.ListenerError)
 		} else {
 			c.ListenerError = ""
 		}
@@ -133,9 +140,7 @@ func (d *busDaemon) register(c *ConnectionState) {
 	defer d.mu.Unlock()
 	d.connections[c.ID] = c
 	d.snapshots[c.ID] = cloneConnection(c)
-	if d.lanes[c.ID] == nil {
-		d.lanes[c.ID] = &sync.Mutex{}
-	}
+	d.laneLocked(c.ID)
 }
 
 func (d *busDaemon) statusSnapshots() []*ConnectionState {
@@ -162,22 +167,41 @@ func (d *busDaemon) snapshot(id string) *ConnectionState {
 	return nil
 }
 
-// Admission never waits while holding another connection's lock. Controls get a
-// truthful busy response instead of claiming a disconnect before enqueue ends.
+// laneLocked returns the connection's lane, a 1-slot semaphore. The caller
+// holds d.mu.
+func (d *busDaemon) laneLocked(id string) chan struct{} {
+	lane := d.lanes[id]
+	if lane == nil {
+		lane = make(chan struct{}, 1)
+		d.lanes[id] = lane
+	}
+	return lane
+}
+
+// releaseLane publishes the connection's snapshot before a waiter can take the lane.
+func (d *busDaemon) releaseLane(id string, lane chan struct{}) {
+	d.mu.Lock()
+	if current := d.connections[id]; current != nil {
+		d.snapshots[id] = cloneConnection(current)
+	}
+	d.mu.Unlock()
+	<-lane
+}
+
+// beginOperation admits scheduled work. It never waits: a busy lane or a full
+// pool is skipped until a later pass.
 func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) {
 	d.mu.Lock()
 	if d.closing {
 		d.mu.Unlock()
 		return nil, nil, errDaemonStopping
 	}
-	var lane *sync.Mutex
+	var lane chan struct{}
 	if id != "" {
-		lane = d.lanes[id]
-		if lane == nil {
-			lane = &sync.Mutex{}
-			d.lanes[id] = lane
-		}
-		if !lane.TryLock() {
+		lane = d.laneLocked(id)
+		select {
+		case lane <- struct{}{}:
+		default:
 			d.mu.Unlock()
 			return nil, nil, errDaemonBusy
 		}
@@ -186,7 +210,7 @@ func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) 
 	case d.slots <- struct{}{}:
 	default:
 		if lane != nil {
-			lane.Unlock()
+			<-lane
 		}
 		d.mu.Unlock()
 		return nil, nil, errDaemonSlotsFull
@@ -196,18 +220,47 @@ func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) 
 	d.mu.Unlock()
 	return c, func() {
 		if lane != nil {
-			d.mu.Lock()
-			if current := d.connections[id]; current != nil {
-				d.snapshots[id] = cloneConnection(current)
-			}
-			d.mu.Unlock()
-			lane.Unlock()
+			d.releaseLane(id, lane)
 		}
 		<-d.slots
 		select {
 		case d.slotFreed <- struct{}{}:
 		default:
 		}
+		d.workers.Done()
+	}, nil
+}
+
+// beginControl admits a control operation (connect, disconnect, reconcile,
+// abandon, relay acknowledgement). It takes no delivery slot, so full delivery
+// workers never refuse it. It waits up to d.controlWait for the connection's
+// lane; a delivery still holding it past that is a truthful busy, never a
+// disconnect claimed before the enqueue ends.
+func (d *busDaemon) beginControl(id string) (*ConnectionState, func(), error) {
+	d.mu.Lock()
+	if d.closing {
+		d.mu.Unlock()
+		return nil, nil, errDaemonStopping
+	}
+	lane := d.laneLocked(id)
+	d.workers.Add(1)
+	d.mu.Unlock()
+	wait := time.NewTimer(d.controlWait)
+	defer wait.Stop()
+	select {
+	case lane <- struct{}{}:
+	case <-wait.C:
+		d.workers.Done()
+		return nil, nil, errDaemonBusy
+	case <-d.ctx.Done():
+		d.workers.Done()
+		return nil, nil, errDaemonStopping
+	}
+	d.mu.Lock()
+	c := d.connections[id]
+	d.mu.Unlock()
+	return c, func() {
+		d.releaseLane(id, lane)
 		d.workers.Done()
 	}, nil
 }
@@ -327,7 +380,7 @@ func (d *busDaemon) runScheduled(c *ConnectionState) {
 			c.State = connectionReadyState(c)
 		}
 		if err := d.save(c); err != nil {
-			fmt.Fprintf(os.Stderr, "cbus daemon: persist %s: %v\n", ConnectionTarget(c), err)
+			daemonLogf("persist %s: %v", ConnectionTarget(c), err)
 		}
 	}
 }
@@ -345,7 +398,7 @@ func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
 	if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
 		logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
 	} else if !logged {
-		fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), strings.ReplaceAll(err.Error(), "\n", "; "))
+		daemonLogf("%s: %s", ConnectionTarget(c), strings.ReplaceAll(err.Error(), "\n", "; "))
 	}
 	c.Error = err.Error()
 	if c.State != "disconnected" && c.State != "detached" && c.State != "binding-required" {
@@ -355,7 +408,7 @@ func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
 		}
 	}
 	if saveErr := d.save(c); saveErr != nil {
-		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s/%s: %v\n", c.Channel, c.Alias, saveErr)
+		daemonLogf("persist %s/%s: %v", c.Channel, c.Alias, saveErr)
 	}
 	retry := 10 * time.Second
 	var epoch inboxEpochError

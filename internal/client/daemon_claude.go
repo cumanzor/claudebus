@@ -3,7 +3,6 @@ package client
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -31,7 +30,7 @@ func logClaudeAttempt(c *ConnectionState, a queueAttempt, outcome string) {
 	if !a.SubmittedAt.IsZero() && outcome != "submitted" {
 		outcome += " after " + time.Since(a.SubmittedAt).Round(time.Millisecond).String()
 	}
-	fmt.Fprintf(os.Stderr, "cbus daemon: %s attempt %s: %s\n", ConnectionTarget(c), a.ClientID, outcome)
+	daemonLogf("%s attempt %s: %s", ConnectionTarget(c), a.ClientID, outcome)
 }
 
 // Adapter dispatch is separate from public admission. Claude admission remains

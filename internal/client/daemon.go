@@ -97,8 +97,10 @@ type busDaemon struct {
 	nextTry       map[string]time.Time
 	ctx           context.Context
 	cancel        context.CancelFunc
-	connectMu     sync.Mutex
-	lanes         map[string]*sync.Mutex
+	connectGate   chan struct{} // one connect at a time; waiters queue rather than fail
+	controlWait   time.Duration
+	skipped       []string // connection records load could not read or validate
+	lanes         map[string]chan struct{}
 	snapshots     map[string]*ConnectionState
 	slots         chan struct{}
 	workers       sync.WaitGroup
@@ -122,7 +124,7 @@ func daemonSocket() string { return filepath.Join(DaemonDir(), "control.sock") }
 func newBusDaemon() *busDaemon {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &busDaemon{root: DaemonDir(), version: "dev", connections: map[string]*ConnectionState{}, queues: map[string]nativeQueue{}, nextTry: map[string]time.Time{},
-		ctx: ctx, cancel: cancel, lanes: map[string]*sync.Mutex{}, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
+		ctx: ctx, cancel: cancel, lanes: map[string]chan struct{}{}, connectGate: make(chan struct{}, 1), controlWait: daemonControlWait, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
 		slotFreed: make(chan struct{}, 1), relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
 	d.openQueue = func(c CodexQueueConfig) (nativeQueue, error) { return newCodexQueueContext(d.ctx, c) }
 	return d
@@ -256,7 +258,11 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 			return
 		}
 		if r.URL.Path == "/health" && r.Method == "GET" {
-			writeDaemonJSON(w, map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true})
+			health := map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true}
+			if len(d.skipped) > 0 {
+				health["skippedRecords"] = d.skipped
+			}
+			writeDaemonJSON(w, health)
 			return
 		}
 		if r.URL.Path == "/stop" && r.Method == "POST" {
@@ -344,6 +350,11 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 	})
 }
 
+// daemonLogf writes one timestamped daemon.log line.
+func daemonLogf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "%s cbus daemon: %s\n", time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"), fmt.Sprintf(format, args...))
+}
+
 func writeDaemonJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
@@ -362,30 +373,41 @@ func (d *busDaemon) load() error {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		c, err := readConnectionRecord(dir, e.Name())
 		if err != nil {
-			return err
+			// one bad record must not stop delivery to every other connection
+			d.skipped = append(d.skipped, e.Name())
+			daemonLogf("skipped %v", err)
+			continue
 		}
-		var c ConnectionState
-		if err = json.Unmarshal(b, &c); err != nil {
-			return fmt.Errorf("connection %s: %w", e.Name(), err)
-		}
-		if c.ID == "" || e.Name() != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !uuidLike(c.ThreadID) {
-			return fmt.Errorf("invalid connection %s", e.Name())
-		}
-		if err := validateConnectionAdapter(&c); err != nil {
-			return fmt.Errorf("connection %s: %w", e.Name(), err)
-		}
-		c.Harness = daemonHarness(c.Harness)
-		if err := validateRelayConfig(c.Relay); err != nil {
-			return fmt.Errorf("connection %s: %w", e.Name(), err)
-		}
-		if err := validateConnectionBinding(&c); err != nil && c.State != "disconnected" && c.State != "detached" {
-			c.State, c.Error = "binding-required", err.Error()
-		}
-		d.register(&c)
+		d.register(c)
 	}
 	return nil
+}
+
+func readConnectionRecord(dir, name string) (*ConnectionState, error) {
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return nil, err
+	}
+	var c ConnectionState
+	if err = json.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("connection %s: %w", name, err)
+	}
+	if c.ID == "" || name != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !uuidLike(c.ThreadID) {
+		return nil, fmt.Errorf("invalid connection %s", name)
+	}
+	if err := validateConnectionAdapter(&c); err != nil {
+		return nil, fmt.Errorf("connection %s: %w", name, err)
+	}
+	c.Harness = daemonHarness(c.Harness)
+	if err := validateRelayConfig(c.Relay); err != nil {
+		return nil, fmt.Errorf("connection %s: %w", name, err)
+	}
+	if err := validateConnectionBinding(&c); err != nil && c.State != "disconnected" && c.State != "detached" {
+		c.State, c.Error = "binding-required", err.Error()
+	}
+	return &c, nil
 }
 
 func (d *busDaemon) save(c *ConnectionState) error {
@@ -547,10 +569,14 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 		return nil, err
 	}
 	req.Harness = daemonHarness(req.Harness)
-	if !d.connectMu.TryLock() {
+	select {
+	case d.connectGate <- struct{}{}:
+		defer func() { <-d.connectGate }()
+	case <-time.After(daemonConnectWait):
 		return nil, errDaemonBusy
+	case <-d.ctx.Done():
+		return nil, errDaemonStopping
 	}
-	defer d.connectMu.Unlock()
 	if err := checkStoreName("channel", req.Channel); err != nil {
 		return nil, err
 	}
@@ -581,7 +607,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			continue
 		}
 		if selected.Channel == req.Channel && selected.ThreadID == req.ThreadID && sameRelay(selected.Relay, req.Relay) && sameConnectHome(selected, req) {
-			c, finish, err := d.beginOperation(selected.ID)
+			c, finish, err := d.beginControl(selected.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -644,7 +670,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	}
 	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Claude: claude, Relay: cloneRelay(req.Relay), Consumer: &consumerObservation{State: "unknown"}}
 	c.State = connectionReadyState(c)
-	_, finish, err := d.beginOperation(c.ID)
+	_, finish, err := d.beginControl(c.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -755,9 +781,9 @@ func (d *busDaemon) deferConnect(c *ConnectionState, errs ...error) string {
 	}
 	deferred := strings.ReplaceAll(err.Error(), "\n", "; ")
 	c.Error = connectDeferredPrefix + deferred
-	fmt.Fprintf(os.Stderr, "cbus daemon: %s: %s\n", ConnectionTarget(c), c.Error)
+	daemonLogf("%s: %s", ConnectionTarget(c), c.Error)
 	if saveErr := d.save(c); saveErr != nil {
-		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s: %v\n", ConnectionTarget(c), saveErr)
+		daemonLogf("persist %s: %v", ConnectionTarget(c), saveErr)
 	}
 	return deferred
 }
