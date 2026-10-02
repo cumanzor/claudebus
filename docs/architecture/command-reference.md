@@ -1784,30 +1784,40 @@ sequenceDiagram
     C->>C: derive channel → join (idempotent) → reserve child alias (origin=fork)
     C->>F: Fork(spec: sid, model, childAlias, bootstrap prompt)
     F->>F: write self-deleting launcher (PATH, CLAUDE_CONFIG_DIR, cwd)
-    F->>T: osascript create window/tab (bare `/bin/bash <tmpfile>`) / tmux new-window
+    F->>T: osascript create window/tab / tmux new-window (both: bare `/bin/bash <tmpfile>`)
     T->>K: ccs <profile>|claude --resume <sid> --fork-session [--model m] [--name childAlias] "<prompt>"
     C-->>P: parent + child lines + arm reminder
     K->>K: cbus join ch (reclaims the reserved alias) → arm Monitor
     K-->>P: join presence event (parent's armed tail sees it)
 ```
 
-**Quirk (iTerm2 tokenizer shim):** window/tab forks hand iTerm2 a **bare**
-`/bin/bash <tmpfile>` command through a self-deleting launcher script, not a
-quoted one-liner. iTerm2's AppleScript `command` parameter is tokenized by
-iTerm2 itself and does **not** honor POSIX quoting, so a quoted one-liner
-launches nothing (probe-verified live, twice). tmux takes the opposite path — a
-POSIX-quoted one-liner through `/bin/sh`. `pane` splits whichever surface is
-live instead of opening a new one: its iTerm2 branch (`osaForkPane`) reuses the
-**same** launcher-script indirection as window/tab (`osaForkITerm`), while its
-tmux branch (`forkTmuxPane`) reuses the same quoted-one-liner `terminalCommand`
-as plain `tmux`; dispatch differs by surface, not by target.
+**The launcher script (`writeLauncher`, `launcherScript`, `launcherCommand`):**
+every terminal surface runs the child through a self-deleting launcher script
+and receives only the bare command `/bin/bash <tmpfile>`. The script, written
+with mode `0700` under a random name in the temp dir (or `/tmp` when that path
+would need quoting), first deletes itself, then unsets the stale identity
+variables, exports the replicated environment, `cd`s to the working directory
+and `exec`s the child with its full argv, launch prompt included. Each surface
+needs it for its own reason. iTerm2's AppleScript `command` parameter is
+tokenized by iTerm2 itself and does **not** honor POSIX quoting, so a quoted
+one-liner launches nothing (probe-verified live, twice). tmux refuses a command
+longer than about 16KB (`command too long`), and launch prompts carrying a role
+file pass that, so an inline command failed for the larger roles. `pane` splits
+whichever surface is live instead of opening a new one: its iTerm2 branch
+(`osaForkPane`) and its tmux branch (`forkTmuxPane`, including the plain-split
+retry when `-l 70%` is refused) use the same launcher as window/tab and plain
+`tmux`. If every launch attempt fails, the script is removed, since it never ran
+to delete itself. Limitation (inferred, not measured): a tmux server that sees a
+different `/tmp` from the launching process, such as a Linux user service with a
+private `/tmp`, could not read the script, and the child would exit with "No such
+file or directory".
 
-**Launcher environment (`forkReplicatedEnv`, `harness.go:356-378`):** the
+**Launcher environment (`forkReplicatedEnv`):** the
 child's environment is not a raw inherit. It is explicitly built from `PATH`,
 an absolute `HOME`, an absolute `CBUS_DIR`, and `CLAUDE_CONFIG_DIR` when set
 (under a CCS instance config dir it relaunches via `ccs <profile>`); a longer
 list is explicitly **unset** before that override applies
-(`claudeLaunchUnset`, `harness.go:381-386`): every session-id var across
+(`claudeLaunchUnset`): every session-id var across
 harnesses (`CBUS_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`,
 `CLAUDE_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `GROK_SESSION_ID`,
 …), `CBUS_CHANNEL`/`CBUS_ALIAS`/`CBUS_HARNESS`, and, the load-bearing

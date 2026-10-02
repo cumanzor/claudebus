@@ -188,16 +188,17 @@ func TestTmuxSplitArgv(t *testing.T) {
 
 // TestTmuxNewWindowArgv: the tmux target names its window after the spec's Title
 // (the child's alias), falling back to the historical cc-branch only when no title
-// was set, and the /bin/sh one-liner rides last exactly as terminalCommand renders it.
+// was set, and the launcher's short command rides last.
 func TestTmuxNewWindowArgv(t *testing.T) {
 	spec := ForkSpec{Target: "tmux", Argv: []string{"claude", "--name", "worker3"}, Dir: "/tmp", Title: "worker3"}
-	got := tmuxNewWindowArgv(spec)
-	want := []string{"new-window", "-n", "worker3", terminalCommand(spec)}
+	run := launcherCommand("/tmp/cc-branch.1.sh")
+	got := tmuxNewWindowArgv(spec, run)
+	want := []string{"new-window", "-n", "worker3", run}
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
 	spec.Title = ""
-	if got := tmuxNewWindowArgv(spec); got[2] != "cc-branch" {
+	if got := tmuxNewWindowArgv(spec, run); got[2] != "cc-branch" {
 		t.Fatalf("empty Title should fall back to cc-branch, got %q", got)
 	}
 }
@@ -215,32 +216,6 @@ func TestTmuxSplitArgvCommandIsLast(t *testing.T) {
 		if i := slices.Index(got, "-t"); i < 0 || got[i+1] != "%7" {
 			t.Errorf("preCount=%d: -t must carry the caller's pane, got %v", preCount, got)
 		}
-	}
-}
-
-// TestTmuxSplitArgvSharesTheShellBuilder: the tmux leg goes through
-// terminalCommand (POSIX-quoted, /bin/sh dialect) — the OPPOSITE of the iTerm2
-// leg, which must hand over a bare, unquoted command because iTerm2 tokenizes it
-// itself. Pinning that they differ keeps a future "unify these" refactor honest.
-func TestTmuxSplitArgvSharesTheShellBuilder(t *testing.T) {
-	spec := ForkSpec{
-		Target: "pane",
-		Argv:   []string{"claude", "hi 'there'"},
-		Env:    map[string]string{"PATH": "/a b"},
-		Dir:    "/work dir",
-	}
-	argv := tmuxSplitArgv("%1", terminalCommand(spec), 2, "")
-	got := argv[len(argv)-1]
-	if !strings.HasPrefix(got, "/bin/bash -c '") {
-		t.Fatalf("the tmux leg must be a POSIX-quoted -c one-liner, got %s", got)
-	}
-	if !strings.Contains(got, `'\''there'\''`) {
-		t.Errorf("embedded quotes must survive shQuote round-tripping: %s", got)
-	}
-	// the iTerm2 leg is deliberately the opposite shape: bare and unquoted, because
-	// iTerm2 tokenizes the command itself and mis-parses POSIX quoting.
-	if strings.HasPrefix(iterm2Command("/tmp/x.sh"), "/bin/bash -c") {
-		t.Error("the iTerm2 leg must stay a BARE two-token command, not a -c one-liner")
 	}
 }
 

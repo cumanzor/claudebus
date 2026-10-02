@@ -395,8 +395,8 @@ var claudeLaunchUnset = []string{
 }
 
 // OSAForker is the real TerminalForker: iTerm2 (osascript) for window/tab, tmux for
-// tmux. window/tab go through a self-deleting launcher SCRIPT (osaForkITerm); tmux
-// runs a quoted one-liner (terminalCommand) — see each for the per-surface rationale.
+// tmux. Every surface runs the child through the self-deleting launcher script
+// (writeLauncher); see osaForkITerm and forkTmuxWindow for why each needs it.
 type OSAForker struct{}
 
 // Precheck answers the surface question from the ENVIRONMENT alone and touches
@@ -447,8 +447,7 @@ func (f OSAForker) Fork(spec ForkSpec) (string, error) {
 		}
 		return osaForkITerm(spec) // Precheck established the iTerm2 uuid is present
 	case "tmux":
-		// tmux runs its command through /bin/sh, which DOES honor POSIX quoting, so a
-		// quoted one-liner works here (unlike iTerm2 — see osaForkITerm).
+		// tmux refuses a command past about 16KB, so it gets the launcher's short form too.
 		return "", forkTmuxWindow(spec)
 	default:
 		return "", fmt.Errorf("unknown target %q", spec.Target) // unreachable: Precheck refuses first
@@ -467,23 +466,11 @@ func (f OSAForker) Fork(spec ForkSpec) (string, error) {
 // script holding the real (POSIX-quoted, /bin/sh-dialect) env exports + cd + exec, and
 // hand iTerm2 only the BARE, whitespace-tokenized command `/bin/bash <tmpfile>`.
 func osaForkITerm(spec ForkSpec) (string, error) {
-	f, err := os.CreateTemp("", "cc-branch.*.sh")
+	path, err := writeLauncher(spec)
 	if err != nil {
 		return "", err
 	}
-	path := f.Name()
-	_, werr := io.WriteString(f, launcherScript(spec, path))
-	cerr := f.Close()
-	if werr != nil {
-		return "", werr
-	}
-	if cerr != nil {
-		return "", cerr
-	}
-	if err := os.Chmod(path, 0o700); err != nil {
-		return "", err
-	}
-	run := iterm2Command(path) // bare `/bin/bash <tmpfile>` — tokenizer-proof
+	run := launcherCommand(path) // bare `/bin/bash <tmpfile>`: tokenizer-proof
 	var created string
 	var ferr error
 	switch spec.Target {
@@ -500,19 +487,55 @@ func osaForkITerm(spec ForkSpec) (string, error) {
 	return created, ferr
 }
 
-// iterm2Command is the bare command handed to iTerm2: `/bin/bash <tmpfile>` with NO
-// quoting (mktemp paths carry no whitespace), so iTerm2's own tokenizer splits it into
-// exactly two args. It exists so the tokenizer never sees POSIX quoting (see
-// osaForkITerm).
-func iterm2Command(scriptPath string) string { return "/bin/bash " + scriptPath }
+// writeLauncher writes the self-deleting launcher for spec to a private temp file.
+// Every terminal backend runs the child through it: iTerm2 because its tokenizer
+// cannot take POSIX quoting, tmux because a command past about 16KB is refused, and
+// a launch prompt is the child's last argv element.
+func writeLauncher(spec ForkSpec) (string, error) {
+	f, err := os.CreateTemp(launcherDir(), "cc-branch.*.sh")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	_, werr := io.WriteString(f, launcherScript(spec, path))
+	cerr := f.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(path, 0o700)
+	}
+	if werr != nil {
+		os.Remove(path)
+		return "", werr
+	}
+	return path, nil
+}
 
-// launcherScript is the self-deleting launcher iTerm2 runs. Inside the script ordinary
-// /bin/sh quoting (shQuote) applies — the layer iTerm2's tokenizer bypasses. It
-// replicates PATH/CLAUDE_CONFIG_DIR + cwd, rm's itself, then execs the child. Kept a
-// pure function of (spec, scriptPath) so it is byte-for-byte unit-testable.
+// launcherDir is os.TempDir() when its path needs no quoting, else /tmp: the launcher
+// command is handed over bare, and iTerm2's tokenizer cannot take quoting at all.
+func launcherDir() string {
+	dir := os.TempDir()
+	if strings.Trim(dir, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-") != "" {
+		return "/tmp"
+	}
+	return dir
+}
+
+// launcherCommand is the bare command a terminal runs: `/bin/bash <tmpfile>` with NO
+// quoting (CreateTemp paths carry no whitespace), so iTerm2's own tokenizer splits it
+// into exactly two args and tmux's command stays a few dozen bytes.
+func launcherCommand(scriptPath string) string { return "/bin/bash " + scriptPath }
+
+// launcherScript is the self-deleting launcher a terminal runs. Inside the script
+// ordinary /bin/sh quoting (shQuote) applies: the layer iTerm2's tokenizer bypasses.
+// It rm's itself first (bash keeps reading the open file, and a failed cd no longer
+// leaves it behind), replicates PATH/CLAUDE_CONFIG_DIR + cwd, then execs the child.
+// Kept a pure function of (spec, scriptPath) so it is byte-for-byte unit-testable.
 func launcherScript(spec ForkSpec, scriptPath string) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\n")
+	b.WriteString("rm -f " + shQuote(scriptPath) + "\n")
 	for _, k := range spec.UnsetEnv {
 		b.WriteString("unset " + shQuote(k) + "\n")
 	}
@@ -520,7 +543,6 @@ func launcherScript(spec ForkSpec, scriptPath string) string {
 		b.WriteString("export " + k + "=" + shQuote(spec.Env[k]) + "\n")
 	}
 	b.WriteString("cd " + shQuote(spec.Dir) + " || exit\n")
-	b.WriteString("rm -f " + shQuote(scriptPath) + "\n")
 	b.WriteString("exec")
 	for _, a := range spec.Argv {
 		b.WriteString(" " + shQuote(a))
@@ -534,8 +556,9 @@ func runOsascript(script string) error { return exec.Command("osascript", "-e", 
 // tmuxNewWindowArgv is the pure argv builder for the tmux target (testable without
 // tmux). -n names the window after the child's title so a spawned or branched peer
 // is findable by its alias in the window list; -n also pins the name, where tmux's
-// automatic-rename would otherwise overwrite it with the running command.
-func tmuxNewWindowArgv(spec ForkSpec) []string {
+// automatic-rename would otherwise overwrite it with the running command. shellCmd
+// is launcherCommand's short form, never the inline command.
+func tmuxNewWindowArgv(spec ForkSpec, shellCmd string) []string {
 	name := spec.Title
 	if name == "" {
 		name = "cc-branch"
@@ -544,7 +567,7 @@ func tmuxNewWindowArgv(spec ForkSpec) []string {
 	if spec.Anchor != "" {
 		args = append(args, "-t", spec.Anchor+":")
 	}
-	return append(args, terminalCommand(spec))
+	return append(args, shellCmd)
 }
 
 func forkTmuxWindow(spec ForkSpec) error {
@@ -561,32 +584,15 @@ func forkTmuxWindow(spec ForkSpec) error {
 		return fmt.Errorf("tmux returned invalid caller session %q", session)
 	}
 	spec.Anchor = session
-	if out, err := exec.Command("tmux", tmuxNewWindowArgv(spec)...).CombinedOutput(); err != nil {
+	path, err := writeLauncher(spec)
+	if err != nil {
+		return err
+	}
+	if out, err := exec.Command("tmux", tmuxNewWindowArgv(spec, launcherCommand(path))...).CombinedOutput(); err != nil {
+		os.Remove(path) // the launcher never ran, so it never self-deletes
 		return fmt.Errorf("tmux new-window: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// terminalCommand renders a ForkSpec into one /bin/sh command line — used for tmux,
-// which execs through a POSIX shell. window/tab CANNOT use this (iTerm2 mis-tokenizes
-// POSIX quoting — see osaForkITerm).
-func terminalCommand(spec ForkSpec) string {
-	return "/bin/bash -c " + shQuote(forkShellCommand(spec))
-}
-
-func forkShellCommand(spec ForkSpec) string {
-	var b strings.Builder
-	b.WriteString("cd " + shQuote(spec.Dir) + " && exec env")
-	for _, k := range spec.UnsetEnv {
-		b.WriteString(" -u " + shQuote(k))
-	}
-	for _, k := range sortedKeys(spec.Env) { // deterministic order for testability
-		b.WriteString(" " + k + "=" + shQuote(spec.Env[k]))
-	}
-	for _, a := range spec.Argv {
-		b.WriteString(" " + shQuote(a))
-	}
-	return b.String()
 }
 
 func sortedKeys(m map[string]string) []string {

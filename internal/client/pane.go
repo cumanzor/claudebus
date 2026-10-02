@@ -287,13 +287,20 @@ func forkTmuxPane(spec ForkSpec) (string, error) {
 	}
 	explicit := spec.Split == "right" || spec.Split == "down"
 	preCount := tmuxPaneCount(anchor)
-	out, err := exec.Command("tmux", tmuxSplitArgv(anchor, terminalCommand(spec), preCount, spec.Split)...).Output()
+	// the prompt rides in the launcher file: inline, tmux refuses a command past ~16KB
+	path, err := writeLauncher(spec)
+	if err != nil {
+		return "", err
+	}
+	run := launcherCommand(path)
+	out, err := exec.Command("tmux", tmuxSplitArgv(anchor, run, preCount, spec.Split)...).Output()
 	if err != nil && !explicit && preCount == 1 {
 		// -l 70% (percentage sizing) needs tmux >= 3.1; retry the plain split
 		// before failing the fork — sizing is a nicety, the pane is the point.
-		out, err = exec.Command("tmux", tmuxSplitArgv(anchor, terminalCommand(spec), 0, spec.Split)...).Output()
+		out, err = exec.Command("tmux", tmuxSplitArgv(anchor, run, 0, spec.Split)...).Output()
 	}
 	if err != nil {
+		os.Remove(path) // the launcher never ran, so it never self-deletes
 		return "", fmt.Errorf("tmux split-window: %v%s", err, cmdStderr(err))
 	}
 	newPane := strings.TrimSpace(string(out))

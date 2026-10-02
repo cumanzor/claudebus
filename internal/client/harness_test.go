@@ -723,22 +723,6 @@ func TestBranchBadTarget(t *testing.T) {
 	}
 }
 
-// TestForkShellCommandQuoting: the temp-file-free command string cd's, sets env, and
-// execs the argv — everything POSIX-quoted (env keys sorted for determinism).
-func TestForkShellCommandQuoting(t *testing.T) {
-	spec := ForkSpec{
-		Target: "window",
-		Argv:   []string{"ccs", "alpha", "--resume", "S", "--fork-session", "hi 'there'"},
-		Env:    map[string]string{"PATH": "/a b", "CLAUDE_CONFIG_DIR": "/c"},
-		Dir:    "/work dir",
-	}
-	got := forkShellCommand(spec)
-	want := `cd '/work dir' && exec env CLAUDE_CONFIG_DIR='/c' PATH='/a b' 'ccs' 'alpha' '--resume' 'S' '--fork-session' 'hi '\''there'\'''`
-	if got != want {
-		t.Fatalf("forkShellCommand:\n got  %s\n want %s", got, want)
-	}
-}
-
 func TestAppleScriptEscaping(t *testing.T) {
 	if got := appleScriptStr(`a"b\c`); got != `"a\"b\\c"` {
 		t.Errorf("appleScriptStr = %s", got)
@@ -757,10 +741,10 @@ func TestLauncherScriptByteExact(t *testing.T) {
 	}
 	got := launcherScript(spec, "/tmp/fixed.sh")
 	want := "#!/bin/bash\n" +
+		"rm -f '/tmp/fixed.sh'\n" +
 		"export CLAUDE_CONFIG_DIR='/c'\n" +
 		"export PATH='/a b'\n" +
 		"cd '/work dir' || exit\n" +
-		"rm -f '/tmp/fixed.sh'\n" +
 		`exec 'ccs' 'alpha' '--resume' 'S' '--fork-session' 'hi '\''there'\'''` + "\n"
 	if got != want {
 		t.Fatalf("launcherScript:\n got  %q\n want %q", got, want)
@@ -771,8 +755,8 @@ func TestLauncherScriptByteExact(t *testing.T) {
 // with no quoting — iTerm2 tokenizes it itself (a quoted one-liner would launch
 // nothing; the launcher-script indirection is why).
 func TestITerm2CommandBare(t *testing.T) {
-	if got := iterm2Command("/tmp/cc-branch.123.sh"); got != "/bin/bash /tmp/cc-branch.123.sh" {
-		t.Fatalf("iterm2Command = %q, want a bare, unquoted two-token command", got)
+	if got := launcherCommand("/tmp/cc-branch.123.sh"); got != "/bin/bash /tmp/cc-branch.123.sh" {
+		t.Fatalf("launcherCommand = %q, want a bare, unquoted two-token command", got)
 	}
 }
 
