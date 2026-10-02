@@ -116,8 +116,11 @@ func TestDaemonHarnessRejectsUnsupportedJournalWithoutRewriting(t *testing.T) {
 	}
 	reloaded := newBusDaemon()
 	defer reloaded.cancel()
-	if err := reloaded.load(); err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("unsupported persisted adapter fell back to Codex: %v", err)
+	if err := reloaded.load(); err != nil {
+		t.Fatalf("one unsupported record stopped the daemon: %v", err)
+	}
+	if len(reloaded.skipped) != 1 || reloaded.skipped[0] != c.ID+".json" {
+		t.Fatalf("unsupported persisted adapter fell back to Codex instead of being skipped: %v", reloaded.skipped)
 	}
 	after, err := os.ReadFile(journal)
 	if err != nil || string(after) != string(b) || len(reloaded.statusSnapshots()) != 0 || q.opens != 1 {

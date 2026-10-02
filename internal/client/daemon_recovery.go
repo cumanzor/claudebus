@@ -63,7 +63,7 @@ func (d *busDaemon) lockConnectionWithRelease(target string) (*ConnectionState, 
 		if selected.Channel != ch || selected.Alias != al || (selected.Relay == nil && host != "") || (selected.Relay != nil && selected.Relay.Host != host) {
 			continue
 		}
-		c, finish, err := d.beginOperation(selected.ID)
+		c, finish, err := d.beginControl(selected.ID)
 		if err != nil {
 			return nil, nil, nil, err
 		}

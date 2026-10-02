@@ -109,6 +109,6 @@ func (d *busDaemon) adoptInboxEpoch(c *ConnectionState, f *os.File, end int64, w
 		return err
 	}
 	*c = next
-	fmt.Fprintf(os.Stderr, "cbus daemon: %s: inbox device changed with the same inode and matching records; identity re-stamped\n", ConnectionTarget(c))
+	daemonLogf("%s: inbox device changed with the same inode and matching records; identity re-stamped", ConnectionTarget(c))
 	return nil
 }

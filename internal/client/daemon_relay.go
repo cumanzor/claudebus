@@ -499,12 +499,9 @@ func (d *busDaemon) ackRelayPresence(ctx context.Context, id, eventID string) er
 		return errors.New("empty presence acknowledgement")
 	}
 	for ctx.Err() == nil {
-		c, finish, err := d.beginOperation(id)
+		c, finish, err := d.beginControl(id)
 		if errors.Is(err, errDaemonBusy) {
-			if relayWait(ctx, 10*time.Millisecond) {
-				continue
-			}
-			return ctx.Err()
+			continue // a delivery outlasted the control wait; the relay read loop waits with it
 		}
 		if err != nil {
 			return err

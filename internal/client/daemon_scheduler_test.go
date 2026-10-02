@@ -132,6 +132,7 @@ func schedulerWait(t *testing.T, why string, predicate func() bool) {
 
 func TestDaemonSchedulerSlowPeerDoesNotBlockDeliveryOrControls(t *testing.T) {
 	d, cs, qs := schedulerFixture(t, 2)
+	d.controlWait = 50 * time.Millisecond
 	gate := make(chan struct{})
 	qs[0].gate = gate
 	for i, c := range cs {
