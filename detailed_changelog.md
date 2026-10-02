@@ -4,6 +4,68 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-02 22:01:33 UTC] [Daemon] controls wait for their lane; tolerant load; log timestamps
+
+[Attempt #1] 9 files. Code: internal/client/daemon.go, daemon_scheduler.go,
+daemon_recovery.go, daemon_relay.go, daemon_claude.go, inbox_epoch.go. Tests:
+daemon_control_admission_test.go (new), daemon_scheduler_test.go,
+daemon_harness_test.go. Changelogs: both, separate commit. Second step of the
+"Daemon delivery latency and lifecycle" milestone (#39).
+
+[What changed]
+Control operations went through `beginOperation`, which tries the
+connection's lane once and takes one of the four delivery slots. Connect also
+tried `connectMu` once. So two connects in the same instant refused each
+other, and any control refused with `connection or daemon workers busy; try
+again` while four deliveries ran. A peer spawned with a kickoff that forbids
+retrying a failed connect then never joined (#19). The Claude pair canary hit
+exactly this: in every failed run the second session's `cbus connect` got
+the busy refusal (#48).
+
+Lanes are now 1-slot channels so a waiter can give up. `beginControl` takes
+no delivery slot and waits up to `daemonControlWait` (12 s, longer than one
+Claude submit plus its peer-lock wait) for the lane. A delivery still holding
+the lane after that is reported busy, as before, never a disconnect claimed
+before the enqueue ends. Connect, disconnect, reconcile, abandon and
+`ackRelayPresence` use it; the relay acknowledgement loses its 10 ms busy
+poll. Connects queue on `connectGate` for up to 60 s, inside the CLI's 90 s
+daemon request timeout. Scheduled delivery keeps the non-blocking
+`beginOperation`.
+
+`load` used to refuse to start the daemon when any one connection record
+failed to read, parse or validate. It now skips that record, logs it and
+lists it under `skippedRecords` in `/health`; the file is left untouched.
+
+Daemon log lines (`daemonLogf`) start with an RFC3339 UTC timestamp with
+milliseconds.
+
+[Possible Ripple Effects]
+- A control on a busy connection now answers after up to 12 s instead of at
+  once. A connect queued behind slow connects answers after up to 60 s.
+- A skipped record's peer still has meta naming its connection id, so the
+  alias stays claimed until it is unregistered.
+- Anything that parsed daemon.log lines by a leading `cbus daemon:` prefix
+  now sees a timestamp first. Nothing in the repository does.
+
+[Testing Notes]
+New tests, red on `main` on the aimed assertion: two concurrent new connects
+while every delivery slot is held by a blocked enqueue both succeed; a
+disconnect waits out a delivery that ends within the control wait and lands
+after the committed enqueue; a corrupt record does not stop a good one from
+loading. `TestDaemonConnectQueuesBehindAConnectInProgress`,
+`TestDaemonLogLinesAreTimestamped` and the `/health` and skip-list assertions
+use the new fields, so they have no red run on `main`.
+`TestDaemonHarnessRejectsUnsupportedJournalWithoutRewriting` now expects the
+unsupported record to be skipped rather than to stop the load, and
+`TestDaemonSchedulerSlowPeerDoesNotBlockDeliveryOrControls` shortens the
+control wait so its busy assertion stays fast. Named mutants (new connect on
+the delivery slot, connect gate refusing, recovery controls on the delivery
+slot, no lane wait, load aborting, no timestamp) each fail on the aimed
+assertion. `go vet` and `go test ./...` pass; linux amd64/arm64 and windows
+amd64 vet or compile; `-race` over the daemon, Claude, epoch and relay tests
+passed 5 runs. The Claude pair canary on this build passed 5 of 5, against
+0 of 3 on v0.17.0 and 2 of 4 on v0.17.1.
+
 ## [2026-10-02 21:43:12 UTC] [Release] v0.17.1: work-conserving scheduler pass
 
 [Attempt #1] Range v0.17.0..565df7e (pull request #47). 2 files:
