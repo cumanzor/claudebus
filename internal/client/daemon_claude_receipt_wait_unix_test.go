@@ -36,6 +36,7 @@ func scheduleUntil(t *testing.T, d *busDaemon, id, why string, predicate func(*C
 		d.schedule()
 		time.Sleep(10 * time.Millisecond)
 		if s := d.snapshot(id); s != nil && predicate(s) {
+			d.workers.Wait() // the snapshot is published before the worker stops writing the connection
 			return s
 		}
 	}

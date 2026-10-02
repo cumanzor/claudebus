@@ -103,7 +103,9 @@ type busDaemon struct {
 	slots         chan struct{}
 	workers       sync.WaitGroup
 	closing       bool
-	rotation      int
+	rotation      int           // next connection a pass visits, guarded by mu
+	passLeft      int           // connections the current pass has yet to visit, guarded by mu
+	slotFreed     chan struct{} // wakes the main loop to resume a pass that ran out of slots
 	probeConsumer func(context.Context, *ConnectionState) (consumerProbe, error)
 	relays        map[string]*relaySubscription
 	relayViews    map[string]relayObservation
@@ -121,7 +123,7 @@ func newBusDaemon() *busDaemon {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &busDaemon{root: DaemonDir(), version: "dev", connections: map[string]*ConnectionState{}, queues: map[string]nativeQueue{}, nextTry: map[string]time.Time{},
 		ctx: ctx, cancel: cancel, lanes: map[string]*sync.Mutex{}, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
-		relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
+		slotFreed: make(chan struct{}, 1), relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
 	d.openQueue = func(c CodexQueueConfig) (nativeQueue, error) { return newCodexQueueContext(d.ctx, c) }
 	return d
 }
@@ -240,6 +242,8 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 			return err
 		case <-tick.C:
 			d.schedule()
+		case <-d.slotFreed:
+			d.continueSchedule()
 		}
 	}
 }
