@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const renumberedDev = 4242
@@ -220,5 +221,19 @@ func TestRelayAppendDefersDevChangeToLaneOwner(t *testing.T) {
 	}
 	if _, _, after, _ := fileIdentity(path); after != before || d.snapshot(c.ID).Dev != renumberedDev {
 		t.Fatal("relay append wrote mail or re-stamped identity")
+	}
+}
+
+func TestDaemonSchedulerEpochRefusalBacksOff(t *testing.T) {
+	d, _, c, first := acceptedInboxFixture(t)
+	if err := os.Truncate(filepath.Join(d.peerDir(c), "inbox.jsonl"), first-1); err != nil {
+		t.Fatal(err)
+	}
+	d.runScheduled(c)
+	if c.State != "error" {
+		t.Fatalf("truncated inbox was not refused: %+v", c)
+	}
+	if wait := time.Until(d.retryAt(c.ID)); wait < 4*time.Minute {
+		t.Fatalf("an epoch refusal needs unregister and connect; retrying in %v rewrites the journal for nothing", wait)
 	}
 }

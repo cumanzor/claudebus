@@ -135,7 +135,11 @@ func (d *busDaemon) observeConsumer(c *ConnectionState) error {
 		if c.Consumer != nil {
 			last, _ = time.Parse(time.RFC3339, c.Consumer.ObservedAt)
 		}
-		if elapsed := time.Since(last); elapsed < 0 || elapsed >= 5*time.Second {
+		every := 5 * time.Second
+		if daemonHarness(c.Harness) == daemonHarnessCodex {
+			every = 30 * time.Second // each probe runs lsof, and every pass now visits every connection
+		}
+		if elapsed := time.Since(last); elapsed < 0 || elapsed >= every {
 			next := cloneConnection(c)
 			if next.Consumer == nil {
 				next.Consumer = &consumerObservation{State: "unknown"}

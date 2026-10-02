@@ -87,8 +87,10 @@ func devMatches(recorded, current uint64) bool {
 	return current == recorded || devMayRenumber
 }
 
+type inboxEpochError struct{ error }
+
 func inboxEpochRefusal(c *ConnectionState, what string) error {
-	return fmt.Errorf("inbox changed or truncated; %s. Save any unread mail past byte %d of the %s inbox, then run cbus unregister %s and connect again", what, c.Offset, ConnectionTarget(c), ConnectionTarget(c))
+	return inboxEpochError{fmt.Errorf("inbox changed or truncated; %s. Save any unread mail past byte %d of the %s inbox, then run cbus unregister %s and connect again", what, c.Offset, ConnectionTarget(c), ConnectionTarget(c))}
 }
 
 // The caller holds the connection lane and the peer lock. A re-stamp is

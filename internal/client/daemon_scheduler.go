@@ -15,6 +15,7 @@ import (
 const daemonMaxOperations = 4
 
 var errDaemonBusy = errors.New("connection or daemon workers busy; try again")
+var errDaemonSlotsFull = fmt.Errorf("%w", errDaemonBusy)
 var errDaemonStopping = errors.New("daemon is stopping")
 
 // Only called before the control socket and scheduler start. A slow peer lock
@@ -188,7 +189,7 @@ func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) 
 			lane.Unlock()
 		}
 		d.mu.Unlock()
-		return nil, nil, errDaemonBusy
+		return nil, nil, errDaemonSlotsFull
 	}
 	d.workers.Add(1)
 	c := d.connections[id]
@@ -203,6 +204,10 @@ func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) 
 			lane.Unlock()
 		}
 		<-d.slots
+		select {
+		case d.slotFreed <- struct{}{}:
+		default:
+		}
 		d.workers.Done()
 	}, nil
 }
@@ -251,23 +256,45 @@ func (d *busDaemon) setRetry(id string, at time.Time) {
 	}
 }
 
-// Each tick starts at a different connection. At most daemonMaxOperations jobs
-// run, and a peer can occupy at most one slot. Empty inboxes never query Codex.
+// A tick starts a pass over every connection from where the last one stopped.
+// At most daemonMaxOperations jobs run, and a peer occupies at most one slot, so
+// a pass that runs out of slots stops in place and continueSchedule resumes it
+// when one frees: a peer waits for one pass, not one tick per registered
+// connection. Empty inboxes never query Codex.
 func (d *busDaemon) schedule() {
-	connections := d.statusSnapshots()
-	if len(connections) == 0 {
-		return
-	}
-	sort.Slice(connections, func(i, j int) bool { return connections[i].ID < connections[j].ID })
 	d.mu.Lock()
-	start := d.rotation % len(connections)
-	d.rotation = (start + 1) % len(connections)
+	d.passLeft = len(d.snapshots)
 	d.mu.Unlock()
-	for i := range connections {
-		selected := connections[(start+i)%len(connections)]
-		c, finish, err := d.beginOperation(selected.ID)
+	d.continueSchedule()
+}
+
+func (d *busDaemon) continueSchedule() {
+	d.mu.Lock()
+	ids := make([]string, 0, len(d.snapshots))
+	for id := range d.snapshots {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+	sort.Strings(ids)
+	for {
+		d.mu.Lock()
+		d.passLeft = min(d.passLeft, len(ids))
+		if d.passLeft == 0 {
+			d.mu.Unlock()
+			return
+		}
+		id := ids[d.rotation%len(ids)]
+		d.mu.Unlock()
+		c, finish, err := d.beginOperation(id)
+		if errors.Is(err, errDaemonStopping) || errors.Is(err, errDaemonSlotsFull) {
+			return
+		}
+		d.mu.Lock()
+		d.rotation = (d.rotation + 1) % len(ids)
+		d.passLeft--
+		d.mu.Unlock()
 		if err != nil {
-			continue
+			continue // lane busy: that peer's operation is already running
 		}
 		if c.State == "detached" || time.Now().Before(d.retryAt(c.ID)) {
 			finish()
@@ -283,6 +310,10 @@ func (d *busDaemon) schedule() {
 func (d *busDaemon) runScheduled(c *ConnectionState) {
 	if err := d.scheduledOperation(c); err != nil {
 		d.scheduledFailure(c, err)
+		return
+	}
+	if parkedClaude(c) {
+		d.setRetry(c.ID, time.Now().Add(parkedClaudeRetry))
 		return
 	}
 	d.mu.Lock()
@@ -326,7 +357,25 @@ func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
 	if saveErr := d.save(c); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "cbus daemon: persist %s/%s: %v\n", c.Channel, c.Alias, saveErr)
 	}
-	d.setRetry(c.ID, time.Now().Add(10*time.Second))
+	retry := 10 * time.Second
+	var epoch inboxEpochError
+	if errors.As(err, &epoch) {
+		retry = inboxEpochRetry // only unregister and connect again clears it
+	}
+	d.setRetry(c.ID, time.Now().Add(retry))
+}
+
+const (
+	parkedClaudeRetry = time.Minute
+	inboxEpochRetry   = 5 * time.Minute
+)
+
+// A Claude endpoint is pinned to one process, so mail for an exited consumer
+// waits for a reconnect, which clears the retry. A pending attempt still gets
+// its receipt lookup: the transcript outlives the process.
+func parkedClaude(c *ConnectionState) bool {
+	return daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending == nil &&
+		c.Consumer != nil && c.Consumer.State == "exited"
 }
 
 func (d *busDaemon) scheduledOperation(c *ConnectionState) error {
@@ -340,7 +389,7 @@ func (d *busDaemon) scheduledOperation(c *ConnectionState) error {
 	}
 	observationErr := d.observeConsumer(c)
 	compactionErr := d.observeCompaction(c)
-	if c.State == "disconnected" || c.State == "detached" || c.State == "binding-required" {
+	if c.State == "disconnected" || c.State == "detached" || c.State == "binding-required" || parkedClaude(c) {
 		return errors.Join(observationErr, compactionErr)
 	}
 	// A broken presence recipient must not starve this connection's incoming
