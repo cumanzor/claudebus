@@ -19,6 +19,8 @@ const (
 	daemonControlWait = 12 * time.Second
 	// below the CLI's 90 s daemon request timeout, so a queued connect still answers
 	daemonConnectWait = 60 * time.Second
+	// the full pass is a safety net: inbox writers wake their recipient
+	daemonSweepInterval = 2 * time.Second
 )
 
 var errDaemonBusy = errors.New("connection or daemon workers busy; try again")

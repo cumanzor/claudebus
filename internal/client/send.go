@@ -21,6 +21,12 @@ import (
 //
 // The message is rejected (never truncated) if it exceeds core.MaxMessageBytes.
 func LocalSend(target, from string, force bool, text string) (resolved, fromOut string, warn bool, err error) {
+	var wake string
+	defer func() {
+		if err == nil {
+			WakeDaemon(wake) // after the peer lock is released
+		}
+	}()
 	ch, al, err := ParseLocal(target)
 	if err != nil {
 		return "", "", false, err
@@ -88,5 +94,6 @@ func LocalSend(target, from string, force bool, text string) (resolved, fromOut 
 	if err := appendInbox(filepath.Join(root, ch, al, "inbox.jsonl"), line); err != nil {
 		return "", "", false, fmt.Errorf("append inbox for %q: %w", ch+"/"+al, err)
 	}
+	wake = managedConnectionID(metaPath)
 	return ch + "/" + al, from, warn, nil
 }
