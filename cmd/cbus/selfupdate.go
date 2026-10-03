@@ -150,6 +150,7 @@ func verifyDownloaded(binPath, wantTag string) error {
 
 // refreshAssets execs the new binary. Codex skills use install receipts to update
 // prior shipped content while preserving local edits; no permission rules change.
+// Mods are force-refreshed like commands, so a mod edit is lost on update.
 func refreshAssets(exePath string) {
 	for _, args := range assetRefreshCommands() {
 		cmd := exec.Command(exePath, args...)
@@ -164,7 +165,7 @@ func refreshAssets(exePath string) {
 }
 
 func assetRefreshCommands() [][]string {
-	return [][]string{{"install-commands", "--force"}, {"install-roles", "--force"}, {"install-codex-skills"}}
+	return [][]string{{"install-commands", "--force"}, {"install-roles", "--force"}, {"install-codex-skills"}, {"install-mods", "--force"}}
 }
 
 func ghLatestTagImpl(slug string) (string, error) {
