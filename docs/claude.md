@@ -74,8 +74,8 @@ persisted user entry or a verified peer queued-command attachment in the bound
 transcript. For a mid-turn attachment, the original UUID is its `source_uuid`,
 not the attachment record's own UUID. That receipt is not proof of a reply or
 completed work. While a clean write waits for its receipt the connection reports
-`awaiting-receipt`, with no error, and the daemon checks the transcript on each
-one-second tick. After 60 seconds without a receipt the attempt becomes
+`awaiting-receipt`, with no error, and the daemon checks the transcript 100, 250
+and 500 ms after the write and then every second. After 60 seconds without a receipt the attempt becomes
 `uncertain`: the daemon keeps checking on its slower error retry and still accepts
 a later exact receipt. A write that fails partway is `uncertain` at once. An
 absent receipt does not prove rejection, so cbus never blindly retries an

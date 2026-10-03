@@ -34,6 +34,8 @@ func BroadcastPresence(ch, from, event, text, skip string) {
 		return
 	}
 	ts := Now()
+	var wake []string
+	defer func() { WakeDaemon(wake...) }()
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
@@ -54,7 +56,11 @@ func BroadcastPresence(ch, from, event, text, skip string) {
 			continue
 		}
 		// Presence is best-effort; a failed inbox must not stop the broadcast.
-		_ = appendInbox(filepath.Join(chDir, peer, "inbox.jsonl"), b)
+		if appendInbox(filepath.Join(chDir, peer, "inbox.jsonl"), b) == nil {
+			if id := managedConnectionID(metaPath); id != "" {
+				wake = append(wake, id)
+			}
+		}
 	}
 }
 

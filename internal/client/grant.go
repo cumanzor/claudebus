@@ -534,7 +534,13 @@ func grantNoticeText(g Grant) string {
 
 // DeliverGrantNotice appends a kind=grant line to the grantee's inbox, under the
 // same alias lock a send takes. Best-effort: the grant is valid without it.
-func DeliverGrantNotice(g Grant) error {
+func DeliverGrantNotice(g Grant) (err error) {
+	var wake string
+	defer func() {
+		if err == nil {
+			WakeDaemon(wake)
+		}
+	}()
 	unlock, err := lockPeer(g.Channel, g.Alias)
 	if err != nil {
 		return err
@@ -549,5 +555,9 @@ func DeliverGrantNotice(g Grant) error {
 	if err != nil {
 		return err
 	}
-	return appendInbox(filepath.Join(dir, "inbox.jsonl"), line)
+	if err = appendInbox(filepath.Join(dir, "inbox.jsonl"), line); err != nil {
+		return err
+	}
+	wake = managedConnectionID(filepath.Join(dir, "meta.json"))
+	return nil
 }
