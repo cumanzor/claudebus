@@ -4,6 +4,67 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-03 02:31:42 UTC] [Daemon] inbox writers wake the daemon through POST /wake
+
+[Attempt #1] 10 files. Code: internal/client/daemon.go, daemon_scheduler.go,
+send.go, presence.go, grant.go. Tests: daemon_wake_unix_test.go (new). Docs:
+docs/architecture/protocol.md (control API table), docs/claude.md and
+docs/architecture/current-architecture.md (receipt follow-up timing).
+Changelogs: both. Fourth step of the "Daemon delivery latency and lifecycle"
+milestone (#41), and the sweep interval change left open in #40.
+
+[What changed]
+`cbus send`, presence broadcasts and grant notices append to an inbox from a
+separate process and never told the daemon, so a managed recipient waited for
+the next scheduler pass (1 s).
+
+The daemon serves `POST /wake {"connectionIds": [...]}`, which marks each
+known connection ready (unknown ids are ignored), and `/health` advertises
+`"wake": true`. `WakeDaemon` reads nothing itself: each writer takes the
+connection id from the recipient's `meta.json` after the append and calls it
+once, after the peer lock is released (a deferred call registered before the
+unlock). The call has a 200 ms deadline, ignores every error, never starts a
+daemon, and is skipped when the recipient is not daemon-managed. A daemon
+without the route answers 404 and delivery falls back to its sweep. There is
+no protocol bump: the CLI's version check already requires a daemon restart
+on every release, and a bump would make the daemon refuse connects from
+older CLIs.
+
+With writers waking their recipient, the full pass is a safety sweep every
+2 s (`daemonSweepInterval`) instead of every second.
+
+[Possible Ripple Effects]
+- A writer whose wake is lost (no daemon socket, a stalled daemon) is
+  delivered by the 2 s sweep, slower than the old 1 s tick.
+- Retry windows, consumer probes and Codex compaction checks now run at the
+  2 s sweep granularity.
+- `cbus send` to a managed peer makes one extra local socket round trip,
+  bounded at 200 ms.
+- The daemon does not run on Windows; there the call fails at once on the
+  missing socket.
+
+[Testing Notes]
+`TestCLIWritersWakeTheDaemon` serves the daemon's real handler on the store's
+control socket and runs the scheduler loop with no tick, then calls
+`LocalSend`, `BroadcastPresence` and `DeliverGrantNotice` and waits for each
+line to be accepted. On `main` it fails at the send step. Other tests cover
+the endpoint (known id ready, unknown ignored, `/health` flag) and the client
+bounds (no daemon, a stalled daemon, an unmanaged peer making no call). Named
+mutants (each writer without its wake, the endpoint ignoring ids, a 5 s
+deadline, empty ids not filtered, `/health` without the flag) each fail on
+the aimed assertion; the empty-id mutant first did not compile and was rerun
+in a form that did. `go vet` and `go test ./...` pass; linux amd64/arm64 and
+windows amd64 vet or compile; `-race` over the daemon, Claude, epoch, relay,
+presence, send and grant tests passed 5 runs.
+
+Live, same harness as before (scratch daemon, 92 stale records copied from a
+real store, one spawned Claude Code peer, eight probe sends): 0.23, 0.24,
+0.24, 0.23, 0.24, 1.91, 0.24 and 0.23 s from append to accept. The 1.91 s
+probe came 3 s after the previous one: the daemon log shows it submitted
+about 100 ms after the send, and the receipt took 1.81 s because the peer was
+still in its turn for the previous probe. Submit to receipt for an idle peer
+was 126 to 132 ms.
+
 ## [2026-10-02 22:25:21 UTC] [Daemon] wake the scheduler on in-process writes; receipt follow-ups
 
 [Attempt #1] 7 files. Code: internal/client/daemon.go, daemon_scheduler.go,

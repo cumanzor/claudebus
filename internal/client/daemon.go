@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,29 @@ func newBusDaemon() *busDaemon {
 	return d
 }
 
+// WakeDaemon tells the local daemon that these managed connections have new
+// inbox lines. Best effort and bounded: no daemon, an older daemon without the
+// endpoint, or a slow one leaves delivery to its sweep. It never starts a daemon.
+func WakeDaemon(connectionIDs ...string) {
+	connectionIDs = slices.DeleteFunc(connectionIDs, func(id string) bool { return id == "" })
+	if len(connectionIDs) == 0 {
+		return // unmanaged peers have no daemon to wake
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = DaemonCallContext(ctx, "POST", "/wake", wakeRequest{ConnectionIDs: connectionIDs}, nil)
+}
+
+type wakeRequest struct {
+	ConnectionIDs []string `json:"connectionIds"`
+}
+
+// managedConnectionID names the daemon connection behind a peer, or "".
+func managedConnectionID(metaPath string) string {
+	m, _ := ReadPeerMeta(metaPath)
+	return m.ConnectionID
+}
+
 // DaemonCall uses a private local socket. A caller's identity/config is explicit
 // in the request, never inherited from the session that happened to start cbusd.
 func DaemonCall(method, path string, in, out any) error {
@@ -221,7 +245,7 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 	srv := &http.Server{Handler: d.handler(cancel), ReadHeaderTimeout: 5 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(l) }()
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(daemonSweepInterval)
 	defer tick.Stop()
 	loopCtx, stopLoop := context.WithCancel(ctx)
 	loopDone := make(chan struct{})
@@ -265,11 +289,23 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 			return
 		}
 		if r.URL.Path == "/health" && r.Method == "GET" {
-			health := map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true}
+			health := map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true, "wake": true}
 			if len(d.skipped) > 0 {
 				health["skippedRecords"] = d.skipped
 			}
 			writeDaemonJSON(w, health)
+			return
+		}
+		if r.URL.Path == "/wake" && r.Method == "POST" {
+			var req wakeRequest
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			for _, id := range req.ConnectionIDs {
+				d.wake(id) // unknown ids are ignored
+			}
+			writeDaemonJSON(w, map[string]bool{"ok": true})
 			return
 		}
 		if r.URL.Path == "/stop" && r.Method == "POST" {
