@@ -4,6 +4,66 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-02 22:25:21 UTC] [Daemon] wake the scheduler on in-process writes; receipt follow-ups
+
+[Attempt #1] 7 files. Code: internal/client/daemon.go, daemon_scheduler.go,
+daemon_presence.go, daemon_relay.go. Tests: daemon_event_loop_test.go (new),
+daemon_event_loop_unix_test.go (new), daemon_scheduler_pass_test.go.
+Changelogs: both, separate commit. Third step of the "Daemon delivery
+latency and lifecycle" milestone (#40). The milestone first planned one
+goroutine per connection; this keeps the single scheduler goroutine and adds
+wakes and due times, which reaches the same latency with about half the code
+and leaves the tests that drive `schedule()` by hand working.
+
+[What changed]
+The scheduler only moved on its 1 s tick. A Claude receipt was looked up on
+the next tick after the submit, each line of a backlog waited for its own
+tick, and relay and presence appends made inside the daemon waited like any
+other write.
+
+`scheduleLoop` now runs in its own goroutine (RunDaemon stops it before
+shutdown) and is the only consumer of a ready set. `wake(id)` marks a
+connection ready and kicks the loop. Relay appends, daemon presence fanout
+(by the recipient's connection id) and connects wake their connection. After
+a Claude submit, `followUp` schedules receipt lookups at 100, 250 and 500 ms
+and then every second until the existing 60 s deadline. After an accept the
+connection goes straight back on the ready set.
+
+A wake that finds the lane busy is kept: an id leaves the ready set before
+its lane is tried and goes back when the lane or the slots refuse it, and
+every lane release (delivery and control) and every freed slot kicks the loop
+afterwards. The tick's full pass stays as the safety sweep, at 1 s, for CLI
+writers that do not wake the daemon yet.
+
+[Possible Ripple Effects]
+- A busy peer's backlog now drains back to back: each accept requeues the
+  connection at once.
+- Receipt follow-ups add up to three extra transcript scans in the first
+  second after each Claude submit.
+- Nothing is removed from the ready set or due times when a connection is
+  detached; a stale entry costs one cheap visit.
+- CLI sends still wait up to a second for the sweep until #41.
+
+[Testing Notes]
+The new tests run the real `scheduleLoop` with a tick channel that never
+fires, so a delivery can only come from a wake, a follow-up or a requeue: a
+five-line backlog drains after one wake; a Claude receipt written after the
+submit is accepted within 1.5 s with no tick; a wake that arrives while a
+control holds the lane is delivered after the release; a join fanned out by
+a new connect is delivered to the existing peer. Named mutants (no backlog
+requeue, no receipt follow-up, control release without a kick, busy lane
+dropping the wake, presence fanout without a wake) each fail on the aimed
+assertion; the two lane mutants failed 3 of 3 runs. The relay append wake
+has no test of its own. `go vet` and `go test ./...` pass; linux amd64/arm64
+and windows amd64 vet or compile; `-race` over the daemon, Claude, epoch,
+relay and presence tests passed 5 runs.
+
+Live, same harness as the scheduler-pass entry (a scratch daemon, 92 stale
+records copied from a real store, one spawned Claude Code peer, eight probe
+sends): v0.17.1 1.35, 1.92, 2.01, 2.03, 2.03, 1.93, 2.03 and 2.04 s; this
+change 0.57, 0.91, 1.05, 0.94, 1.05, 0.94, 1.03 and 0.93 s. Submit to receipt
+from the daemon log: about 1.0 s on v0.17.1, 124 to 132 ms here.
+
 ## [2026-10-02 22:01:33 UTC] [Daemon] controls wait for their lane; tolerant load; log timestamps
 
 [Attempt #1] 9 files. Code: internal/client/daemon.go, daemon_scheduler.go,

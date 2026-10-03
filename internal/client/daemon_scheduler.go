@@ -223,10 +223,7 @@ func (d *busDaemon) beginOperation(id string) (*ConnectionState, func(), error) 
 			d.releaseLane(id, lane)
 		}
 		<-d.slots
-		select {
-		case d.slotFreed <- struct{}{}:
-		default:
-		}
+		d.kickLoop()
 		d.workers.Done()
 	}, nil
 }
@@ -261,6 +258,7 @@ func (d *busDaemon) beginControl(id string) (*ConnectionState, func(), error) {
 	d.mu.Unlock()
 	return c, func() {
 		d.releaseLane(id, lane)
+		d.kickLoop() // a wake that found this lane busy is still ready
 		d.workers.Done()
 	}, nil
 }
@@ -309,16 +307,126 @@ func (d *busDaemon) setRetry(id string, at time.Time) {
 	}
 }
 
+// scheduleLoop is the only consumer of the ready set. A wake, a freed slot and a
+// released lane all kick it after the state they change is visible, so a wake
+// that finds its lane busy stays ready until the release kicks the loop again.
+// The tick's full pass is the safety sweep for writers that do not wake.
+func (d *busDaemon) scheduleLoop(ctx context.Context, tick <-chan time.Time) {
+	due := time.NewTimer(time.Hour)
+	defer due.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			d.schedule()
+		case <-d.kick:
+			d.drive()
+		case <-due.C:
+			d.drive()
+		}
+		wait := time.Hour
+		if next := d.nextDue(); !next.IsZero() {
+			wait = max(time.Until(next), 0)
+		}
+		due.Reset(wait)
+	}
+}
+
+// wake marks a connection ready, for a writer that just appended to its inbox.
+func (d *busDaemon) wake(id string) {
+	d.mu.Lock()
+	if d.connections[id] != nil {
+		d.ready[id] = struct{}{}
+	}
+	d.mu.Unlock()
+	d.kickLoop()
+}
+
+func (d *busDaemon) kickLoop() {
+	select {
+	case d.kick <- struct{}{}:
+	default:
+	}
+}
+
+func (d *busDaemon) nextDue() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var next time.Time
+	for _, at := range d.due {
+		if next.IsZero() || at.Before(next) {
+			next = at
+		}
+	}
+	return next
+}
+
 // A tick starts a pass over every connection from where the last one stopped.
 // At most daemonMaxOperations jobs run, and a peer occupies at most one slot, so
-// a pass that runs out of slots stops in place and continueSchedule resumes it
-// when one frees: a peer waits for one pass, not one tick per registered
-// connection. Empty inboxes never query Codex.
+// a pass that runs out of slots stops in place and the next kick resumes it.
+// Empty inboxes never query Codex.
 func (d *busDaemon) schedule() {
 	d.mu.Lock()
 	d.passLeft = len(d.snapshots)
 	d.mu.Unlock()
-	d.continueSchedule()
+	d.drive()
+}
+
+func (d *busDaemon) drive() {
+	if d.dispatchReady() {
+		d.continueSchedule()
+	}
+}
+
+// dispatchReady starts ready and due connections ahead of the sweep. It reports
+// whether slots remain. An id leaves the ready set before its lane is tried, so
+// a wake that lands during the operation is kept for another visit.
+func (d *busDaemon) dispatchReady() bool {
+	now := time.Now()
+	d.mu.Lock()
+	for id, at := range d.due {
+		if !at.After(now) {
+			d.ready[id] = struct{}{}
+			delete(d.due, id)
+		}
+	}
+	ids := make([]string, 0, len(d.ready))
+	for id := range d.ready {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+	sort.Strings(ids)
+	for _, id := range ids {
+		d.mu.Lock()
+		delete(d.ready, id)
+		d.mu.Unlock()
+		c, finish, err := d.beginOperation(id)
+		if err != nil {
+			if !errors.Is(err, errDaemonStopping) {
+				d.mu.Lock()
+				d.ready[id] = struct{}{}
+				d.mu.Unlock()
+			}
+			if errors.Is(err, errDaemonBusy) && !errors.Is(err, errDaemonSlotsFull) {
+				continue // the lane's release kicks the loop
+			}
+			return false
+		}
+		d.launch(c, finish)
+	}
+	return true
+}
+
+func (d *busDaemon) launch(c *ConnectionState, finish func()) {
+	if c == nil || c.State == "detached" || time.Now().Before(d.retryAt(c.ID)) {
+		finish()
+		return
+	}
+	go func() {
+		defer finish()
+		d.runScheduled(c)
+	}()
 }
 
 func (d *busDaemon) continueSchedule() {
@@ -349,22 +457,17 @@ func (d *busDaemon) continueSchedule() {
 		if err != nil {
 			continue // lane busy: that peer's operation is already running
 		}
-		if c.State == "detached" || time.Now().Before(d.retryAt(c.ID)) {
-			finish()
-			continue
-		}
-		go func() {
-			defer finish()
-			d.runScheduled(c)
-		}()
+		d.launch(c, finish)
 	}
 }
 
 func (d *busDaemon) runScheduled(c *ConnectionState) {
+	accepted := c.Accepted
 	if err := d.scheduledOperation(c); err != nil {
 		d.scheduledFailure(c, err)
 		return
 	}
+	d.followUp(c, c.Accepted != accepted)
 	if parkedClaude(c) {
 		d.setRetry(c.ID, time.Now().Add(parkedClaudeRetry))
 		return
@@ -382,6 +485,29 @@ func (d *busDaemon) runScheduled(c *ConnectionState) {
 		if err := d.save(c); err != nil {
 			daemonLogf("persist %s: %v", ConnectionTarget(c), err)
 		}
+	}
+}
+
+var receiptFollowUps = []time.Duration{100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond}
+
+// followUp schedules the next visit an operation already knows it needs: a
+// Claude receipt lookup soon after the submit, or the next line of a backlog.
+func (d *busDaemon) followUp(c *ConnectionState, accepted bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c.State == claudeAwaitingReceiptState && c.Pending != nil && c.Error == "" {
+		step := d.followups[c.ID]
+		d.followups[c.ID] = step + 1
+		wait := time.Second
+		if step < len(receiptFollowUps) {
+			wait = receiptFollowUps[step]
+		}
+		d.due[c.ID] = time.Now().Add(wait)
+		return
+	}
+	delete(d.followups, c.ID)
+	if accepted {
+		d.ready[c.ID] = struct{}{} // the release that follows kicks the loop
 	}
 }
 

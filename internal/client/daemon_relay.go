@@ -465,6 +465,7 @@ func (d *busDaemon) consumeRelay(ctx context.Context, id string, conn relaySocke
 				if err := d.appendRelay(ctx, c, frame); err != nil {
 					return err
 				}
+				d.wake(id)
 				d.relayState(id, "connected", nil, frame.SpoolID)
 				if err := writeRelayFrame(conn, relayFrame{Type: "ack", SpoolID: frame.SpoolID}); err != nil {
 					return err
