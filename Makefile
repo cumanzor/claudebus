@@ -19,13 +19,19 @@ PLATFORMS := \
 	windows/amd64
 
 .DEFAULT_GOAL := build
-.PHONY: build test clean dist install release $(PLATFORMS)
+.PHONY: build test test-mods clean dist install release $(PLATFORMS)
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 test:
 	go test ./...
+
+# needs the claude CLI; skipped where it isn't installed
+test-mods:
+	@if command -v claude >/dev/null 2>&1; then \
+		for m in mods/*/; do claude plugin validate $$m && claude plugin test $$m || exit 1; done; \
+	else echo "test-mods: claude not on PATH, skipped"; fi
 
 clean:
 	rm -rf $(BINARY) $(DIST)

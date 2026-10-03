@@ -25,3 +25,9 @@ var CodexSkills embed.FS
 //
 //go:embed roles/*.md
 var Roles embed.FS
+
+// Mods holds mods/<name>/: Claude Code function-hook plugins, installed as
+// <skills-root>/<name>/. The all: prefix keeps each mod's .claude-plugin dir.
+//
+//go:embed all:mods
+var Mods embed.FS

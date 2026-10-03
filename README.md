@@ -38,7 +38,7 @@ Codex adapter also requires a compatible installed Codex CLI.
 # from source
 go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
   -o ~/.local/bin/cbus ./cmd/cbus
-cbus install-commands && cbus install-roles && cbus install-codex-skills
+cbus install-commands && cbus install-roles && cbus install-codex-skills && cbus install-mods
 
 # or bootstrap from a release (see docs/install.md), then stay current with
 cbus selfupdate

@@ -4,6 +4,7 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-03 20:29:44 UTC] [Mods] cbus-compact Claude Code mod draws a peer message as one line ('▸ [14:02] from bob: text', presence as 'bob joined'); cbus install-mods writes embedded mods to ~/.claude/skills/<mod>, refreshed by selfupdate and get.sh.
 [2026-10-03 02:31:42 UTC] [Daemon] cbus send, presence broadcasts and grant notices wake the daemon through a new POST /wake (advertised as "wake": true in /health), so a managed recipient's line is submitted at once instead of on the next pass; the full pass becomes a 2 s safety sweep. Best effort: 200 ms deadline, errors ignored, never starts a daemon, no call for unmanaged peers, no protocol bump. Live with 92 stale records: append to accept 0.23 to 0.24 s for an idle Claude peer (v0.17.1: about 1.9 s; v0.17.0: 54 to 82 s).
 
 [2026-10-02 22:25:21 UTC] [Daemon] The scheduler loop wakes on in-process writes and follows up Claude receipts: relay appends, daemon presence fanout and connects wake their connection, a receipt is looked up 100, 250 and 500 ms after the submit and then every second, and a backlog requeues after each accept instead of waiting a tick per line. Live with 92 stale records: append to accept 0.93 s mean, 1.05 s max (v0.17.1: 1.92 s, 2.04 s); submit to receipt about 128 ms (was about 1 s). CLI sends still wait for the 1 s sweep until they wake the daemon (#41).

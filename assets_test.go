@@ -118,3 +118,41 @@ func sharedCore(body string) (string, bool) {
 	}
 	return "", false
 }
+
+func TestModsEmbedMatchesSource(t *testing.T) {
+	var got []string
+	err := fs.WalkDir(Mods, "mods", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if strings.HasSuffix(p, "/.claude-plugin/types") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		got = append(got, p)
+		emb, _ := fs.ReadFile(Mods, p)
+		src, err := os.ReadFile(filepath.FromSlash(p))
+		if err != nil {
+			t.Errorf("read source %s: %v", p, err)
+		} else if !bytes.Equal(emb, src) {
+			t.Errorf("%s: embedded bytes differ from the repo source (stale embed?)", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"mods/cbus-compact/.claude-plugin/plugin.json",
+		"mods/cbus-compact/hooks/cbus-compact.test.ts",
+		"mods/cbus-compact/hooks/frame.ts",
+		"mods/cbus-compact/hooks/hooks.json",
+		"mods/cbus-compact/hooks/register.tsx",
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("mods embed set:\n got %v\nwant %v", got, want)
+	}
+}

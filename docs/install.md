@@ -30,10 +30,10 @@ binary both read it. It must be `https://`; plain `http://` is accepted only for
 `127.0.0.1`, `localhost` and `[::1]`, and any other `http://` base is refused.
 
 `get.sh` writes `cbus` to `~/.local/bin` and installs Claude commands, role prompts,
-and the Codex `cbus-connect` skill.
+the Codex `cbus-connect` skill and the Claude Code mods.
 `cbus selfupdate` downloads the latest release, verifies the download reports the tag
-it fetched before swapping the running binary, and refreshes commands, roles and
-Codex skills. Codex skill receipts permit upgrades of unchanged shipped content
+it fetched before swapping the running binary, and refreshes commands, roles,
+Codex skills and Claude Code mods. Codex skill receipts permit upgrades of unchanged shipped content
 while preserving local edits; `--force` is an explicit overwrite. Updaters from
 before the Codex integration only refresh their known assets: run
 `cbus install-codex-skills` once after that first upgrade.
@@ -51,7 +51,22 @@ go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
 cbus install-commands   # the slash-command skills -> ~/.claude/commands
 cbus install-roles      # role prompts -> $CBUS_DIR/roles (the spawn-outside-repo fallback)
 cbus install-codex-skills # $CODEX_HOME/skills, default ~/.codex/skills
+cbus install-mods       # Claude Code mods -> ~/.claude/skills/<mod>
 ```
+
+**Claude Code mods.** Claude Code 2.1.287 and later loads function-hook plugins
+("mods") from `~/.claude/skills/<name>/`. cbus ships one:
+
+- `cbus-compact` redraws a peer message in the transcript as one line,
+  `▸ [14:02] from bob: got it, on it now`, and a presence event as
+  `▸ [14:02] bob joined`. Only the drawing changes: the model still reads the full
+  frame, including the `from=` address it replies to. ctrl+o shows the raw frame.
+  Times are local, from the host's UTC offset read once per session.
+
+`install-mods` writes each file sha-guarded like the other verbs, never ships the
+mod's tests, and leaves the `.claude-plugin/types/` folder Claude Code generates
+alone. A CCS profile whose `skills` directory is not shared with `~/.claude/skills`
+needs `--path "$CLAUDE_CONFIG_DIR/skills"`. To remove a mod, delete its folder.
 
 The install verbs are content-guarded: an unchanged file is left alone, a locally-edited
 one is skipped (with a reason) unless `--force`. The commands placed are:

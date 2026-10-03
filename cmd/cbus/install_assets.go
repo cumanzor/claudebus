@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -127,6 +128,81 @@ func installCodexSkills(fsys fs.FS, dstDir string, force bool) ([]assetResult, e
 	return out, nil
 }
 
+// installMods writes every file of each embedded mods/<name>/ into dstDir/<name>/,
+// sha-guarded per file like installAssets. Claude Code writes typings into a loaded
+// mod's .claude-plugin/types, and the plugin tests are dev-only: neither is shipped.
+func installMods(fsys fs.FS, dstDir string, force bool) ([]assetResult, error) {
+	const subdir = "mods"
+	entries, err := fs.ReadDir(fsys, subdir)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded %s: %w", subdir, err)
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", dstDir, err)
+	}
+	var out []assetResult
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == "." || !fs.ValidPath(name) || !filepath.IsLocal(name) || strings.ContainsAny(name, `/\`) {
+			out = append(out, assetResult{name: name, outcome: "failed", reason: "invalid embedded mod directory name"})
+			continue
+		}
+		modDir := filepath.Join(dstDir, name)
+		if info, err := os.Lstat(modDir); err == nil && !info.IsDir() {
+			out = append(out, assetResult{name: name, outcome: "failed", reason: "destination mod path is not a directory (symlinks are not followed)"})
+			continue
+		}
+		root := subdir + "/" + name
+		werr := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel := strings.TrimPrefix(p, root+"/")
+			if d.IsDir() {
+				if rel == ".claude-plugin/types" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if isModTestFile(rel) {
+				return nil
+			}
+			res := assetResult{name: name + "/" + rel, outcome: "failed"}
+			content, err := fs.ReadFile(fsys, p)
+			if err != nil {
+				res.reason = "read embed: " + err.Error()
+				out = append(out, res)
+				return nil
+			}
+			dst := filepath.Join(modDir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				res.reason = "mkdir dest: " + err.Error()
+				out = append(out, res)
+				return nil
+			}
+			out = append(out, installAsset(dst, res.name, content, force))
+			return nil
+		})
+		if werr != nil {
+			out = append(out, assetResult{name: name, outcome: "failed", reason: "walk embed: " + werr.Error()})
+		}
+	}
+	return out, nil
+}
+
+func isModTestFile(rel string) bool {
+	base := path.Base(rel)
+	for _, suf := range []string{".test.ts", ".test.tsx", ".test.js", ".test.jsx"} {
+		if strings.HasSuffix(base, suf) {
+			return true
+		}
+	}
+	return false
+}
+
 // writeFileAtomic writes via a sibling temp + rename in the SAME directory, so a
 // reader sees the old or the new file, never a torn one, and a failed write leaves
 // the existing file intact (S3, applied to asset files too).
@@ -191,6 +267,15 @@ func defaultCodexSkillsDir() (string, error) {
 	return filepath.Join(home, ".codex", "skills"), nil
 }
 
+// defaultModsDir is the user skills folder, where Claude Code auto-loads plugins.
+func defaultModsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude", "skills"), nil
+}
+
 // defaultRolesDir is $CBUS_DIR/roles — the LoadRole fallback searched when a spawn
 // runs outside the repo.
 func defaultRolesDir() string {
@@ -229,6 +314,24 @@ func runInstallRoles(args []string) int {
 		return die("%v", err)
 	}
 	return reportAssets("roles", dir, results)
+}
+
+func runInstallMods(args []string) int {
+	const use = "usage: cbus install-mods [--path DIR] [--force]"
+	dir, force, err := parseInstallArgs(args, use)
+	if err != nil {
+		return die("%v", err)
+	}
+	if dir == "" {
+		if dir, err = defaultModsDir(); err != nil {
+			return die("resolve home dir: %v", err)
+		}
+	}
+	results, err := installMods(claudebus.Mods, dir, force)
+	if err != nil {
+		return die("%v", err)
+	}
+	return reportAssets("mods", dir, results)
 }
 
 func runInstallCodexSkills(args []string) int {

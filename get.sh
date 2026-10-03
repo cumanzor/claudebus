@@ -132,6 +132,7 @@ echo "installed: $OUT"
 "$OUT" install-commands --force || echo "cbus: note: install-commands reported problems (see above)" >&2
 "$OUT" install-roles --force || echo "cbus: note: install-roles reported problems (see above)" >&2
 "$OUT" install-codex-skills || echo "cbus: note: install-codex-skills reported problems (see above)" >&2
+"$OUT" install-mods --force || echo "cbus: note: install-mods reported problems (see above)" >&2
 
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;

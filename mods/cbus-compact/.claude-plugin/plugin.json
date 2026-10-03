@@ -1,0 +1,6 @@
+{
+  "name": "cbus-compact",
+  "version": "0.1.0",
+  "description": "Draw cbus peer messages as one line in the transcript; ctrl+o still shows the raw frame",
+  "author": { "name": "claudebus" }
+}

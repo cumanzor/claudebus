@@ -15,3 +15,6 @@ __pycache__/
 *.pyc
 
 docs/nugget/
+
+# Claude Code writes API typings beside a loaded mod
+mods/*/.claude-plugin/types/

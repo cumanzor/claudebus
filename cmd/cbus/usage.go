@@ -123,13 +123,17 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus selfupdate [--check] [--force]            update the running binary from
                                    the latest GitHub release (needs gh authed);
                                    --check reports without applying; then refreshes
-                                   the installed commands + roles. Set CBUS_REPO
+                                   the installed commands, roles, Codex skills and
+                                   Claude Code mods. Set CBUS_REPO
                                    or use a released binary (its repo is baked in)
   cbus install-commands [--path DIR] [--force]   write the embedded slash-command
                                    skills to ~/.claude/commands (sha-guarded;
                                    --force overwrites a locally-edited file)
   cbus install-roles [--path DIR] [--force]      write the embedded role prompts
                                    to $CBUS_DIR/roles (the LoadRole fallback)
+  cbus install-mods [--path DIR] [--force]       write the embedded Claude Code mods
+                                   to ~/.claude/skills/<mod> (sha-guarded per file;
+                                   --force overwrites a locally-edited file)
   cbus install-codex-skills [--path DIR] [--force] [--with-permissions]
                                    install session-side skills to $CODEX_HOME/skills
                                    (safe shipped-version upgrades; protects edits)

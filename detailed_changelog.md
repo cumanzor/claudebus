@@ -4,6 +4,55 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-03 20:29:44 UTC] [Mods] cbus-compact mod and cbus install-mods
+
+[Attempt #1] Code: mods/cbus-compact/ (new: manifest, hooks/register.tsx,
+hooks/frame.ts, hooks/cbus-compact.test.ts), assets.go (Mods embed),
+cmd/cbus/install_assets.go (installMods, runInstallMods), main.go, usage.go,
+selfupdate.go, get.sh, Makefile (test-mods), .gitignore. Tests:
+cmd/cbus/install_mods_test.go (new), assets_test.go. Docs: docs/install.md,
+CHEATSHEET.md, README.md. Changelogs: both. Issue #53.
+
+[What changed]
+A peer message reached a Claude Code transcript as the whole cbus frame: the
+header, a body hard-wrapped at 440 bytes, the end marker, and for presence and
+grant events a paragraph written for the model. Claude Code 2.1.287 added
+function-hook plugins that can redraw a transcript row without touching what the
+model reads. cbus-compact hooks `ui.render` for `UserMessage`, finds each cbus
+frame in the row and draws it as `▸ [HH:MM] from <peer>: <text>`; presence
+becomes `▸ [HH:MM] <peer> joined|left|departed|renamed`, a grant keeps its body
+behind `[grant]`. Lines the 440-byte wrap split are joined again, a burst draws
+one line per frame, a sender on another channel keeps its channel prefix. The
+row passes through untouched when expanded (ctrl+o) or when it holds no frame.
+Times are local: the hook sandbox has no reliable zone, so the mod reads the
+host offset with `date +%z` at session start.
+
+`cbus install-mods [--path DIR] [--force]` writes each embedded mod to
+`~/.claude/skills/<mod>/`, where Claude Code auto-loads plugins, using the same
+per-file sha guard as `install-commands`. It skips `.claude-plugin/types/` (the
+engine writes typings there on every load) and `*.test.ts(x)/js(x)` files, and
+refuses a destination mod path that is not a real directory. The embed uses
+`all:mods` so the dot-prefixed `.claude-plugin` directory is included.
+`selfupdate` and `get.sh` run `install-mods --force` with the other assets.
+
+[Possible Ripple Effects]
+- Every Claude Code session that reads `~/.claude/skills` (CCS profiles that
+  share it included) loads the mod after install; removing its folder undoes it.
+- A local edit to an installed mod is overwritten by the next selfupdate, as
+  with commands and roles.
+- A DST change during a long session shifts the drawn times by an hour until
+  the session restarts.
+- Rows only change in the drawing: delivery receipts match the message uuid and
+  the model still sees the `from=` address.
+
+[Testing Notes]
+- `go test ./...` green; `make test-mods` runs `claude plugin validate` and
+  `claude plugin test` (9 tests) when the claude CLI is on PATH.
+- Mutants caught: shipping `.claude-plugin/types/` and shipping plugin tests.
+- Live: a fresh session with no `--plugin-dir`, in two CCS profiles sharing
+  `~/.claude/skills`, drew an idle message, a 720-character wrapped message, a
+  mid-turn delivery and a presence join and leave as one line each.
+
 ## [2026-10-03 02:31:42 UTC] [Daemon] inbox writers wake the daemon through POST /wake
 
 [Attempt #1] 10 files. Code: internal/client/daemon.go, daemon_scheduler.go,
