@@ -69,7 +69,7 @@ receives:
 - **Native recipient**: the daemon already holds the connection and pushes
   into the harness's own socket/sidecar (§15), not a fire-and-forget
   append, but the push itself is not receipt. A Claude submission stays
-  pending (`awaiting-receipt`, checked on each daemon tick) until its exact
+  pending (`awaiting-receipt`, checked 100, 250 and 500 ms after the write, then every second) until its exact
   transcript receipt appears, and turns `uncertain` after 60 seconds
   without one; Codex sidecar
   acceptance is likewise not receipt until `connection reconcile` finds it
