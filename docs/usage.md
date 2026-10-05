@@ -100,16 +100,26 @@ and a peer reply supplies separate evidence of action. Use
 can receive input between foreground tool calls; hold/refuse policy still applies.
 Stop future delivery with `cbus connection disconnect deploy/laptop`, which retains the inbox.
 
-Connection records are never removed yet: `leave`, `unregister` and
-`disconnect` keep them, and a reconnect after a detach adds a new one.
-`cbus connection gc --dry-run` reports what a collection would do with each
-record: keep it when its consumer process is still running (checked by pid and
-start time, never by a stale "online" observation), never touch one with a
-pending attempt (it names the `reconcile` and `abandon` commands), collect a
-detached one, and collect any other once its session's transcript or rollout
-has been inactive past `--older-than` (default 14 days). It counts the unread
-mail a collection would export first, and only from an inbox the record still
-owns. Collection itself lands separately.
+`leave`, `unregister` and `disconnect` keep a connection record, and a
+reconnect after a detach adds a new one, so records accumulate.
+`cbus connection gc` collects the stale ones. Each record is kept while its
+consumer process is still running (checked by pid and start time, never by a
+stale "online" observation) and never touched while it has a pending attempt;
+a detached record is collected, and any other once its session's transcript
+or rollout has been inactive past `--older-than` (default 14 days).
+`cbus connection gc --dry-run` shows the same classification, names the
+`reconcile` or `abandon` command each pending record needs, and changes
+nothing.
+
+Collection runs inside the daemon, under each record's lane and peer lock, and
+holds the connect gate for the pass, so a session resuming at the same moment
+either finishes first and is kept, or connects afresh afterwards. A collected
+record moves to `.daemon/connections/.archive/YYYY-MM/<id>/` with its inbox
+folder (only when the record still owns it; a newer connection's folder stays)
+and an `unread.jsonl` of the lines past its delivered offset. Its session
+token is deleted, not archived, and tokens no record references any more are
+removed in the same pass. A pass that fails partway leaves the record in place
+for the next one. Archives are not pruned yet.
 To end the peer's session as well, `cbus close deploy/laptop` signals the
 Claude or Codex process bound to that connection, after disconnecting it,
 and then closes its tmux pane or iTerm2 tab. It never signals the daemon,

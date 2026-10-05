@@ -52,7 +52,11 @@ type gcProbe struct {
 // (leave or unregister) is collectable now; any other is collectable once its
 // session has been inactive longer than olderThan.
 func PlanConnectionGC(olderThan time.Duration) (GCPlan, error) {
-	return planConnectionGC(DaemonDir(), CBUSDir(), olderThan, gcProbe{
+	return planConnectionGC(DaemonDir(), CBUSDir(), olderThan, liveGCProbe())
+}
+
+func liveGCProbe() gcProbe {
+	return gcProbe{
 		now: time.Now(),
 		alive: func(pid int, start string) bool {
 			got, err := procStartTime(pid)
@@ -65,7 +69,7 @@ func PlanConnectionGC(olderThan time.Duration) (GCPlan, error) {
 			}
 			return info.ModTime(), true
 		},
-	})
+	}
 }
 
 func planConnectionGC(daemonRoot, busRoot string, olderThan time.Duration, p gcProbe) (GCPlan, error) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"claudebus/internal/client"
 )
 
-const gcUsage = "usage: cbus connection gc --dry-run [--older-than DURATION] [--json]  (DURATION like 14d or 36h)"
+const gcUsage = "usage: cbus connection gc [--dry-run] [--older-than DURATION] [--json]  (DURATION like 14d or 36h)"
 
 const gcDefaultOlderThan = 14 * 24 * time.Hour
 
@@ -21,14 +22,14 @@ func runConnectionGC(args []string) int {
 	if err := noExtra(p.pos, 0, gcUsage); err != nil {
 		return die("%v", err)
 	}
-	if !p.flags["--dry-run"] {
-		return die("connection gc only plans for now: pass --dry-run to see what a collection would remove; nothing is removed")
-	}
 	olderThan := gcDefaultOlderThan
 	if v, ok := p.has("--older-than"); ok {
 		if olderThan, err = parseGCDuration(v); err != nil {
 			return die("--older-than: %v", err)
 		}
+	}
+	if !p.flags["--dry-run"] {
+		return collectConnections(olderThan, p.flags["--json"])
 	}
 	plan, err := client.PlanConnectionGC(olderThan)
 	if err != nil {
@@ -102,4 +103,67 @@ func gcLimit(d time.Duration) string {
 		return fmt.Sprintf("%dd", d/(24*time.Hour))
 	}
 	return strings.TrimSuffix(strings.TrimSuffix(d.String(), "0s"), "0m")
+}
+
+// collectConnections asks the daemon, which owns every record in memory, to
+// collect; editing the files behind a running daemon would race its lanes.
+func collectConnections(olderThan time.Duration, asJSON bool) int {
+	if err := ensureDaemon(); err != nil {
+		return die("%v", err)
+	}
+	var pass client.GCPass
+	err := client.DaemonCall("POST", "/gc", map[string]int64{"olderThanSeconds": int64(olderThan / time.Second)}, &pass)
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			return die("the running daemon predates connection gc; run cbus daemon restart, then retry")
+		}
+		return die("connection gc: %v", err)
+	}
+	if asJSON {
+		return printConnectionJSON(pass)
+	}
+	fmt.Print(renderGCResults(pass, olderThan))
+	return 0
+}
+
+func renderGCResults(pass client.GCPass, olderThan time.Duration) string {
+	results := pass.Records
+	var b strings.Builder
+	var collected, left []client.GCResult
+	counts := map[string]int{}
+	for _, r := range results {
+		switch {
+		case r.Collected:
+			collected = append(collected, r)
+		case r.Class == client.GCCollect:
+			left = append(left, r)
+		default:
+			counts[r.Class]++
+		}
+	}
+	fmt.Fprintf(&b, "collected %d of %d connection records (inactivity limit %s); kept %d live, %d pending, %d under the limit\n",
+		len(collected), len(results), gcLimit(olderThan), counts[client.GCLive], counts[client.GCPending], counts[client.GCKeep])
+	for _, r := range collected {
+		line := fmt.Sprintf("  collected %-40s %s", r.Target, r.Reason)
+		if r.Unread > 0 {
+			line += fmt.Sprintf("; %d unread exported", r.Unread)
+		}
+		b.WriteString(line + "\n")
+	}
+	for _, r := range left {
+		fmt.Fprintf(&b, "  left      %-40s %s\n", r.Target, r.Left)
+	}
+	if len(collected) > 0 {
+		fmt.Fprintf(&b, "archived under %s (record, inbox folder, unread.jsonl); session tokens deleted\n", filepath.Dir(filepath.Dir(collected[0].Archive)))
+	}
+	if pass.OrphanTokens > 0 {
+		fmt.Fprintf(&b, "removed %d session tokens no connection record references\n", pass.OrphanTokens)
+	}
+	if pass.TokenSweepOff != "" {
+		b.WriteString("token sweep skipped: " + pass.TokenSweepOff + "\n")
+	}
+	if counts[client.GCPending] > 0 {
+		b.WriteString("pending records are never collected; cbus connection gc --dry-run names the reconcile or abandon command for each\n")
+	}
+	return b.String()
 }

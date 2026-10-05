@@ -159,9 +159,10 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    delivery remains unknown, may still occur
   cbus connection disconnect <channel/alias>
                                    stop future injection; retain inbox/history
-  cbus connection gc --dry-run [--older-than 14d] [--json]
-                                   report which stored connection records a
-                                   collection would remove; removes nothing yet
+  cbus connection gc [--dry-run] [--older-than 14d] [--json]
+                                   archive stale connection records: detached ones,
+                                   and ones with no running consumer inactive past
+                                   the limit; --dry-run only reports
   cbus daemon start|restart|status|stop|serve [--json]
                                    local supervisor; connect starts it as needed
   cbus codex [--channel CH] [--alias AL] [--thread ID] [codex args...]
