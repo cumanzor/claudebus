@@ -141,7 +141,8 @@ func (s Store) WriteNamed(channel, alias, name string, line []byte) error {
 }
 
 func syncExisting(path string) error {
-	f, err := os.Open(path)
+	// windows flushes only through a handle opened for writing.
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
