@@ -2,17 +2,14 @@
 
 package client
 
-import (
-	"errors"
-	"os"
-)
+import "os"
 
-func openClaudeTranscript(string) (*os.File, error) {
-	return nil, errors.New("native Claude connections are not supported on Windows")
-}
+// shared-delete access, so holding the transcript never blocks Claude Code
+// from rotating or removing it.
+func openClaudeTranscript(path string) (*os.File, error) { return openSharedRead(path) }
 
-func trustedClaudeTranscriptInfo(os.FileInfo) bool { return false }
-
-func ClaudeConnectIdentity() (ClaudeConnectBinding, error) {
-	return ClaudeConnectBinding{}, errors.New("Claude native messaging is not supported on Windows")
+// windows grants through the profile's ACL rather than mode bits; refuse
+// reparse points and anything that is not a plain file.
+func trustedClaudeTranscriptInfo(info os.FileInfo) bool {
+	return info != nil && info.Mode().IsRegular() && info.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0
 }

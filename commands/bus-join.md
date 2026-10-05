@@ -47,4 +47,5 @@ requires deliberate migration: prefer a fresh alias. To reuse the old alias, sto
 only its known Monitor, read/export unread mail, and obtain the user's explicit
 choice before `cbus leave` deletes that exact inbox. Then reconnect; do not blindly
 replay the exported messages. A missing persisted transcript is not by itself proof
-that the session needs restarting. Desktop clients and native Windows are outside v1.
+that the session needs restarting. Native Windows CLI sessions connect the same way;
+Desktop clients are outside v1.

@@ -21,14 +21,3 @@ func trustedClaudeTranscriptInfo(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && stat.Uid == uint32(os.Geteuid()) && stat.Nlink == 1
 }
-
-func ClaudeConnectIdentity() (ClaudeConnectBinding, error) {
-	return claudeConnectIdentity(func() (int, string, error) {
-		pid, err := claudeCallerPID(os.Getppid(), procLookup())
-		if err != nil {
-			return 0, "", err
-		}
-		start, err := procStartTime(pid)
-		return pid, start, err
-	})
-}
