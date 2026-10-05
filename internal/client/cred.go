@@ -139,6 +139,9 @@ func (fileBackend) put(host, field, value string) error {
 	if err := os.MkdirAll(d, 0o700); err != nil { // dir 0700 (bash: umask 077)
 		return err
 	}
+	if err := restrictToOwner(d); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(d, field), []byte(value), 0o600) // file 0600, no trailing newline
 }
 

@@ -212,6 +212,9 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 	if err := os.Chmod(d.root, 0700); err != nil {
 		return err
 	}
+	if err := restrictToOwner(d.root); err != nil {
+		return err
+	}
 	lock, err := os.OpenFile(filepath.Join(d.root, "lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
