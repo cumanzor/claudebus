@@ -97,6 +97,17 @@ func claudeConnectIdentity(runtime func() (int, string, error)) (ClaudeConnectBi
 	return binding, nil
 }
 
+func ClaudeConnectIdentity() (ClaudeConnectBinding, error) {
+	return claudeConnectIdentity(func() (int, string, error) {
+		pid, err := claudeCallerPID(os.Getppid(), procLookup())
+		if err != nil {
+			return 0, "", err
+		}
+		start, err := procStartTime(pid)
+		return pid, start, err
+	})
+}
+
 func claudeCallerPID(start int, lookup func(int) (procRecord, bool)) (int, error) {
 	var previous procRecord
 	for depth, pid := 0, start; pid > 1 && depth < maxWalkDepth; depth++ {

@@ -105,8 +105,9 @@ Claude receive since v0.13.0, both on macOS/Linux. Codex release field checks
 used 0.155.1 on macOS and 0.154.0 on Linux;
 the app-server queue surface remains experimental. See the
 [Codex cheat sheet](../CHEATSHEET.md#codex-cli-quick-reference).
-Windows retains its existing cbus functionality and explicitly refuses native
-`connect`/`daemon` in this release. Desktop harness clients are v2.
+On native Windows, Claude Code CLI sessions connect the same way (see
+[Claude Code on Windows](claude.md#native-windows)); native Codex connect is
+still refused there. Desktop harness clients are v2.
 
 For seamless use across channels, opt into trusted cbus setup once:
 

@@ -69,3 +69,6 @@ func privateClaudeSocket(path string) (os.FileInfo, error) {
 	}
 	return info, nil
 }
+
+// wellFormed: an absolute socket path pinned to the inode captured at bind time.
+func (e claudeEndpoint) wellFormed() bool { return filepath.IsAbs(e.Socket) && e.Ino != 0 }
