@@ -126,6 +126,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    the installed commands, roles, Codex skills and
                                    Claude Code mods. Set CBUS_REPO
                                    or use a released binary (its repo is baked in)
+  cbus install-assets              install everything below as an update does
+                                   (selfupdate and get.sh run it from the new binary)
   cbus install-commands [--path DIR] [--force]   write the embedded slash-command
                                    skills to ~/.claude/commands (sha-guarded;
                                    --force overwrites a locally-edited file)

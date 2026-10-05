@@ -130,6 +130,8 @@ func run(args []string) int {
 		return runInstallCodexSkills(args[1:])
 	case "install-mods":
 		return runInstallMods(args[1:])
+	case "install-assets":
+		return runInstallAssets(args[1:])
 	case "codex-permissions":
 		return runCodexPermissions(args[1:])
 	case "selfupdate": // cbus-7sg: gh-driven in-place update of the running binary

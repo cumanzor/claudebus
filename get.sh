@@ -3,7 +3,7 @@
 #
 # Downloads the cbus binary from a GitHub release (with gh when it is installed and
 # authenticated, otherwise anonymously with curl), checks it against the release's
-# SHA256SUMS, then installs the /bus-* skill commands and role prompts it carries. After the first
+# SHA256SUMS, then installs the commands, roles, Codex skills and mods it carries. After the first
 # install, update in place with `cbus selfupdate` — no need to re-run this.
 #
 # The repo slug is NOT baked into this script (it stays out of committed source so
@@ -128,11 +128,16 @@ echo ""
 mv -f "$TMP" "$OUT"       # same-fs atomic rename
 echo "installed: $OUT"
 
-# install the skill commands and role prompts the binary carries.
-"$OUT" install-commands --force || echo "cbus: note: install-commands reported problems (see above)" >&2
-"$OUT" install-roles --force || echo "cbus: note: install-roles reported problems (see above)" >&2
-"$OUT" install-codex-skills || echo "cbus: note: install-codex-skills reported problems (see above)" >&2
-"$OUT" install-mods --force || echo "cbus: note: install-mods reported problems (see above)" >&2
+# install every asset the binary carries. A release older than install-assets
+# (CBUS_VERSION can pick one) gets the verbs it knows, one by one.
+if "$OUT" --help 2>/dev/null | grep -q 'cbus install-assets'; then
+    "$OUT" install-assets || echo "cbus: note: install-assets reported problems (see above)" >&2
+else
+    "$OUT" install-commands --force || echo "cbus: note: install-commands reported problems (see above)" >&2
+    "$OUT" install-roles --force || echo "cbus: note: install-roles reported problems (see above)" >&2
+    "$OUT" install-codex-skills || echo "cbus: note: install-codex-skills reported problems (see above)" >&2
+    "$OUT" install-mods --force || echo "cbus: note: install-mods reported problems (see above)" >&2
+fi
 
 case ":$PATH:" in
     *":$INSTALL_DIR:"*) ;;
