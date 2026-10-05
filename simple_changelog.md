@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-05 06:03:57 UTC] [Release] v0.20.1 (tag at `a02f86f`): a collected connection's unread.jsonl holds only mail and is not written for a tail of presence notices (#68); the test suites can no longer write into a real cbus store (#66). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked.
+
 [2026-10-05 05:53:34 UTC] [Client/Daemon] A collected connection's unread.jsonl now holds only mail: presence lines past the delivered offset are left out, and no file is written when nothing else remains. The plan's unread count, the export and the count `cbus connect` reports share one rule, so they agree.
 
 [2026-10-05 05:48:17 UTC] [Release] v0.20.0 (tag at `c755f0e`): a connection ends with its session. The daemon collects a connection 15 minutes after its Claude Code or Codex process exits, on its own a minute after start and every 5 minutes, archiving the record, its inbox and its unread mail (#62, #63, #64 landed by #65); `cbus install-assets`, which selfupdate and get.sh now run from the new binary (#61). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked.

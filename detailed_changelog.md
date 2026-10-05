@@ -4,6 +4,42 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 06:03:57 UTC] [Release] v0.20.1: unread export holds only mail
+
+[Attempt #1] Range v0.20.0..a02f86f (pull requests #66, #67, #68). Files:
+detailed_changelog.md, simple_changelog.md. Written after the tag, so the tag
+does not include this entry.
+
+[What changed]
+- #68: the unread export of a collected connection keeps only lines that are
+  not presence records and writes no file when none remain; the plan, the
+  export and `cbus connect` count unread mail the same way.
+- #66 (tests only): test daemons stop their workers before the test's
+  environment is restored, one test that never set CBUS_DIR does, and both
+  packages fail their suite if anything is written outside a test's own store.
+
+[Possible Ripple Effects]
+- Archives written by v0.20.0 keep their presence-only unread.jsonl files
+  until the 30-day pruning.
+
+[Testing Notes]
+A daemon-only fix, so the client-only gate: `go test ./...` and `-race` on
+internal/client and cmd/cbus from a fresh clone at the tagged commit with the
+store guard on, vet for darwin, linux amd64/arm64 and windows, and the Claude
+pair canary (8/8) on a fresh-clone build. Release: five assets built from two
+fresh clones at the tag were byte-identical, and the published assets match:
+
+```
+dc4734fd91086571e8a506b4371b852127d771a5ca1df03de26a04a061e2d0e3  cbus-darwin-amd64
+7337282849392f5a0f28e5e288b7e86fc0190d6e8ff17c8f7e185110551d8593  cbus-darwin-arm64
+f085b8acbbddf62b3b6375f5e34872352f2265b3f6c9d1687ab6c8a80e2c24b1  cbus-linux-amd64
+132be6f0cf2d17a97d34bf6938d661e7fd5c80e3a6f63c4faeae9ccc88849b61  cbus-linux-arm64
+ad48fedbf20f34f17c919d51640d947c886817a461bdf17e7da03f108587191d  cbus-windows-amd64.exe
+```
+
+Installed by selfupdate on macOS, Linux and Windows; daemons restarted on all
+three with their records retained.
+
 ## [2026-10-05 05:53:34 UTC] [Client/Daemon] Unread export holds only mail
 
 [Attempt #1] Files: internal/client/connection_gc.go (gcIsMail),
