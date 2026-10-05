@@ -3,35 +3,38 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"claudebus/internal/client"
 )
 
-const gcUsage = "usage: cbus connection gc [--dry-run] [--older-than DURATION] [--json]  (DURATION like 14d or 36h)"
-
-const gcDefaultOlderThan = 14 * 24 * time.Hour
+const gcUsage = "usage: cbus connection gc [--dry-run] [--grace DURATION] [--older-than DURATION] [--json]  (DURATION like 15m, 36h or 14d)"
 
 func runConnectionGC(args []string) int {
-	p, err := splitVerbArgs(args, map[string]bool{"--older-than": true}, map[string]bool{"--dry-run": true, "--json": true}, false)
+	p, err := splitVerbArgs(args, map[string]bool{"--grace": true, "--older-than": true}, map[string]bool{"--dry-run": true, "--json": true}, false)
 	if err != nil {
 		return die("%v (%s)", err, gcUsage)
 	}
 	if err := noExtra(p.pos, 0, gcUsage); err != nil {
 		return die("%v", err)
 	}
-	olderThan := gcDefaultOlderThan
-	if v, ok := p.has("--older-than"); ok {
-		if olderThan, err = parseGCDuration(v); err != nil {
-			return die("--older-than: %v", err)
+	settings, err := client.LoadGCSettings()
+	if err != nil {
+		return die("%v", err)
+	}
+	limits := settings.Limits
+	for flag, into := range map[string]*time.Duration{"--grace": &limits.Grace, "--older-than": &limits.Inactive} {
+		if v, ok := p.has(flag); ok {
+			if *into, err = client.ParseGCDuration(v); err != nil {
+				return die("%s: %v", flag, err)
+			}
 		}
 	}
 	if !p.flags["--dry-run"] {
-		return collectConnections(olderThan, p.flags["--json"])
+		return collectConnections(limits, p.flags["--json"])
 	}
-	plan, err := client.PlanConnectionGC(olderThan)
+	plan, err := client.PlanConnectionGC(limits)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -40,23 +43,6 @@ func runConnectionGC(args []string) int {
 	}
 	fmt.Print(renderGCPlan(plan))
 	return 0
-}
-
-// parseGCDuration accepts Go durations plus a whole-day form, since an
-// inactivity limit is naturally counted in days.
-func parseGCDuration(v string) (time.Duration, error) {
-	if days, ok := strings.CutSuffix(v, "d"); ok {
-		n, err := strconv.Atoi(days)
-		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("%q is not a positive number of days", v)
-		}
-		return time.Duration(n) * 24 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("%q is not a positive duration", v)
-	}
-	return d, nil
 }
 
 func renderGCPlan(plan client.GCPlan) string {
@@ -69,11 +55,11 @@ func renderGCPlan(plan client.GCPlan) string {
 			unread++
 		}
 	}
-	fmt.Fprintf(&b, "dry run, nothing removed: %d connection records, inactivity limit %s\n", len(plan.Records), gcLimit(plan.OlderThan))
+	fmt.Fprintf(&b, "dry run, nothing removed: %d connection records; %s\n", len(plan.Records), gcLimitsText(plan.Limits))
 	fmt.Fprintf(&b, "  live     %4d  consumer running, kept\n", counts[client.GCLive])
-	fmt.Fprintf(&b, "  pending  %4d  never collected until reconciled or abandoned\n", counts[client.GCPending])
+	fmt.Fprintf(&b, "  pending  %4d  consumer not confirmed gone; reconcile or abandon\n", counts[client.GCPending])
 	fmt.Fprintf(&b, "  collect  %4d  %d with unread mail that would be exported first\n", counts[client.GCCollect], unread)
-	fmt.Fprintf(&b, "  keep     %4d  no consumer, inactive under the limit\n", counts[client.GCKeep])
+	fmt.Fprintf(&b, "  keep     %4d  inside the grace or under the inactivity limit\n", counts[client.GCKeep])
 	if len(plan.Skipped) > 0 {
 		fmt.Fprintf(&b, "  skipped  %4d  unreadable records: %s\n", len(plan.Skipped), strings.Join(plan.Skipped, ", "))
 	}
@@ -98,6 +84,10 @@ func renderGCPlan(plan client.GCPlan) string {
 	return b.String()
 }
 
+func gcLimitsText(l client.GCLimits) string {
+	return "grace " + gcLimit(l.Grace) + " after a consumer exits, " + gcLimit(l.Inactive) + " when none is on file"
+}
+
 func gcLimit(d time.Duration) string {
 	if d%(24*time.Hour) == 0 {
 		return fmt.Sprintf("%dd", d/(24*time.Hour))
@@ -107,12 +97,12 @@ func gcLimit(d time.Duration) string {
 
 // collectConnections asks the daemon, which owns every record in memory, to
 // collect; editing the files behind a running daemon would race its lanes.
-func collectConnections(olderThan time.Duration, asJSON bool) int {
+func collectConnections(limits client.GCLimits, asJSON bool) int {
 	if err := ensureDaemon(); err != nil {
 		return die("%v", err)
 	}
 	var pass client.GCPass
-	err := client.DaemonCall("POST", "/gc", map[string]int64{"olderThanSeconds": int64(olderThan / time.Second)}, &pass)
+	err := client.DaemonCall("POST", "/gc", map[string]int64{"graceSeconds": int64(limits.Grace / time.Second), "inactiveSeconds": int64(limits.Inactive / time.Second)}, &pass)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return die("the running daemon predates connection gc; run cbus daemon restart, then retry")
@@ -122,11 +112,11 @@ func collectConnections(olderThan time.Duration, asJSON bool) int {
 	if asJSON {
 		return printConnectionJSON(pass)
 	}
-	fmt.Print(renderGCResults(pass, olderThan))
+	fmt.Print(renderGCResults(pass, limits))
 	return 0
 }
 
-func renderGCResults(pass client.GCPass, olderThan time.Duration) string {
+func renderGCResults(pass client.GCPass, limits client.GCLimits) string {
 	results := pass.Records
 	var b strings.Builder
 	var collected, left []client.GCResult
@@ -141,8 +131,8 @@ func renderGCResults(pass client.GCPass, olderThan time.Duration) string {
 			counts[r.Class]++
 		}
 	}
-	fmt.Fprintf(&b, "collected %d of %d connection records (inactivity limit %s); kept %d live, %d pending, %d under the limit\n",
-		len(collected), len(results), gcLimit(olderThan), counts[client.GCLive], counts[client.GCPending], counts[client.GCKeep])
+	fmt.Fprintf(&b, "collected %d of %d connection records (%s); kept %d live, %d pending, %d inside a limit\n",
+		len(collected), len(results), gcLimitsText(limits), counts[client.GCLive], counts[client.GCPending], counts[client.GCKeep])
 	for _, r := range collected {
 		line := fmt.Sprintf("  collected %-40s %s", r.Target, r.Reason)
 		if r.Unread > 0 {
