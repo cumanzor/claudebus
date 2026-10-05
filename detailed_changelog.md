@@ -4,6 +4,57 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 05:48:17 UTC] [Release] v0.20.0: connection lifecycle and install-assets
+
+[Attempt #1] Range v0.19.0..c755f0e (pull requests #61, #62, #63, #64, #65).
+Files: detailed_changelog.md, simple_changelog.md. Written after the tag, so
+the tag does not include this entry. #64 merged into its stacked base after
+#63 had landed, so #65 brought it to main unchanged.
+
+[What changed]
+- Connection lifecycle (#62, #63, #64): `cbus connection gc` with
+  `--dry-run`, collection inside the daemon under each record's lane and peer
+  lock, and the automatic policy: a connection whose consumer process is gone
+  is collected after a 15 minute grace, a pending attempt included; no
+  consumer on file falls back to 14 days; detached records go on the next
+  pass. Passes run a minute after daemon start and every 5 minutes, archives
+  are deleted after 30 days, session tokens no record references are removed,
+  and `cbus connect` names an archived predecessor of the same session.
+  CBUS_GC=off, CBUS_GC_GRACE, CBUS_GC_INACTIVE, CBUS_GC_ARCHIVE.
+- `cbus install-assets` (#61): the new binary decides what an update installs.
+
+[Possible Ripple Effects]
+- The first pass after `cbus daemon restart` collects every connection whose
+  session is gone, which on a long-used store is most of them. They are
+  archived under .daemon/connections/.archive/YYYY-MM/.
+- Updating from v0.19.0 or earlier still runs the old updater's asset list;
+  install-assets delegation starts with the next update.
+- An `unread.jsonl` is also written when the undelivered tail holds only
+  presence lines; harmless, fixed separately.
+
+[Testing Notes]
+Candidate gates on c755f0e, whose code equals the tested tip of #64: `go test
+./...` from a fresh clone (with CBUS_DIR pointed at a scratch store, since
+main's suite still had the test leaks #66 fixes), vet for linux amd64/arm64
+and windows. Claude canaries against a fresh-clone build: pair 8/8, relay
+restart-received 36/36, relay accepted 22/22. Release: five assets built from
+two fresh clones at the tag were byte-identical, and the published assets
+match:
+
+```
+c31ab75a1743a57f34f8781111329734d3a7e5ff03c8bc2177c1d5ce122f5e46  cbus-darwin-amd64
+83f46cbb383b4f4a8444a5631833ddfe3b095d0fe87149c28f69e8e7da14464e  cbus-darwin-arm64
+fc2a05ee926467650c96dd1b144a2fc5d2c63aa7aeda0b5e1d038ef7c198ac27  cbus-linux-amd64
+29ea16e617237ec8b84b94da3ca279a27f941701acc52747ae12797557165789  cbus-linux-arm64
+f776985257a93494c40c9733b927ebf7781c9563f9da867bc9d949d9e626838b  cbus-windows-amd64.exe
+```
+
+Installed by selfupdate on macOS, Linux and Windows. After `cbus daemon
+restart`, each daemon's own first pass ran 60 s later: macOS collected 114 of
+115 records (keeping the one running session) and removed 19 orphan tokens;
+Linux collected 3 of 4 (keeping its running session). The relay is unchanged
+since v0.19.0 and was not redeployed.
+
 ## [2026-10-05 05:22:45 UTC] [Client/Daemon] Automatic connection lifecycle (#42, #43)
 
 [Attempt #1] Files: internal/client/connection_gc.go (GCLimits, classifyGC,
