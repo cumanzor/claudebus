@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-05 05:48:17 UTC] [Release] v0.20.0 (tag at `c755f0e`): a connection ends with its session. The daemon collects a connection 15 minutes after its Claude Code or Codex process exits, on its own a minute after start and every 5 minutes, archiving the record, its inbox and its unread mail (#62, #63, #64 landed by #65); `cbus install-assets`, which selfupdate and get.sh now run from the new binary (#61). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked.
+
 [2026-10-05 05:22:45 UTC] [Client/Daemon] A connection now ends with its session: the daemon collects a connection 15 minutes after its Claude Code or Codex process has exited, a pending attempt included (its message is archived as unread), runs that pass a minute after it starts and every 5 minutes, and deletes archives after 30 days. A record with no consumer process on file falls back to 14 days. `cbus connect` names an archived predecessor of the same session. CBUS_GC=off, CBUS_GC_GRACE, CBUS_GC_INACTIVE and CBUS_GC_ARCHIVE tune it.
 
 [2026-10-05 04:29:46 UTC] [Client/Daemon] `cbus connection gc` now collects stale connection records instead of only planning. The daemon archives each collected record with the inbox folder it still owns and an unread.jsonl export under .daemon/connections/.archive/YYYY-MM/<id>/, deletes its session token, drops it from memory, and removes session tokens no record references. Pending and running records are never collected; the pass holds the connect gate so a resume is never interleaved with it. Second step of #43.
