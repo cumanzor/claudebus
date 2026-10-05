@@ -310,6 +310,7 @@ cbus install-commands                               # (re)write the /bus-* skill
 cbus install-roles                                  # (re)write role prompts to $CBUS_DIR/roles
 cbus install-codex-skills                           # refresh the Codex skill, preserve edited files
 cbus install-mods                                   # (re)write Claude Code mods to ~/.claude/skills
+cbus install-assets                                 # all of the above, as an update installs them
 cbus daemon restart                                # load the upgraded binary; retain pending mail
 export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'update available' hint
 ```

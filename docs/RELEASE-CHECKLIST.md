@@ -35,8 +35,11 @@
    binaries or validation files this release carries. Verify downloaded bytes
    against the prepared hashes and run install/selfupdate on Mac and server. Do
    not rebuild different bytes under the same tag.
-6. Verify command/role/Codex-skill refresh. Older updater binaries need one manual
-   `cbus install-codex-skills` after upgrading. Preserve modified Codex skills;
+6. Verify command/role/Codex-skill/mod refresh. An updater that has
+   `install-assets` runs the new binary's copy, so assets a release adds arrive
+   with it. An older updater runs its own fixed list: after upgrading from v0.18.0
+   or earlier run `cbus install-mods` once, and from before Codex skills shipped,
+   `cbus install-codex-skills`. Preserve modified Codex skills;
    permission rule installation is always a separate explicit opt-in.
 7. Restart an existing daemon explicitly with the new executable; verify reported
    version/protocol, retained connection epoch and pending messages. An old pilot

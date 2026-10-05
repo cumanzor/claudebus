@@ -52,7 +52,14 @@ cbus install-commands   # the slash-command skills -> ~/.claude/commands
 cbus install-roles      # role prompts -> $CBUS_DIR/roles (the spawn-outside-repo fallback)
 cbus install-codex-skills # $CODEX_HOME/skills, default ~/.codex/skills
 cbus install-mods       # Claude Code mods -> ~/.claude/skills/<mod>
+cbus install-assets     # all four, as selfupdate and get.sh install them
 ```
+
+`install-assets` runs the four verbs the way an update does: commands, roles and
+mods are overwritten, and Codex skills keep local edits. `cbus selfupdate` and
+`get.sh` run it from the newly installed binary, so a new kind of asset in a
+release is installed by the first update to that release. Use the single verbs
+without `--force` to keep a locally edited command, role or mod.
 
 **Claude Code mods.** Claude Code 2.1.287 and later loads function-hook plugins
 ("mods") from `~/.claude/skills/<name>/`. cbus ships one:

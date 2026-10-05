@@ -4,6 +4,41 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 03:54:29 UTC] [Client/Install] install-assets: the new binary decides what an update installs
+
+[Attempt #1] Files: cmd/cbus/install_assets.go (assetInstalls,
+runInstallAssets), cmd/cbus/selfupdate.go (refreshAssets,
+supportsInstallAssets, legacyAssetRefreshCommands), cmd/cbus/main.go,
+cmd/cbus/usage.go, cmd/cbus/install_all_test.go (new), get.sh, README.md,
+docs/install.md, CHEATSHEET.md, docs/RELEASE-CHECKLIST.md.
+
+[What changed]
+- `cbus selfupdate` refreshed assets from a list compiled into the running,
+  older binary, so assets added in the new release were skipped: updating
+  from v0.18.0 to v0.19.0 did not install mods. The asset list now lives in
+  the new `cbus install-assets` verb, and the updater runs the new binary's
+  copy. It checks the new binary's `--help` for the verb first and falls
+  back to the fixed list for a binary released before it.
+- get.sh runs `install-assets` the same way, with the same fallback for an
+  older tag picked with CBUS_VERSION.
+- A test fails if the usage advertises an `install-*` verb that
+  `install-assets` does not run.
+
+[Possible Ripple Effects]
+- Updating from v0.19.0 or earlier still uses that updater's own list; the
+  delegation starts with updates made by a binary that has this change.
+- `install-assets` overwrites edited commands, roles and mods, as updates
+  always have. The single verbs without `--force` still protect edits.
+
+[Testing Notes]
+New tests for the verb (every asset type installed), the coverage guard, and
+the updater delegating versus falling back; mutants that drop install-mods
+from the list or disable delegation each fail them. macOS `go test ./...`
+green, vet for linux amd64/arm64 and windows, the install tests pass on
+Windows 11. Live against a local fake release served over http on
+127.0.0.1: get.sh fresh install and a selfupdate from a build of this
+change each installed all four asset types into an empty home.
+
 ## [2026-10-05 03:38:13 UTC] [Release] v0.19.0: Windows native connect and daemon, install-mods
 
 [Attempt #1] Range v0.18.0..4e15fb8 (pull requests #54, #56, #57, #58, #59).
