@@ -129,7 +129,7 @@ func TestDaemonBindingMigratesLegacySymlinkHome(t *testing.T) {
 }
 
 func TestDaemonHealthReportsRunningVersionAndStopFencesInstance(t *testing.T) {
-	d := newBusDaemon()
+	d := testDaemon(t)
 	defer d.cancel()
 	d.start, d.version = "original-start", "candidate-version"
 	stopped := 0

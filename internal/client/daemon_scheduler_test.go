@@ -68,7 +68,7 @@ func (q *schedulerQueue) observedCalls() []daemonQueueCall {
 func schedulerFixture(t *testing.T, count int) (*busDaemon, []*ConnectionState, []*schedulerQueue) {
 	t.Helper()
 	root := setupStore(t)
-	d := newBusDaemon()
+	d := testDaemon(t)
 	d.start = selfStart(t)
 	d.probeConsumer = func(_ context.Context, c *ConnectionState) (consumerProbe, error) {
 		if c.Consumer == nil {
@@ -256,7 +256,7 @@ func TestDaemonSchedulerShutdownPersistsAmbiguousAttempt(t *testing.T) {
 		t.Fatalf("shutdown allowed new work: %v", err)
 	}
 	// A fresh daemon must retain the fence and only reconcile, never re-enqueue.
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	defer restarted.cancel()
 	restarted.start = d.start
 	restarted.openQueue = d.openQueue
@@ -319,7 +319,7 @@ func TestDaemonSchedulerShutdownCancelsPeerLockWait(t *testing.T) {
 }
 
 func TestDaemonSchedulerSnapshotsOwnNestedState(t *testing.T) {
-	d := newBusDaemon()
+	d := testDaemon(t)
 	defer d.cancel()
 	c := &ConnectionState{ID: "snapshot", Pending: &queueAttempt{Evidence: &codexMessageLookup{State: codexMessageQueued}},
 		LastAccepted: &deliveryObservation{Attempt: queueAttempt{Evidence: &codexMessageLookup{State: codexMessageQueued}}},

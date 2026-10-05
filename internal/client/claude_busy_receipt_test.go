@@ -149,7 +149,7 @@ func TestDaemonClaudeBusyReceiptUnblocksFollowingDeliveryAfterRestart(t *testing
 	}
 	appendClaudeQueueRow(t, q, claudeBusyReceiptJSON(t, claudeBusyReceiptRow(firstAttempt)))
 	d.closeQueue(c.ID)
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	restarted.start = d.start
 	if err := restarted.load(); err != nil {
 		t.Fatal(err)

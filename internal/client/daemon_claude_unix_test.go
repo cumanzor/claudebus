@@ -76,7 +76,7 @@ func TestDaemonClaudeReceiptAloneAdvancesBothCursors(t *testing.T) {
 	// must dispatch Claude recovery without treating the socket as a Codex queue.
 	d.closeQueue(c.ID)
 	listener.Close() // Receipt recovery does not require a live socket.
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	restarted.start = d.start
 	if err := restarted.load(); err != nil {
 		t.Fatal(err)

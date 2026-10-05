@@ -226,7 +226,7 @@ func TestDaemonClaudeRestartMidWaitKeepsDeadline(t *testing.T) {
 	<-wire
 	attempt, submitted := c.Pending.ClientID, c.Pending.SubmittedAt
 	d.closeQueue(c.ID)
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	restarted.start = d.start
 	if err := restarted.load(); err != nil {
 		t.Fatal(err)

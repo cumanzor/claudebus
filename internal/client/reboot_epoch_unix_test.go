@@ -55,7 +55,7 @@ func TestClaudeReceiptsSurviveRenumberedRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.closeQueue(c.ID)
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	restarted.start = d.start
 	if err := restarted.load(); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestClaudeReceiptsSurviveRenumberedRestart(t *testing.T) {
 	}
 	accepted, cursor := *c.LastAccepted, c.Claude.ReceiptOffset
 	restarted.closeQueue(c.ID)
-	again := newBusDaemon()
+	again := testDaemon(t)
 	again.start = d.start
 	if err := again.load(); err != nil {
 		t.Fatal(err)

@@ -114,7 +114,7 @@ func TestDaemonHarnessRejectsUnsupportedJournalWithoutRewriting(t *testing.T) {
 	if err := os.WriteFile(journal, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	reloaded := newBusDaemon()
+	reloaded := testDaemon(t)
 	defer reloaded.cancel()
 	if err := reloaded.load(); err != nil {
 		t.Fatalf("one unsupported record stopped the daemon: %v", err)
