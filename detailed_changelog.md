@@ -4,6 +4,47 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 00:25:59 UTC] [Release] v0.18.0: control admission, event-driven wakes, /wake
+
+[Attempt #1] Range v0.17.1..ebf0105 (pull requests #49, #50, #51, #52). 2
+files: detailed_changelog.md, simple_changelog.md. Written after the tag, so
+the tag does not include this entry. The mods work merged to main after
+`ebf0105` (#54) is not in this release.
+
+[What changed]
+- Control admission (#50, closes #19, #39, #48): connect, disconnect,
+  reconcile, abandon and relay presence acknowledgements take no delivery
+  slot and wait up to 12 s for their lane; connects queue for up to 60 s.
+  `load` skips a bad connection record and lists it in `/health`. Daemon log
+  lines carry an RFC3339 UTC timestamp.
+- Scheduler wakes (#51): a ready set consumed by the scheduler loop; relay
+  appends, presence fanout and connects wake their connection; Claude
+  receipts are followed up at 100, 250 and 500 ms then every second; a
+  backlog requeues after each accept.
+- `POST /wake` (#52, closes #40, #41): CLI inbox writers wake the daemon,
+  `/health` advertises `"wake": true`, and the full pass is a 2 s safety
+  sweep.
+
+[Possible Ripple Effects]
+- Daemons need `cbus daemon restart` to load the new binary; connections,
+  pending attempts and cursors are retained.
+- An older CLI against this daemon does not wake it and is delivered by the
+  2 s sweep. This CLI against an older daemon gets a 404 from `/wake`, which
+  it ignores.
+- Stale connection records still accumulate until the lifecycle work (#42,
+  #43) lands.
+
+[Testing Notes]
+Each change's evidence is in its pull request (red/green, mutants, race,
+platforms, live runs). Release gate: the five assets built twice from fresh
+clones at the tag were byte-identical; the published assets matched the
+uploaded `SHA256SUMS`; the version reads `v0.18.0`; the Claude pair canary
+(`scripts/claude_cbus_pair_canary.py`) passed 3 of 3 on the release asset.
+After the laptop daemon restart: 114 of 114 connections, 5 of 5 pending
+attempts, no cursor moved back, no inbox identity changed, and `/health`
+reports `"wake": true` with no skipped records. The server selfupdated and
+restarted on v0.18.0 with its 4 connections retained.
+
 ## [2026-10-03 20:29:44 UTC] [Mods] cbus-compact mod and cbus install-mods
 
 [Attempt #1] Code: mods/cbus-compact/ (new: manifest, hooks/register.tsx,
