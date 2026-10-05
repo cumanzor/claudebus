@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"claudebus/internal/dirsync"
 )
 
 var seq atomic.Uint64
@@ -139,7 +141,8 @@ func (s Store) WriteNamed(channel, alias, name string, line []byte) error {
 }
 
 func syncExisting(path string) error {
-	f, err := os.Open(path)
+	// windows flushes only through a handle opened for writing.
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
@@ -154,14 +157,7 @@ func syncExisting(path string) error {
 	return syncDir(filepath.Dir(path))
 }
 
-func syncDir(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
-}
+func syncDir(path string) error { return dirsync.Sync(path) }
 
 func mkdirAllDurable(path string) error {
 	if st, err := os.Stat(path); err == nil {

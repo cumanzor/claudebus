@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"unicode/utf8"
+
+	"claudebus/internal/dirsync"
 )
 
 const claudeCredentialDir = "claude-credentials"
@@ -148,11 +150,4 @@ func openClaudeCredentialRoot(path string, create bool) (*os.Root, error) {
 	return root, nil
 }
 
-func syncClaudeCredentialRoot(root *os.Root) error {
-	dir, err := root.Open(".")
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
+func syncClaudeCredentialRoot(root *os.Root) error { return dirsync.SyncRoot(root) }

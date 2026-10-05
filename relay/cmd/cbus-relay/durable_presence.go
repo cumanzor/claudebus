@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"claudebus/internal/core"
+	"claudebus/internal/dirsync"
 )
 
 type durablePresenceRecipient struct {
@@ -125,14 +126,7 @@ func (s *server) acceptDurablePresence(key string, t *tail, ch, al string, frame
 	return nil
 }
 
-func relaySyncDir(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
-}
+func relaySyncDir(path string) error { return dirsync.Sync(path) }
 
 func saveDurablePresenceJournal(path string, value durablePresenceJournal) error {
 	return saveRelayJSON(path, value)

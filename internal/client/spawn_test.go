@@ -9,7 +9,8 @@ import (
 
 func TestSpawnFreshArgvCCSProfile(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
-	t.Setenv("CLAUDE_CONFIG_DIR", "/Users/x/.ccs/instances/alpha")
+	ccsDir := filepath.Join(t.TempDir(), ".ccs", "instances", "alpha")
+	t.Setenv("CLAUDE_CONFIG_DIR", ccsDir)
 	t.Setenv("PATH", "/usr/bin:/bin")
 	f := &fakeForker{}
 	addr, child, err := Spawn("window", "dev", "", "", "", f)
@@ -34,7 +35,7 @@ func TestSpawnFreshArgvCCSProfile(t *testing.T) {
 	if got := f.spec.Argv[len(f.spec.Argv)-1]; got != SpawnPromptAliased("dev", child) {
 		t.Fatalf("prompt positional = %q", got)
 	}
-	if f.spec.Env["PATH"] != "/usr/bin:/bin" || f.spec.Env["CLAUDE_CONFIG_DIR"] != "/Users/x/.ccs/instances/alpha" {
+	if f.spec.Env["PATH"] != "/usr/bin:/bin" || f.spec.Env["CLAUDE_CONFIG_DIR"] != ccsDir {
 		t.Fatalf("env replication = %v", f.spec.Env)
 	}
 	if f.spec.Dir == "" {

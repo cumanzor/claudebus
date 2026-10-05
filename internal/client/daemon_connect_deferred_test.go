@@ -145,7 +145,11 @@ func TestDaemonScheduledSuccessClearsDeferredConnectError(t *testing.T) {
 	repair := brokenPresencePeer(t, req.Channel)
 	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
 	var got *ConnectionState
-	captureStderr(t, func() { got, _ = d.connect(req) })
+	var err error
+	captureStderr(t, func() { got, err = d.connect(req) })
+	if err != nil || got == nil {
+		t.Fatalf("registered connect must succeed: %v", err)
+	}
 	c := d.connections[got.ID]
 	repair()
 	c.Consumer.ObservedAt = ""
