@@ -36,9 +36,9 @@ type GCRecord struct {
 }
 
 type GCPlan struct {
-	OlderThan time.Duration `json:"olderThanSeconds"`
-	Records   []GCRecord    `json:"records"`
-	Skipped   []string      `json:"skipped,omitempty"`
+	Limits  GCLimits   `json:"limits"`
+	Records []GCRecord `json:"records"`
+	Skipped []string   `json:"skipped,omitempty"`
 }
 
 type gcProbe struct {
@@ -47,12 +47,10 @@ type gcProbe struct {
 	mtime func(path string) (time.Time, bool)
 }
 
-// PlanConnectionGC classifies every stored connection record. A record is never
-// collected while it has a pending attempt or a running consumer; a detached one
-// (leave or unregister) is collectable now; any other is collectable once its
-// session has been inactive longer than olderThan.
-func PlanConnectionGC(olderThan time.Duration) (GCPlan, error) {
-	return planConnectionGC(DaemonDir(), CBUSDir(), olderThan, liveGCProbe())
+// PlanConnectionGC classifies every stored connection record without changing
+// anything (see classifyGC).
+func PlanConnectionGC(l GCLimits) (GCPlan, error) {
+	return planConnectionGC(DaemonDir(), CBUSDir(), l, liveGCProbe())
 }
 
 func liveGCProbe() gcProbe {
@@ -72,10 +70,10 @@ func liveGCProbe() gcProbe {
 	}
 }
 
-func planConnectionGC(daemonRoot, busRoot string, olderThan time.Duration, p gcProbe) (GCPlan, error) {
-	plan := GCPlan{OlderThan: olderThan}
-	if olderThan <= 0 {
-		return plan, errors.New("the inactivity limit must be positive")
+func planConnectionGC(daemonRoot, busRoot string, l GCLimits, p gcProbe) (GCPlan, error) {
+	plan := GCPlan{Limits: l}
+	if err := l.valid(); err != nil {
+		return plan, err
 	}
 	dir := filepath.Join(daemonRoot, "connections")
 	entries, err := os.ReadDir(dir)
@@ -94,7 +92,7 @@ func planConnectionGC(daemonRoot, busRoot string, olderThan time.Duration, p gcP
 			plan.Skipped = append(plan.Skipped, e.Name())
 			continue
 		}
-		r := classifyGC(c, filepath.Join(dir, e.Name()), olderThan, p)
+		r := classifyGC(c, filepath.Join(dir, e.Name()), l, p)
 		r.Unread, r.InboxNote = gcUnread(c, daemonRoot, busRoot)
 		plan.Records = append(plan.Records, r)
 	}
@@ -109,31 +107,67 @@ func planConnectionGC(daemonRoot, busRoot string, olderThan time.Duration, p gcP
 	return plan, nil
 }
 
-func classifyGC(c *ConnectionState, record string, olderThan time.Duration, p gcProbe) GCRecord {
+// GCLimits: a session whose process is gone is collected once it has been idle
+// past Grace; a record with no consumer process on file falls back to Inactive.
+type GCLimits struct {
+	Grace    time.Duration `json:"graceSeconds"`
+	Inactive time.Duration `json:"inactiveSeconds"`
+}
+
+func (l GCLimits) valid() error {
+	if l.Grace <= 0 || l.Inactive <= 0 {
+		return errors.New("the grace and inactivity limits must be positive")
+	}
+	return nil
+}
+
+// classifyGC: a session's connection ends with its process. A record whose
+// consumer is confirmed gone is collected after the grace, a pending attempt
+// included (its message is in the unread export); only a record whose consumer
+// cannot be checked waits out the inactivity limit.
+func classifyGC(c *ConnectionState, record string, l GCLimits, p gcProbe) GCRecord {
 	r := GCRecord{ID: c.ID, Target: ConnectionTarget(c), Harness: c.Harness, State: c.State, LastActive: gcLastActive(c, record, p)}
 	if r.Harness == "" {
 		r.Harness = daemonHarnessCodex
 	}
-	idle := p.now.Sub(r.LastActive).Round(time.Hour)
+	idle := p.now.Sub(r.LastActive)
+	alive := gcConsumerAlive(c, p)
+	dead := gcConsumerKnown(c) && !alive
 	switch {
-	case c.Pending != nil:
-		r.Class, r.Reason = GCPending, "has a pending delivery attempt; never collected while it is unresolved"
-		r.Next = "cbus connection reconcile " + r.Target + "  (then, if still pending: cbus connection abandon " + r.Target + " --pending " + c.Pending.ClientID + " --reason <text>)"
-	case gcConsumerAlive(c, p):
+	case alive:
 		r.Class, r.Reason = GCLive, "its consumer process is running"
 		if c.State == "disconnected" || c.State == "detached" {
 			r.Reason += " (this record is " + c.State + ")"
 		}
+	case c.Pending != nil && !dead:
+		r.Class, r.Reason = GCPending, "has a pending delivery attempt and its consumer cannot be confirmed gone"
+		r.Next = "cbus connection reconcile " + r.Target + "  (then, if still pending: cbus connection abandon " + r.Target + " --pending " + c.Pending.ClientID + " --reason <text>)"
 	case c.State == "detached":
 		r.Class, r.Reason = GCCollect, "detached by leave or unregister"
+	case dead && idle > l.Grace:
+		r.Class, r.Reason = GCCollect, "consumer exited; idle "+gcAge(idle)
+		if c.Pending != nil {
+			r.Reason += "; its pending attempt is archived unresolved"
+		}
+	case dead:
+		r.Class, r.Reason = GCKeep, "consumer exited "+gcAge(idle)+" ago, inside the "+gcAge(l.Grace)+" grace"
 	case r.LastActive.IsZero():
-		r.Class, r.Reason = GCCollect, "no consumer and no record of activity"
-	case idle > olderThan:
-		r.Class, r.Reason = GCCollect, "no consumer; inactive "+gcDays(idle)
+		r.Class, r.Reason = GCCollect, "no consumer on file and no record of activity"
+	case idle > l.Inactive:
+		r.Class, r.Reason = GCCollect, "no consumer on file; inactive "+gcAge(idle)
 	default:
-		r.Class, r.Reason = GCKeep, "no consumer; inactive "+gcDays(idle)+", under the limit"
+		r.Class, r.Reason = GCKeep, "no consumer on file; inactive "+gcAge(idle)+", under the "+gcAge(l.Inactive)+" limit"
 	}
 	return r
+}
+
+// gcConsumerKnown: a pid with its start time is on file, so liveness can be
+// decided rather than guessed.
+func gcConsumerKnown(c *ConnectionState) bool {
+	if o := c.Consumer; o != nil && o.PID > 0 && o.StartToken != "" {
+		return true
+	}
+	return c.Claude != nil && c.Claude.Binding.Endpoint.PID > 0 && c.Claude.Binding.Endpoint.StartToken != ""
 }
 
 // gcConsumerAlive trusts a pid only with the start time recorded beside it, so a
@@ -221,9 +255,12 @@ func gcUnread(c *ConnectionState, daemonRoot, busRoot string) (int, string) {
 	return n, ""
 }
 
-func gcDays(d time.Duration) string {
-	if d < 48*time.Hour {
-		return d.String()
+func gcAge(d time.Duration) string {
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", d/time.Hour)
 	}
 	return fmt.Sprintf("%dd", d/(24*time.Hour))
 }

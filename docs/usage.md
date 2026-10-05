@@ -100,26 +100,47 @@ and a peer reply supplies separate evidence of action. Use
 can receive input between foreground tool calls; hold/refuse policy still applies.
 Stop future delivery with `cbus connection disconnect deploy/laptop`, which retains the inbox.
 
-`leave`, `unregister` and `disconnect` keep a connection record, and a
-reconnect after a detach adds a new one, so records accumulate.
-`cbus connection gc` collects the stale ones. Each record is kept while its
-consumer process is still running (checked by pid and start time, never by a
-stale "online" observation) and never touched while it has a pending attempt;
-a detached record is collected, and any other once its session's transcript
-or rollout has been inactive past `--older-than` (default 14 days).
-`cbus connection gc --dry-run` shows the same classification, names the
-`reconcile` or `abandon` command each pending record needs, and changes
-nothing.
+A connection ends with its session. Once the consumer process (the Claude Code
+or Codex CLI the connection is bound to) has exited, checked by pid and start
+time rather than by a stale "online" observation, the daemon collects the
+connection after a short grace (15 minutes, measured from the session's last
+transcript or rollout write). A pending delivery attempt does not hold it: the
+uncertain message is past the delivered offset, so it lands in the archive's
+unread mail. A record left by `leave` or `unregister` is collected on the next
+pass. A record with no consumer process on file falls back to 14 days of
+inactivity, and one with a pending attempt and no consumer on file is never
+collected; `cbus connection gc --dry-run` names the `reconcile` or `abandon`
+command it needs.
 
-Collection runs inside the daemon, under each record's lane and peer lock, and
-holds the connect gate for the pass, so a session resuming at the same moment
-either finishes first and is kept, or connects afresh afterwards. A collected
-record moves to `.daemon/connections/.archive/YYYY-MM/<id>/` with its inbox
-folder (only when the record still owns it; a newer connection's folder stays)
-and an `unread.jsonl` of the lines past its delivered offset. Its session
-token is deleted, not archived, and tokens no record references any more are
-removed in the same pass. A pass that fails partway leaves the record in place
-for the next one. Archives are not pruned yet.
+The daemon runs a pass a minute after it starts, so a reboot's dead sessions go
+as soon as their grace has passed, then every 5 minutes. `cbus connection gc`
+runs one now, and `--dry-run` shows the same classification without changing
+anything. `/health` reports the last automatic pass under `lastGC`, and each
+collection is a line in the daemon log.
+
+Collection runs under each record's lane and peer lock and holds the connect
+gate for the pass, so a session resuming at the same moment either finishes
+first and is kept, or connects afresh afterwards. A collected record moves to
+`.daemon/connections/.archive/YYYY-MM/<id>/` with its inbox folder (only when
+the record still owns it; a newer connection's folder stays) and an
+`unread.jsonl` of the lines past its delivered offset. Its session token is
+deleted, not archived, and tokens no record references any more are removed in
+the same pass. A pass that fails partway leaves the record for the next one.
+Archives are deleted after 30 days.
+
+When a resumed session connects and a record of the same session on the same
+channel was collected while it was down, `cbus connect` says so on stderr and
+names that archive's `unread.jsonl` (`archivedPredecessor` in `--json` output).
+
+Settings, read by the daemon at start and by the CLI: `CBUS_GC=off` stops the
+automatic passes, `CBUS_GC_GRACE` (default `15m`), `CBUS_GC_INACTIVE` (default
+`14d`) and `CBUS_GC_ARCHIVE` (default `30d`). The CLI also takes `--grace` and
+`--older-than` for one run.
+
+Over a relay, collection closes the dead peer's subscription, so the relay
+sends `departed` to the channel. Mail sent to that alias afterwards waits in
+the relay's per-alias queue and reaches whichever connection next subscribes as
+that alias.
 To end the peer's session as well, `cbus close deploy/laptop` signals the
 Claude or Codex process bound to that connection, after disconnecting it,
 and then closes its tmux pane or iTerm2 tab. It never signals the daemon,

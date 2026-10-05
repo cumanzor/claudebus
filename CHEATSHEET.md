@@ -311,6 +311,9 @@ cbus install-roles                                  # (re)write role prompts to 
 cbus install-codex-skills                           # refresh the Codex skill, preserve edited files
 cbus install-mods                                   # (re)write Claude Code mods to ~/.claude/skills
 cbus install-assets                                 # all of the above, as an update installs them
+cbus connection gc --dry-run                        # which stale connections the daemon would collect
+cbus connection gc                                  # collect now (the daemon also does it every 5 min)
+export CBUS_GC=off                                  # stop automatic collection (CBUS_GC_GRACE=15m, CBUS_GC_INACTIVE=14d, CBUS_GC_ARCHIVE=30d)
 cbus daemon restart                                # load the upgraded binary; retain pending mail
 export CBUS_UPDATE_CHECK=1                           # opt-in: a once-a-day 'update available' hint
 ```

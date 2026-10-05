@@ -97,7 +97,7 @@ func TestKickoffPerModeFraming(t *testing.T) {
 	}
 	// Native recovery preserves unread and uncertain mail; do not instruct a
 	// resumed peer to duplicate it on the old assumption of a lossy tail.
-	if !strings.Contains(resume, "preserve unread mail and uncertain attempts") ||
+	if !strings.Contains(resume, "holds its unread mail and uncertain attempts") || !strings.Contains(resume, "archived predecessor") ||
 		!strings.Contains(resume, "do not assume mail was lost") || strings.Contains(resume, "NOT replayed") {
 		t.Errorf("resumed native peer received unsafe replay advice:\n%s", resume)
 	}

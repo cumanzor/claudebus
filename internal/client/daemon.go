@@ -68,7 +68,8 @@ type ConnectionState struct {
 	Relay            *RelayConfig            `json:"relay,omitempty"`
 	RelayStatus      *relayObservation       `json:"relayStatus,omitempty"`
 	Compaction       *compactionObservation  `json:"compaction,omitempty"`
-	Deferred         string                  `json:"deferred,omitempty"` // set only on the copy a connect returns, never stored
+	Deferred         string                  `json:"deferred,omitempty"`            // set only on the copy a connect returns, never stored
+	Predecessor      *ArchivedConnection     `json:"archivedPredecessor,omitempty"` // likewise
 }
 
 type queueAttempt struct {
@@ -117,6 +118,9 @@ type busDaemon struct {
 	relays        map[string]*relaySubscription
 	relayViews    map[string]relayObservation
 	tickErrors    map[string]string // last logged tick error per connection, guarded by mu
+	lastGC        *GCStatus         // guarded by mu
+	gcFirst       time.Duration
+	gcEvery       time.Duration
 	relayWorkers  sync.WaitGroup
 	dialRelay     func(context.Context, *ConnectionState) (relaySocket, error)
 }
@@ -130,7 +134,7 @@ func newBusDaemon() *busDaemon {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &busDaemon{root: DaemonDir(), version: "dev", connections: map[string]*ConnectionState{}, queues: map[string]nativeQueue{}, nextTry: map[string]time.Time{},
 		ctx: ctx, cancel: cancel, lanes: map[string]chan struct{}{}, connectGate: make(chan struct{}, 1), controlWait: daemonControlWait, snapshots: map[string]*ConnectionState{}, slots: make(chan struct{}, daemonMaxOperations),
-		kick: make(chan struct{}, 1), ready: map[string]struct{}{}, due: map[string]time.Time{}, followups: map[string]int{}, relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}}
+		kick: make(chan struct{}, 1), ready: map[string]struct{}{}, due: map[string]time.Time{}, followups: map[string]int{}, relays: map[string]*relaySubscription{}, relayViews: map[string]relayObservation{}, tickErrors: map[string]string{}, gcFirst: gcFirstPassDelay, gcEvery: gcPassInterval}
 	d.openQueue = func(c CodexQueueConfig) (nativeQueue, error) { return newCodexQueueContext(d.ctx, c) }
 	return d
 }
@@ -257,9 +261,20 @@ func RunDaemon(ctx context.Context, versions ...string) error {
 		defer close(loopDone)
 		d.scheduleLoop(loopCtx, tick.C)
 	}()
+	gcSettings, err := LoadGCSettings()
+	if err != nil {
+		daemonLogf("gc: %v; automatic collection is off", err)
+		gcSettings.Auto = false
+	}
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		d.runGC(loopCtx, gcSettings)
+	}()
 	shutdown := func() error {
 		stopLoop()
 		<-loopDone
+		<-gcDone
 		c, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
 		err := d.shutdown(c)
@@ -297,6 +312,11 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 			if len(d.skipped) > 0 {
 				health["skippedRecords"] = d.skipped
 			}
+			d.mu.Lock()
+			if d.lastGC != nil {
+				health["lastGC"] = *d.lastGC
+			}
+			d.mu.Unlock()
 			writeDaemonJSON(w, health)
 			return
 		}
@@ -306,7 +326,7 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			pass, err := d.collectConnections(time.Duration(req.OlderThanSeconds)*time.Second, liveGCProbe())
+			pass, err := d.collectConnections(r.Context(), GCLimits{Grace: time.Duration(req.GraceSeconds) * time.Second, Inactive: time.Duration(req.InactiveSeconds) * time.Second}, liveGCProbe())
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
@@ -369,6 +389,7 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 				s = c
 			}
 			s.Deferred = c.Deferred
+			s.Predecessor = d.archivedPredecessor(s)
 			writeDaemonJSON(w, s)
 		case r.URL.Path == "/connections" && r.Method == "GET":
 			writeDaemonJSON(w, d.statusSnapshots())
