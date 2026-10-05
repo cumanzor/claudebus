@@ -388,6 +388,7 @@ func TestArmMetaRecordsListenerAndGrace(t *testing.T) {
 // not a create — armMeta must not panic or fabricate a file.
 func TestArmMetaBestEffortMissing(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir) // armMeta takes the peer lock under CBUS_DIR
 	metaPath := filepath.Join(dir, "meta.json")
 	armMeta(metaPath, selfStart(t)) // must not panic
 	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {

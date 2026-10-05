@@ -101,7 +101,7 @@ func TestDaemonRelayProcessToNativeQueueAcrossRestart(t *testing.T) {
 	if entries, err := os.ReadDir(queued); err != nil || len(entries) != 1 {
 		t.Fatalf("offline remote message did not stay pending: %+v %v", entries, err)
 	}
-	restarted := newBusDaemon()
+	restarted := testDaemon(t)
 	restarted.start = d.start
 	restarted.probeConsumer = d.probeConsumer
 	if err := restarted.load(); err != nil {

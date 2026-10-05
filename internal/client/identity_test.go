@@ -13,9 +13,18 @@ func TestMain(m *testing.M) {
 	// must opt into that identity explicitly instead of accidentally joining the runner.
 	_ = os.Unsetenv("CODEX_THREAD_ID")
 	violations := installSignalGuard()
+	stores, err := guardStore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "store guard:", err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if n := violations(); n > 0 {
 		fmt.Fprintf(os.Stderr, "SIGNAL GUARD: %d signal(s) aimed at processes the tests did not start\n", n)
+		code = 1
+	}
+	if leaked := stores(); len(leaked) > 0 {
+		reportStoreLeaks(leaked)
 		code = 1
 	}
 	os.Exit(code)

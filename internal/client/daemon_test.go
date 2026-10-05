@@ -74,7 +74,7 @@ func daemonFixture(t *testing.T) (*busDaemon, *daemonFakeQueue, ConnectRequest) 
 
 func reloadDaemonFixture(t *testing.T, q *daemonFakeQueue) *busDaemon {
 	t.Helper()
-	d := newBusDaemon()
+	d := testDaemon(t)
 	d.start = selfStart(t)
 	d.probeConsumer = func(_ context.Context, c *ConnectionState) (consumerProbe, error) {
 		if c.Consumer == nil {

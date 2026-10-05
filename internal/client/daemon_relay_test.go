@@ -376,7 +376,7 @@ func TestDaemonRelayEndpointHandshakeAndLegacyRefusal(t *testing.T) {
 // A worker that stops before its first relayState call (the daemon was told to
 // stop right after starting it) must record the view as stopped, not panic.
 func TestRunRelayStoppedBeforeFirstStepRecordsStopped(t *testing.T) {
-	d := newBusDaemon()
+	d := testDaemon(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	sub := &relaySubscription{cancel: func() {}, done: make(chan struct{})}
