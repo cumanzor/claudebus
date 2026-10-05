@@ -178,8 +178,8 @@ func gcOwnsPeerDir(c *ConnectionState, dir string) bool {
 	return m.ConnectionID == c.ID
 }
 
-// gcExportUnread copies every line past the delivered offset, when the inbox is
-// still the one the record delivered from.
+// gcExportUnread copies the mail past the delivered offset (gcIsMail), when the
+// inbox is still the one the record delivered from; with none, it writes no file.
 func gcExportUnread(c *ConnectionState, peer, out string) error {
 	f, err := openSharedRead(filepath.Join(peer, "inbox.jsonl"))
 	if os.IsNotExist(err) {
@@ -196,11 +196,25 @@ func gcExportUnread(c *ConnectionState, peer, out string) error {
 	if _, err := f.Seek(c.Offset, io.SeekStart); err != nil {
 		return err
 	}
+	var mail []byte
+	scan := bufio.NewScanner(f)
+	scan.Buffer(make([]byte, 64<<10), 16<<20)
+	for scan.Scan() {
+		if gcIsMail(scan.Bytes()) {
+			mail = append(append(mail, scan.Bytes()...), '\n')
+		}
+	}
+	if err := scan.Err(); err != nil {
+		return err
+	}
+	if len(mail) == 0 {
+		return nil
+	}
 	w, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(w, bufio.NewReader(f)); err != nil {
+	if _, err := w.Write(mail); err != nil {
 		w.Close()
 		return err
 	}
@@ -400,10 +414,7 @@ func gcCountUnread(path string) int {
 	scan := bufio.NewScanner(f)
 	scan.Buffer(make([]byte, 64<<10), 16<<20)
 	for scan.Scan() {
-		var m struct {
-			Kind string `json:"kind"`
-		}
-		if json.Unmarshal(scan.Bytes(), &m) == nil && m.Kind != "presence" {
+		if gcIsMail(scan.Bytes()) {
 			n++
 		}
 	}

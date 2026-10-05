@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -245,14 +246,24 @@ func gcUnread(c *ConnectionState, daemonRoot, busRoot string) (int, string) {
 	scan := bufio.NewScanner(f)
 	scan.Buffer(make([]byte, 64<<10), 16<<20)
 	for scan.Scan() {
-		var m struct {
-			Kind string `json:"kind"`
-		}
-		if json.Unmarshal(scan.Bytes(), &m) == nil && m.Kind != "presence" {
+		if gcIsMail(scan.Bytes()) {
 			n++
 		}
 	}
 	return n, ""
+}
+
+// gcIsMail: a line past the delivered offset is unread mail unless it is
+// positively a presence record, which means nothing to a session that has
+// gone. A torn or unparsable line is kept, since it may be a message.
+func gcIsMail(line []byte) bool {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return false
+	}
+	var m struct {
+		Kind string `json:"kind"`
+	}
+	return json.Unmarshal(line, &m) != nil || m.Kind != "presence"
 }
 
 func gcAge(d time.Duration) string {

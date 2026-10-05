@@ -437,3 +437,66 @@ func TestConnectNamesTheArchivedPredecessorOfTheSameSession(t *testing.T) {
 		}
 	}
 }
+
+// stalePresenceConnection is staleConnection whose undelivered tail holds the
+// given lines instead of one message.
+func stalePresenceConnection(t *testing.T, lines ...string) (*busDaemon, *ConnectionState) {
+	t.Helper()
+	d, q, req := daemonFixture(t)
+	_ = q
+	c := mustDaemonConnect(t, d, req)
+	f, err := os.OpenFile(InboxPath(c.Channel, c.Alias), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if _, err := f.WriteString(l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+	c.State = "detached"
+	if err := d.save(c); err != nil {
+		t.Fatal(err)
+	}
+	d.publish(c)
+	return d, c
+}
+
+func TestCollectExportsNoUnreadFileForPresenceOnly(t *testing.T) {
+	d, c := stalePresenceConnection(t,
+		`{"from":"dev/a","kind":"presence","event":"join","text":"joined"}`+"\n",
+		"\n",
+		`{"from":"dev/a","kind":"presence","event":"departed","text":"departed"}`+"\n")
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
+	if err != nil || !pass.Records[0].Collected || pass.Records[0].Unread != 0 {
+		t.Fatalf("collect: %+v, %v", pass, err)
+	}
+	if _, err := os.Stat(filepath.Join(gcArchiveOf(d, c.ID), "unread.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("a presence-only tail produced an unread export: %v", err)
+	}
+}
+
+func TestCollectExportsOnlyMailAndKeepsATornLine(t *testing.T) {
+	d, c := stalePresenceConnection(t,
+		`{"from":"dev/a","kind":"presence","event":"join","text":"joined"}`+"\n",
+		`{"from":"dev/a","text":"real message"}`+"\n",
+		`{"from":"dev/a","kind":"presence","event":"departed","text":"departed"}`+"\n",
+		`{"from":"dev/b","text":"torn mid-wri`)
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
+	if err != nil || !pass.Records[0].Collected {
+		t.Fatalf("collect: %+v, %v", pass, err)
+	}
+	b, err := os.ReadFile(filepath.Join(gcArchiveOf(d, c.ID), "unread.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"from":"dev/a","text":"real message"}` + "\n" + `{"from":"dev/b","text":"torn mid-wri` + "\n"
+	if string(b) != want {
+		t.Fatalf("export = %q, want %q", b, want)
+	}
+	fresh := &ConnectionState{ID: "fresh", Channel: c.Channel, ThreadID: c.ThreadID}
+	if counted, named := pass.Records[0].Unread, d.archivedPredecessor(fresh).Unread; counted != 2 || named != 2 {
+		t.Fatalf("the plan counted %d and connect would report %d; both must match the 2 exported lines", counted, named)
+	}
+}

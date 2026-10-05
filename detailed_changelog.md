@@ -4,6 +4,36 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 05:53:34 UTC] [Client/Daemon] Unread export holds only mail
+
+[Attempt #1] Files: internal/client/connection_gc.go (gcIsMail),
+internal/client/daemon_gc.go (gcExportUnread, gcCountUnread),
+internal/client/daemon_gc_test.go.
+
+[What changed]
+- gcExportUnread copied every byte past the delivered offset, so a tail of
+  join and departed notices produced an unread.jsonl: on one real store 54
+  archives had the file and 4 held mail. It now copies only lines that are not
+  positively presence records and writes nothing when none remain. The whole
+  inbox is still archived with the record when the record owns it.
+- A torn or unparsable line counts as mail and is kept, since it may be a
+  message cut off by the writer.
+- The planner's count, the export and the archived-predecessor count used by
+  `cbus connect` now share one predicate. The counts previously skipped
+  unparsable lines while the export kept them.
+
+[Possible Ripple Effects]
+- Archives written by v0.20.0 keep their presence-only unread.jsonl files
+  until archive pruning deletes them after 30 days.
+
+[Testing Notes]
+New tests: a presence-only tail writes no file; a mixed tail exports only the
+message and the torn final line, and the plan and connect counts both read 2.
+Both fail on main (the presence-only file exists; the export carries the
+presence lines). A mutant that drops unparsable lines fails the second test.
+`go test ./...` green with the store guard, vet for linux and windows, and the
+client suite passes on Windows 11.
+
 ## [2026-10-05 05:48:17 UTC] [Release] v0.20.0: connection lifecycle and install-assets
 
 [Attempt #1] Range v0.19.0..c755f0e (pull requests #61, #62, #63, #64, #65).
