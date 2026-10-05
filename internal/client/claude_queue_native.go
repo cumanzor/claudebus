@@ -1,11 +1,8 @@
-//go:build darwin || linux
-
 package client
 
 import (
 	"context"
 	"errors"
-	"net"
 	"sync"
 	"time"
 )
@@ -75,7 +72,7 @@ func (q *claudeQueue) enqueue(threadID, attemptID, payload string) (string, erro
 	}
 	ctx, cancel := context.WithTimeout(q.ctx, 5*time.Second)
 	defer cancel()
-	target := claudeSocketTarget{Endpoint: q.cfg.Binding.Endpoint.Socket, SessionID: threadID, Validate: func(ctx context.Context, conn *net.UnixConn) error {
+	target := claudeSocketTarget{Endpoint: q.cfg.Binding.Endpoint.Socket, SessionID: threadID, Validate: func(ctx context.Context, conn claudeConn) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

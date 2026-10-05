@@ -1,5 +1,3 @@
-//go:build darwin || linux
-
 package client
 
 import (
@@ -8,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	"claudebus/internal/dirsync"
@@ -73,7 +70,7 @@ func readClaudeCredential(daemonRoot, ref string) (string, error) {
 	// Root bounds traversal but may follow in-root symlinks. Check both the
 	// opened inode and final Lstat before reading; NONBLOCK also fences a FIFO
 	// replacement from hanging the open before its type can be validated.
-	f, err := root.OpenFile(ref, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := root.OpenFile(ref, os.O_RDONLY|nonBlockingOpen, 0)
 	if err != nil {
 		return "", errors.New("Claude credential open failed")
 	}
@@ -92,20 +89,6 @@ func readClaudeCredential(daemonRoot, ref string) (string, error) {
 
 func validClaudeCredentialToken(token string) bool {
 	return len(token) > 0 && len(token) <= claudeCredentialMaxBytes && utf8.ValidString(token) && !strings.ContainsAny(token, "\r\n\x00")
-}
-
-func privateClaudeCredentialInfo(info os.FileInfo, directory bool) bool {
-	if info == nil || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
-		return false
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
-		return false
-	}
-	if directory {
-		return info.IsDir() && info.Mode().Perm() == 0o700
-	}
-	return info.Mode().IsRegular() && info.Mode().Perm() == 0o600 && stat.Nlink == 1
 }
 
 // OpenRoot anchors all later operations to descriptors. Refuse a symlink or

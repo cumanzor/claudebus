@@ -57,8 +57,8 @@ func validateConnectionBinding(c *ConnectionState) error {
 	b := c.Claude.Binding
 	if !uuidLike(c.ThreadID) || b.SessionID != c.ThreadID ||
 		!filepath.IsAbs(b.ConfigHome) || !filepath.IsAbs(b.UserHome) || !filepath.IsAbs(b.Cwd) ||
-		!filepath.IsAbs(b.TranscriptPath) || !filepath.IsAbs(b.Endpoint.Socket) ||
-		b.TranscriptIno == 0 || b.Endpoint.PID <= 1 || b.Endpoint.StartToken == "" || b.Endpoint.Ino == 0 ||
+		!filepath.IsAbs(b.TranscriptPath) || !b.Endpoint.wellFormed() ||
+		b.TranscriptIno == 0 || b.Endpoint.PID <= 1 || b.Endpoint.StartToken == "" ||
 		c.Claude.ReceiptOffset < 0 || !validClaudeCredentialRef(c.Claude.CredentialRef) {
 		return errors.New("Claude connection requires exact session, runtime, transcript and credential bindings")
 	}

@@ -1,5 +1,3 @@
-//go:build !windows
-
 package client
 
 import (
@@ -11,16 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
-	"path/filepath"
 )
 
 type claudeSocketTarget struct {
 	Endpoint, SessionID string
 	// Required: check connected peer PID/UID/start and endpoint file identity.
 	// The caller binds these to the exact session before calling this primitive.
-	Validate func(context.Context, *net.UnixConn) error
+	Validate func(context.Context, claudeConn) error
 }
 
 type claudeSubmission struct {
@@ -46,7 +42,7 @@ func claudeMessageUUID(attemptID string) string {
 func submitClaudeSocket(ctx context.Context, target claudeSocketTarget, token, attemptID, payload string) (claudeSubmission, error) {
 	result := claudeSubmission{UUID: claudeMessageUUID(attemptID), State: claudeNotSubmitted}
 	deadline, bounded := ctx.Deadline()
-	if !bounded || !filepath.IsAbs(target.Endpoint) || !uuidLike(target.SessionID) || target.Validate == nil || token == "" || attemptID == "" || payload == "" {
+	if !bounded || !validClaudeEndpointName(target.Endpoint) || !uuidLike(target.SessionID) || target.Validate == nil || token == "" || attemptID == "" || payload == "" {
 		return result, errors.New("Claude socket requires a bounded context and an exact validated target")
 	}
 	if err := ctx.Err(); err != nil {
@@ -63,17 +59,12 @@ func submitClaudeSocket(ctx context.Context, target claudeSocketTarget, token, a
 	if len(auth)+1 > claudeMaxLine || len(message)+1 > claudeMaxLine {
 		return result, errors.New("Claude socket envelope exceeds the byte limit")
 	}
-	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", target.Endpoint)
+	conn, release, err := dialClaude(ctx, target.Endpoint, deadline)
 	if err != nil {
 		return result, errors.New("Claude socket dial failed")
 	}
-	defer conn.Close()
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
-	if err := conn.SetDeadline(deadline); err != nil {
-		return result, errors.New("Claude socket deadline failed")
-	}
-	if err := target.Validate(ctx, conn.(*net.UnixConn)); err != nil {
+	defer release()
+	if err := target.Validate(ctx, conn); err != nil {
 		return result, errors.New("Claude socket identity validation failed")
 	}
 	if err := ctx.Err(); err != nil {

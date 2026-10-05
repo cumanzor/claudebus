@@ -1,11 +1,10 @@
-//go:build darwin || linux
-
 package client
 
 import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 )
 
 // NativeConnectIdentity prefers the nearest witnessed harness. An explicit Codex
@@ -27,6 +26,9 @@ func nativeConnectIdentityForHarness(harness string, opts CodexConnectOptions, c
 	req.Host = host
 	switch harness {
 	case "codex":
+		if runtime.GOOS == "windows" {
+			return req, "", errors.New("native Codex connect is not available on Windows yet; Claude Code sessions can connect")
+		}
 		cfg, sid, err := codex(opts)
 		req.Config, req.ThreadID = cfg, sid
 		return req, "", err

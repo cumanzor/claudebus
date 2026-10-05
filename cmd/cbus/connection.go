@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -18,9 +17,6 @@ import (
 )
 
 func runConnect(args []string) int {
-	if runtime.GOOS == "windows" {
-		return die("cbus connect is not available on windows in phase 1")
-	}
 	pos, asJSON, opts, err := connectArgs(args)
 	if err != nil {
 		return die("%v", err)
