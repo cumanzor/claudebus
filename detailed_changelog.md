@@ -4,6 +4,46 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 02:02:52 UTC] [Client/Relay/Windows] Directory and spool fsync on Windows
+
+[Attempt #1] Files: internal/dirsync/ (new: dirsync.go, dirsync_unix.go,
+dirsync_windows.go, dirsync_test.go), internal/client/daemon.go
+(durableJSON), internal/client/claude_credentials.go
+(syncClaudeCredentialRoot), internal/client/daemon_relay.go
+(syncRelayDirectories), relay/cmd/cbus-relay/durable_presence.go
+(relaySyncDir), relay/internal/spool/spool.go (syncDir, syncExisting), plus
+three tests in internal/client.
+
+[What changed]
+- Every directory fsync after a create, rename or remove now calls
+  `dirsync.Sync` or `dirsync.SyncRoot`. On unix it opens the directory and
+  calls Sync as before. On Windows it returns nil: Go opens a directory
+  read-only, FlushFileBuffers needs write access, and NTFS journals the entry
+  change on its own.
+- `spool.syncExisting` opened an existing spool file read-only and then
+  fsynced it, which Windows refuses for the same reason. It now opens the file
+  read-write; nothing is written through that handle.
+- `TestDaemonScheduledSuccessClearsDeferredConnectError` discarded the connect
+  error and dereferenced a nil result, so one setup failure panicked and ended
+  the whole package run. It now fails with the error.
+- `TestBranchReplicatesEnvCCS` and `TestSpawnFreshArgvCCSProfile` used unix
+  path literals for `CLAUDE_CONFIG_DIR`, which `filepath.Abs` rewrites on
+  Windows. They now build the path under `t.TempDir()`.
+
+[Possible Ripple Effects]
+- Windows only. Daemon and relay durable writes now succeed there; `connect`
+  and `daemon` are still refused on Windows until the native-connect port
+  lands.
+- Directory entries on Windows rely on NTFS metadata journaling rather than an
+  explicit flush.
+
+[Testing Notes]
+Windows test binaries cross-compiled from this branch and run on a Windows 11
+machine: internal/client 1105 pass, 0 fail (92 fail and a panic before);
+relay/cmd/cbus-relay 31/0 (17 fail before); relay/internal/spool 4/0 (3 fail
+before); cmd/cbus, internal/core, internal/dirsync and the root package
+green. macOS `go test ./...` green; `GOOS=windows go vet ./...` clean.
+
 ## [2026-10-05 00:25:59 UTC] [Release] v0.18.0: control admission, event-driven wakes, /wake
 
 [Attempt #1] Range v0.17.1..ebf0105 (pull requests #49, #50, #51, #52). 2
