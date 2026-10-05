@@ -4,6 +4,69 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 05:22:45 UTC] [Client/Daemon] Automatic connection lifecycle (#42, #43)
+
+[Attempt #1] Files: internal/client/connection_gc.go (GCLimits, classifyGC,
+gcConsumerKnown, gcAge), internal/client/gc_config.go (new: GCSettings,
+LoadGCSettings, ParseGCDuration), internal/client/daemon_gc.go (context,
+GCStatus, runGC, gcPass, pruneArchive, ArchivedConnection,
+archivedPredecessor), internal/client/daemon.go (loop start and shutdown,
+/health lastGC, connect response), internal/client/formation_kickoff.go,
+roles/{coder,documenter,orchestrator,reviewer}.md, cmd/cbus/connection.go,
+cmd/cbus/connection_gc.go, tests, docs/usage.md, CHEATSHEET.md.
+
+[What changed]
+- Policy: a connection ends with its session. Before the native daemon, a
+  peer whose listener died was pruned with `departed (listener gone)`; the
+  daemon kept every record instead, with no path that removed one. A record
+  whose consumer pid and start time are on file and whose process is gone is
+  now collected once its transcript or rollout has been idle past the grace
+  (15 minutes). Codex is treated like Claude. A pending attempt no longer
+  holds such a record: the message is past the delivered offset, so the
+  archive's unread export carries it, and the archived record keeps the
+  attempt. Pending with no consumer on file still waits, and the dry run names
+  the reconcile or abandon command.
+- A record with no consumer on file falls back to an inactivity limit (14 days).
+  Detached records are collected on the next pass, as before.
+- The daemon runs a pass a minute after it starts and then every 5 minutes,
+  records it in /health as lastGC, logs each collection, and deletes archived
+  records older than 30 days. Shutdown waits for the loop, and a pass stops
+  between records when the daemon is stopping.
+- `cbus connect` reports, on stderr and as archivedPredecessor in its JSON, a
+  record of the same session and channel that was collected while the session
+  was down, with the count of unread messages in its archive.
+- The resume kickoff and the native-connection paragraph of the four role
+  files say a connection may have been collected and where its unread mail is,
+  instead of promising the connection kept it. The role paragraph stays
+  identical across the four files.
+- Settings: CBUS_GC=off, CBUS_GC_GRACE, CBUS_GC_INACTIVE, CBUS_GC_ARCHIVE; the
+  CLI takes --grace and --older-than for one run.
+
+[Possible Ripple Effects]
+- First start after upgrading collects every connection whose session is gone,
+  which on a long-used store is most of them; they are archived, not deleted.
+- A session resumed after its connection was collected connects afresh; mail
+  that arrived while it was down is in the archive, named by connect.
+- Over a relay, collection closes the dead peer's subscription, so the relay
+  sends departed; mail sent to the alias afterwards waits in the relay's
+  per-alias queue for the next subscriber of that alias.
+
+[Testing Notes]
+Classification table (12 cases), collection, the pending export, the pass
+status and archive pruning, the loop's first delay and shutdown, CBUS_GC=off,
+settings parsing, the predecessor lookup and the connect notice. Mutants for
+each rule (pending blocking a dead consumer, no grace, pending before
+liveness, off ignored, pruning ignoring age, predecessor ignoring channel,
+notice on stdout, loop ignoring shutdown) each fail their test; two that did
+not compile at first were rewritten before counting. macOS `go test ./...`,
+vet for linux amd64/arm64 and windows, the full client and cmd suites on
+Windows 11. Field test on a copy of a real 115-record store with relay URLs
+blanked: the dry run planned 113 collections, 1 live, 1 kept, 0 pending; the
+daemon's own first pass, 60 s after start, collected 113, left 0 and removed
+19 orphan tokens; a restart loaded the 2 remaining records. A copy changes
+every inbox's inode, so the field test cannot exercise the unread export; the
+unit test does.
+
 ## [2026-10-05 04:29:46 UTC] [Client/Daemon] connection gc collects (#43, step 2)
 
 [Attempt #1] Files: internal/client/daemon_gc.go (new: collectConnections,

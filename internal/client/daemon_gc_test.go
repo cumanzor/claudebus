@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"testing"
 	"time"
 )
+
+var gcTestLimits = GCLimits{Grace: 15 * time.Minute, Inactive: time.Hour}
 
 // gcDaemonProbe treats every session as inactive for 30 days; alive answers
 // the consumer-liveness question in call order, repeating its last answer.
@@ -50,7 +53,7 @@ func gcArchiveOf(d *busDaemon, id string) string {
 func TestCollectArchivesADetachedRecordAndForgetsIt(t *testing.T) {
 	d, q, c := staleConnection(t)
 	peer := d.peerDir(c)
-	pass, err := d.collectConnections(time.Hour, gcDaemonProbe(false))
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
 	results := pass.Records
 	if err != nil || len(results) != 1 || !results[0].Collected {
 		t.Fatalf("collect: %+v, %v", results, err)
@@ -85,12 +88,13 @@ func TestCollectArchivesADetachedRecordAndForgetsIt(t *testing.T) {
 	}
 }
 
-func TestCollectNeverTouchesPendingOrLiveRecords(t *testing.T) {
-	t.Run("pending", func(t *testing.T) {
+func TestCollectLeavesUnconfirmedPendingAndLiveRecords(t *testing.T) {
+	t.Run("pending with no consumer on file", func(t *testing.T) {
 		d, _, c := staleConnection(t)
+		c.State, c.Consumer = "error", nil
 		c.Pending = &queueAttempt{ClientID: "cbus-x-1"}
 		d.publish(c)
-		pass, err := d.collectConnections(time.Hour, gcDaemonProbe(false))
+		pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
 		results := pass.Records
 		if err != nil || results[0].Class != GCPending || results[0].Collected {
 			t.Fatalf("pending: %+v, %v", results, err)
@@ -101,7 +105,7 @@ func TestCollectNeverTouchesPendingOrLiveRecords(t *testing.T) {
 	})
 	t.Run("live", func(t *testing.T) {
 		d, _, c := staleConnection(t)
-		pass, err := d.collectConnections(time.Hour, gcDaemonProbe(true))
+		pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(true))
 		results := pass.Records
 		if err != nil || results[0].Class != GCLive || results[0].Collected {
 			t.Fatalf("live: %+v, %v", results, err)
@@ -115,7 +119,7 @@ func TestCollectNeverTouchesPendingOrLiveRecords(t *testing.T) {
 // a session that resumes between the plan and the record's lane wins.
 func TestCollectLeavesARecordThatCameBackDuringThePass(t *testing.T) {
 	d, _, c := staleConnection(t)
-	pass, err := d.collectConnections(time.Hour, gcDaemonProbe(false, true))
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false, true))
 	results := pass.Records
 	if err != nil || results[0].Collected || !strings.HasPrefix(results[0].Left, "now live") {
 		t.Fatalf("recheck under the lane: %+v, %v", results, err)
@@ -138,7 +142,7 @@ func TestCollectLeavesAnInboxANewerConnectionOwns(t *testing.T) {
 	if err := os.WriteFile(metaPath, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pass, err := d.collectConnections(time.Hour, gcDaemonProbe(false))
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
 	results := pass.Records
 	if err != nil || !results[0].Collected {
 		t.Fatalf("collect: %+v, %v", results, err)
@@ -160,7 +164,7 @@ func TestCollectFailureBeforeTheRecordMovesLeavesItForTheNextPass(t *testing.T) 
 	if err := os.MkdirAll(blocker, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	pass, err := d.collectConnections(time.Hour, gcDaemonProbe(false))
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
 	results := pass.Records
 	if err != nil || results[0].Collected || !strings.HasPrefix(results[0].Left, "archive inbox") {
 		t.Fatalf("blocked archive: %+v, %v", results, err)
@@ -176,7 +180,7 @@ func TestCollectFailureBeforeTheRecordMovesLeavesItForTheNextPass(t *testing.T) 
 	if err := os.RemoveAll(filepath.Dir(blocker)); err != nil {
 		t.Fatal(err)
 	}
-	if pass, err = d.collectConnections(time.Hour, gcDaemonProbe(false)); err != nil || !pass.Records[0].Collected {
+	if pass, err = d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false)); err != nil || !pass.Records[0].Collected {
 		t.Fatalf("second pass: %+v, %v", pass, err)
 	}
 }
@@ -218,7 +222,7 @@ func TestCollectWaitsForAConnectInProgress(t *testing.T) {
 	d.connectGate <- struct{}{}
 	done := make(chan []GCResult, 1)
 	go func() {
-		pass, _ := d.collectConnections(time.Hour, gcDaemonProbe(false))
+		pass, _ := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
 		done <- pass.Records
 	}()
 	select {
@@ -254,7 +258,7 @@ func TestCollectSweepsTokensNoRecordReferences(t *testing.T) {
 	c.Claude = &ClaudeConnectionConfig{CredentialRef: kept}
 
 	d.skipped = []string{"broken.json"}
-	pass, err := d.collectConnections(24*time.Hour*365, gcDaemonProbe(true))
+	pass, err := d.collectConnections(context.Background(), GCLimits{Grace: 365 * 24 * time.Hour, Inactive: 365 * 24 * time.Hour}, gcDaemonProbe(true))
 	if err != nil || pass.OrphanTokens != 0 || pass.TokenSweepOff == "" {
 		t.Fatalf("an unreadable record must stop the sweep: %+v, %v", pass, err)
 	}
@@ -263,12 +267,173 @@ func TestCollectSweepsTokensNoRecordReferences(t *testing.T) {
 	}
 
 	d.skipped = nil
-	if pass, err = d.collectConnections(24*time.Hour*365, gcDaemonProbe(true)); err != nil || pass.OrphanTokens != 1 {
+	if pass, err = d.collectConnections(context.Background(), GCLimits{Grace: 365 * 24 * time.Hour, Inactive: 365 * 24 * time.Hour}, gcDaemonProbe(true)); err != nil || pass.OrphanTokens != 1 {
 		t.Fatalf("sweep: %+v, %v", pass, err)
 	}
 	for name, want := range map[string]bool{kept: true, orphan: false, "notes.txt": true} {
 		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
 			t.Errorf("%s present=%v, want %v", name, err == nil, want)
+		}
+	}
+}
+
+// once its consumer is confirmed gone, a pending attempt no longer blocks: its
+// message is past the delivered offset, so the unread export carries it.
+func TestCollectArchivesAGoneConsumersPendingMessage(t *testing.T) {
+	d, _, c := staleConnection(t)
+	c.State = "socket-ready"
+	c.Pending = &queueAttempt{ClientID: "cbus-x-1", End: c.Offset + 1}
+	if err := d.save(c); err != nil {
+		t.Fatal(err)
+	}
+	d.publish(c)
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
+	if err != nil || !pass.Records[0].Collected || !strings.Contains(pass.Records[0].Reason, "pending attempt is archived") {
+		t.Fatalf("collect: %+v, %v", pass, err)
+	}
+	unread, err := os.ReadFile(filepath.Join(gcArchiveOf(d, c.ID), "unread.jsonl"))
+	if err != nil || !strings.Contains(string(unread), "never read") {
+		t.Fatalf("the pending message is not in the export: %q, %v", unread, err)
+	}
+	record, err := os.ReadFile(filepath.Join(gcArchiveOf(d, c.ID), "record.json"))
+	if err != nil || !strings.Contains(string(record), "cbus-x-1") {
+		t.Fatalf("the archived record lost its pending attempt: %v", err)
+	}
+}
+
+func TestGCPassRecordsStatusAndPrunesOnlyOldArchives(t *testing.T) {
+	d, _, c := staleConnection(t)
+	archive := filepath.Join(d.root, "connections", ".archive", "2026-08")
+	old, recent := filepath.Join(archive, "old"), filepath.Join(archive, "recent")
+	for _, dir := range []string{old, recent} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(old, gcNow.Add(-40*24*time.Hour), gcNow.Add(-40*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(recent, gcNow.Add(-2*24*time.Hour), gcNow.Add(-2*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	d.gcPass(context.Background(), GCSettings{Auto: true, Limits: gcTestLimits, ArchiveKeep: 30 * 24 * time.Hour}, gcDaemonProbe(false))
+	d.mu.Lock()
+	st := d.lastGC
+	d.mu.Unlock()
+	if st == nil || st.Collected != 1 || st.ArchivesPruned != 1 || st.Error != "" {
+		t.Fatalf("status = %+v", st)
+	}
+	for path, want := range map[string]bool{old: false, recent: true, gcArchiveOf(d, c.ID): true} {
+		if _, err := os.Stat(path); (err == nil) != want {
+			t.Errorf("%s present=%v, want %v", path, err == nil, want)
+		}
+	}
+}
+
+func TestRunGCPassesAfterItsDelayAndStopsWithTheDaemon(t *testing.T) {
+	d, _, _ := staleConnection(t)
+	d.gcFirst, d.gcEvery = 10*time.Millisecond, time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.runGC(ctx, GCSettings{Auto: true, Limits: gcTestLimits, ArchiveKeep: time.Hour})
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		d.mu.Lock()
+		st := d.lastGC
+		d.mu.Unlock()
+		if st != nil {
+			if st.Collected != 1 {
+				t.Fatalf("first automatic pass: %+v", st)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no automatic pass after the first delay")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the GC loop outlived its daemon")
+	}
+}
+
+func TestRunGCOffDoesNothing(t *testing.T) {
+	d, _, c := staleConnection(t)
+	d.gcFirst = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		d.runGC(ctx, GCSettings{Auto: false, Limits: gcTestLimits})
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		cancel()
+		<-returned
+		t.Fatal("with CBUS_GC=off the loop must return at once, not schedule passes")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.lastGC != nil {
+		t.Fatalf("a disabled GC ran a pass: %+v", d.lastGC)
+	}
+	if _, err := os.Stat(d.recordPath(c.ID)); err != nil {
+		t.Fatalf("a disabled GC moved a record: %v", err)
+	}
+}
+
+func TestLoadGCSettings(t *testing.T) {
+	t.Setenv("CBUS_GC", "")
+	t.Setenv("CBUS_GC_GRACE", "")
+	t.Setenv("CBUS_GC_INACTIVE", "")
+	t.Setenv("CBUS_GC_ARCHIVE", "")
+	s, err := LoadGCSettings()
+	if err != nil || !s.Auto || s.Limits != (GCLimits{Grace: 15 * time.Minute, Inactive: 14 * 24 * time.Hour}) || s.ArchiveKeep != 30*24*time.Hour {
+		t.Fatalf("defaults: %+v, %v", s, err)
+	}
+	t.Setenv("CBUS_GC", "off")
+	t.Setenv("CBUS_GC_GRACE", "1h")
+	t.Setenv("CBUS_GC_INACTIVE", "3d")
+	t.Setenv("CBUS_GC_ARCHIVE", "7d")
+	s, err = LoadGCSettings()
+	if err != nil || s.Auto || s.Limits != (GCLimits{Grace: time.Hour, Inactive: 3 * 24 * time.Hour}) || s.ArchiveKeep != 7*24*time.Hour {
+		t.Fatalf("overrides: %+v, %v", s, err)
+	}
+	for name, bad := range map[string]string{"CBUS_GC": "maybe", "CBUS_GC_GRACE": "-5m", "CBUS_GC_ARCHIVE": "0d"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, bad)
+			if _, err := LoadGCSettings(); err == nil {
+				t.Fatalf("%s=%q accepted", name, bad)
+			}
+		})
+	}
+}
+
+func TestConnectNamesTheArchivedPredecessorOfTheSameSession(t *testing.T) {
+	d, _, c := staleConnection(t)
+	if pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false)); err != nil || !pass.Records[0].Collected {
+		t.Fatalf("collect: %+v, %v", pass, err)
+	}
+	fresh := &ConnectionState{ID: "fresh", Channel: c.Channel, Alias: c.Alias, ThreadID: c.ThreadID}
+	got := d.archivedPredecessor(fresh)
+	if got == nil || got.ID != c.ID || got.Unread != 1 || got.Path != gcArchiveOf(d, c.ID) {
+		t.Fatalf("predecessor = %+v", got)
+	}
+	for name, other := range map[string]*ConnectionState{
+		"another channel": {ID: "x", Channel: "other", ThreadID: c.ThreadID},
+		"another session": {ID: "x", Channel: c.Channel, ThreadID: "01a0b0c6-0000-7fd0-9319-1ab0275adc21"},
+		"over a relay":    {ID: "x", Channel: c.Channel, ThreadID: c.ThreadID, Relay: &RelayConfig{Host: "server"}},
+	} {
+		if got := d.archivedPredecessor(other); got != nil {
+			t.Errorf("%s matched %+v", name, got)
 		}
 	}
 }

@@ -2,7 +2,8 @@ package client
 
 import (
 	"bufio"
-	"errors"
+	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,7 +27,8 @@ type GCPass struct {
 }
 
 type gcRequest struct {
-	OlderThanSeconds int64 `json:"olderThanSeconds"`
+	GraceSeconds    int64 `json:"graceSeconds"`
+	InactiveSeconds int64 `json:"inactiveSeconds"`
 }
 
 const gcConnectWait = 60 * time.Second
@@ -35,10 +37,10 @@ const gcConnectWait = 60 * time.Second
 // pass: a connect already running finishes first and is seen by the recheck
 // under each lane, and a resume that arrives meanwhile waits, then connects to
 // whatever the pass left, never to a half-collected record.
-func (d *busDaemon) collectConnections(olderThan time.Duration, p gcProbe) (GCPass, error) {
+func (d *busDaemon) collectConnections(ctx context.Context, l GCLimits, p gcProbe) (GCPass, error) {
 	var pass GCPass
-	if olderThan <= 0 {
-		return pass, errors.New("the inactivity limit must be positive")
+	if err := l.valid(); err != nil {
+		return pass, err
 	}
 	wait := time.NewTimer(gcConnectWait)
 	defer wait.Stop()
@@ -49,12 +51,17 @@ func (d *busDaemon) collectConnections(olderThan time.Duration, p gcProbe) (GCPa
 		return pass, errDaemonBusy
 	case <-d.ctx.Done():
 		return pass, errDaemonStopping
+	case <-ctx.Done():
+		return pass, ctx.Err()
 	}
 	for _, s := range d.statusSnapshots() {
-		r := GCResult{GCRecord: classifyGC(s, d.recordPath(s.ID), olderThan, p)}
+		if ctx.Err() != nil {
+			return pass, ctx.Err()
+		}
+		r := GCResult{GCRecord: classifyGC(s, d.recordPath(s.ID), l, p)}
 		r.Unread, r.InboxNote = gcUnread(s, d.root, CBUSDir())
 		if r.Class == GCCollect {
-			r.Archive, r.Left = d.collectOne(s.ID, olderThan, p)
+			r.Archive, r.Left = d.collectOne(s.ID, l, p)
 			r.Collected = r.Left == ""
 			if !r.Collected {
 				r.Archive = ""
@@ -111,7 +118,7 @@ func (d *busDaemon) recordPath(id string) string {
 // collectOne archives one record and everything it owns. Each step before the
 // record file moves leaves the record in place, so a pass that stops partway
 // is finished by the next one; moving the record is the commit.
-func (d *busDaemon) collectOne(id string, olderThan time.Duration, p gcProbe) (string, string) {
+func (d *busDaemon) collectOne(id string, l GCLimits, p gcProbe) (string, string) {
 	c, finish, err := d.beginControl(id)
 	if err != nil {
 		return "", "lane unavailable: " + err.Error()
@@ -120,7 +127,7 @@ func (d *busDaemon) collectOne(id string, olderThan time.Duration, p gcProbe) (s
 	if c == nil {
 		return "", "already removed"
 	}
-	if now := classifyGC(c, d.recordPath(id), olderThan, p); now.Class != GCCollect {
+	if now := classifyGC(c, d.recordPath(id), l, p); now.Class != GCCollect {
 		return "", "now " + now.Class + ": " + now.Reason
 	}
 	if len(c.PresenceOutbox) > 0 {
@@ -240,4 +247,165 @@ func (d *busDaemon) forget(id string) {
 	delete(d.followups, id)
 	delete(d.relayViews, id)
 	delete(d.tickErrors, id)
+}
+
+// GCStatus is the last automatic pass, as /health reports it.
+type GCStatus struct {
+	At             time.Time `json:"at"`
+	Collected      int       `json:"collected"`
+	Left           int       `json:"left"`
+	OrphanTokens   int       `json:"orphanTokensRemoved"`
+	ArchivesPruned int       `json:"archivesPruned"`
+	Error          string    `json:"error,omitempty"`
+}
+
+// runGC collects on its own: shortly after startup, so a reboot's dead sessions
+// go once their grace has passed, then on a fixed interval.
+func (d *busDaemon) runGC(ctx context.Context, s GCSettings) {
+	if !s.Auto {
+		daemonLogf("gc: automatic collection is off (CBUS_GC=off)")
+		return
+	}
+	wait := time.NewTimer(d.gcFirst)
+	defer wait.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wait.C:
+		}
+		d.gcPass(ctx, s, liveGCProbe())
+		wait.Reset(d.gcEvery)
+	}
+}
+
+func (d *busDaemon) gcPass(ctx context.Context, s GCSettings, p gcProbe) {
+	st := GCStatus{At: p.now}
+	pass, err := d.collectConnections(ctx, s.Limits, p)
+	if err != nil {
+		st.Error = err.Error()
+	}
+	for _, r := range pass.Records {
+		if r.Collected {
+			st.Collected++
+			daemonLogf("%s: collected connection %s (%s) into %s", r.Target, r.ID, r.Reason, r.Archive)
+		} else if r.Class == GCCollect {
+			st.Left++
+			daemonLogf("%s: collectable connection %s left: %s", r.Target, r.ID, r.Left)
+		}
+	}
+	st.OrphanTokens = pass.OrphanTokens
+	if st.OrphanTokens > 0 {
+		daemonLogf("gc: removed %d session tokens no record references", st.OrphanTokens)
+	}
+	st.ArchivesPruned = d.pruneArchive(s.ArchiveKeep, p.now)
+	d.mu.Lock()
+	d.lastGC = &st
+	d.mu.Unlock()
+}
+
+// pruneArchive deletes archived records collected more than keep ago. A
+// record's archive folder is last modified when the collection moved the
+// record into it.
+func (d *busDaemon) pruneArchive(keep time.Duration, now time.Time) int {
+	root := filepath.Join(d.root, "connections", ".archive")
+	months, err := os.ReadDir(root)
+	if err != nil {
+		return 0
+	}
+	pruned := 0
+	for _, m := range months {
+		dir := filepath.Join(root, m.Name())
+		ids, err := os.ReadDir(dir)
+		if err != nil || !m.IsDir() {
+			continue
+		}
+		for _, id := range ids {
+			info, err := id.Info()
+			if err != nil || !id.IsDir() || now.Sub(info.ModTime()) <= keep {
+				continue
+			}
+			if os.RemoveAll(filepath.Join(dir, id.Name())) == nil {
+				pruned++
+			}
+		}
+		_ = os.Remove(dir) // the month folder, only when now empty
+	}
+	if pruned > 0 {
+		daemonLogf("gc: deleted %d archived records older than %s", pruned, keep)
+	}
+	return pruned
+}
+
+// ArchivedConnection points a reconnecting session at the record a collection
+// archived while it was down, and the mail that record had not delivered.
+type ArchivedConnection struct {
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Unread int    `json:"unread"`
+}
+
+// archivedPredecessor finds this session's most recent collected record on the
+// same channel. Archives older than a few weeks are pruned, so the scan stays
+// small, and it runs only when a session connects.
+func (d *busDaemon) archivedPredecessor(c *ConnectionState) *ArchivedConnection {
+	if c == nil || c.ThreadID == "" {
+		return nil
+	}
+	var best *ArchivedConnection
+	var bestAt time.Time
+	months, _ := os.ReadDir(filepath.Join(d.root, "connections", ".archive"))
+	for _, m := range months {
+		dir := filepath.Join(d.root, "connections", ".archive", m.Name())
+		ids, _ := os.ReadDir(dir)
+		for _, id := range ids {
+			if id.Name() == c.ID {
+				continue
+			}
+			path := filepath.Join(dir, id.Name())
+			old, err := readArchivedRecord(filepath.Join(path, "record.json"))
+			if err != nil || old.ThreadID != c.ThreadID || old.Channel != c.Channel || !sameRelay(old.Relay, c.Relay) {
+				continue
+			}
+			info, err := id.Info()
+			if err != nil || info.ModTime().Before(bestAt) {
+				continue
+			}
+			bestAt = info.ModTime()
+			best = &ArchivedConnection{ID: old.ID, Path: path, Unread: gcCountUnread(filepath.Join(path, "unread.jsonl"))}
+		}
+	}
+	return best
+}
+
+func readArchivedRecord(path string) (*ConnectionState, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c ConnectionState
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func gcCountUnread(path string) int {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	n := 0
+	scan := bufio.NewScanner(f)
+	scan.Buffer(make([]byte, 64<<10), 16<<20)
+	for scan.Scan() {
+		var m struct {
+			Kind string `json:"kind"`
+		}
+		if json.Unmarshal(scan.Bytes(), &m) == nil && m.Kind != "presence" {
+			n++
+		}
+	}
+	return n
 }

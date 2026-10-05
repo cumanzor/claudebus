@@ -65,6 +65,10 @@ func reportConnect(state client.ConnectionState, asJSON bool) int {
 		target := client.ConnectionTarget(&state)
 		fmt.Fprintf(os.Stderr, "cbus: connected as %s, but a step after registration failed and the daemon retries it: %s (cbus connection status %s)\n", target, state.Deferred, target)
 	}
+	if p := state.Predecessor; p != nil {
+		fmt.Fprintf(os.Stderr, "cbus: this session's previous connection (%s) was collected while the session was down; %d unread messages that arrived meanwhile are in %s\n",
+			p.ID, p.Unread, filepath.Join(p.Path, "unread.jsonl"))
+	}
 	if asJSON {
 		return printConnectionJSON(state)
 	}

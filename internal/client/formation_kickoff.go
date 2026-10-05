@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// Restored sessions retain durable native inboxes. A fork is a new identity and
+// A restored session finds its native inbox, or its archive after a collection. A fork is a new identity and
 // cannot take over an existing managed alias without explicit operator action.
 const kickoffResume = `You are being restored into the "$formation" formation as $addr. This is the SAME session you were before, with its existing transcript and session id.
-Native connections preserve unread mail and uncertain attempts; do not assume mail was lost or ask peers to resend blindly. If an uncertain attempt prevents rebinding, report it for reconciliation rather than deleting the peer.`
+If your connection outlived your last run it still holds its unread mail and uncertain attempts; if cbus collected it after you exited, cbus connect names the archived predecessor and its unread.jsonl holds the mail that arrived meanwhile. Either way, do not assume mail was lost or ask peers to resend blindly. If an uncertain attempt prevents rebinding, report it for reconciliation rather than deleting the peer.`
 
 const kickoffFork = `You are a FORK of the session that was "$alias" in the "$formation" formation, restored as $addr. You carry its transcript up to its checkpoint, but you are a NEW session; the original may still exist and may still be running. You are not it.
 Do NOT act on unfinished work inherited from that transcript. Confirm ownership before continuing. If the alias belongs to the original managed connection, report the conflict rather than taking it over.`

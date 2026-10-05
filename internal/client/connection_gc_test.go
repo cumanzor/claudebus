@@ -21,11 +21,13 @@ func gcTestProbe(alive map[int]string, mtimes map[string]time.Time) gcProbe {
 }
 
 func TestClassifyGCOrder(t *testing.T) {
-	limit := 14 * 24 * time.Hour
+	limits := GCLimits{Grace: 15 * time.Minute, Inactive: 14 * 24 * time.Hour}
 	transcript := "/t/session.jsonl"
 	claude := func() *ClaudeConnectionConfig {
 		return &ClaudeConnectionConfig{Binding: ClaudeConnectBinding{TranscriptPath: transcript, Endpoint: claudeEndpoint{PID: 42, StartToken: "s42"}}}
 	}
+	codexConsumer := &consumerObservation{State: "exited", PID: 9, StartToken: "s9"}
+	pending := &queueAttempt{ClientID: "a1"}
 	cases := []struct {
 		name  string
 		c     ConnectionState
@@ -33,19 +35,24 @@ func TestClassifyGCOrder(t *testing.T) {
 		idle  time.Duration
 		want  string
 	}{
-		{"pending beats a running consumer", ConnectionState{State: "socket-ready", Claude: claude(), Pending: &queueAttempt{ClientID: "a1"}}, map[int]string{42: "s42"}, time.Hour, GCPending},
-		{"running consumer is live even when old", ConnectionState{State: "socket-ready", Claude: claude()}, map[int]string{42: "s42"}, 90 * 24 * time.Hour, GCLive},
-		{"a reused pid is not the consumer", ConnectionState{State: "socket-ready", Claude: claude()}, map[int]string{42: "other"}, time.Hour, GCKeep},
-		{"a stale online observation is not live", ConnectionState{State: "detached", Consumer: &consumerObservation{State: "online", PID: 7, StartToken: "s7"}}, nil, time.Hour, GCCollect},
-		{"detached is collectable at once", ConnectionState{State: "detached", Claude: claude()}, nil, time.Hour, GCCollect},
-		{"inactive past the limit", ConnectionState{State: "error", Claude: claude()}, nil, 15 * 24 * time.Hour, GCCollect},
-		{"inactive under the limit", ConnectionState{State: "disconnected", Claude: claude()}, nil, 3 * 24 * time.Hour, GCKeep},
+		{"a running consumer is live even with a pending attempt", ConnectionState{State: "socket-ready", Claude: claude(), Pending: pending}, map[int]string{42: "s42"}, time.Hour, GCLive},
+		{"a running consumer is live however old", ConnectionState{State: "socket-ready", Claude: claude()}, map[int]string{42: "s42"}, 90 * 24 * time.Hour, GCLive},
+		{"a reused pid means the consumer is gone", ConnectionState{State: "socket-ready", Claude: claude()}, map[int]string{42: "other"}, time.Hour, GCCollect},
+		{"a gone consumer inside the grace is kept", ConnectionState{State: "error", Claude: claude()}, nil, 5 * time.Minute, GCKeep},
+		{"a gone consumer past the grace is collected", ConnectionState{State: "error", Claude: claude()}, nil, time.Hour, GCCollect},
+		{"a gone consumer's pending attempt does not block", ConnectionState{State: "socket-ready", Claude: claude(), Pending: pending}, nil, time.Hour, GCCollect},
+		{"a gone Codex consumer is treated the same", ConnectionState{State: "queue-ready", Consumer: codexConsumer}, nil, time.Hour, GCCollect},
+		{"pending with no consumer on file waits", ConnectionState{State: "error", Pending: pending}, nil, 30 * 24 * time.Hour, GCPending},
+		{"a stale online observation is not live", ConnectionState{State: "detached", Consumer: &consumerObservation{State: "online", PID: 7, StartToken: "s7"}}, nil, time.Minute, GCCollect},
+		{"detached is collected at once", ConnectionState{State: "detached"}, nil, time.Minute, GCCollect},
+		{"no consumer on file, past the inactivity limit", ConnectionState{State: "error", RolloutPath: transcript}, nil, 15 * 24 * time.Hour, GCCollect},
+		{"no consumer on file, under the inactivity limit", ConnectionState{State: "disconnected", RolloutPath: transcript}, nil, 3 * 24 * time.Hour, GCKeep},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.c.ID, tc.c.Channel, tc.c.Alias, tc.c.Harness = "abc", "ch", "al", daemonHarnessClaude
 			p := gcTestProbe(tc.alive, map[string]time.Time{transcript: gcNow.Add(-tc.idle)})
-			if got := classifyGC(&tc.c, "/nonexistent", limit, p); got.Class != tc.want {
+			if got := classifyGC(&tc.c, "/nonexistent", limits, p); got.Class != tc.want {
 				t.Fatalf("class %s (%s), want %s", got.Class, got.Reason, tc.want)
 			}
 		})
@@ -54,7 +61,7 @@ func TestClassifyGCOrder(t *testing.T) {
 
 func TestClassifyGCPendingNamesItsCommands(t *testing.T) {
 	c := &ConnectionState{ID: "abc", Channel: "ch", Alias: "al", Relay: &RelayConfig{Host: "server"}, Pending: &queueAttempt{ClientID: "cbus-x-1"}}
-	r := classifyGC(c, "/nonexistent", time.Hour, gcTestProbe(nil, nil))
+	r := classifyGC(c, "/nonexistent", GCLimits{Grace: time.Minute, Inactive: time.Hour}, gcTestProbe(nil, nil))
 	want := "cbus connection reconcile ch@server/al  (then, if still pending: cbus connection abandon ch@server/al --pending cbus-x-1 --reason <text>)"
 	if r.Next != want {
 		t.Fatalf("next = %q", r.Next)
@@ -114,7 +121,7 @@ func TestPlanConnectionGCCountsOnlyThisRecordsUnreadMail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, err := planConnectionGC(daemon, bus, time.Hour, gcTestProbe(nil, nil))
+	plan, err := planConnectionGC(daemon, bus, GCLimits{Grace: time.Minute, Inactive: time.Hour}, gcTestProbe(nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +144,7 @@ func TestPlanConnectionGCCountsOnlyThisRecordsUnreadMail(t *testing.T) {
 }
 
 func TestPlanConnectionGCWithoutRecords(t *testing.T) {
-	plan, err := planConnectionGC(filepath.Join(t.TempDir(), ".daemon"), t.TempDir(), time.Hour, gcTestProbe(nil, nil))
+	plan, err := planConnectionGC(filepath.Join(t.TempDir(), ".daemon"), t.TempDir(), GCLimits{Grace: time.Minute, Inactive: time.Hour}, gcTestProbe(nil, nil))
 	if err != nil || len(plan.Records) != 0 {
 		t.Fatalf("empty store: %+v, %v", plan, err)
 	}
