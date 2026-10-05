@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -18,9 +17,6 @@ import (
 )
 
 func runConnect(args []string) int {
-	if runtime.GOOS == "windows" {
-		return die("cbus connect is not available on windows in phase 1")
-	}
 	pos, asJSON, opts, err := connectArgs(args)
 	if err != nil {
 		return die("%v", err)
@@ -259,9 +255,6 @@ func runConnectionAbandon(args []string) int {
 }
 
 func runDaemon(args []string) int {
-	if runtime.GOOS == "windows" {
-		return die("cbus daemon is not available on windows in phase 1")
-	}
 	pos, asJSON, err := connectionArgs(args)
 	if err != nil {
 		return die("%v", err)
@@ -365,16 +358,13 @@ func startDaemon() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "daemon", "serve")
-	cmd.Env = daemonEnvironment(os.Environ())
-	detachProcess(cmd)
-	cmd.Stdout = log
-	cmd.Stderr = log
-	if err = cmd.Start(); err != nil {
-		return err
-	}
-	_ = cmd.Process.Release()
-	return nil
+	return detachDaemon(func() *exec.Cmd {
+		cmd := exec.Command(exe, "daemon", "serve")
+		cmd.Env = daemonEnvironment(os.Environ())
+		cmd.Stdout = log
+		cmd.Stderr = log
+		return cmd
+	})
 }
 
 func connectionArgs(args []string) ([]string, bool, error) {

@@ -36,7 +36,7 @@ func checkDaemonCompatibility(h daemonHealth) error {
 }
 
 func daemonAbsent(err error) bool {
-	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) || socketAbsent(err)
 }
 
 // daemonExiting reports a probe cut off by a daemon that is shutting down: its server
@@ -44,7 +44,7 @@ func daemonAbsent(err error) bool {
 // after a stop was sent, and never proof of exit on its own; the lock decides.
 func daemonExiting(ctx context.Context, err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || socketReset(err) ||
 		(errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil)
 }
 

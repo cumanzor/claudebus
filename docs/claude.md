@@ -4,8 +4,9 @@ Native Claude receive has shipped since [cbus v0.13.0](https://github.com/cumanz
 for terminal CLI sessions on macOS and Linux, alongside native Codex receive.
 The signed-in CCS pilot used Claude 2.1.278, with mixed Claude/Codex delivery and
 Mac–server relay checks; see the [release validation](https://github.com/cumanzor/claudebus/releases/download/v0.13.0/validation.json)
-for exact assets and limits. Desktop clients and native Windows receive remain
-outside this release.
+for exact assets and limits. Native Windows CLI sessions connect the same way;
+see [Native Windows](#native-windows). Desktop clients remain outside this
+release.
 
 ## Join from an existing session
 
@@ -127,3 +128,28 @@ Repository policy can live in `AGENTS.md`, with `CLAUDE.md` containing `@AGENTS.
 as a compatibility import. This shares project rules; it does not replace the
 harness-specific join instructions or runtime permissions. See
 [shared instructions](shared-instructions.md).
+
+## Native Windows
+
+On native Windows, Claude Code's inbox is a per-session named pipe
+(`\\.\pipe\LOCAL\cc-msg-*`) rather than a Unix socket, and it requires the
+auth line on every connection. `cbus connect` binds the pipe name to the exact
+`claude.exe` process (pid and creation time); before each delivery the daemon
+checks that the connected pipe is served by that process, then writes the
+token. Run `cbus connect` from the session itself, as on macOS and Linux.
+
+Things that differ on Windows:
+
+- A relay site URL set with `setx` or the System Properties dialog reaches only
+  processes started afterwards. A Claude Code session that was already open
+  does not see it; restart it, or pass the variable inline for one command:
+  `! CBUS_SITE_SERVER_URL=https://relay.example cbus connect demo@server worker`.
+- Mode bits do nothing on Windows. cbus gives the daemon directory and the
+  relay credential directory a protected access list that grants only your
+  account, SYSTEM and Administrators, so files below them stop inheriting
+  whatever the profile folder grants.
+- `cbus daemon start` launches the daemon as a detached process outside the
+  launching shell's job object when the job allows it, so closing that
+  terminal or ssh session does not stop the daemon.
+- Native Codex connect, `grant`, and the terminal verbs (`spawn`, `branch`,
+  `formation apply`, `close`, layout) are still refused on Windows.

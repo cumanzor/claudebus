@@ -4,6 +4,60 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 02:31:30 UTC] [Client/Windows] Native Claude Code connect and the daemon on Windows
+
+[Attempt #1] Two commits. Daemon: cmd/cbus/connection.go,
+daemon_upgrade.go, detach_daemon_{unix,windows}.go,
+socket_errno_{unix,windows}.go, internal/client/daemon.go, cred.go,
+owneronly_{unix,windows}.go (+ Windows test). Connect: the Claude
+transport, credential store, current-session check, connect identity,
+admission and reconnect files in internal/client become shared, with
+claude_conn_{unix,windows}.go, claude_credentials_{unix,windows}.go and
+the Windows endpoint, session and transcript files holding the platform
+parts. Docs: docs/claude.md (Native Windows), docs/install.md,
+commands/bus-join.md.
+
+[What changed]
+- `cbus daemon` runs on Windows. Its AF_UNIX control socket already worked.
+  The health probe now treats WSAENETDOWN (missing directory) and
+  WSAECONNREFUSED (missing or stale socket) as "no daemon", and
+  WSAECONNRESET/WSAECONNABORTED as a daemon shutting down; Go's portable
+  errno constants never match Winsock codes. `daemon start` launches the
+  server detached and outside the caller's job object when the job allows
+  it, so it survives the terminal or ssh session closing.
+- The daemon directory and the relay credential directory get a protected
+  DACL granting only the user, SYSTEM and Administrators. 0700/0600 do
+  nothing on Windows, and a profile folder can grant other accounts access
+  that every child inherits.
+- `cbus connect` works from a native Windows Claude Code CLI session. The
+  endpoint is the inbox pipe name plus the claude.exe pid and creation
+  time. Before the auth line is written, GetNamedPipeServerProcessId must
+  return that pid. Pipe I/O past the deadline is cancelled with CancelIoEx,
+  since a pipe handle takes no deadline. The transcript is read with
+  shared-delete access.
+- Native Codex connect is refused on Windows with a message saying so.
+
+[Possible Ripple Effects]
+- macOS and Linux behavior is unchanged; the shared files keep the same
+  logic and the unix checks moved into platform files verbatim.
+- A Windows session started before a relay URL was set in the user
+  environment does not see it; docs/claude.md covers restarting or passing
+  it inline.
+- `grant` and the terminal verbs remain refused on Windows.
+
+[Testing Notes]
+Windows test binaries (Windows 11) for every package pass, including new
+tests for the owner-only DACL (a no-op mutant fails on the protected-DACL
+assertion) and for the pipe transport: auth line then message, no bytes to
+a pipe served by another pid, a server that never reads cannot hold the send
+past its deadline, pipe-name validation. macOS `go test ./...` green; vet
+clean for darwin, linux amd64/arm64 and windows. Live: daemon
+start/restart/stop across three ssh sessions with the socket inheriting the
+protected DACL; an interactive Windows Claude Code session ran
+`cbus connect demo@server` and a message from a Mac session through the
+relay was submitted over the pipe and observed in the Windows transcript
+112 ms later, and the Windows session's reply reached the Mac session.
+
 ## [2026-10-05 02:02:52 UTC] [Client/Relay/Windows] Directory and spool fsync on Windows
 
 [Attempt #1] Files: internal/dirsync/ (new: dirsync.go, dirsync_unix.go,
