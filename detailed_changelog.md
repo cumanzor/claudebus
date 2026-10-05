@@ -4,6 +4,58 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 03:38:13 UTC] [Release] v0.19.0: Windows native connect and daemon, install-mods
+
+[Attempt #1] Range v0.18.0..4e15fb8 (pull requests #54, #56, #57, #58, #59).
+Files: detailed_changelog.md, simple_changelog.md. Written after the tag,
+so the tag does not include this entry.
+
+[What changed]
+- Windows (#56, #57, #58; #59 landed #57 and #58 on main after the stacked
+  merges): directory and spool fsync work on Windows; `cbus daemon` runs
+  there, detached from the launching shell's job object, with owner-only
+  access lists on its directory and the relay credentials; `cbus connect`
+  works from a native Windows Claude Code CLI session over its named-pipe
+  inbox. Native Codex connect stays refused on Windows.
+- `cbus install-mods` and the cbus-compact Claude Code mod (#54), merged
+  after v0.18.0 was tagged.
+- Relay: the spool fsyncs an existing file through a read-write handle and
+  directory syncs go through the shared helper. No change on Linux.
+
+[Possible Ripple Effects]
+- Daemons need `cbus daemon restart` to load the new binary; connections and
+  pending mail are retained.
+- An updater older than this release does not run `install-mods` during
+  selfupdate; run `cbus install-mods` once if you want the mods.
+- A Windows session started before a relay URL was set in the user
+  environment does not see it (docs/claude.md, Native Windows).
+
+[Testing Notes]
+Candidate gates on the tested tree (identical to the tag): macOS `go test
+./...`, vet for darwin, linux amd64/arm64 and windows; every Windows test
+binary on Windows 11. Claude canaries against a fresh-clone build: the pair
+canary passed; the relay CLI canary passed both cases (36/36 and 22/22
+checks). The mixed Codex/Claude canary passed 36 of 37 checks; the
+remaining check, codex_close_left_claude_and_daemon, fails the same way on
+v0.18.0 and asserts the Claude receiver's state while its receipt follow-up
+is still pending, so it is a canary timing issue, not a regression. Live:
+a Mac session and a Windows 11 Claude Code session exchanged messages both
+ways through the relay. Release: five assets built from two fresh clones at
+the tag were byte-identical, and the published assets match:
+
+```
+d7ef0fb63b462bfc8bf95880161212f8c52235efb32d890d0ac2b51245d8fdbd  cbus-darwin-amd64
+d292aec36c637e167eca3281fdf6746081b44a9d0179085d407d50dc7c266010  cbus-darwin-arm64
+417bc85463463c339191c4853d66013b14304f785d0be2ec990d5ed53f17e8c5  cbus-linux-amd64
+615c3539b930b5ebfaca57381c800b4131238be364a396e9a0aa25fae846d8f7  cbus-linux-arm64
+ac58a7bea25d8c04c02768c151b8da1983193844c76b34aca6b4cb668c5af2e5  cbus-windows-amd64.exe
+```
+
+Installed by selfupdate on macOS, Linux and Windows (Windows over the
+anonymous HTTPS path); daemons restarted on macOS and Linux with every
+connection retained; relay rebuilt from the tag and a relay delivery checked
+after its restart.
+
 ## [2026-10-05 02:31:30 UTC] [Client/Windows] Native Claude Code connect and the daemon on Windows
 
 [Attempt #1] Two commits. Daemon: cmd/cbus/connection.go,
