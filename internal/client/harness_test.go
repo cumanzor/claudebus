@@ -648,7 +648,8 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 	t.Setenv("CBUS_DIR", root)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "SID123")
 	t.Setenv("PATH", "/custom/bin:/usr/bin")
-	t.Setenv("CLAUDE_CONFIG_DIR", "/home/u/.ccs/instances/alpha")
+	ccsDir := filepath.Join(t.TempDir(), ".ccs", "instances", "alpha")
+	t.Setenv("CLAUDE_CONFIG_DIR", ccsDir)
 
 	f := &fakeForker{}
 	ch, alias, child, err := Branch("tab", "mychan", "", "", f)
@@ -670,7 +671,7 @@ func TestBranchReplicatesEnvCCS(t *testing.T) {
 	if f.spec.Env["PATH"] != "/custom/bin:/usr/bin" {
 		t.Errorf("PATH not replicated: %q", f.spec.Env["PATH"])
 	}
-	if f.spec.Env["CLAUDE_CONFIG_DIR"] != "/home/u/.ccs/instances/alpha" {
+	if f.spec.Env["CLAUDE_CONFIG_DIR"] != ccsDir {
 		t.Errorf("CLAUDE_CONFIG_DIR not replicated: %q", f.spec.Env["CLAUDE_CONFIG_DIR"])
 	}
 	if f.spec.Dir == "" {

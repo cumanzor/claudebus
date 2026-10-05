@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"claudebus/internal/core"
+	"claudebus/internal/dirsync"
 	"claudebus/internal/wire"
 )
 
@@ -625,12 +626,7 @@ func (d *busDaemon) syncRelayParents(c *ConnectionState) error {
 func syncRelayDirectories(start string) error {
 	stop := filepath.Dir(filepath.Clean(CBUSDir()))
 	for dir := start; ; dir = filepath.Dir(dir) {
-		f, err := os.Open(dir)
-		if err != nil {
-			return err
-		}
-		err = errors.Join(f.Sync(), f.Close())
-		if err != nil {
+		if err := dirsync.Sync(dir); err != nil {
 			return err
 		}
 		if dir == stop || filepath.Dir(dir) == dir {

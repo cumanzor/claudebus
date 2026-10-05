@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"claudebus/internal/core"
+	"claudebus/internal/dirsync"
 )
 
 type ConnectRequest struct {
@@ -487,12 +488,7 @@ func durableJSON(path string, b []byte) error {
 	if err = os.Rename(tmp, path); err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return dirsync.Sync(filepath.Dir(path))
 }
 
 func writeDaemonMeta(dir string, m peerMeta) error {
