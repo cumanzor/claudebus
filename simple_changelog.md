@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-05 03:38:13 UTC] [Release] v0.19.0 (tag at `4e15fb8`): native Claude Code connect and the cbus daemon on Windows, so a Windows session joins cross-machine and local channels with daemon delivery (#56, #57, #58, landed by #59); the `cbus install-mods` verb and the cbus-compact mod (#54). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked. Relay rebuilt from the tag and deployed.
+
 [2026-10-05 02:31:30 UTC] [Client/Windows] Native Claude Code connect and the cbus daemon run on Windows. Claude Code's Windows inbox is a named pipe; cbus binds it to the exact claude.exe process and checks the pipe's server process before writing the token. The daemon starts detached from the launching shell's job object and keeps its directory and the relay credentials under an owner-only access list. Cross-machine delivery verified both ways between a Mac and a Windows 11 session through a relay. Native Codex connect stays refused on Windows.
 
 [2026-10-05 02:02:52 UTC] [Client/Relay/Windows] Durable writes no longer fail on Windows with `sync <dir>: Access is denied`. Directory fsync goes through a new `internal/dirsync` package that syncs on unix and does nothing on Windows, where a read-only directory handle cannot be flushed and NTFS journals the entry change. The relay spool reopens an existing file for writing before its fsync. Unblocks the daemon and relay code on Windows; no behavior change on macOS or Linux.
