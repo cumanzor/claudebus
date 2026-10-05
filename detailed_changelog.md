@@ -4,6 +4,58 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 04:29:46 UTC] [Client/Daemon] connection gc collects (#43, step 2)
+
+[Attempt #1] Files: internal/client/daemon_gc.go (new: collectConnections,
+collectOne, gcOwnsPeerDir, gcExportUnread, removeClaudeCredential,
+sweepOrphanCredentials, forget), internal/client/daemon_gc_test.go (new),
+internal/client/connection_gc.go (liveGCProbe), internal/client/daemon.go
+(POST /gc, health "gc", nil guard), internal/client/daemon_recovery.go (nil
+guard), cmd/cbus/connection_gc.go and its test, cmd/cbus/usage.go,
+docs/usage.md.
+
+[What changed]
+- Without `--dry-run`, `cbus connection gc` starts the daemon if needed and
+  asks it to collect (POST /gc). Records live in the daemon's memory as well
+  as on disk, so collection never edits files behind a running daemon.
+- The pass holds the connect gate. Each collectable record is rechecked under
+  its lane before anything moves, so a session that resumed after planning is
+  left alone.
+- Per record, under its lane and peer lock: stop its relay and queue, export
+  the lines past its delivered offset to unread.jsonl, move its inbox folder
+  into the archive when the record still owns it (a newer connection's folder
+  stays), delete its session token unless another record uses it, then move
+  the record file into the archive and drop every in-memory entry. Moving the
+  record is the commit: a failure before it leaves the record for the next
+  pass.
+- The same pass deletes session tokens no loaded record references (a
+  reconnect with a new capability leaves the old token behind). It skips the
+  sweep when any record failed to load.
+- Two control paths that iterate an earlier snapshot now treat a record
+  collected since the snapshot as absent instead of dereferencing nil.
+
+[Possible Ripple Effects]
+- Archives are not pruned yet; leases and the automatic pass come next.
+- A CLI against an older daemon gets a 404 from /gc and is told to restart the
+  daemon.
+- Collected peers disappear from `cbus list`; their mail is in the archive.
+
+[Testing Notes]
+Daemon tests for archive-and-forget (including a reload), pending and live
+records left alone, a record that resumes between plan and lane, an inbox a
+newer connection owns, a failed step before the commit followed by a
+successful second pass, shared versus unshared tokens, waiting for a connect
+in progress, and the orphan-token sweep. Mutants for each of those (no
+recheck, every inbox treated as owned, forget as a no-op, record committed
+before the inbox moves, gate not held, shared token deleted, sweep ignoring
+unloaded records) each fail them. macOS `go test ./...` and `-race` on
+internal/client and cmd/cbus green; vet for linux amd64/arm64 and windows;
+the full client and cmd suites pass on Windows 11. Field test on a copy of a
+real store (115 records) with relay URLs blanked: 44 collected, matching the
+dry run exactly, 0 left; a restart loaded the remaining 71 with none skipped;
+no remaining record's inbox moved; 39 tokens went with their records and 19
+orphan tokens were swept, leaving exactly the 66 still referenced.
+
 ## [2026-10-05 03:58:42 UTC] [Client/Daemon] connection gc --dry-run (#43, step 1)
 
 [Attempt #1] Files: internal/client/connection_gc.go (new: PlanConnectionGC,

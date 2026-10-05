@@ -67,7 +67,7 @@ func (d *busDaemon) lockConnectionWithRelease(target string) (*ConnectionState, 
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if c.State == "detached" {
+		if c == nil || c.State == "detached" { // collected since the snapshot
 			finish()
 			continue
 		}

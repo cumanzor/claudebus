@@ -1,8 +1,11 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"claudebus/internal/client"
 )
 
 func TestParseGCDuration(t *testing.T) {
@@ -18,11 +21,16 @@ func TestParseGCDuration(t *testing.T) {
 	}
 }
 
-func TestConnectionGCRefusesWithoutDryRun(t *testing.T) {
-	t.Setenv("CBUS_DIR", t.TempDir())
-	var rc int
-	out := captureStderr(t, func() { rc = runConnectionGC(nil) })
-	if rc == 0 || out == "" {
-		t.Fatalf("gc without --dry-run must refuse, rc=%d out=%q", rc, out)
+func TestRenderGCResultsNamesWhatWasLeft(t *testing.T) {
+	results := []client.GCResult{
+		{GCRecord: client.GCRecord{Target: "dev/old", Class: client.GCCollect, Reason: "detached by leave or unregister", Unread: 2}, Collected: true, Archive: "/s/.daemon/connections/.archive/2026-10/abc"},
+		{GCRecord: client.GCRecord{Target: "dev/busy", Class: client.GCCollect}, Left: "now live: its consumer process is running"},
+		{GCRecord: client.GCRecord{Target: "dev/p", Class: client.GCPending}},
+	}
+	out := renderGCResults(client.GCPass{Records: results, OrphanTokens: 3}, 14*24*time.Hour)
+	for _, want := range []string{"collected 1 of 3", "1 pending", "dev/old", "2 unread exported", "left      dev/busy", "now live", "reconcile or abandon", "removed 3 session tokens"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
 	}
 }

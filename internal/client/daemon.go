@@ -293,11 +293,33 @@ func (d *busDaemon) handler(stop context.CancelFunc) http.Handler {
 			return
 		}
 		if r.URL.Path == "/health" && r.Method == "GET" {
-			health := map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true, "wake": true}
+			health := map[string]any{"running": true, "pid": os.Getpid(), "start": d.start, "protocol": DaemonProtocolVersion, "version": d.version, "fencedDisconnect": true, "wake": true, "gc": true}
 			if len(d.skipped) > 0 {
 				health["skippedRecords"] = d.skipped
 			}
 			writeDaemonJSON(w, health)
+			return
+		}
+		if r.URL.Path == "/gc" && r.Method == "POST" {
+			var req gcRequest
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			pass, err := d.collectConnections(time.Duration(req.OlderThanSeconds)*time.Second, liveGCProbe())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			for _, r := range pass.Records {
+				if r.Collected {
+					daemonLogf("%s: collected connection %s into %s", r.Target, r.ID, r.Archive)
+				}
+			}
+			if pass.OrphanTokens > 0 {
+				daemonLogf("gc: removed %d session tokens no record references", pass.OrphanTokens)
+			}
+			writeDaemonJSON(w, pass)
 			return
 		}
 		if r.URL.Path == "/wake" && r.Method == "POST" {
@@ -653,7 +675,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			if err != nil {
 				return nil, err
 			}
-			if c.State == "detached" || !d.owns(c) {
+			if c == nil || c.State == "detached" || !d.owns(c) { // nil: collected since the snapshot
 				finish()
 				continue
 			}
