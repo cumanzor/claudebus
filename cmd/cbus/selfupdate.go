@@ -148,11 +148,19 @@ func verifyDownloaded(binPath, wantTag string) error {
 	return nil
 }
 
-// refreshAssets execs the new binary. Codex skills use install receipts to update
-// prior shipped content while preserving local edits; no permission rules change.
-// Mods are force-refreshed like commands, so a mod edit is lost on update.
+// refreshAssets execs the new binary, which knows the assets its own release
+// carries. A binary released before install-assets gets the fixed list instead.
 func refreshAssets(exePath string) {
-	for _, args := range assetRefreshCommands() {
+	if supportsInstallAssets(exePath) {
+		cmd := exec.Command(exePath, "install-assets")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "cbus: note: install-assets reported problems (see above)")
+		}
+		return
+	}
+	for _, args := range legacyAssetRefreshCommands() {
 		cmd := exec.Command(exePath, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -164,7 +172,15 @@ func refreshAssets(exePath string) {
 	}
 }
 
-func assetRefreshCommands() [][]string {
+// supportsInstallAssets reads the binary's usage rather than running the verb,
+// so an older binary is never handed a command it does not know.
+func supportsInstallAssets(exePath string) bool {
+	out, _ := exec.Command(exePath, "--help").Output()
+	return bytes.Contains(out, []byte("cbus install-assets"))
+}
+
+// legacyAssetRefreshCommands is what releases before install-assets carried.
+func legacyAssetRefreshCommands() [][]string {
 	return [][]string{{"install-commands", "--force"}, {"install-roles", "--force"}, {"install-codex-skills"}, {"install-mods", "--force"}}
 }
 

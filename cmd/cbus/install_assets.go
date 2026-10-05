@@ -384,3 +384,32 @@ func parseInstallArgs(args []string, use string) (dir string, force bool, err er
 	}
 	return dir, p.flags["--force"], nil
 }
+
+// assetInstalls is every asset a release carries, installed the way an update
+// installs it: commands, roles and mods are overwritten, Codex skills keep local
+// edits. selfupdate and get.sh run this list from the newly installed binary, so
+// an asset type added in a release is installed by the first update to it.
+var assetInstalls = []struct {
+	verb string
+	args []string
+	run  func([]string) int
+}{
+	{"install-commands", []string{"--force"}, runInstallCommands},
+	{"install-roles", []string{"--force"}, runInstallRoles},
+	{"install-codex-skills", nil, runInstallCodexSkills},
+	{"install-mods", []string{"--force"}, runInstallMods},
+}
+
+func runInstallAssets(args []string) int {
+	if err := noExtra(args, 0, "usage: cbus install-assets"); err != nil {
+		return die("%v", err)
+	}
+	rc := 0
+	for _, a := range assetInstalls {
+		if a.run(a.args) != 0 {
+			fmt.Fprintf(os.Stderr, "cbus: note: %s reported problems (see above)\n", a.verb)
+			rc = 1
+		}
+	}
+	return rc
+}
