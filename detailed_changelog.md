@@ -4,6 +4,44 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-05 03:58:42 UTC] [Client/Daemon] connection gc --dry-run (#43, step 1)
+
+[Attempt #1] Files: internal/client/connection_gc.go (new: PlanConnectionGC,
+classifyGC, gcConsumerAlive, gcLastActive, gcUnread),
+internal/client/connection_gc_test.go (new), cmd/cbus/connection_gc.go and
+its test (new), cmd/cbus/connection.go, cmd/cbus/usage.go, docs/usage.md.
+
+[What changed]
+- No code path removes a connection record. `leave`, `unregister` and
+  `disconnect` keep them, and a reconnect after a detach mints a new id, so
+  records pile up. This adds the planning half of collection only: a
+  read-only report straight from the record files, which works with the
+  daemon stopped.
+- Classes, in precedence order: pending (never collected; prints the exact
+  `reconcile` and `abandon` commands), live (consumer pid alive with the
+  recorded start time; a stale "online" observation or a reused pid does not
+  count), collect (detached, or inactive past the limit), keep.
+- Inactivity is measured from the session's own transcript or rollout mtime
+  and the last accepted delivery, not the record file, which every daemon
+  probe rewrites.
+- Unread mail is non-presence lines past the delivered offset, counted only
+  when the inbox is still this record's: a reconnect after a detach reuses
+  the folder under a new id, and a replaced inbox is reported as unknown.
+- Without `--dry-run` the verb refuses and says collection is not built yet.
+
+[Possible Ripple Effects]
+- None at runtime: nothing reads or writes differently outside the new verb.
+
+[Testing Notes]
+Unit tests for class precedence, the pending commands, unread counting
+(offset, presence, foreign owner, replaced inbox), skipped records, an
+empty store, duration parsing and the refusal. Mutants that drop the
+start-time check, the owner check or the presence filter each fail them.
+macOS `go test ./...` green, vet for linux amd64/arm64 and windows, the new
+tests pass on Windows 11. Run against a real store of 115 records: 1 live,
+5 pending, 45 collect, 64 keep at 14d (109 collect at 1h), with the daemon
+directory's content hash identical before and after.
+
 ## [2026-10-05 03:54:29 UTC] [Client/Install] install-assets: the new binary decides what an update installs
 
 [Attempt #1] Files: cmd/cbus/install_assets.go (assetInstalls,

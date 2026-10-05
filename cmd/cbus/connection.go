@@ -105,12 +105,15 @@ func runConnection(args []string) int {
 	if len(args) > 0 && args[0] == "abandon" {
 		return runConnectionAbandon(args[1:])
 	}
+	if len(args) > 0 && args[0] == "gc" {
+		return runConnectionGC(args[1:])
+	}
 	pos, asJSON, err := connectionArgs(args)
 	if err != nil {
 		return die("%v", err)
 	}
 	if len(pos) < 1 || len(pos) > 2 {
-		return die("usage: cbus connection status [channel/alias] [--json] | reconcile|disconnect <channel/alias> | abandon <channel/alias> --pending <client-id> --reason <text>")
+		return die("usage: cbus connection status [channel/alias] [--json] | reconcile|disconnect <channel/alias> | abandon <channel/alias> --pending <client-id> --reason <text> | gc --dry-run [--older-than D]")
 	}
 	switch pos[0] {
 	case "status":

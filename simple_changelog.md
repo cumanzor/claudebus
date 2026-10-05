@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-05 03:58:42 UTC] [Client/Daemon] New `cbus connection gc --dry-run` reports what a collection would do with every stored connection record: keep it while its consumer process is running, never touch one with a pending attempt (naming the reconcile and abandon commands), collect a detached one, and collect any other once its session has been inactive past --older-than (default 14d). It counts unread mail a collection would export first and removes nothing. First step of #43.
+
 [2026-10-05 03:54:29 UTC] [Client/Install] New `cbus install-assets` installs commands, roles, Codex skills and mods the way an update does. `cbus selfupdate` and get.sh now run it from the newly installed binary instead of a list fixed in the updater, so an asset type a release adds is installed by the first update to it. A binary that predates the verb gets the old list.
 
 [2026-10-05 03:38:13 UTC] [Release] v0.19.0 (tag at `4e15fb8`): native Claude Code connect and the cbus daemon on Windows, so a Windows session joins cross-machine and local channels with daemon delivery (#56, #57, #58, landed by #59); the `cbus install-mods` verb and the cbus-compact mod (#54). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked. Relay rebuilt from the tag and deployed.
