@@ -146,11 +146,13 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 			break
 		}
 	}
+	live := liveSids()
+	addResumedSids(live, resumedSids())
 	return &PlanWorld{
 		Host:             host,
 		GitHead:          head,
 		Roster:           roster,
-		LiveSids:         liveSids(),
+		LiveSids:         live,
 		Self:             self,
 		HasTranscript:    func(profile, sid string) bool { _, ok := TranscriptPath(profile, sid); return ok },
 		InstanceProfiles: InstanceProfiles,
@@ -162,8 +164,9 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 // claimed: only positive exit evidence permits another writer to resume it.
 //
 // The limit, named rather than hidden: this sees sessions ON THE BUS. A live session
-// that never joined, or left, is invisible here — so the gate proves "not alive on
-// the bus", never "not alive".
+// that never joined, or left, is invisible here, so GatherPlanWorld adds the ones a
+// running process resumes by sid (resumedSids). A fresh session that never joined
+// remains invisible.
 func liveSids() map[string]string {
 	out := map[string]string{}
 	root := CBUSDir()
