@@ -4,6 +4,42 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 18:50:05 UTC] [Client/Codex] Follow managed CLI frontend lifetime
+
+[What changed]
+- A managed backend survives CLI exit and may drain its native queue without a
+  terminal. Parent-only discovery also loses the session when a new CLI resumes
+  on that same backend.
+- Verify the exact thread's TUI endpoint through the backend's kernel-verified
+  control socket, then bind its loopback listener to a live interactive CLI and
+  process start token. Persist backend and frontend identities separately;
+  recheck endpoint identity and reject ambiguous or reused ownership.
+- Retain new mail in the durable bus inbox while a managed frontend is absent
+  or unverified. Reconcile prior attempts without another submission. Resume
+  releases retained mail once, and presence, roster, remote identity and
+  collection follow the frontend lifetime. Collection rechecks managed resume
+  before archiving an expired record.
+
+[Files changed]
+- Consumer discovery, native socket verification, daemon delivery/presence/GC,
+  roster and remote identity, process fixtures and lifecycle regression tests.
+- docs/usage.md.
+
+[Possible ripple effects]
+- Managed backends must expose the exact thread's TUI endpoint. Unsupported or
+  inconclusive observations retain new mail. Already submitted input may execute
+  after CLI exit; no shared backend is signaled or stopped.
+- Non-managed CLI native offline queues retain their existing behavior. Codex
+  permissions and the relay wire protocol are unchanged.
+
+[Testing notes]
+- Real-process regressions reproduce missing departure and post-exit submission
+  on the original implementation. Fixtures cover same-backend resume, restart,
+  reused ports, wrong socket owners, unknown probes and reconciliation.
+- Linux Codex 0.161.0 acceptance uses isolated real CLIs and local fake providers.
+  Exact-thread quit/resume and presence pass; native macOS runtime validation is
+  not available in this environment. Full validation is recorded in the PR.
+
 ## [2026-10-08 16:25:26 UTC] [Client/Formations] Resume refuses a session already open in a process
 
 [Attempt #1] Files: internal/client/formation_procscan.go (resumedSids,

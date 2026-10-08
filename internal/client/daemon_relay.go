@@ -112,8 +112,8 @@ func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
 		}
 		owner = c.Claude.Binding.Endpoint.PID
 	}
-	if c.Consumer != nil && c.Consumer.PID > 0 {
-		owner = c.Consumer.PID
+	if pid, _ := observedCLIProcess(c); pid > 0 {
+		owner = pid
 	}
 	type marker struct {
 		Alias        string `json:"alias"`
