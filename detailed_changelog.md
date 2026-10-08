@@ -4,6 +4,40 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 16:25:26 UTC] [Client/Formations] Resume refuses a session already open in a process
+
+[Attempt #1] Files: internal/client/formation_procscan.go (resumedSids,
+parseResumedSids, addResumedSids), internal/client/formation_plan.go
+(GatherPlanWorld), internal/client/formation_procscan_test.go,
+docs/formations.md, docs/architecture/command-reference.md.
+
+[What changed]
+- The resume gates read liveness only from the bus: a listener or managed
+  consumer registered under the channel. A session reopened with
+  `claude --resume <sid>` (by hand, or from another launcher) that never
+  re-joined was invisible, so `formation resume` or `apply --mode resume` would
+  launch a second process on the same transcript.
+- GatherPlanWorld now also scans `ps -axww -o pid=,args=` for argv that resumes
+  a session (`--resume <sid>`, `-r <sid>`, `--resume=<sid>`, sid shape-checked)
+  and adds those sids to LiveSids as `pid <n> (a process resuming it, not on
+  the bus)`. A bus holder keeps its address. Both verbs refuse through their
+  existing held-session gate.
+
+[Possible Ripple Effects]
+- A twin left running after an earlier double-attach now blocks resume until
+  it exits. That is the intent; the refusal names the pid.
+- A fresh session that never joined carries no sid in its argv and is still
+  invisible. Windows reports bus holders only.
+
+[Testing Notes]
+Field: on a real store with an anchor reopened by hand and not on the bus,
+`apply --dry-run --mode resume` with v0.20.1 planned `resumed`; this branch
+refused naming the holder pid. New tests: argv parsing (flag forms, shape
+check, own pid skipped, lowest pid kept), a real child process carrying
+`--resume <sid>` found through `ps`, and both verbs refusing through a stubbed
+scan. Mutants dropping the fold, the `-r` form, the self skip, or the shape
+check each fail a test. `go test ./...` green.
+
 ## [2026-10-08 16:19:40 UTC] [Client/Formations] Resume follows the terminal the anchor ran in
 
 [Attempt #1] Files: internal/client/pane.go (osaForkTab,

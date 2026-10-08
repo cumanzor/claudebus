@@ -2301,7 +2301,15 @@ surfaced as the per-peer detail — the load-bearing ones:
   → refused (D14): `session <sid> is held at <where> (live or availability
   unresolved) — resume risks a second process on one transcript; confirm the
   original has stopped, or set mode=fork if a copy of it is what you want`
-  (`formation_plan.go:309-315`, quoted verbatim).
+  (`formation_plan.go:309-315`, quoted verbatim). "Held" covers two sources:
+  a live listener or managed consumer on the bus, and, on macOS and Linux, a
+  running process whose argv resumes the sid (`--resume <sid>`, `-r <sid>`,
+  `--resume=<sid>`, read from `ps`), reported as `held at pid <n> (a process
+  resuming it, not on the bus)`. The second catches a session reopened by hand
+  or by another launcher that never re-joined. A fresh session that never
+  joined carries no sid in its argv and stays invisible; Windows has no argv
+  read and reports only bus holders. `formation resume` gates its anchor on
+  the same set.
 - one transcript recorded under two aliases → refused: `session <sid> is
   recorded under more than one alias in this formation — one of them is wrong;
   fix the file` (`formation_plan.go:278-282`).

@@ -141,7 +141,8 @@ iTerm2 session `tab`); `--target` overrides it for one launch.
 A guard refuses double-resumes while the anchor is booting, and a formation
 that is already running refuses with directions to the live seat; other
 refusal cases (a gone transcript, a fork-born or unattributed anchor origin,
-a live-armed session id, or resuming from the wrong machine) are documented,
+a session id that is live on the bus or open in a running `--resume`
+process, or resuming from the wrong machine) are documented,
 listed under formation resume in `cbus --help`.
 
 ## Anchors and integrations
