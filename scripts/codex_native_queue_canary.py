@@ -85,6 +85,14 @@ class Canary:
         self.thread = None
         self.target = "native-canary/advisor"
 
+    def ordinary_cli_runtime(self, meta):
+        from codex_cli_resume_canary import process_descendants
+        tree = process_descendants(self.process.pid)
+        self.result["initialProcessTree"] = tree
+        return (self.process.poll() is None and meta.get("id") == self.thread
+                and any(Path(row["comm"]).name == "codex" and " app-server " not in row["args"]
+                        for row in tree))
+
     def command(self, args, recipient=False, allowed=(0,)):
         env = self.env.copy()
         if recipient:
@@ -193,7 +201,7 @@ class Canary:
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"),
                            codexVersion=meta.get("cli_version"), rollout=str(self.rollout))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         self.wait(lambda: any(e.get("payload", {}).get("type") == "task_complete"
                               for e in self.entries()), "offline initial turn completion")
 
@@ -262,6 +270,26 @@ class Canary:
                 self.process.wait(timeout=3)
         if self.master is not None:
             os.close(self.master)
+        packages = self.home / "packages" / "app-server-daemon"
+        if packages.is_dir():
+            stopped = subprocess.run([self.codex, "app-server", "daemon", "stop"], env=self.env,
+                                     capture_output=True, text=True, timeout=20)
+            self.result["managedDaemonStopped"] = stopped.returncode == 0
+            if stopped.returncode != 0:
+                self.result["passed"] = False
+            # the managed updater is outside the CLI process group and survives daemon stop
+            for line in subprocess.check_output(["ps", "-axo", "pid=,args="], text=True, timeout=5).splitlines():
+                parts = line.strip().split(None, 1)
+                if (len(parts) == 2 and parts[1].startswith(str(packages) + "/")
+                        and parts[1].endswith(" app-server daemon pid-update-loop")):
+                    current = subprocess.run(["ps", "-p", parts[0], "-o", "args="], capture_output=True, text=True, timeout=5)
+                    if current.stdout.strip() == parts[1]:
+                        try:
+                            os.kill(int(parts[0]), signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+            if stopped.returncode == 0:
+                shutil.rmtree(packages)  # disposable copies, not transcript evidence
         (self.root / "tui-output.txt").write_bytes(self.output)
         (self.root / "result.json").write_text(json.dumps(self.result, indent=2) + "\n")
 

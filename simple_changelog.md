@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-08 19:03:00 UTC] [Tests/Codex] Acceptance canaries recognize managed CLI frontends, verify offline bus retention and same-backend resume, preserve legacy queue checks, and clean up their scratch managed processes.
+
 [2026-10-08 18:50:05 UTC] [Client/Codex] Managed Codex connections track the exact CLI frontend across quit and resume, retain new offline mail in the bus inbox, and preserve shared backends and prior delivery receipts.
 
 [2026-10-08 16:25:26 UTC] [Client/Formations] `formation resume` and `apply --mode resume` refuse a session that a running process already resumes (`claude --resume <sid>` found in `ps`), naming the pid, instead of launching a second process on the transcript. Covers an anchor reopened by hand that never re-joined the bus. macOS and Linux.
