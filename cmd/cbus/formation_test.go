@@ -458,6 +458,19 @@ func TestFormationResumeVerbErrors(t *testing.T) {
 	}
 }
 
+// a bad --target refuses before the formation is even read, naming the choices
+func TestFormationResumeRejectsUnknownTarget(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	var rc int
+	errOut := captureStderr(t, func() { rc = runFormation([]string{"resume", "ghost", "--target", "iterm2"}) })
+	if rc == 0 {
+		t.Fatal("rc=0, want failure")
+	}
+	if !strings.Contains(errOut, "--target must be window|tab|pane|tmux") {
+		t.Errorf("stderr = %q, want the target refusal (not the missing-formation one)", errOut)
+	}
+}
+
 // TestFormationSaveWarnsOnAnchorlessRefresh: the same shape as the RunConflict
 // warning — a SaveReport field no user-facing path renders reports to nobody. The
 // refresh must still succeed (refusing would strand legacy envelopes), so the print
@@ -484,5 +497,22 @@ func TestFormationSaveWarnsOnAnchorlessRefresh(t *testing.T) {
 	plantMeta(t, dir2, "roles", "coder", "sid-coder")
 	if rc := runFormation([]string{"save", "roles", "roles"}); rc == 0 {
 		t.Error("the save door minted an anchorless envelope")
+	}
+}
+
+// the saver's retarget is printed, not only recorded in the report
+func TestFormationSaveReportsRetarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
+	t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+	plantMeta(t, dir, "roles", "orchestrator", "sid-orch")
+	var rc int
+	out := captureStdout(t, func() { rc = runFormation([]string{"save", "roles", "roles"}) })
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	if !strings.Contains(out, "target follows this session's terminal — orchestrator: tab -> tmux") {
+		t.Errorf("save output does not name the retarget:\n%s", out)
 	}
 }

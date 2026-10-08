@@ -135,10 +135,14 @@ and the restored anchor wakes to a decision brief: the saved roster, which
 peers are still resumable, and the `apply` commands to bring them back as
 themselves or fresh: its call, confirmed with you. `--brief TEXT` adds an
 effort brief to the anchor's resume kickoff, the same way it does on `apply`.
+The anchor launches on its recorded `target`, which `save` keeps in step with
+the terminal the saving session runs in (a tmux pane records `tmux`, a plain
+iTerm2 session `tab`); `--target` overrides it for one launch.
 A guard refuses double-resumes while the anchor is booting, and a formation
 that is already running refuses with directions to the live seat; other
 refusal cases (a gone transcript, a fork-born or unattributed anchor origin,
-a live-armed session id, or resuming from the wrong machine) are documented,
+a session id that is live on the bus or open in a running `--resume`
+process, or resuming from the wrong machine) are documented,
 listed under formation resume in `cbus --help`.
 
 ## Anchors and integrations

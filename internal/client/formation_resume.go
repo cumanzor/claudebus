@@ -163,6 +163,29 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 	return created, inferredProfile, nil
 }
 
+var forkTargets = []string{"window", "tab", "tmux", "pane"}
+
+// ValidForkTarget reports whether t is a surface the forker can launch on.
+func ValidForkTarget(t string) bool {
+	for _, v := range forkTargets {
+		if t == v {
+			return true
+		}
+	}
+	return false
+}
+
+// RetargetAnchor overrides the anchor's recorded target for this launch only, for a
+// launcher that knows the surface better than the envelope does. In memory: the
+// anchor's next save records where it actually runs.
+func (f *Formation) RetargetAnchor(target string) {
+	for i := range f.Peers {
+		if f.Peers[i].Alias == f.AnchorAlias {
+			f.Peers[i].Target = target
+		}
+	}
+}
+
 // anchorLaunchPrefix launches under the peer's RECORDED profile even from a bare
 // shell: launchPrefix consults the CURRENT env, which a fresh post-reboot terminal
 // does not have, so a profiled anchor launched as plain claude would resume against

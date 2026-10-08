@@ -4,6 +4,85 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 16:25:26 UTC] [Client/Formations] Resume refuses a session already open in a process
+
+[Attempt #1] Files: internal/client/formation_procscan.go (resumedSids,
+parseResumedSids, addResumedSids), internal/client/formation_plan.go
+(GatherPlanWorld), internal/client/formation_procscan_test.go,
+docs/formations.md, docs/architecture/command-reference.md.
+
+[What changed]
+- The resume gates read liveness only from the bus: a listener or managed
+  consumer registered under the channel. A session reopened with
+  `claude --resume <sid>` (by hand, or from another launcher) that never
+  re-joined was invisible, so `formation resume` or `apply --mode resume` would
+  launch a second process on the same transcript.
+- GatherPlanWorld now also scans `ps -axww -o pid=,args=` for argv that resumes
+  a session (`--resume <sid>`, `-r <sid>`, `--resume=<sid>`, sid shape-checked)
+  and adds those sids to LiveSids as `pid <n> (a process resuming it, not on
+  the bus)`. A bus holder keeps its address. Both verbs refuse through their
+  existing held-session gate.
+
+[Possible Ripple Effects]
+- A twin left running after an earlier double-attach now blocks resume until
+  it exits. That is the intent; the refusal names the pid.
+- A fresh session that never joined carries no sid in its argv and is still
+  invisible. Windows reports bus holders only.
+
+[Testing Notes]
+Field: on a real store with an anchor reopened by hand and not on the bus,
+`apply --dry-run --mode resume` with v0.20.1 planned `resumed`; this branch
+refused naming the holder pid. New tests: argv parsing (flag forms, shape
+check, own pid skipped, lowest pid kept), a real child process carrying
+`--resume <sid>` found through `ps`, and both verbs refusing through a stubbed
+scan. Mutants dropping the fold, the `-r` form, the self skip, or the shape
+check each fail a test. `go test ./...` green.
+
+## [2026-10-08 16:19:40 UTC] [Client/Formations] Resume follows the terminal the anchor ran in
+
+[Attempt #1] Files: internal/client/pane.go (osaForkTab,
+tabInOwningWindowScript), internal/client/formation_save.go (observedSurface,
+targetForSurface, retargetSelf, SaveReport.Retargeted),
+internal/client/formation_resume.go (ValidForkTarget, RetargetAnchor),
+internal/client/formation.go, cmd/cbus/formation.go, cmd/cbus/usage.go,
+docs/formations.md, docs/architecture/command-reference.md,
+docs/architecture/cross-harness-daemon-scope.md, tests.
+
+[What changed]
+- A `tab` fork run inside tmux failed with `session <uuid> not found in any
+  iTerm2 window`. tmux panes inherit `ITERM_SESSION_ID` from the tmux server's
+  environment, frozen when the server started, so it names whatever iTerm2
+  session that was, often one closed since. Inside tmux, `tab` now opens a new
+  iTerm2 window without consulting the uuid. Outside tmux, a uuid that matches
+  no live session also opens a new window instead of erroring. Focus still
+  never decides placement: there is no fallback to the current window when a
+  uuid is known.
+- `formation save` never recorded where a peer ran: every new peer got
+  `target: tab`, so a launcher had nothing to go on. Save now reconciles the
+  saving session's own peer with its terminal: `$TMUX` set moves `tab`,
+  `window` or blank to `tmux`; a plain iTerm2 session moves `tmux` to `tab`;
+  `pane` and matching targets are left alone. Other peers are untouched, since
+  save cannot see their terminals. The saver is normally the anchor.
+- `formation resume --target window|tab|pane|tmux` overrides the anchor's
+  target for one launch without rewriting the envelope.
+
+[Possible Ripple Effects]
+- A tab fork from inside tmux used to land in the window that owned the tmux
+  server's inherited session when that session was still open. It now always
+  gets a new window.
+- A save from a tmux pane rewrites the saver's `target` from `tab` to `tmux`,
+  so the next `resume` of that formation needs a tmux session (the launcher
+  provides one).
+
+[Testing Notes]
+Live, against iTerm2 with a closed session's uuid: on main, `osaForkTab` inside
+tmux fails with the exact reported error; on this branch it opens a window
+that runs the launcher, inside tmux and out. New tests cover the surface
+mapping, the saver-only retarget and its printed line, the override reaching
+the fork spec, and a bad `--target` refusal. Mutants that drop the retarget
+call, the tmux branch, the iTerm2-back mapping, or point the stale branch at
+the current window each fail a test. `go test ./...` green.
+
 ## [2026-10-08 07:00:00 UTC] [Client/Codex] Recognize managed CLI consumers
 
 [What changed]

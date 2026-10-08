@@ -60,9 +60,9 @@ Peer-creation and placement polish stays in scope as a separate work package:
 explicit caller/group anchors, predictable automatic placement, visible launch
 failure, and documented fallback when the requested surface is unavailable.
 Retain explicit split/layout preferences and avoid silently rearranging unrelated
-peers or stealing focus. The existing iTerm2 tab path can fall back to the current
-window on a stale anchor; that behavior needs an explicit decision in this work,
-not a claim that every current launcher already meets the proposed policy.
+peers or stealing focus. A stale iTerm2 tab anchor opens a new window, never the
+focused one, and a tab launched from inside tmux does the same, since there the
+inherited `ITERM_SESSION_ID` is the tmux server's and not the caller's.
 
 Terminal independence does not require identical UI features. The current live
 layout implementation is tmux-specific. Backends should advertise supported
