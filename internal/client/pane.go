@@ -108,14 +108,15 @@ func paneGeometryScript(uuids []string) string {
 }
 
 // tabInOwningWindowScript creates the tab in the window that OWNS the uuid session
-// (`tell w`). A stale known UUID is an error; focus changes must not redirect
-// the launch to an unrelated window.
+// (`tell w`). A stale uuid opens a NEW window rather than erroring: the owning window
+// is gone, and focus must still never pick where the launch lands.
 func tabInOwningWindowScript(uuid, run string) string {
 	r := appleScriptStr(run)
 	body := "          tell w to create tab with default profile command " + r + "\n" +
 		"          return \"ok\"\n"
 	return findSessionScript(uuid, body,
-		"  error \"session \" & "+appleScriptStr(uuid)+" & \" not found in any iTerm2 window\"\n")
+		"  create window with default profile command "+r+"\n"+
+			"  return \"window\"\n")
 }
 
 // osaForkPane splits spec.Anchor (or this session when empty; Fork pre-checks the
@@ -140,6 +141,11 @@ func osaForkPane(spec ForkSpec, run string) (string, error) {
 // osaForkTab places the tab in the caller's own window when the session is
 // locatable, else falls back to the pre-fix current-window behavior.
 func osaForkTab(run string) error {
+	if os.Getenv("TMUX") != "" {
+		// inside tmux, $ITERM_SESSION_ID is what the tmux server inherited at start:
+		// it can name a closed session or another window entirely
+		return runOsascript("tell application \"iTerm2\" to create window with default profile command " + appleScriptStr(run))
+	}
 	if uuid := iTermSessionUUID(); uuid != "" {
 		return runOsascriptErr(tabInOwningWindowScript(uuid, run))
 	}
