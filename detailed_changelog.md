@@ -4,6 +4,51 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 16:19:40 UTC] [Client/Formations] Resume follows the terminal the anchor ran in
+
+[Attempt #1] Files: internal/client/pane.go (osaForkTab,
+tabInOwningWindowScript), internal/client/formation_save.go (observedSurface,
+targetForSurface, retargetSelf, SaveReport.Retargeted),
+internal/client/formation_resume.go (ValidForkTarget, RetargetAnchor),
+internal/client/formation.go, cmd/cbus/formation.go, cmd/cbus/usage.go,
+docs/formations.md, docs/architecture/command-reference.md,
+docs/architecture/cross-harness-daemon-scope.md, tests.
+
+[What changed]
+- A `tab` fork run inside tmux failed with `session <uuid> not found in any
+  iTerm2 window`. tmux panes inherit `ITERM_SESSION_ID` from the tmux server's
+  environment, frozen when the server started, so it names whatever iTerm2
+  session that was, often one closed since. Inside tmux, `tab` now opens a new
+  iTerm2 window without consulting the uuid. Outside tmux, a uuid that matches
+  no live session also opens a new window instead of erroring. Focus still
+  never decides placement: there is no fallback to the current window when a
+  uuid is known.
+- `formation save` never recorded where a peer ran: every new peer got
+  `target: tab`, so a launcher had nothing to go on. Save now reconciles the
+  saving session's own peer with its terminal: `$TMUX` set moves `tab`,
+  `window` or blank to `tmux`; a plain iTerm2 session moves `tmux` to `tab`;
+  `pane` and matching targets are left alone. Other peers are untouched, since
+  save cannot see their terminals. The saver is normally the anchor.
+- `formation resume --target window|tab|pane|tmux` overrides the anchor's
+  target for one launch without rewriting the envelope.
+
+[Possible Ripple Effects]
+- A tab fork from inside tmux used to land in the window that owned the tmux
+  server's inherited session when that session was still open. It now always
+  gets a new window.
+- A save from a tmux pane rewrites the saver's `target` from `tab` to `tmux`,
+  so the next `resume` of that formation needs a tmux session (the launcher
+  provides one).
+
+[Testing Notes]
+Live, against iTerm2 with a closed session's uuid: on main, `osaForkTab` inside
+tmux fails with the exact reported error; on this branch it opens a window
+that runs the launcher, inside tmux and out. New tests cover the surface
+mapping, the saver-only retarget and its printed line, the override reaching
+the fork spec, and a bad `--target` refusal. Mutants that drop the retarget
+call, the tmux branch, the iTerm2-back mapping, or point the stale branch at
+the current window each fail a test. `go test ./...` green.
+
 ## [2026-10-05 06:03:57 UTC] [Release] v0.20.1: unread export holds only mail
 
 [Attempt #1] Range v0.20.0..a02f86f (pull requests #66, #67, #68). Files:

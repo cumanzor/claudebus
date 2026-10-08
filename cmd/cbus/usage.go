@@ -112,6 +112,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    unattributed origin, live-armed sid, wrong
                                    machine — each names its remedy
        --brief TEXT                effort brief appended to the anchor's kickoff
+       --target T                  launch on window|tab|pane|tmux this time
+                                   instead of the recorded target
   cbus formation bootstrap <name> <alias> [--brief TEXT]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not

@@ -2168,6 +2168,13 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   skipped with a note), and the birth-record `origin`/`model` **when the
   launcher recorded them** (§9 / protocol.md birth records). It fills a blank
   origin/model **once** and never overwrites a hand-edited field;
+  The **saving session's own** peer also gets its `target` reconciled with
+  the terminal save runs in: `$TMUX` set moves `tab`/`window`/blank to
+  `tmux`, a plain iTerm2 session moves `tmux` back to `tab`, and `pane` or a
+  matching target is left alone. Reported as `target follows this session's
+  terminal — <alias>: tab -> tmux`. Other peers keep their recorded target,
+  since save cannot see their terminals; the saver is normally the anchor,
+  the one seat `resume` launches.
   `rolefile`/`role` and `split` are yours to fill in — `save` never writes
   `split` at all, even on a blank one. A corrupted birth-record is skipped with
   a note, not fatal. (Fleet caveat until every binary carries the profile
@@ -2327,13 +2334,18 @@ convergence. Drift checking covers only the `git_head` anchor today
 `drift_anchors` is prose for a human and is never diffed. A moved `git_head`
 prints `DRIFT git_head: saved <a>, now <b> — ... not blocking`.
 
-### `cbus formation resume <name> [--brief TEXT]`
+### `cbus formation resume <name> [--brief TEXT] [--target T]`
 
 The **first hop after a reboot**: relaunches the formation's **anchor** session
 from a bare shell — right cwd, right CCS profile (`ccs <profile>` even when the
 invoking shell has no CCS env), `--resume` its own sid — so recovery never
 starts with a human copying session ids out of a JSON file. It launches exactly
 one session; the restored anchor reconciles the rest itself.
+
+`--target window|tab|pane|tmux` overrides the anchor's recorded target for
+this launch only; the envelope is not rewritten, and the anchor's next `save`
+records the surface it actually runs in. A launcher that knows the surface
+(a tmux session it just opened, a plain iTerm2 window) passes it.
 
 **Refuses loudly instead of degrading** — the anchor is the seat the human is
 about to sit next to, and a silent blank replacement is the failure this verb
@@ -3159,9 +3171,13 @@ client; they remain for the homogenization/port record.
     always targets iTerm2's current/frontmost window (the old behavior, and
     the source of the tab-in-wrong-window bug): it now locates the window
     OWNING the caller's session via the `$ITERM_SESSION_ID` UUID and targets
-    that window directly; current-window survives only as the no-UUID
-    fallback (and only there does `tab` still need an existing iTerm2 window
-    — `tell current window` errors on zero windows). `pane` never falls back
+    that window directly. A UUID that resolves to no live session opens a new
+    iTerm2 window instead, and inside tmux (`$TMUX` set) `tab` skips the UUID
+    and opens a new window outright: there `$ITERM_SESSION_ID` is whatever the
+    tmux server inherited when it started, which can name a closed session or
+    an unrelated window. Current-window survives only as the no-UUID fallback
+    outside tmux (and only there does `tab` still need an existing iTerm2
+    window — `tell current window` errors on zero windows). `pane` never falls back
     to frontmost: a UUID that resolves to no live session is a hard
     AppleScript `error`, and neither `$TMUX` nor `$ITERM_SESSION_ID` set is a
     hard `cbus:` error — refusing beats silently splitting whatever happens to

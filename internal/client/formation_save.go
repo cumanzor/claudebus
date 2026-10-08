@@ -122,6 +122,9 @@ type SaveReport struct {
 	// envelope will accept (hand-corrupted meta), so it was NOT propagated. Surfaced,
 	// never silent (cbus-m9l G6).
 	SkippedBirth []string
+	// Retargeted names the saving session's peer when its target was moved to match
+	// the surface the session runs in ("alias: tab -> tmux").
+	Retargeted []string
 	// BasedOn is set when the refresh base came from a committed template rather than
 	// a prior runtime save, so the CLI can say the starter was inherited.
 	BasedOn string
@@ -244,6 +247,7 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 			rep.Kept = append(rep.Kept, f.Peers[i].Alias)
 		}
 	}
+	retargetSelf(ch, f.Peers, observedSurface(), rep)
 
 	f.SavedAt = Now()
 	if f.SavedBy, err = savedBy(ch); err != nil {
@@ -407,6 +411,55 @@ func validModel(m string) bool {
 }
 
 func strPtr(s string) *string { return &s }
+
+// observedSurface names the terminal this process runs in. $TMUX wins: inside tmux,
+// $ITERM_SESSION_ID is whatever the tmux server inherited and names no pane here.
+func observedSurface() string {
+	switch {
+	case os.Getenv("TMUX") != "":
+		return "tmux"
+	case os.Getenv("ITERM_SESSION_ID") != "":
+		return "iterm2"
+	}
+	return ""
+}
+
+// targetForSurface reconciles a recorded target with the surface its session was
+// seen in. Only a mismatch in KIND moves it: window vs tab is the human's choice and
+// pane works in both, but a tab recorded for a tmux session (the save default) sends
+// the next restore hunting for an iTerm2 session that is not there.
+func targetForSurface(target, surface string) string {
+	switch {
+	case surface == "tmux" && (target == "" || target == "tab" || target == "window"):
+		return "tmux"
+	case surface == "iterm2" && target == "tmux":
+		return defaultTarget
+	}
+	return target
+}
+
+// retargetSelf applies the saving session's own surface to its own peer. Save can
+// observe only its own terminal, and the saver is normally the anchor: the one seat
+// a restore launches directly.
+func retargetSelf(ch string, peers []FormationPeer, surface string, rep *SaveReport) {
+	if surface == "" {
+		return
+	}
+	for _, reg := range ResolveSelf() {
+		if reg.Channel != ch {
+			continue
+		}
+		for i := range peers {
+			if peers[i].Alias != reg.Alias {
+				continue
+			}
+			if t := targetForSurface(peers[i].Target, surface); t != peers[i].Target {
+				rep.Retargeted = append(rep.Retargeted, fmt.Sprintf("%s: %s -> %s", reg.Alias, orUnset(peers[i].Target), t))
+				peers[i].Target = t
+			}
+		}
+	}
+}
 
 // savedBy is this session's address on ch, falling back to the machine when the
 // saver is not itself a peer (a formation can be saved from outside the channel).

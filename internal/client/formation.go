@@ -601,7 +601,7 @@ func (p *FormationPeer) validate() error {
 	if err := oneOf("onStale", p.OnStale, OnStaleTemplate, OnStaleSkip, OnStaleFail); err != nil {
 		return err
 	}
-	if err := oneOf("target", p.Target, "window", "tab", "tmux", "pane"); err != nil {
+	if err := oneOf("target", p.Target, forkTargets...); err != nil {
 		return err
 	}
 	if err := oneOf("split", p.Split, "auto", "right", "down"); err != nil {

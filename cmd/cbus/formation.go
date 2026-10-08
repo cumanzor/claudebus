@@ -109,6 +109,9 @@ func runFormationSave(args []string) int {
 	for _, s := range rep.SkippedBirth {
 		fmt.Printf("  skipped a corrupted birth-record — %s\n", s)
 	}
+	for _, s := range rep.Retargeted {
+		fmt.Printf("  target follows this session's terminal — %s\n", s)
+	}
 	// A split run is recorded, never refused: save exists precisely for a pausing or
 	// dying formation, and refusing to save a split would destroy the evidence of it.
 	// But it cannot be silent either — a report field no user-facing path reads
@@ -249,12 +252,12 @@ func renderApplyReport(f *client.Formation, rep *client.ApplyReport, opts client
 // back into a terminal from a bare shell, so a reboot recovery never starts with a
 // human copying session ids out of a JSON file. The anchor reconciles the rest.
 func runFormationResume(args []string) int {
-	const use = "usage: cbus formation resume <name> [--brief TEXT]"
+	const use = "usage: cbus formation resume <name> [--brief TEXT] [--target window|tab|pane|tmux]"
 	if len(args) == 0 {
 		return die(use)
 	}
 	name := args[0]
-	p, err := splitVerbArgs(args[1:], map[string]bool{"--brief": true}, nil, true)
+	p, err := splitVerbArgs(args[1:], map[string]bool{"--brief": true, "--target": true}, nil, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
@@ -262,11 +265,20 @@ func runFormationResume(args []string) int {
 		return die("%v", err)
 	}
 	brief, _ := p.has("--brief")
+	target, hasTarget := p.has("--target")
+	if hasTarget && !client.ValidForkTarget(target) {
+		return die("--target must be window|tab|pane|tmux, got %q", target)
+	}
 	f, source, err := client.ResolveFormation(name)
 	if err != nil {
 		return die("%v", err)
 	}
 	fmt.Printf("resolved %q from the %s\n", name, source)
+	if hasTarget {
+		// launch-only: the envelope is not rewritten, the next save records where it ran
+		f.RetargetAnchor(target)
+		fmt.Printf("  target: %s (from --target)\n", target)
+	}
 	created, inferred, err := client.ResumeAnchor(f, brief, applyForker)
 	if err != nil {
 		return die("%v", err)

@@ -118,19 +118,20 @@ func TestTabInOwningWindowScriptByteExact(t *testing.T) {
 		"      end repeat\n" +
 		"    end repeat\n" +
 		"  end repeat\n" +
-		"  error \"session \" & \"UU-ID\" & \" not found in any iTerm2 window\"\n" +
+		"  create window with default profile command \"/bin/bash /tmp/cc-branch.1.sh\"\n" +
+		"  return \"window\"\n" +
 		"end tell"
 	if got != want {
 		t.Fatalf("tabInOwningWindowScript:\n got  %q\n want %q", got, want)
 	}
 }
 
-// A stale exact caller must never fall back to whichever window has focus.
-func TestTabStaleAnchorRefusesAfterSearch(t *testing.T) {
+// A stale caller opens a new window after the search, never whichever window has focus.
+func TestTabStaleAnchorOpensNewWindowAfterSearch(t *testing.T) {
 	got := tabInOwningWindowScript("UU-ID", "RUN")
 	tellW := strings.Index(got, "tell w to create tab")
 	lastEnd := strings.LastIndex(got, "end repeat")
-	fallback := strings.Index(got, "error \"session \"")
+	fallback := strings.Index(got, "  create window with default profile command")
 	if tellW < 0 || lastEnd < 0 || fallback < 0 {
 		t.Fatalf("missing an expected clause:\n%s", got)
 	}
