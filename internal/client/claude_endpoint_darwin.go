@@ -9,6 +9,10 @@ import (
 )
 
 func validateClaudeSocketPeer(conn *net.UnixConn, expectedPID int) error {
+	return validateUnixSocketPeer(conn, expectedPID)
+}
+
+func validateUnixSocketPeer(conn *net.UnixConn, expectedPID int) error {
 	raw, err := conn.SyscallConn()
 	if err != nil {
 		return err
@@ -25,7 +29,7 @@ func validateClaudeSocketPeer(conn *net.UnixConn, expectedPID int) error {
 		return peerErr
 	}
 	if pid != expectedPID {
-		return errors.New("Claude socket peer does not match the bound process")
+		return errors.New("socket peer does not match the bound process")
 	}
 	return nil
 }

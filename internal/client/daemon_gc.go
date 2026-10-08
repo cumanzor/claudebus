@@ -127,6 +127,21 @@ func (d *busDaemon) collectOne(id string, l GCLimits, p gcProbe) (string, string
 	if c == nil {
 		return "", "already removed"
 	}
+	if c.Consumer != nil && c.Consumer.Managed {
+		// a resumed TUI can reuse the backend before the periodic probe runs.
+		probe, err := d.consumerProbe(c)
+		if err != nil || (probe.State != "online" && probe.State != "exited") {
+			return "", "managed CLI inspection is inconclusive"
+		}
+		next := cloneConnection(c)
+		if err := d.applyConsumerProbe(next, probe, true); err != nil {
+			return "", err.Error()
+		}
+		if err := d.save(next); err != nil {
+			return "", err.Error()
+		}
+		*c = *next
+	}
 	if now := classifyGC(c, d.recordPath(id), l, p); now.Class != GCCollect {
 		return "", "now " + now.Class + ": " + now.Reason
 	}

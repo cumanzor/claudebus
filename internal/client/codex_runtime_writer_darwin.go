@@ -20,6 +20,23 @@ func codexProcessFiles(ctx context.Context, pid int) ([]codexWriterFD, error) {
 	return codexLsof(ctx, "-nP", "-a", "-p", strconv.Itoa(pid), "-F0pfan")
 }
 
+func codexTCPListeners(ctx context.Context, port int) ([]int, error) {
+	address := "127.0.0.1:" + strconv.Itoa(port)
+	files, err := codexLsof(ctx, "-nP", "-a", "-iTCP@"+address, "-sTCP:LISTEN", "-F0pfn")
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int]bool{}
+	var pids []int
+	for _, file := range files {
+		if file.PID > 0 && file.Path == address && !seen[file.PID] {
+			seen[file.PID] = true
+			pids = append(pids, file.PID)
+		}
+	}
+	return pids, nil
+}
+
 func codexLsof(parent context.Context, args ...string) ([]codexWriterFD, error) {
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()

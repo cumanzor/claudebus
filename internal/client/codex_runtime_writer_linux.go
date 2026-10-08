@@ -94,3 +94,56 @@ func codexProcessFiles(ctx context.Context, pid int) ([]codexWriterFD, error) {
 	}
 	return found, nil
 }
+
+func codexTCPListeners(ctx context.Context, port int) ([]int, error) {
+	data, err := os.ReadFile("/proc/net/tcp")
+	if err != nil {
+		return nil, err
+	}
+	inodes := map[string]bool{}
+	address := fmt.Sprintf("0100007F:%04X", port)
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 9 && fields[1] == address && fields[3] == "0A" {
+			inodes["socket:["+fields[9]+"]"] = true
+		}
+	}
+	if len(inodes) == 0 {
+		return nil, nil
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		comm, _, err := procParent(pid)
+		if err != nil || commBase(comm) != "codex" {
+			continue
+		}
+		files, err := codexProcessFiles(ctx, pid)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			if inodes[file.Path] {
+				pids = append(pids, pid)
+				break
+			}
+		}
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("TUI listener exists without a verified Codex owner")
+	}
+	return pids, nil
+}

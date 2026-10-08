@@ -111,7 +111,8 @@ func journaledConsumer(ch, alias string, m PeerMeta) (state string, pid int) {
 		return "unknown", 0
 	}
 	if c.Consumer.State == "online" {
-		return c.Consumer.State, c.Consumer.PID
+		pid, _ := observedCLIProcess(&c)
+		return c.Consumer.State, pid
 	}
 	return c.Consumer.State, 0
 }

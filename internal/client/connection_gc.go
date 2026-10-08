@@ -165,7 +165,7 @@ func classifyGC(c *ConnectionState, record string, l GCLimits, p gcProbe) GCReco
 // gcConsumerKnown: a pid with its start time is on file, so liveness can be
 // decided rather than guessed.
 func gcConsumerKnown(c *ConnectionState) bool {
-	if o := c.Consumer; o != nil && o.PID > 0 && o.StartToken != "" {
+	if pid, start := observedCLIProcess(c); pid > 0 && start != "" {
 		return true
 	}
 	return c.Claude != nil && c.Claude.Binding.Endpoint.PID > 0 && c.Claude.Binding.Endpoint.StartToken != ""
@@ -174,7 +174,7 @@ func gcConsumerKnown(c *ConnectionState) bool {
 // gcConsumerAlive trusts a pid only with the start time recorded beside it, so a
 // reused pid or a stale "online" observation never keeps a record.
 func gcConsumerAlive(c *ConnectionState, p gcProbe) bool {
-	if o := c.Consumer; o != nil && o.PID > 0 && o.StartToken != "" && p.alive(o.PID, o.StartToken) {
+	if pid, start := observedCLIProcess(c); pid > 0 && start != "" && p.alive(pid, start) {
 		return true
 	}
 	if c.Claude != nil {
