@@ -4,6 +4,32 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 19:03:00 UTC] [Tests/Codex] Validate managed frontend lifecycle
+
+[What changed]
+- Prove ordinary CLI execution from the launched process tree instead of the
+  transcript's historical source label. Distinguish frontend exit from a managed
+  backend that intentionally survives it.
+- Require new managed offline mail to remain in the bus inbox with no recipient
+  activity, then arrive once on a new frontend using the same backend. Retain the
+  existing offline native-queue assertions for non-managed CLIs.
+- Recognize automatic title metadata separately from recipient turns and stop
+  scratch managed daemons and update helpers during cleanup.
+
+[Files changed]
+- Native queue and resume canary helpers; presence, compaction, permissions,
+  relay, interruption and multiple-home canary entry points.
+
+[Possible ripple effects]
+- Depends on the managed frontend lifecycle fix. Production code and permissions
+  are unchanged. Cleanup only touches each canary's isolated processes and
+  disposable backend copies; transcripts and result files remain available.
+
+[Testing notes]
+- Python compilation passes. Actual Linux Codex 0.161.0 runs use a local fake
+  provider and retain check outcomes and result-file hashes in the PR evidence.
+- Native macOS acceptance remains outside this environment's coverage.
+
 ## [2026-10-08 18:50:05 UTC] [Client/Codex] Follow managed CLI frontend lifetime
 
 [What changed]
