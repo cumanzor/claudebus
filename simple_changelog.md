@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-08 07:00:00 UTC] [Client/Codex] Native connections recognize a CLI-owned managed app server with exact rollout and queue evidence; unrelated backends remain excluded and close still refuses to signal a shared backend.
+
 [2026-10-05 06:03:57 UTC] [Release] v0.20.1 (tag at `a02f86f`): a collected connection's unread.jsonl holds only mail and is not written for a tail of presence notices (#68); the test suites can no longer write into a real cbus store (#66). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked.
 
 [2026-10-05 05:53:34 UTC] [Client/Daemon] A collected connection's unread.jsonl now holds only mail: presence lines past the delivered offset are left out, and no file is written when nothing else remains. The plan's unread count, the export and the count `cbus connect` reports share one rule, so they agree.

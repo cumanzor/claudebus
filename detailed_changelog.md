@@ -4,6 +4,22 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-08 07:00:00 UTC] [Client/Codex] Recognize managed CLI consumers
+
+[What changed]
+- Native connect previously rejected a Codex CLI whose rollout writer was its managed app-server child. The consumer probe now recognizes the local managed launch shape and verifies a live direct interactive CLI parent before and after inspecting the backend.
+- Exact thread metadata, writable rollout and queue descriptors, unique writer checks, and caller process identity remain required. Frontends need not retain queue descriptors after launching the backend. Generic servers, exec parents, detached backends, and desktop ancestry remain excluded.
+- The separate close check still refuses to signal a managed backend because it may serve multiple threads. Usage documentation explains its consumer PID and disconnect behavior.
+
+[Files changed]
+- `internal/client/codex_runtime_writer.go`, `internal/client/codex_managed_consumer.go`, and two managed-consumer test files.
+- `docs/usage.md` and both changelogs. No generated artifacts, dependency changes, or wire changes.
+
+[Testing and limits]
+- A real-process regression fails on the original probe and passes after the fix. Negative cases cover generic servers, exec/server parents, desktop ancestry, missing CLI parents, read-only rollouts, wrong stores, stale caller identity, ambiguous writers, orphaned backends, and close refusal. Focused ownership, admission, and close tests pass with the race detector; three weakened ownership/close variants are detected by the regression.
+- A read-only probe of a live managed Codex CLI reports the exact runtime online and passes admission. It creates no connection and does not establish inbound delivery.
+- The broader suite passes with two pre-existing tests excluded: `TestHostOverrideRecordedInMetaLedgerAndFormation` and `TestCloseRefusesOwnAncestry` also fail on unchanged main when run inside Codex. macOS and Windows client tests cross-compile; native acceptance there is untested.
+
 ## [2026-10-05 06:03:57 UTC] [Release] v0.20.1: unread export holds only mail
 
 [Attempt #1] Range v0.20.0..a02f86f (pull requests #66, #67, #68). Files:
