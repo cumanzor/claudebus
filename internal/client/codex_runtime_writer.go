@@ -73,8 +73,18 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 		if err != nil {
 			return unknown, err
 		}
-		if !interactiveCodexProcess(argv) || codexDesktopAncestor(fd.PID, procLookup()) {
+		if codexDesktopAncestor(fd.PID, procLookup()) {
 			continue
+		}
+		parentPID, parentStart := 0, ""
+		if !interactiveCodexProcess(argv) {
+			parentPID, parentStart, err = managedCodexCLIParent(fd.PID, argv)
+			if err != nil {
+				return unknown, err
+			}
+			if parentPID == 0 {
+				continue
+			}
 		}
 		// Re-read this candidate's descriptors within its process-start fence;
 		// the first scan may race process exit or a PID being reused.
@@ -92,6 +102,15 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 			}
 			if sameExistingFile(f.Path, filepath.Join(c.Config.SQLiteHome, "queue_1.sqlite")) {
 				queue = true
+			}
+		}
+		if parentPID > 0 {
+			pid, start, err := managedCodexCLIParent(fd.PID, argv)
+			if err != nil {
+				return unknown, err
+			}
+			if pid != parentPID || start != parentStart {
+				return unknown, errors.New("managed Codex CLI parent changed during inspection")
 			}
 		}
 		after, err := procStartTime(fd.PID)

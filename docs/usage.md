@@ -92,6 +92,13 @@ together with `consumer.state`, `consumer.startToken` and `consumer.observedAt`;
 a retained PID alone does not prove the session is still running. Legacy Monitor
 peers instead use `listenerPid` for their tail process.
 
+Codex CLI can run its thread in a child `app-server --listen unix://
+--managed-daemon` process. Native connections recognize that backend while
+its direct interactive CLI parent is alive, provided the backend uniquely
+holds the exact thread's writable rollout and queue store. `consumer.pid`
+then identifies the managed backend. A detached backend with no verified CLI
+parent remains unverified; a generic app server does not qualify.
+
 `socket-ready` means the Claude endpoint is available, not that a message arrived.
 A successful send is submission; an exact transcript receipt confirms arrival,
 and a peer reply supplies separate evidence of action. Use
@@ -148,6 +155,10 @@ keeps the inbox and the registration, and refuses when it cannot prove the
 process is still that peer's session. The checks and the signal are separate
 system calls, so this narrows but cannot fully exclude a process that exits
 and is replaced in between.
+
+`cbus close` refuses to signal a managed Codex backend, which can serve more
+than one thread. Use `cbus connection disconnect CHANNEL/ALIAS` to stop that
+connection's delivery, and exit the intended session through its CLI.
 
 ## The global channel
 
