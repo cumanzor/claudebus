@@ -337,7 +337,7 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 	key := channel + "/" + alias
 	conn, t, err := s.upgradeOwnedTail(w, r, key, "", false, proto)
 	if err != nil {
-		log.Printf("tail %s: upgrade: %v", key, err)
+		log.Printf("tail %s: upgrade: %v ua=%q", key, err, r.UserAgent())
 		return
 	}
 	defer func() {
@@ -346,7 +346,7 @@ func (s *server) handleTail(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	conn.WriteTimeout = 10 * time.Second // a wedged client can't stall the loop
-	log.Printf("tail %s: connected", key)
+	log.Printf("tail %s: connected ua=%q", key, r.UserAgent())
 
 	lastPong := time.Now()
 	var pongMu sync.Mutex
