@@ -29,7 +29,7 @@ const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 // front-door access log cannot tell a cbus dial from a foreign client using
 // a leaked token when the handshake carries no identity. Binaries stamp it
 // from main.version; read it through UserAgentValue.
-var UserAgent = "cbus/dev"
+var UserAgent = "cbus/unstamped"
 
 // UserAgentValue is UserAgent with CR and LF stripped, so a stamped value cannot
 // inject headers into the raw handshake or an HTTP request.
