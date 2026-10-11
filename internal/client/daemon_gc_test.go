@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -498,5 +499,37 @@ func TestCollectExportsOnlyMailAndKeepsATornLine(t *testing.T) {
 	fresh := &ConnectionState{ID: "fresh", Channel: c.Channel, ThreadID: c.ThreadID}
 	if counted, named := pass.Records[0].Unread, d.archivedPredecessor(fresh).Unread; counted != 2 || named != 2 {
 		t.Fatalf("the plan counted %d and connect would report %d; both must match the 2 exported lines", counted, named)
+	}
+}
+
+func TestCollectRechecksManagedResumeBeforeArchiving(t *testing.T) {
+	for _, unknown := range []bool{false, true} {
+		t.Run(fmt.Sprint(unknown), func(t *testing.T) {
+			d, _, c := staleConnection(t)
+			c.State = "queue-ready"
+			c.Consumer.Managed = true
+			c.Consumer.Frontend = &codexFrontend{PID: 1, StartToken: "old", Origin: "http://127.0.0.1:10001"}
+			if err := d.save(c); err != nil {
+				t.Fatal(err)
+			}
+			d.publish(c)
+			probes := 0
+			d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) {
+				probes++
+				if unknown {
+					return consumerProbe{State: "unknown", Managed: true}, nil
+				}
+				return consumerProbe{State: "online", PID: 4242, StartToken: "backend", Managed: true, Frontend: &codexFrontend{PID: 2, StartToken: "new", Origin: "http://127.0.0.1:10002"}}, nil
+			}
+			p := gcDaemonProbe(false)
+			p.alive = func(pid int, start string) bool { return pid == 2 && start == "new" }
+			pass, err := d.collectConnections(context.Background(), gcTestLimits, p)
+			if err != nil || probes != 1 || len(pass.Records) != 1 || pass.Records[0].Collected {
+				t.Fatalf("collection bypassed fresh managed proof: %+v %v probes=%d", pass, err, probes)
+			}
+			if _, err := os.Stat(d.recordPath(c.ID)); err != nil {
+				t.Fatal("retained record disappeared")
+			}
+		})
 	}
 }

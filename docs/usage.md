@@ -92,6 +92,22 @@ together with `consumer.state`, `consumer.startToken` and `consumer.observedAt`;
 a retained PID alone does not prove the session is still running. Legacy Monitor
 peers instead use `listenerPid` for their tail process.
 
+Codex CLI can run its thread in a shared `app-server --listen unix://
+--managed-daemon` process. Native connections require both its unique writable
+rollout/queue ownership and the exact thread's TUI endpoint owned by a live
+interactive CLI. The endpoint comes from a read-only query over the verified
+backend socket; a backend PID or historical source label is insufficient.
+`consumer.pid` identifies the backend, while `consumer.frontend.pid` and
+`consumer.frontend.startToken` identify the CLI. A resumed CLI can reuse the
+backend and receive the same durable registration.
+
+For managed backends, new mail stays in the cbus inbox while the frontend is
+exited or unverified. It reaches the native queue only after fresh frontend
+verification. Mail already submitted may still execute after the terminal
+closes; cbus neither cancels that work nor stops the shared backend. A backend
+without the per-thread TUI endpoint remains unverified. Non-managed CLIs retain
+their native offline-queue behavior.
+
 `socket-ready` means the Claude endpoint is available, not that a message arrived.
 A successful send is submission; an exact transcript receipt confirms arrival,
 and a peer reply supplies separate evidence of action. Use
@@ -148,6 +164,10 @@ keeps the inbox and the registration, and refuses when it cannot prove the
 process is still that peer's session. The checks and the signal are separate
 system calls, so this narrows but cannot fully exclude a process that exits
 and is replaced in between.
+
+`cbus close` refuses to signal a managed Codex backend, which can serve more
+than one thread. Use `cbus connection disconnect CHANNEL/ALIAS` to stop that
+connection's delivery, and exit the intended session through its CLI.
 
 ## The global channel
 

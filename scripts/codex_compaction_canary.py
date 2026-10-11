@@ -35,7 +35,7 @@ class CompactionCanary(ResumeCanary):
         meta = next(e["payload"] for e in self.entries() if e.get("type") == "session_meta")
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"), codexVersion=meta.get("cli_version"))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         self.finish_provider_turn(1, "Local compaction observation acceptance")
         state = json.loads(self.command(["connect", "cli-compaction", "advisor", "--codex-sqlite-home", str(self.home), "--json"], recipient=True).stdout)
         self.check("baseline_is_initialized", state.get("compaction", {}).get("offset", 0) > 0)

@@ -149,3 +149,20 @@ func TestPlanConnectionGCWithoutRecords(t *testing.T) {
 		t.Fatalf("empty store: %+v, %v", plan, err)
 	}
 }
+
+func TestGCManagedConsumerUsesFrontendLifetime(t *testing.T) {
+	c := &ConnectionState{State: "queue-ready", Consumer: &consumerObservation{State: "online", PID: 9, StartToken: "backend", Managed: true, Frontend: &codexFrontend{PID: 10, StartToken: "frontend"}}}
+	p := gcTestProbe(map[int]string{9: "backend"}, map[string]time.Time{"record": gcNow.Add(-time.Hour)})
+	limits := GCLimits{Grace: time.Minute, Inactive: 24 * time.Hour}
+	if got := classifyGC(c, "record", limits, p); got.Class != GCCollect {
+		t.Fatalf("surviving backend kept expired frontend: %+v", got)
+	}
+	p = gcTestProbe(map[int]string{9: "backend", 10: "frontend"}, nil)
+	if got := classifyGC(c, "record", limits, p); got.Class != GCLive {
+		t.Fatalf("live frontend: %+v", got)
+	}
+	c.Consumer.Frontend = nil
+	if gcConsumerKnown(c) || gcConsumerAlive(c, p) {
+		t.Fatal("missing frontend borrowed backend lifetime")
+	}
+}

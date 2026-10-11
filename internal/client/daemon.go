@@ -1064,6 +1064,12 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	if c.Pending != nil && (c.Pending.End != end || c.Pending.Hash != hash) {
 		return errors.New("pending message bytes changed; refusing another enqueue")
 	}
+	managed := c.Pending == nil && managedCodexConnection(c)
+	if managed {
+		if ready, err := d.managedCodexDeliveryReady(c); err != nil || !ready {
+			return err
+		}
+	}
 	q, err := d.queue(c)
 	if err != nil {
 		return err
@@ -1096,6 +1102,12 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		logClaudeAttempt(c, attempt, "received")
 		d.setRetry(c.ID, time.Time{})
 		return nil
+	}
+	if managed {
+		// queue initialization may have waited while the frontend exited.
+		if ready, err := d.managedCodexDeliveryReady(c); err != nil || !ready {
+			return err
+		}
 	}
 	c.Pending = &queueAttempt{ClientID: fmt.Sprintf("cbus-%s-%d-%s", c.ID, c.Offset, hash[:16]), End: end, Hash: hash}
 	c.State = "submitting"

@@ -12,8 +12,8 @@ app-server observer lists queued/loaded threads; it never starts or resumes one.
 Use --resume-selector uuid|last|name|picker to choose the actual CLI resume path.
 This proves clean CLI resume and retained input, not a model-driven skill/reply,
 interrupted resume, or long-idle behavior. Explicit cbus reconciliation must
-observe the pending message as queued, then received, without another submission
-or provider request.
+observe receipt without another submission or provider request. For a managed
+backend, new offline mail stays in the bus inbox until a verified CLI resumes.
 """
 
 import argparse
@@ -36,11 +36,11 @@ from codex_queue_lifecycle_canary import FakeProvider, RPC
 def process_descendants(pid):
     rows = {}
     output = subprocess.check_output(
-        ["ps", "-axo", "pid=,ppid=,comm="], text=True, timeout=5)
+        ["ps", "-axo", "pid=,ppid=,comm=,args="], text=True, timeout=5)
     for line in output.splitlines():
-        parts = line.strip().split(None, 2)
-        if len(parts) == 3:
-            rows[int(parts[0])] = {"pid": int(parts[0]), "ppid": int(parts[1]), "comm": parts[2]}
+        parts = line.strip().split(None, 3)
+        if len(parts) == 4:
+            rows[int(parts[0])] = {"pid": int(parts[0]), "ppid": int(parts[1]), "comm": parts[2], "args": parts[3]}
     selected = {pid}
     while True:
         more = {key for key, row in rows.items() if row["ppid"] in selected}
@@ -53,8 +53,11 @@ def process_descendants(pid):
 def process_exists(pid):
     try:
         os.kill(pid, 0)
+        stat = Path(f"/proc/{pid}/stat")
+        if stat.exists() and stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+            return False
         return True
-    except ProcessLookupError:
+    except (ProcessLookupError, FileNotFoundError):
         return False
 
 
@@ -134,6 +137,8 @@ class ResumeCanary(Canary):
         original = self.process
         tree = process_descendants(original.pid)
         self.result["originalProcessTree"] = tree
+        frontend = [row for row in tree if " app-server " not in row.get("args", "")]
+        self.result["originalFrontendProcessTree"] = frontend
         self.check("ordinary_native_cli_process_observed", any(Path(row["comm"]).name == "codex" for row in tree))
         os.write(self.master, b"/quit")
         self.pump(.4)  # Let the TUI's paste-burst detector settle before Enter.
@@ -143,9 +148,9 @@ class ResumeCanary(Canary):
             self.pump(.1)
         self.check("original_cli_exited_cleanly", original.poll() == 0)
         deadline = time.monotonic() + 5
-        while any(process_exists(row["pid"]) for row in tree) and time.monotonic() < deadline:
+        while any(process_exists(row["pid"]) for row in frontend) and time.monotonic() < deadline:
             time.sleep(.05)
-        self.check("original_cli_process_tree_exited", not any(process_exists(row["pid"]) for row in tree))
+        self.check("original_cli_frontends_exited", bool(frontend) and not any(process_exists(row["pid"]) for row in frontend))
         os.close(self.master)
         self.master = None
         self.process = None
@@ -182,7 +187,7 @@ class ResumeCanary(Canary):
             # It is local fake inference, but must not count as recipient activity.
             schema = body.get("text", {}).get("format", {}).get("schema", {})
             metadata = json.loads(body.get("client_metadata", {}).get("x-codex-turn-metadata", "{}"))
-            if set(schema.get("properties", {})) != {"title"} or metadata.get("thread_source") != "system":
+            if set(schema.get("properties", {})) != {"title"} or metadata.get("thread_source") not in ("system", "thread_title"):
                 raise AssertionError("unexpected auxiliary provider request")
             request["classification"] = "automatic-cli-title"
             request["release"].set()
@@ -215,7 +220,7 @@ class ResumeCanary(Canary):
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"),
                            codexVersion=meta.get("cli_version"), rollout=str(self.rollout))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         self.finish_provider_turn(1, seed)
         initial_connection = self.connect()
         daemon_before = json.loads(self.command(["daemon", "status", "--json"]).stdout)
@@ -241,25 +246,36 @@ class ResumeCanary(Canary):
         print("Original CLI exited cleanly; checking pending mail while it is down.", flush=True)
 
         self.command(["send", self.target, "--from", "cli-resume-canary/tester", pending])
-        self.wait(lambda: self.status()["accepted"] == 2, "daemon acceptance while CLI absent")
-        queued_before = self.queued()
-        self.check("queued_message_preserved_without_cli", len(queued_before) == 1
-                   and pending in json.dumps(queued_before[0]))
-        requests_before = self.provider.count()
-        reconciled_down = self.reconcile()
-        down_observation = reconciled_down.get("lastAccepted", {})
-        self.check("reconcile_observes_queued_while_cli_down", down_observation.get("state") == "queued"
-                   and down_observation.get("attempt", {}).get("clientId") == queued_before[0]["clientUserMessageId"])
-        self.check("queued_reconcile_preserves_acceptance_and_queue", reconciled_down["accepted"] == 2
-                   and self.queued() == queued_before and self.provider.count() == requests_before)
-        self.pump(self.watcher_window)
-        self.check("absent_cli_does_not_consume_queue", self.queued() == queued_before
-                   and self.count(pending) == 0 and len(self.provider_turns()) == 2)
-        daemon_during = json.loads(self.command(["daemon", "status", "--json"]).stdout)
-        self.check("cbus_daemon_survives_cli_exit", daemon_during["pid"] == daemon_before["pid"])
-        self.result["downtime"] = {"secondsObserved": self.watcher_window, "queue": queued_before,
-                                   "connection": self.status(), "daemon": daemon_during,
-                                   "reconciled": reconciled_down}
+        managed = initial_connection.get("consumer", {}).get("managed", False)
+        queued_before = None
+        if managed:
+            self.pump(self.watcher_window)
+            self.check("offline_mail_retained_in_bus", self.status()["accepted"] == 1
+                       and self.queued() == [] and self.count(pending) == 0 and len(self.provider_turns()) == 2
+                       and pending in (self.bus / "cli-resume-canary" / "advisor" / "inbox.jsonl").read_text())
+            daemon_during = json.loads(self.command(["daemon", "status", "--json"]).stdout)
+            self.check("cbus_daemon_survives_cli_exit", daemon_during["pid"] == daemon_before["pid"])
+
+        else:
+            self.wait(lambda: self.status()["accepted"] == 2, "daemon acceptance while CLI absent")
+            queued_before = self.queued()
+            self.check("queued_message_preserved_without_cli", len(queued_before) == 1
+                       and pending in json.dumps(queued_before[0]))
+            requests_before = self.provider.count()
+            reconciled_down = self.reconcile()
+            down_observation = reconciled_down.get("lastAccepted", {})
+            self.check("reconcile_observes_queued_while_cli_down", down_observation.get("state") == "queued"
+                       and down_observation.get("attempt", {}).get("clientId") == queued_before[0]["clientUserMessageId"])
+            self.check("queued_reconcile_preserves_acceptance_and_queue", reconciled_down["accepted"] == 2
+                       and self.queued() == queued_before and self.provider.count() == requests_before)
+            self.pump(self.watcher_window)
+            self.check("absent_cli_does_not_consume_queue", self.queued() == queued_before
+                       and self.count(pending) == 0 and len(self.provider_turns()) == 2)
+            daemon_during = json.loads(self.command(["daemon", "status", "--json"]).stdout)
+            self.check("cbus_daemon_survives_cli_exit", daemon_during["pid"] == daemon_before["pid"])
+            self.result["downtime"] = {"secondsObserved": self.watcher_window, "queue": queued_before,
+                                       "connection": self.status(), "daemon": daemon_during,
+                                       "reconciled": reconciled_down}
 
         self.start_cli(resume=True)
         self.check("resume_uses_new_cli_pid", self.clis[0].pid != self.process.pid)
@@ -278,7 +294,8 @@ class ResumeCanary(Canary):
         reconciled_up = self.reconcile()
         up_observation = reconciled_up.get("lastAccepted", {})
         self.check("reconcile_observes_received_after_resume", up_observation.get("state") == "received"
-                   and up_observation.get("attempt", {}).get("clientId") == queued_before[0]["clientUserMessageId"]
+                   and bool(up_observation.get("attempt", {}).get("clientId"))
+                   and (queued_before is None or up_observation["attempt"]["clientId"] == queued_before[0]["clientUserMessageId"])
                    and bool(up_observation.get("itemId")))
         self.check("received_reconcile_preserves_acceptance_and_queue", reconciled_up["accepted"] == 2
                    and self.queued() == [] and self.provider.count() == requests_before)
@@ -291,6 +308,11 @@ class ResumeCanary(Canary):
         self.check("observer_never_loaded_thread", self.observer.call("thread/loaded/list", {})["data"] == [])
         daemon_after = json.loads(self.command(["daemon", "status", "--json"]).stdout)
         self.check("same_cbus_daemon_after_cli_resume", daemon_after["pid"] == daemon_before["pid"])
+        if managed:
+            current = self.status()["consumer"]
+            prior = initial_connection["consumer"]
+            self.check("same_managed_backend_and_new_frontend", current["pid"] == prior["pid"]
+                       and current["frontend"]["pid"] != prior["frontend"]["pid"])
         resumed_tree = process_descendants(self.process.pid)
         original_native = {row["pid"] for row in self.result["originalProcessTree"] if Path(row["comm"]).name == "codex"}
         resumed_native = {row["pid"] for row in resumed_tree if Path(row["comm"]).name == "codex"}

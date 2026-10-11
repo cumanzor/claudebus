@@ -59,7 +59,7 @@ class PresenceCanary(ResumeCanary):
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"),
                            codexVersion=meta.get("cli_version"), rollout=str(self.rollout))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         self.finish_provider_turn(1, seed)
         self.command(["join", "cli-resume-canary", "observer", "--session-id", str(uuid.uuid4())])
         self.peer_inbox = self.bus / "cli-resume-canary" / "observer" / "inbox.jsonl"
@@ -68,7 +68,7 @@ class PresenceCanary(ResumeCanary):
         initial = self.status()
         original_tree = process_descendants(self.process.pid)
         original_native = {r["pid"] for r in original_tree if Path(r["comm"]).name == "codex"}
-        self.check("owner_is_actual_native_cli", self.consumer().get("pid") in original_native)
+        self.check("owner_is_actual_native_cli", self.consumer().get("frontend", self.consumer()).get("pid") in original_native)
         self.check("explicit_store_did_not_claim_parent_pid", connected["config"].get("RuntimePID", 0) == 0)
         self.check_events(["join"])
         self.connect()
@@ -98,19 +98,28 @@ class PresenceCanary(ResumeCanary):
         self.wait(lambda: self.consumer().get("state") == "exited", "natural CLI exit observed")
         self.check_events(["join", "departed"])
         self.command(["send", self.target, "--from", "cli-resume-canary/tester", pending])
-        self.wait(lambda: self.status()["accepted"] == accepted_before + 1, "offline native queue acceptance")
-        down = self.reconcile()
-        self.check("offline_mail_durable_and_consumer_separate", down["lastAccepted"]["state"] == "queued"
-                   and down["consumer"]["state"] == "exited")
+        if initial.get("consumer", {}).get("managed", False):
+            self.pump(self.watcher_window)
+            down = self.status()
+            self.check("offline_mail_retained_in_bus", down["accepted"] == accepted_before
+                       and down["consumer"]["state"] == "exited" and self.count(pending) == 0
+                       and pending in (self.bus / "cli-resume-canary" / "advisor" / "inbox.jsonl").read_text())
+        else:
+            self.wait(lambda: self.status()["accepted"] == accepted_before + 1, "offline native queue acceptance")
+            down = self.reconcile()
+            self.check("offline_mail_durable_and_consumer_separate", down["lastAccepted"]["state"] == "queued"
+                       and down["consumer"]["state"] == "exited")
         self.pump(6)
         self.check("offline_no_model_maintenance", len(self.provider_turns()) == 2 and self.count(pending) == 0)
         self.start_cli(resume=True)
         self.wait(lambda: self.consumer().get("state") == "online", "automatic exact-thread resume discovery")
         resumed_tree = process_descendants(self.process.pid)
         resumed_native = {r["pid"] for r in resumed_tree if Path(r["comm"]).name == "codex"}
-        self.check("resume_owner_is_new_native_cli", self.consumer().get("pid") in resumed_native
+        self.check("resume_owner_is_new_native_cli", self.consumer().get("frontend", self.consumer()).get("pid") in resumed_native
                    and not resumed_native & original_native)
         self.check_events(["join", "departed", "join"])
+        if initial.get("consumer", {}).get("managed", False):
+            self.check("same_managed_backend_after_resume", self.consumer()["pid"] == initial["consumer"]["pid"])
         self.finish_provider_turn(3, pending)
         self.check("resume_preserves_epoch_and_prior_input", self.status()["id"] == initial["id"]
                    and seed in json.dumps(self.provider_turns()[2]["body"].get("input", [])))

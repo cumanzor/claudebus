@@ -6,9 +6,15 @@ previous repository and may not resolve.
 
 [2026-10-11 03:55:42 UTC] [Wire] Every cbus WebSocket dial and relay HTTP request (send, prune, peers) now sends a User-Agent: `cbus/<version>` from the daemon and CLI (stamped via `main.version`), `cbus/wstail` for the test client, `cbus/unstamped` from a binary built without the stamp. One accessor strips CR/LF so a stamped value cannot inject headers. The relay logs the value on tail connect and upgrade failure for both `/tail` and `/tail/durable-v1`. A front-door access log or the relay log can now tell a cbus dial from a foreign client holding a leaked relay token; before, every legitimate dial was anonymous.
 
+[2026-10-08 19:03:00 UTC] [Tests/Codex] Acceptance canaries recognize managed CLI frontends, verify offline bus retention and same-backend resume, preserve legacy queue checks, and clean up their scratch managed processes.
+
+[2026-10-08 18:50:05 UTC] [Client/Codex] Managed Codex connections track the exact CLI frontend across quit and resume, retain new offline mail in the bus inbox, and preserve shared backends and prior delivery receipts.
+
 [2026-10-08 16:25:26 UTC] [Client/Formations] `formation resume` and `apply --mode resume` refuse a session that a running process already resumes (`claude --resume <sid>` found in `ps`), naming the pid, instead of launching a second process on the transcript. Covers an anchor reopened by hand that never re-joined the bus. macOS and Linux.
 
 [2026-10-08 16:19:40 UTC] [Client/Formations] `formation save` sets the saving session's own `target` from the terminal it runs in (tmux records `tmux`, a plain iTerm2 session moves `tmux` back to `tab`); `formation resume --target` launches the anchor on another surface for one run; a `tab` fork whose iTerm2 session is gone, or that runs inside tmux, opens a new iTerm2 window instead of failing with `session ... not found in any iTerm2 window`.
+
+[2026-10-08 07:00:00 UTC] [Client/Codex] Native connections recognize a CLI-owned managed app server with exact rollout and queue evidence; unrelated backends remain excluded and close still refuses to signal a shared backend.
 
 [2026-10-05 06:03:57 UTC] [Release] v0.20.1 (tag at `a02f86f`): a collected connection's unread.jsonl holds only mail and is not written for a tail of presence notices (#68); the test suites can no longer write into a real cbus store (#66). Assets built twice from fresh clones at the tag, byte-identical; published SHA256SUMS checked.
 

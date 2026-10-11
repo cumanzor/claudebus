@@ -10,6 +10,10 @@ import (
 )
 
 func validateClaudeSocketPeer(conn *net.UnixConn, expectedPID int) error {
+	return validateUnixSocketPeer(conn, expectedPID)
+}
+
+func validateUnixSocketPeer(conn *net.UnixConn, expectedPID int) error {
 	raw, err := conn.SyscallConn()
 	if err != nil {
 		return err
@@ -26,7 +30,7 @@ func validateClaudeSocketPeer(conn *net.UnixConn, expectedPID int) error {
 		return peerErr
 	}
 	if cred.Pid != int32(expectedPID) || cred.Uid != uint32(os.Geteuid()) {
-		return errors.New("Claude socket peer does not match the bound process and user")
+		return errors.New("socket peer does not match the bound process and user")
 	}
 	return nil
 }

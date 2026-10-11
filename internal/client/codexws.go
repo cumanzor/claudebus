@@ -86,6 +86,10 @@ func dialCodex(sock string) (*codexConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newCodexConn(conn)
+}
+
+func newCodexConn(conn net.Conn) (*codexConn, error) {
 	br, err := wsHandshake(conn)
 	if err != nil {
 		conn.Close()

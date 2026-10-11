@@ -97,7 +97,7 @@ class Peer(ResumeCanary):
         meta = next(row["payload"] for row in self.entries() if row.get("type") == "session_meta")
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"), codexVersion=meta.get("cli_version"), rollout=str(self.rollout))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
 
     def release(self):
         with self.provider.condition:

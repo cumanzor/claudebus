@@ -283,7 +283,7 @@ class RelayCanary(Canary):
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"), codexVersion=meta.get("cli_version"),
                            rollout=str(self.rollout))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         self.wait(lambda: self.tester.count(event="join") == 1, "actual CLI bootstrap + remote consumer join")
         self.wait(lambda: any(e.get("payload", {}).get("type") == "task_complete" for e in self.entries()), "bootstrap completion")
         first = self.status()

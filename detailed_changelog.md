@@ -64,6 +64,68 @@ upgrade-failure log lines), docs/security.md, docs/architecture/protocol.md.
   failed once in six runs on an unrelated harness-sensitive test and passed on
   every rerun.
 
+## [2026-10-08 19:03:00 UTC] [Tests/Codex] Validate managed frontend lifecycle
+
+[What changed]
+- Prove ordinary CLI execution from the launched process tree instead of the
+  transcript's historical source label. Distinguish frontend exit from a managed
+  backend that intentionally survives it.
+- Require new managed offline mail to remain in the bus inbox with no recipient
+  activity, then arrive once on a new frontend using the same backend. Retain the
+  existing offline native-queue assertions for non-managed CLIs.
+- Recognize automatic title metadata separately from recipient turns and stop
+  scratch managed daemons and update helpers during cleanup.
+
+[Files changed]
+- Native queue and resume canary helpers; presence, compaction, permissions,
+  relay, interruption and multiple-home canary entry points.
+
+[Possible ripple effects]
+- Depends on the managed frontend lifecycle fix. Production code and permissions
+  are unchanged. Cleanup only touches each canary's isolated processes and
+  disposable backend copies; transcripts and result files remain available.
+
+[Testing notes]
+- Python compilation passes. Actual Linux Codex 0.161.0 runs use a local fake
+  provider and retain check outcomes and result-file hashes in the PR evidence.
+- Native macOS acceptance remains outside this environment's coverage.
+
+## [2026-10-08 18:50:05 UTC] [Client/Codex] Follow managed CLI frontend lifetime
+
+[What changed]
+- A managed backend survives CLI exit and may drain its native queue without a
+  terminal. Parent-only discovery also loses the session when a new CLI resumes
+  on that same backend.
+- Verify the exact thread's TUI endpoint through the backend's kernel-verified
+  control socket, then bind its loopback listener to a live interactive CLI and
+  process start token. Persist backend and frontend identities separately;
+  recheck endpoint identity and reject ambiguous or reused ownership.
+- Retain new mail in the durable bus inbox while a managed frontend is absent
+  or unverified. Reconcile prior attempts without another submission. Resume
+  releases retained mail once, and presence, roster, remote identity and
+  collection follow the frontend lifetime. Collection rechecks managed resume
+  before archiving an expired record.
+
+[Files changed]
+- Consumer discovery, native socket verification, daemon delivery/presence/GC,
+  roster and remote identity, process fixtures and lifecycle regression tests.
+- docs/usage.md.
+
+[Possible ripple effects]
+- Managed backends must expose the exact thread's TUI endpoint. Unsupported or
+  inconclusive observations retain new mail. Already submitted input may execute
+  after CLI exit; no shared backend is signaled or stopped.
+- Non-managed CLI native offline queues retain their existing behavior. Codex
+  permissions and the relay wire protocol are unchanged.
+
+[Testing notes]
+- Real-process regressions reproduce missing departure and post-exit submission
+  on the original implementation. Fixtures cover same-backend resume, restart,
+  reused ports, wrong socket owners, unknown probes and reconciliation.
+- Linux Codex 0.161.0 acceptance uses isolated real CLIs and local fake providers.
+  Exact-thread quit/resume and presence pass; native macOS runtime validation is
+  not available in this environment. Full validation is recorded in the PR.
+
 ## [2026-10-08 16:25:26 UTC] [Client/Formations] Resume refuses a session already open in a process
 
 [Attempt #1] Files: internal/client/formation_procscan.go (resumedSids,
@@ -142,6 +204,22 @@ mapping, the saver-only retarget and its printed line, the override reaching
 the fork spec, and a bad `--target` refusal. Mutants that drop the retarget
 call, the tmux branch, the iTerm2-back mapping, or point the stale branch at
 the current window each fail a test. `go test ./...` green.
+
+## [2026-10-08 07:00:00 UTC] [Client/Codex] Recognize managed CLI consumers
+
+[What changed]
+- Native connect previously rejected a Codex CLI whose rollout writer was its managed app-server child. The consumer probe now recognizes the local managed launch shape and verifies a live direct interactive CLI parent before and after inspecting the backend.
+- Exact thread metadata, writable rollout and queue descriptors, unique writer checks, and caller process identity remain required. Frontends need not retain queue descriptors after launching the backend. Generic servers, exec parents, detached backends, and desktop ancestry remain excluded.
+- The separate close check still refuses to signal a managed backend because it may serve multiple threads. Usage documentation explains its consumer PID and disconnect behavior.
+
+[Files changed]
+- `internal/client/codex_runtime_writer.go`, `internal/client/codex_managed_consumer.go`, and two managed-consumer test files.
+- `docs/usage.md` and both changelogs. No generated artifacts, dependency changes, or wire changes.
+
+[Testing and limits]
+- A real-process regression fails on the original probe and passes after the fix. Negative cases cover generic servers, exec/server parents, desktop ancestry, missing CLI parents, read-only rollouts, wrong stores, stale caller identity, ambiguous writers, orphaned backends, and close refusal. Focused ownership, admission, and close tests pass with the race detector; three weakened ownership/close variants are detected by the regression.
+- A read-only probe of a live managed Codex CLI reports the exact runtime online and passes admission. It creates no connection and does not establish inbound delivery.
+- The broader suite passes with two pre-existing tests excluded: `TestHostOverrideRecordedInMetaLedgerAndFormation` and `TestCloseRefusesOwnAncestry` also fail on unchanged main when run inside Codex. macOS and Windows client tests cross-compile; native acceptance there is untested.
 
 ## [2026-10-05 06:03:57 UTC] [Release] v0.20.1: unread export holds only mail
 

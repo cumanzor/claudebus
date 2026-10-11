@@ -175,7 +175,7 @@ class PermissionsCanary(ResumeCanary):
         meta = next(record["payload"] for record in self.entries() if record.get("type") == "session_meta")
         self.thread = meta["id"]
         self.result.update(threadId=self.thread, source=meta.get("source"), codexVersion=meta.get("cli_version"))
-        self.check("ordinary_cli_source", meta.get("source") == "cli")
+        self.check("ordinary_cli_runtime", self.ordinary_cli_runtime(meta))
         if self.bus_scope:
             self.run_bus_tools()
         else:

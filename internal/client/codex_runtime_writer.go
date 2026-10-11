@@ -36,6 +36,9 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 	oldPID, oldStart := c.Config.RuntimePID, c.Config.RuntimeStartToken
 	if c.Consumer != nil && c.Consumer.PID > 0 {
 		oldPID, oldStart = c.Consumer.PID, c.Consumer.StartToken
+		if c.Consumer.Managed && c.Consumer.Frontend != nil {
+			oldPID, oldStart = c.Consumer.Frontend.PID, c.Consumer.Frontend.StartToken
+		}
 	}
 	oldExited := false
 	if oldPID > 0 && oldStart != "" {
@@ -50,6 +53,8 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 	}
 	seen := map[int]bool{}
 	var found []consumerProbe
+	managedSeen := false
+	writers := 0
 	for _, fd := range fds {
 		if seen[fd.PID] || (fd.Access != "w" && fd.Access != "u") {
 			continue
@@ -73,7 +78,11 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 		if err != nil {
 			return unknown, err
 		}
-		if !interactiveCodexProcess(argv) || codexDesktopAncestor(fd.PID, procLookup()) {
+		if codexDesktopAncestor(fd.PID, procLookup()) {
+			continue
+		}
+		managed := managedCodexProcess(argv)
+		if !interactiveCodexProcess(argv) && !managed {
 			continue
 		}
 		// Re-read this candidate's descriptors within its process-start fence;
@@ -94,12 +103,29 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 				queue = true
 			}
 		}
+		var frontend *codexFrontend
+		if writer && queue {
+			writers++
+			if writers > 1 {
+				return unknown, errors.New("multiple CLI writers hold this exact rollout; consumer ownership is ambiguous")
+			}
+		}
+		if managed && writer && queue {
+			managedSeen = true
+			frontend, err = managedCodexFrontend(ctx, c, fd.PID)
+			if err != nil {
+				return consumerProbe{State: "unknown", Managed: true}, err
+			}
+			if frontend == nil {
+				continue
+			}
+		}
 		after, err := procStartTime(fd.PID)
 		if err != nil || before != after {
 			return unknown, errors.New("rollout owner changed during inspection")
 		}
 		if writer && queue && !procZombie(fd.PID) {
-			found = append(found, consumerProbe{State: "online", PID: fd.PID, StartToken: before, Detail: "exact rollout writer and queue store observed"})
+			found = append(found, consumerProbe{State: "online", PID: fd.PID, StartToken: before, Managed: managed, Frontend: frontend, Detail: "exact rollout writer and queue store observed"})
 		}
 	}
 	if !sameOpenFile(identity, path) {
@@ -112,9 +138,9 @@ func observeCodexConsumer(ctx context.Context, c *ConnectionState) (consumerProb
 		return found[0], nil
 	}
 	if oldExited {
-		return consumerProbe{State: "exited", Detail: "previous CLI process exited; no replacement writer observed"}, nil
+		return consumerProbe{State: "exited", Managed: managedSeen, Detail: "previous CLI process exited; no replacement CLI observed"}, nil
 	}
-	return consumerProbe{State: "unknown", Detail: "no exact CLI rollout writer observed"}, nil
+	return consumerProbe{State: "unknown", Managed: managedSeen, Detail: "no exact CLI rollout writer and frontend observed"}, nil
 }
 
 // ownerStartTime reads a process start token. (A var only for tests.)

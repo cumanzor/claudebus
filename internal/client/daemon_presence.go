@@ -19,17 +19,27 @@ import (
 // desired subscription, and historical message receipts. PresenceOnline is the
 // last announced state, so a transient unknown probe cannot manufacture a rejoin.
 type consumerObservation struct {
-	State          string `json:"state"`
-	PID            int    `json:"pid,omitempty"`
-	StartToken     string `json:"startToken,omitempty"`
-	ObservedAt     string `json:"observedAt"`
-	Detail         string `json:"detail,omitempty"`
-	PresenceOnline bool   `json:"presenceOnline"`
+	State          string         `json:"state"`
+	PID            int            `json:"pid,omitempty"`
+	StartToken     string         `json:"startToken,omitempty"`
+	ObservedAt     string         `json:"observedAt"`
+	Detail         string         `json:"detail,omitempty"`
+	PresenceOnline bool           `json:"presenceOnline"`
+	Managed        bool           `json:"managed,omitempty"`
+	Frontend       *codexFrontend `json:"frontend,omitempty"`
 }
 
 type consumerProbe struct {
 	State, StartToken, Detail string
 	PID                       int
+	Managed                   bool
+	Frontend                  *codexFrontend
+}
+
+type codexFrontend struct {
+	PID        int    `json:"pid"`
+	StartToken string `json:"startToken"`
+	Origin     string `json:"origin"`
 }
 
 type presenceRecipient struct {
@@ -47,6 +57,10 @@ func clonePresenceFields(next, c *ConnectionState) {
 	if c.Consumer != nil {
 		v := *c.Consumer
 		next.Consumer = &v
+		if v.Frontend != nil {
+			frontend := *v.Frontend
+			next.Consumer.Frontend = &frontend
+		}
 	}
 	next.PresenceOutbox = append([]presenceTransition(nil), c.PresenceOutbox...)
 	for i := range next.PresenceOutbox {
@@ -76,7 +90,7 @@ func (d *busDaemon) connectPresence(c *ConnectionState, fresh bool) error {
 	}
 	p, err := d.consumerProbe(next)
 	if err != nil {
-		p = consumerProbe{State: "unknown", Detail: err.Error()}
+		p.State, p.Detail = "unknown", err.Error()
 	}
 	if err := d.applyConsumerProbe(next, p, fresh || c.Consumer != nil); err != nil {
 		return err
@@ -146,7 +160,7 @@ func (d *busDaemon) observeConsumer(c *ConnectionState) error {
 			}
 			p, err := d.consumerProbe(next)
 			if err != nil {
-				p = consumerProbe{State: "unknown", Detail: err.Error()}
+				p.State, p.Detail = "unknown", err.Error()
 			}
 			// Pre-presence journals establish a baseline without replaying the old join.
 			if err := d.applyConsumerProbe(next, p, c.Consumer != nil); err != nil {
@@ -172,7 +186,27 @@ func consumerChanged(a, b *consumerObservation) bool {
 	if a == nil || b == nil {
 		return a != b
 	}
-	return a.State != b.State || a.PID != b.PID || a.StartToken != b.StartToken || a.Detail != b.Detail || a.PresenceOnline != b.PresenceOnline
+	return a.State != b.State || a.PID != b.PID || a.StartToken != b.StartToken || a.Detail != b.Detail || a.PresenceOnline != b.PresenceOnline || a.Managed != b.Managed || !sameCodexFrontend(a.Frontend, b.Frontend)
+}
+
+func sameCodexFrontend(a, b *codexFrontend) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func observedCLIProcess(c *ConnectionState) (int, string) {
+	if c.Consumer == nil {
+		return 0, ""
+	}
+	if c.Consumer.Managed {
+		if c.Consumer.Frontend == nil {
+			return 0, ""
+		}
+		return c.Consumer.Frontend.PID, c.Consumer.Frontend.StartToken
+	}
+	return c.Consumer.PID, c.Consumer.StartToken
 }
 
 func (d *busDaemon) applyConsumerProbe(c *ConnectionState, p consumerProbe, announce bool) error {
@@ -196,6 +230,16 @@ func (d *busDaemon) applyConsumerProbe(c *ConnectionState, p consumerProbe, anno
 	c.Consumer.State, c.Consumer.Detail, c.Consumer.ObservedAt = p.State, p.Detail, Now()
 	if p.PID > 0 {
 		c.Consumer.PID, c.Consumer.StartToken = p.PID, p.StartToken
+	}
+	if p.Managed {
+		c.Consumer.Managed = true
+	}
+	if p.Frontend != nil {
+		frontend := *p.Frontend
+		c.Consumer.Frontend = &frontend
+	}
+	if p.State == "online" && !p.Managed {
+		c.Consumer.Managed, c.Consumer.Frontend = false, nil
 	}
 	return nil
 }
