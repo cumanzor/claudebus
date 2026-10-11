@@ -4,6 +4,40 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-11 03:55:42 UTC] [Wire] WebSocket client dials carry a User-Agent
+
+[Attempt #1] Files: internal/wire/ws.go (UserAgent var; User-Agent line in
+handshakeClient, CR/LF stripped from the value), internal/wire/ws_test.go
+(new), cmd/cbus/main.go (init stamps "cbus/"+version), relay/internal/wire/
+ws.go (SetUserAgent passthrough), relay/cmd/wstail/main.go (identifies as
+cbus/wstail).
+
+[What changed]
+- The hand-rolled client handshake wrote GET/Host/Upgrade/Connection/Key/
+  Version and nothing else, so every cbus dial reached the relay as an
+  anonymous 101 upgrade. A front-door access log watching for a leaked relay
+  token cannot tell a real cbus client from a foreign one when every
+  legitimate client is anonymous, which made such a tripwire unactionable.
+- Every dial now sends `User-Agent: cbus/<version>`. The daemon and CLI stamp
+  `main.version`; wstail identifies as `cbus/wstail`. The value is stripped
+  of CR/LF at the write, so a stamped version can never inject headers into
+  the raw request.
+
+[Possible Ripple Effects]
+- Front-door allowlists that keyed on empty or `Go-http-client` UAs for
+  WebSocket dials need to admit `cbus/*`.
+- `wire.UserAgent` is package state; tests that set it must restore it.
+
+[Testing Notes]
+- New `internal/wire` tests: TestDialContextSendsUserAgent (fails on the old
+  code with handshake User-Agent ""; green with the patch) and
+  TestUserAgentCannotInjectHeaders (a CR/LF-carrying UserAgent produces no
+  `Injected` header on the server side).
+- gofmt and `go vet ./...` clean. `go test ./...`: two harness-sensitive
+  internal/client failures (TestHostOverrideRecordedInMetaLedgerAndFormation,
+  TestCloseRefusesOwnAncestry) reproduce on unpatched main and are unrelated;
+  every other package green.
+
 ## [2026-10-08 16:25:26 UTC] [Client/Formations] Resume refuses a session already open in a process
 
 [Attempt #1] Files: internal/client/formation_procscan.go (resumedSids,

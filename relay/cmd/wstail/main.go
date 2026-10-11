@@ -28,6 +28,7 @@ func main() {
 
 	path := fmt.Sprintf("/tail?channel=%s&alias=%s",
 		url.QueryEscape(*channel), url.QueryEscape(*alias))
+	wire.SetUserAgent("cbus/wstail")
 	conn, err := wire.Dial(*addr, path, "bearer.cbus."+*token, 5*time.Second)
 	if err != nil {
 		log.Fatalf("dial: %v", err)

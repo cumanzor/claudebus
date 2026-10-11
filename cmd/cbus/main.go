@@ -17,12 +17,15 @@ import (
 
 	"claudebus/internal/client"
 	"claudebus/internal/core"
+	"claudebus/internal/wire"
 )
 
 // version is stamped at build time via -ldflags "-X main.version=<git describe>".
 // A readiness delta (bash cbus has no version verb) — provenance for the installed
 // binary during coexistence and cutover.
 var version = "dev"
+
+func init() { wire.UserAgent = "cbus/" + version }
 
 func main() { os.Exit(run(os.Args[1:])) }
 
