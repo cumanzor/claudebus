@@ -4,6 +4,46 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-11 05:49:10 UTC] [Release] v0.20.4: client User-Agent identity
+
+[Attempt #1] Range v0.20.3..8ca492e (pull request #77). Files:
+detailed_changelog.md, simple_changelog.md. Written after the tag, so the tag
+does not include this entry.
+
+[What changed]
+- #77: the WebSocket handshake and the relay HTTP requests (send, prune,
+  peers) send `User-Agent: cbus/<version>` through one CR/LF-stripping
+  accessor; the package default is `cbus/unstamped`; the relay logs the value
+  on tail connect and upgrade failure for `/tail` and `/tail/durable-v1`;
+  docs/security.md and protocol.md section 16 describe it as attribution, not
+  authentication. Details in the 2026-10-11 03:55:42 entry below.
+
+[Possible Ripple Effects]
+- Front-door allowlists keyed on empty or `Go-http-client` User-Agents need
+  `cbus/*` on the HTTP paths as well as the WebSocket upgrade.
+- The relay-side log lines appear only once a relay built from this tag or
+  later is deployed; the client release alone does not change relay output.
+
+[Testing Notes]
+A client and relay-log change with no adapter change, so the client-only
+gate: `go vet ./...` and the full `-race` suite from a fresh clone at the
+tagged commit, green with a short TMPDIR. Under the default macOS TMPDIR eight
+Codex managed-fixture tests fail before this release and after it, because the
+fixture's Unix socket path exceeds 104 bytes; tracked separately. Five assets
+built from two fresh clones at the tag were byte-identical, and the published
+assets match:
+
+```
+c7688385ad1710b40f9079bdf62dfab3a534f7757a2788023848cf1dd6eecbb0  cbus-darwin-amd64
+a84666d8a95050e860a40f4a6d47f3681aa9694df3e43395232b96eee9aff952  cbus-darwin-arm64
+818b58c10b324f8de28bbb31c2dc17f71b48d4a49cc56bff13eb1a1746aee520  cbus-linux-amd64
+d5d61c82c6a1ee2e9522d26215f153df9e788e0e9bfa43aadf64fe784b58b08c  cbus-linux-arm64
+eef4cfb98cb033c60763e941fed68b1c44585e303ea1651312338081cfce4b33  cbus-windows-amd64.exe
+```
+
+Installed by selfupdate on macOS, Linux and Windows; the Linux daemon
+restarted on the new build with its records retained.
+
 ## [2026-10-11 03:55:42 UTC] [Wire] WebSocket client dials carry a User-Agent
 
 [Attempt #1] Files: internal/wire/ws.go (UserAgent var, default cbus/unstamped;
