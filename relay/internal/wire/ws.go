@@ -15,3 +15,6 @@ const (
 
 var Upgrade = shared.Upgrade
 var Dial = shared.Dial
+
+// SetUserAgent stamps the client identity carried on relay-side dials.
+func SetUserAgent(ua string) { shared.UserAgent = ua }

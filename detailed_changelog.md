@@ -4,6 +4,66 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-11 03:55:42 UTC] [Wire] WebSocket client dials carry a User-Agent
+
+[Attempt #1] Files: internal/wire/ws.go (UserAgent var, default cbus/unstamped;
+UserAgentValue strips CR/LF; User-Agent line in handshakeClient),
+internal/wire/ws_test.go (new), internal/client/remote.go (RemoteEndpoint.apply
+sets User-Agent), internal/client/remote_test.go, cmd/cbus/main.go (init stamps
+"cbus/"+version), cmd/cbus/useragent_test.go (new), relay/internal/wire/ws.go
+(SetUserAgent passthrough), relay/cmd/wstail/main.go (identifies as cbus/wstail),
+relay/cmd/cbus-relay/main.go and durable_tail.go (ua= on tail connect and
+upgrade-failure log lines), docs/security.md, docs/architecture/protocol.md.
+
+[What changed]
+- The hand-rolled client handshake wrote GET/Host/Upgrade/Connection/Key/
+  Version and nothing else, so every cbus dial reached the relay as an
+  anonymous 101 upgrade. A front-door access log watching for a leaked relay
+  token cannot tell a real cbus client from a foreign one when every
+  legitimate client is anonymous, which made such a tripwire unactionable.
+- Every WebSocket dial now sends `User-Agent: cbus/<version>`. The daemon and
+  CLI stamp `main.version`; wstail identifies as `cbus/wstail`. The relay HTTP
+  requests (`POST /send`, `POST /prune`, `GET /peers`, behind `cbus send
+  @host`, `cbus prune` and `cbus list @host`) carry the same value instead of
+  Go's default `Go-http-client/1.1`. Both read one accessor,
+  `wire.UserAgentValue`, which strips CR/LF so a stamped version can never
+  inject headers into the raw request.
+- The package default is `cbus/unstamped`, not `cbus/dev`. Under `go test`
+  the version is `dev`, so a `cbus/dev` default made any "main stamps the
+  value" assertion pass with the stamp deleted. A binary built without the
+  version stamp now shows as `cbus/unstamped`, still inside the `cbus/`
+  prefix.
+- The relay logs the dialer's User-Agent on its own `tail ... connected`,
+  `durable tail ... connected` and both upgrade-failure lines, so a foreign
+  client holding a valid token is visible in the relay log and not only at a
+  front door. The header is attribution, not authentication; docs/security.md
+  says so.
+
+[Possible Ripple Effects]
+- Front-door allowlists that keyed on empty or `Go-http-client` UAs for cbus
+  traffic need to admit `cbus/*`, on the HTTP paths as well as the WebSocket
+  upgrade.
+- `wire.UserAgent` is package state; tests that set it must restore it.
+- Relay logs gain one `durable tail ... connected` line per durable
+  subscription and an `ua=` field on the existing tail lines.
+
+[Testing Notes]
+- `internal/wire`: TestDialContextSendsUserAgent (red on the old code with
+  User-Agent ""), TestUserAgentCannotInjectHeaders.
+- `internal/client`: TestRemoteHTTPCarriesWireUserAgent (red on the old code
+  with `Go-http-client/1.1` on all three paths, green with the patch).
+- `cmd/cbus`: TestUserAgentStampedFromVersion (red when the init stops
+  stamping: got `cbus/unstamped`, want `cbus/dev`; the same mutant passed
+  against the old default, which is why the default moved).
+- Live local relay run (relay and wstail built from the branch, scratch spool
+  and token): `tail demo/laptop: connected ua="cbus/wstail"`, the 409
+  upgrade-failure line with `ua="cbus/wstail"`, and
+  `durable tail demo/laptop: connected ua="cbus/durable-probe"` from a
+  curl-opened durable-v1 tail, plus its 409 upgrade-failure line with `ua=`.
+- gofmt and `go vet ./...` clean; `go test ./...` green. `internal/client`
+  failed once in six runs on an unrelated harness-sensitive test and passed on
+  every rerun.
+
 ## [2026-10-08 19:03:00 UTC] [Tests/Codex] Validate managed frontend lifecycle
 
 [What changed]

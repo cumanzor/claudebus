@@ -25,6 +25,23 @@ import (
 
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+// UserAgent identifies cbus WebSocket clients to the relay's front doors: a
+// front-door access log cannot tell a cbus dial from a foreign client using
+// a leaked token when the handshake carries no identity. Binaries stamp it
+// from main.version; read it through UserAgentValue.
+var UserAgent = "cbus/unstamped"
+
+// UserAgentValue is UserAgent with CR and LF stripped, so a stamped value cannot
+// inject headers into the raw handshake or an HTTP request.
+func UserAgentValue() string {
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, UserAgent)
+}
+
 const (
 	OpText  byte = 0x1
 	OpClose byte = 0x8
@@ -156,7 +173,7 @@ func handshakeClient(conn net.Conn, addr, path, subprotocol string, timeout time
 		return nil, err
 	}
 	key := base64.StdEncoding.EncodeToString(keyBytes)
-	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n", path, addr, key)
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n", path, addr, UserAgentValue(), key)
 	if subprotocol != "" {
 		req += "Sec-WebSocket-Protocol: " + subprotocol + "\r\n"
 	}

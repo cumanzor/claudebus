@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"claudebus/internal/core"
+	"claudebus/internal/wire"
 )
 
 // Explicit HTTP timeouts the bash client lacks (only its 0.3s healthz probe is
@@ -78,6 +79,7 @@ func ResolveRemote(store *CredStore, host string) (RemoteEndpoint, error) {
 }
 
 func (e RemoteEndpoint) apply(req *http.Request) {
+	req.Header.Set("User-Agent", wire.UserAgentValue())
 	for k, v := range e.headers {
 		req.Header.Set(k, v)
 	}

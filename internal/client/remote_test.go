@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"claudebus/internal/core"
+	"claudebus/internal/wire"
 )
 
 // seedCreds points XDG at a temp dir and writes credential fields there.
@@ -132,5 +133,42 @@ func TestRemoteListDecodes(t *testing.T) {
 	}
 	if e, ok := peers["dev/server"]; !ok || !e.Connected || e.Queued != 2 || e.LastSeen.IsZero() {
 		t.Errorf("peers[dev/server] = %+v (ok=%v)", peers["dev/server"], ok)
+	}
+}
+
+func TestRemoteHTTPCarriesWireUserAgent(t *testing.T) {
+	old := wire.UserAgent
+	t.Cleanup(func() { wire.UserAgent = old })
+	wire.UserAgent = "cbus/test-ua"
+	got := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got[r.Method+" "+r.URL.Path] = r.Header.Get("User-Agent")
+		switch r.URL.Path {
+		case "/send":
+			_, _ = w.Write([]byte(`{"ok":true,"id":"x"}`))
+		case "/prune":
+			_, _ = w.Write([]byte(`{"pruned":[]}`))
+		case "/peers":
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	ep := RemoteEndpoint{FrontDoor: FrontDoor{Local: true, Base: srv.URL}}
+
+	if err := RemoteSend(ep, core.SendReq{Channel: "c", Alias: "a", From: "c/o", Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemotePrune(ep, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoteList(ep); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"POST /send", "POST /prune", "GET /peers"} {
+		if got[k] != "cbus/test-ua" {
+			t.Errorf("%s User-Agent = %q, want %q", k, got[k], "cbus/test-ua")
+		}
 	}
 }

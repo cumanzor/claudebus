@@ -1657,6 +1657,9 @@ the allowlist itself, not a convention the caller has to honor.
 
 Shares §10's handshake and frame-layer mechanics; layered on top:
 
+- **Client identity**: the WebSocket handshake and the relay HTTP requests
+  (`RemoteSend`, `RemotePrune`, `RemoteList`) carry `User-Agent: cbus/<version>`
+  from `wire.UserAgentValue`, which strips CR and LF from the stamped value.
 - **Ready handshake** (relay → daemon): immediately after the ws upgrade,
   the relay sends one text frame,
   `{"type":"ready","protocol":"cbus-relay-durable/v1"}`, before anything

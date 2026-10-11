@@ -97,6 +97,16 @@ front door. Per path:
 - `GET /healthz` is unauthenticated at the relay itself and returns only `ok`. Put it
   behind the front door too, or accept that it discloses liveness and nothing else.
 
+**Client identity.** Every authenticated cbus request to the relay (`POST /send`,
+`GET /peers`, `POST /prune`, and both WebSocket dials) carries
+`User-Agent: cbus/<version>`; only the unauthenticated loopback `/healthz` probe does not. The relay's test client
+sends `cbus/wstail`, and a cbus binary built without the version stamp sends
+`cbus/unstamped`. The relay logs that value on tail connect and on upgrade failure, for
+both `/tail` and `/tail/durable-v1`, and a front door can alert when a valid token
+arrives with any other User-Agent. This is attribution, not authentication: any client
+can set the header, so it flags a careless foreign client holding a leaked token and
+proves nothing about a careful one.
+
 **Current risk.** The bearer is one shared, relay-wide secret: a leaked token lets
 anyone read any channel's mail through the paths above, acknowledge durable messages
 on a channel's behalf, and publish presence text that reaches every session connected
