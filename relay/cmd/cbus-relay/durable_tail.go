@@ -161,9 +161,10 @@ func (s *server) handleDurableTail(w http.ResponseWriter, r *http.Request) {
 	key := ch + "/" + al
 	conn, t, err := s.upgradeOwnedTail(w, r, key, consumer, true, proto)
 	if err != nil {
-		log.Printf("durable tail %s: upgrade: %v", key, err)
+		log.Printf("durable tail %s: upgrade: %v ua=%q", key, err, r.UserAgent())
 		return
 	}
+	log.Printf("durable tail %s: connected ua=%q", key, r.UserAgent())
 	defer s.hub.detach(key, t) // subscriber transport is not recipient CLI presence.
 	conn.WriteTimeout = 10 * time.Second
 	defer conn.Close()
