@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-11 05:49:10 UTC] [Release] v0.20.4 (tag at `8ca492e`): every cbus WebSocket dial and relay HTTP request carries `User-Agent: cbus/<version>` and the relay logs it on tail connect and upgrade failure (#77). Five assets byte-identical from two fresh clones at the tag; SHA256SUMS and build-provenance.json published. Installed by selfupdate on macOS, Linux and Windows.
+
 [2026-10-11 03:55:42 UTC] [Wire] Every cbus WebSocket dial and relay HTTP request (send, prune, peers) now sends a User-Agent: `cbus/<version>` from the daemon and CLI (stamped via `main.version`), `cbus/wstail` for the test client, `cbus/unstamped` from a binary built without the stamp. One accessor strips CR/LF so a stamped value cannot inject headers. The relay logs the value on tail connect and upgrade failure for both `/tail` and `/tail/durable-v1`. A front-door access log or the relay log can now tell a cbus dial from a foreign client holding a leaked relay token; before, every legitimate dial was anonymous.
 
 [2026-10-08 19:03:00 UTC] [Tests/Codex] Acceptance canaries recognize managed CLI frontends, verify offline bus retention and same-backend resume, preserve legacy queue checks, and clean up their scratch managed processes.
