@@ -4,6 +4,64 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-22 14:51:20 UTC] [Daemon/Harness] Explicit per-harness dispatch
+
+[Attempt #1] Files: internal/client/daemon_harness.go (opencode constant,
+validThreadID, validOpencodeSessionID, errUnsupportedHarness,
+consumerProbeInterval), daemon.go (readConnectionRecord, queue,
+requireCLIConsumer, connect thread check and reconnect dispatch, meta cwd,
+deliver lookup and accept dispatch, accept), daemon_claude.go
+(claudeReceiptWaiting, validateConnectionBinding, connectionReadyState,
+pinnedConsumer, new claudeCleanWrite and provedNotSubmitted),
+daemon_compaction.go, daemon_connect_binding.go, daemon_connect_request.go,
+daemon_presence.go, daemon_relay.go, daemon_scheduler.go (parkedClaude, new
+logsAttemptOutcomes), daemon_codex_frontend.go, daemon_claude_reconnect.go,
+close_native_unix.go (default on the revalidation switch), formation_harness.go,
+formation_plan.go. Tests: new harness_dispatch_test.go; daemon_harness_test.go
+expects the OpenCode-specific refusal.
+
+[What changed]
+- 34 harness comparisons became switches. Each default is chosen per site:
+  refuse with an unsupported-harness error where the code would act (queue,
+  binding, probe, accept, relay owner, compaction, reconnect), and false or a
+  no-op where the code is a predicate (receipt waiting, parking, attempt
+  logging, managed Codex frontends).
+- Thread IDs are checked by validThreadID for the connection's harness at
+  connect and when journals load. The connect error now says "session ID"
+  rather than "session UUID".
+- OpenCode has a harness constant and a dedicated refusal message; admission
+  and the adapter whitelist still reject it.
+
+[Why]
+Most branches read `if claude {...}` with Codex as the implied else. An
+OpenCode connection admitted later would have been probed, queued and
+accepted as Codex. Making each default explicit, and pinning it with a test,
+turns that into a refusal the next adapter has to replace site by site.
+
+[Possible Ripple Effects]
+- Behavior for Codex and Claude is unchanged; legacy journals with an empty
+  harness still normalize to Codex.
+- Several new defaults are unreachable today because validateConnectionAdapter
+  rejects any third harness first. They become live when OpenCode is admitted.
+- The guard test is syntactic: it catches comparisons against the harness
+  constants or daemonHarness(...) with a literal, and harness switches with no
+  default. It cannot judge whether a default is correct.
+
+[Testing Notes]
+- New guard test run against main: fails with 34 sites listed. Passes after.
+- Mutants (each run against the new tests): borrowing the Codex consumer in
+  pinnedConsumer, "queue-ready" default, releasing attempts by default,
+  dropping a default, UUID check for OpenCode, admitting OpenCode,
+  reintroducing a two-way comparison, accept committing by default: all
+  killed on the aimed assertion. A Codex default in consumerProbe survives
+  because the adapter whitelist rejects first; it is equivalent until
+  OpenCode is admitted.
+- go test -race ./... green with a short TMPDIR; build and vet for linux
+  amd64/arm64 and windows; test binaries compile for linux and windows.
+- Live: a scratch daemon on the new binary, this change's own Claude session
+  connected natively, one message submitted, received from the transcript and
+  accepted, then disconnected.
+
 ## [2026-10-22 03:37:53 UTC] [Docs/OpenCode] OpenCode adapter feasibility
 
 [Attempt #1] Files: docs/architecture/opencode-adapter-feasibility.md (new),

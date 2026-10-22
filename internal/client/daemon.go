@@ -484,7 +484,7 @@ func readConnectionRecord(dir, name string) (*ConnectionState, error) {
 	if err = json.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("connection %s: %w", name, err)
 	}
-	if c.ID == "" || name != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !uuidLike(c.ThreadID) {
+	if c.ID == "" || name != c.ID+".json" || !core.ValidStoreName(c.Channel) || !core.ValidStoreName(c.Alias) || !validThreadID(c.Harness, c.ThreadID) {
 		return nil, fmt.Errorf("invalid connection %s", name)
 	}
 	if err := validateConnectionAdapter(&c); err != nil {
@@ -558,10 +558,13 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 	}
 	var q nativeQueue
 	var err error
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		q, err = newClaudeQueueContext(d.ctx, d.root, *c.Claude)
-	} else {
+	case daemonHarnessCodex:
 		q, err = d.openQueue(c.Config)
+	default:
+		err = errUnsupportedHarness(c.Harness)
 	}
 	if err != nil {
 		return nil, err
@@ -600,11 +603,15 @@ func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
 	if p.State != "online" || p.PID <= 0 || p.StartToken == "" {
 		return fmt.Errorf("current %s CLI consumer not verified (%s); run connect from the exact CLI with normal process-inspection permission", daemonHarness(c.Harness), p.State)
 	}
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		if c.Claude == nil || p.PID != c.Claude.Binding.Endpoint.PID || p.StartToken != c.Claude.Binding.Endpoint.StartToken {
 			return errors.New("Claude consumer does not match the caller's exact process identity")
 		}
 		return nil
+	case daemonHarnessCodex:
+	default:
+		return errUnsupportedHarness(c.Harness)
 	}
 	if c.Config.RuntimePID != 0 || c.Config.RuntimeStartToken != "" || c.Config.BindingSource == "runtime-open-queue" {
 		if p.PID != c.Config.RuntimePID || p.StartToken != c.Config.RuntimeStartToken {
@@ -670,8 +677,8 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			return nil, err
 		}
 	}
-	if !uuidLike(req.ThreadID) {
-		return nil, errors.New("connect requires the exact CLI session UUID")
+	if !validThreadID(req.Harness, req.ThreadID) {
+		return nil, errors.New("connect requires the exact CLI session ID")
 	}
 	claude, err := prepareConnectBinding(req, token)
 	if err != nil {
@@ -704,12 +711,16 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			if req.Alias != "" && req.Alias != c.Alias {
 				return nil, fmt.Errorf("this thread is already connected as %s/%s", c.Channel, c.Alias)
 			}
-			if req.Harness == daemonHarnessClaude {
+			switch req.Harness {
+			case daemonHarnessClaude:
 				state, err := d.reconnectClaude(c, req, claude, token)
 				if err == nil {
 					d.wake(c.ID)
 				}
 				return state, err
+			case daemonHarnessCodex:
+			default:
+				return nil, errUnsupportedHarness(req.Harness)
 			}
 			if c.Config.SQLiteHome != "" && c.Config.SQLiteHome != req.Config.SQLiteHome {
 				return nil, errors.New("Codex queue store changed; refusing to redirect an existing connection or its pending deliveries")
@@ -933,8 +944,12 @@ func (d *busDaemon) armLocked(c *ConnectionState) error {
 	m.ListenerPid = json.RawMessage(fmt.Sprint(os.Getpid()))
 	m.ListenerStart = d.start
 	m.OwnerPid = jsonNull
-	if c.Claude != nil && daemonHarness(c.Harness) == daemonHarnessClaude {
-		m.Cwd = c.Claude.Binding.Cwd
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude != nil {
+			m.Cwd = c.Claude.Binding.Cwd
+		}
+	default:
 	}
 	if err := writeDaemonMeta(d.peerDir(c), m); err != nil {
 		return err
@@ -1084,16 +1099,22 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 			if err != nil {
 				return err
 			}
-			if found.State == codexMessageNotFound && daemonHarness(c.Harness) == daemonHarnessClaude {
-				return d.awaitClaudeReceipt(c)
-			}
 			if found.State == codexMessageNotFound {
-				return errors.New("enqueue outcome uncertain; retained message needs reconciliation, not a blind retry")
+				switch daemonHarness(c.Harness) {
+				case daemonHarnessClaude:
+					return d.awaitClaudeReceipt(c)
+				default:
+					return errors.New("enqueue outcome uncertain; retained message needs reconciliation, not a blind retry")
+				}
 			}
 			evidence = &found
 		}
-		if daemonHarness(c.Harness) != daemonHarnessClaude {
+		switch daemonHarness(c.Harness) {
+		case daemonHarnessClaude:
+		case daemonHarnessCodex:
 			return d.accept(c, evidence)
+		default:
+			return errUnsupportedHarness(c.Harness)
 		}
 		attempt := *c.Pending
 		if err := d.accept(c, evidence); err != nil {
@@ -1120,8 +1141,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		return errors.New("connection detached before enqueue")
 	}
 	queueID, err := q.enqueue(c.ThreadID, c.Pending.ClientID, nativeBusPayload(line, msg))
-	var awaiting *claudeAwaitingReceiptError
-	if daemonHarness(c.Harness) == daemonHarnessClaude && errors.As(err, &awaiting) && awaiting.State == claudeSubmitted && awaiting.Err == nil {
+	if claudeCleanWrite(c, err) {
 		// A clean write has no ACK. Wait for its receipt on the scheduler tick
 		// with the sidecar kept, so lookups scan on from where they stopped.
 		next := *c
@@ -1138,10 +1158,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		return nil
 	}
 	if err != nil {
-		var rejection *rpcError
-		var claudeRejected *claudeNotSubmittedError
-		if (daemonHarness(c.Harness) == daemonHarnessCodex && errors.As(err, &rejection) && rejection.Code == -32600) ||
-			(daemonHarness(c.Harness) == daemonHarnessClaude && errors.As(err, &claudeRejected)) {
+		if provedNotSubmitted(c, err) {
 			// Only adapter-specific proof that no message was submitted can
 			// release this attempt. Unconfirmed socket writes remain pending.
 			next := *c
@@ -1180,8 +1197,14 @@ func (d *busDaemon) awaitClaudeReceipt(c *ConnectionState) error {
 }
 
 func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) error {
-	if daemonHarness(c.Harness) == daemonHarnessClaude && (c.Claude == nil || evidence == nil || evidence.State != codexMessageReceived || evidence.ReceiptOffset == nil) {
-		return errors.New("Claude acceptance requires exact persisted user receipt; socket writes are unconfirmed")
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude == nil || evidence == nil || evidence.State != codexMessageReceived || evidence.ReceiptOffset == nil {
+			return errors.New("Claude acceptance requires exact persisted user receipt; socket writes are unconfirmed")
+		}
+	case daemonHarnessCodex:
+	default:
+		return errUnsupportedHarness(c.Harness)
 	}
 	// Keep the in-memory attempt intact on persistence failure, too.
 	if evidence != nil {
@@ -1201,11 +1224,13 @@ func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) err
 		next.LastAccepted.ItemID = evidence.ItemID
 		next.LastAccepted.Attempt.QueueID = evidence.QueueID
 		next.LastQueueID = evidence.QueueID
-		if daemonHarness(c.Harness) == daemonHarnessClaude {
+		switch daemonHarness(c.Harness) {
+		case daemonHarnessClaude:
 			if *evidence.ReceiptOffset < c.Claude.ReceiptOffset {
 				return errors.New("Claude receipt cursor moved backwards")
 			}
 			next.Claude.ReceiptOffset = *evidence.ReceiptOffset
+		default:
 		}
 	}
 	next.LastAccepted.Attempt.Evidence = nil
@@ -1219,8 +1244,10 @@ func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) err
 		return err
 	}
 	*c = next
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		d.closeQueue(c.ID) // Reopen with the newly committed receipt cursor.
+	default:
 	}
 	return nil
 }

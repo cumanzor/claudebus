@@ -25,8 +25,12 @@ func (d *busDaemon) observeCompaction(c *ConnectionState) error {
 	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		return nil // Claude lifecycle hooks retain their own compaction grammar.
+	case daemonHarnessCodex:
+	default:
+		return errUnsupportedHarness(c.Harness)
 	}
 	if c.RolloutPath == "" || c.State == "detached" || c.State == "binding-required" {
 		return nil
