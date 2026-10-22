@@ -133,6 +133,8 @@ func run(args []string) int {
 		return runInstallCodexSkills(args[1:])
 	case "install-mods":
 		return runInstallMods(args[1:])
+	case "install-opencode":
+		return runInstallOpencode(args[1:])
 	case "install-assets":
 		return runInstallAssets(args[1:])
 	case "codex-permissions":

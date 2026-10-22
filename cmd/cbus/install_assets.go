@@ -398,6 +398,7 @@ var assetInstalls = []struct {
 	{"install-roles", []string{"--force"}, runInstallRoles},
 	{"install-codex-skills", nil, runInstallCodexSkills},
 	{"install-mods", []string{"--force"}, runInstallMods},
+	{"install-opencode", nil, refreshOpencodePlugins},
 }
 
 func runInstallAssets(args []string) int {
