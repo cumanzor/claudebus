@@ -82,6 +82,8 @@ type queueAttempt struct {
 	Evidence *codexMessageLookup `json:"evidence,omitempty"`
 	// Set only after a clean Claude socket write; it anchors the receipt deadline.
 	SubmittedAt time.Time `json:"submittedAt,omitzero"`
+	// The OpenCode message ID, chosen once before the first submit.
+	MessageID string `json:"messageId,omitempty"`
 }
 
 type nativeQueue interface {
@@ -1119,7 +1121,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	if c.Pending != nil {
 		evidence := c.Pending.Evidence
 		if c.Pending.QueueID == "" && evidence == nil {
-			found, err := d.lookup(c, q, c.Pending.ClientID)
+			found, err := d.lookup(c, q, nativeAttemptKey(c, *c.Pending))
 			if err != nil {
 				return err
 			}
@@ -1135,7 +1137,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		}
 		switch daemonHarness(c.Harness) {
 		case daemonHarnessClaude:
-		case daemonHarnessCodex:
+		case daemonHarnessCodex, daemonHarnessOpencode:
 			return d.accept(c, evidence)
 		default:
 			return errUnsupportedHarness(c.Harness)
@@ -1154,7 +1156,19 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 			return err
 		}
 	}
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessOpencode:
+		if ready, err := d.opencodeDeliveryReady(c); err != nil || !ready {
+			return err
+		}
+	default:
+	}
 	c.Pending = &queueAttempt{ClientID: fmt.Sprintf("cbus-%s-%d-%s", c.ID, c.Offset, hash[:16]), End: end, Hash: hash}
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessOpencode:
+		c.Pending.MessageID = newOpencodeMessageID(time.Now())
+	default:
+	}
 	c.State = "submitting"
 	c.Error = ""
 	if err = d.save(c); err != nil {
@@ -1164,7 +1178,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 	if !d.owns(c) {
 		return errors.New("connection detached before enqueue")
 	}
-	queueID, err := q.enqueue(c.ThreadID, c.Pending.ClientID, nativeBusPayload(line, msg))
+	queueID, err := q.enqueue(c.ThreadID, nativeAttemptKey(c, *c.Pending), nativeBusPayload(line, msg))
 	if claudeCleanWrite(c, err) {
 		// A clean write has no ACK. Wait for its receipt on the scheduler tick
 		// with the sidecar kept, so lookups scan on from where they stopped.
@@ -1199,7 +1213,7 @@ func (d *busDaemon) deliver(c *ConnectionState) error {
 		return err
 	}
 	c.Pending.QueueID = queueID
-	return d.accept(c, nil)
+	return d.accept(c, enqueueEvidence(c, queueID))
 }
 
 // Absence before the deadline is still waiting. After it, the attempt is
@@ -1225,6 +1239,10 @@ func (d *busDaemon) accept(c *ConnectionState, evidence *codexMessageLookup) err
 	case daemonHarnessClaude:
 		if c.Claude == nil || evidence == nil || evidence.State != codexMessageReceived || evidence.ReceiptOffset == nil {
 			return errors.New("Claude acceptance requires exact persisted user receipt; socket writes are unconfirmed")
+		}
+	case daemonHarnessOpencode:
+		if c.Opencode == nil || c.Pending == nil || evidence == nil || evidence.State != codexMessageReceived || evidence.ItemID != c.Pending.MessageID {
+			return errors.New("OpenCode acceptance requires the stored message with the attempt's own message ID")
 		}
 	case daemonHarnessCodex:
 	default:

@@ -4,6 +4,64 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-22 16:12:36 UTC] [OpenCode/Delivery] OpenCode delivery and receipt
+
+[Attempt #1] Files: internal/client/daemon_opencode.go (enqueue, lookupMessage,
+idle gate, nativeAttemptKey, enqueueEvidence, message IDs); daemon.go
+(queueAttempt.MessageID, idle gate before an attempt, MessageID chosen with
+the write-ahead attempt, accept requires the attempt's own stored message,
+enqueue evidence); daemon_recovery.go (reconcile looks up by the adapter's
+key); opencode_endpoint_unix.go and _windows.go (errOpencodeNotDialed).
+Tests: new opencode_delivery_unix_test.go; the helper in
+opencode_connect_unix_test.go gained a message store and a control file;
+the store root for these tests is now short and test-name independent.
+
+[What changed]
+- Before an attempt exists, the daemon asks the plugin for status and starts
+  one only when the pane shows the bound session and it is idle; otherwise
+  the mail stays in the inbox and the check repeats every 2 s. A pending
+  attempt's lookup is not held behind that gate.
+- Each attempt gets an OpenCode message ID (`msg_` + 12 hex of
+  milliseconds*4096+counter + 14 base62) saved with the write-ahead record,
+  and every submit, lookup and reconcile uses it.
+- enqueue succeeds only on a receipt the plugin read back; that receipt is
+  the acceptance evidence, and accept refuses anything else.
+  submitted-unconfirmed and unknown failures keep the attempt pending. Only
+  `submitted: false` from the plugin, or a dial or peer-check failure before
+  any byte was written, releases it.
+
+[Why]
+Fourth milestone of the OpenCode adapter. OpenCode's classic API appends a
+duplicate part on a resent ID and the feasibility runs showed mid-turn
+delivery overriding the user's own request, so delivery waits for idle and
+never resends an attempt it cannot prove absent.
+
+[Possible Ripple Effects]
+- Between the status check and the submit the user can still start a turn;
+  the bus message then joins it. The classic API has no submit-if-idle.
+- Waiting for idle polls the plugin socket every 2 s while mail is waiting;
+  the next milestone wakes on the plugin's watch stream instead.
+- Journals gain an optional messageId on pending and last-accepted attempts.
+
+[Testing Notes]
+- Tests drive the helper process standing in for the plugin: delivery when
+  idle with the receipt naming the attempt's own ID; holding while busy, in
+  retry, or showing another or no session; an unconfirmed submit accepted by
+  lookup without a second submit, even while busy; proof of not-submitted
+  releasing the attempt; an unknown outcome never resent; the message ID
+  surviving a daemon restart; accept refusing missing, queued or foreign
+  evidence; ID form and ordering.
+- One test had been skipped silently because its long name pushed the temp
+  store past the socket path limit; the store root is now short and the
+  suite passes with no skips under both a short and the default macOS TMPDIR.
+- 11 mutants killed on the aimed tests; one first did not compile and was
+  rerun as a condition that does.
+- go test -race ./... green; builds for linux amd64/arm64 and windows.
+- Live on OpenCode 1.19.3 with a scratch daemon: idle delivery accepted and
+  answered; a message sent during a user's busy turn stayed in the inbox
+  until the user's own reply, then was delivered and answered; the export
+  shows the bus messages under ascending IDs among OpenCode's own.
+
 ## [2026-10-22 16:00:12 UTC] [OpenCode/Connect] OpenCode connect binding
 
 [Attempt #1] Files: internal/client/opencode_binding.go,

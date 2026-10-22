@@ -8,6 +8,8 @@ var errOpencodeWindows = errors.New("OpenCode connections are not available on W
 
 var errOpencodeEndpointGone = errOpencodeWindows
 
+var errOpencodeNotDialed = errOpencodeWindows
+
 func captureOpencodeEndpoint(string) (opencodeEndpoint, error) {
 	return opencodeEndpoint{}, errOpencodeWindows
 }

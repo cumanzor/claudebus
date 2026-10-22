@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -42,6 +43,7 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 		protocol = opencodePluginProtocol
 	}
 	shown := os.Getenv("CBUS_OC_HELPER_SESSION")
+	ctlPath, logPath := os.Getenv("CBUS_OC_HELPER_CTL"), os.Getenv("CBUS_OC_HELPER_LOG")
 	_ = os.MkdirAll(dir, 0o700)
 	path := filepath.Join(dir, name)
 	l, err := net.Listen("unix", path)
@@ -55,6 +57,8 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 		mode = os.FileMode(v)
 	}
 	_ = os.Chmod(path, mode)
+	var mu sync.Mutex
+	stored := map[string]string{}
 	fmt.Println("ready")
 	for {
 		c, err := l.Accept()
@@ -67,18 +71,46 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 			if err != nil {
 				return
 			}
-			var req struct{ Op string }
+			mu.Lock()
+			defer mu.Unlock()
+			ctl := opencodeHelperControl{State: "idle", Shown: shown, Deliver: "ok"}
+			if b, err := os.ReadFile(ctlPath); err == nil {
+				_ = json.Unmarshal(b, &ctl)
+			}
+			if logPath != "" {
+				if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+					_, _ = f.Write(line)
+					f.Close()
+				}
+			}
+			var req struct{ Op, SessionID, MessageID, Text string }
 			_ = json.Unmarshal(line, &req)
 			var sid any
-			if shown != "" {
-				sid = shown
+			if ctl.Shown != "" {
+				sid = ctl.Shown
 			}
-			reply := map[string]any{"ok": true, "sessionID": sid}
+			reply := map[string]any{"ok": true}
 			switch req.Op {
 			case "hello":
-				reply["protocol"], reply["plugin"], reply["pid"] = protocol, "1", os.Getpid()
+				reply["protocol"], reply["plugin"], reply["pid"], reply["sessionID"] = protocol, "1", os.Getpid(), sid
 			case "status":
-				reply["state"] = "idle"
+				reply["sessionID"], reply["state"] = sid, ctl.State
+			case "lookup":
+				_, ok := stored[req.MessageID]
+				reply["present"] = ok
+			case "deliver":
+				switch ctl.Deliver {
+				case "ok":
+					stored[req.MessageID] = req.Text
+					reply["receipt"] = "persisted"
+				case "unconfirmed":
+					stored[req.MessageID] = req.Text
+					reply["receipt"] = "submitted-unconfirmed"
+				case "notsubmitted":
+					reply = map[string]any{"ok": false, "code": "session-not-found", "error": "Session not found", "submitted": false}
+				default:
+					reply = map[string]any{"ok": false, "code": "failed", "error": "socket hang up", "submitted": "unknown"}
+				}
 			default:
 				reply = map[string]any{"ok": false, "code": "bad-request"}
 			}
@@ -86,6 +118,12 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 			_, _ = c.Write(append(b, '\n'))
 		}(c)
 	}
+}
+
+type opencodeHelperControl struct {
+	State   string `json:"state"`
+	Shown   string `json:"shown"`
+	Deliver string `json:"deliver"`
 }
 
 type opencodeHelper struct {
@@ -129,11 +167,23 @@ func (h opencodeHelper) kill(t *testing.T) {
 	}
 }
 
+// opencodeTestStore uses a short store root: t.TempDir embeds the test name,
+// and a long one would push socket paths past the 104-byte limit.
 func opencodeTestStore(t *testing.T) {
 	t.Helper()
-	root := setupStore(t)
-	if len(filepath.Join(root, ".opencode", "4194304.sock")) > 103 {
-		t.Skipf("store path %s leaves no room for a socket name; run with a short TMPDIR", root)
+	setupStore(t)
+	base := "/tmp"
+	if _, err := os.Stat(base); err != nil {
+		base = os.TempDir()
+	}
+	root, err := os.MkdirTemp(base, "cboc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	t.Setenv("CBUS_DIR", root)
+	if p := filepath.Join(root, ".opencode", "4194304.sock"); len(p) > 103 {
+		t.Fatalf("store path %s leaves no room for a socket name", root)
 	}
 }
 
@@ -331,25 +381,6 @@ func TestDaemonOpencodeOneLiveEndpointPerSession(t *testing.T) {
 	rebound, err := d.connect(again)
 	if err != nil || rebound.ID != state.ID || rebound.Opencode.Binding.Endpoint.PID != second.pid {
 		t.Fatalf("reconnect = %+v %v", rebound, err)
-	}
-}
-
-func TestDaemonOpencodeHoldsMailUntilDeliveryLands(t *testing.T) {
-	opencodeTestStore(t)
-	startOpencodeHelper(t, ocS1)
-	d := opencodeDaemon(t)
-	state, err := d.connect(opencodeConnectRequest(t, "oc", ocS1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := d.connections[state.ID]
-	appendDaemonMessage(t, c, "", "must stay unread")
-	err = d.scheduledOperation(c)
-	if err == nil || !strings.Contains(err.Error(), "not enabled") {
-		t.Fatalf("delivery attempt = %v", err)
-	}
-	if c.Pending != nil || c.Offset != 0 || c.Accepted != 0 {
-		t.Fatalf("message left the inbox or stayed pending: pending=%v offset=%d accepted=%d", c.Pending, c.Offset, c.Accepted)
 	}
 }
 
