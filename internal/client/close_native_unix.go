@@ -223,6 +223,8 @@ func revalidateNativeConsumer(c *ConnectionState, consumer nativeConsumer, daemo
 		if !strings.EqualFold(commBase(comm), "codex") || !interactiveCodexProcess(argv) || codexDesktopAncestor(consumer.pid, procLookup()) {
 			return refuseNative("changed incarnation", "pid %d is not an interactive codex CLI", consumer.pid)
 		}
+	default:
+		return refuseNative("cannot inspect", "unsupported harness %q", c.Harness)
 	}
 	if gone, err := inspectIncarnation(consumer); err != nil {
 		return refuseNative("cannot inspect", "%v", err)

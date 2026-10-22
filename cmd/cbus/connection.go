@@ -72,6 +72,11 @@ func reportConnect(state client.ConnectionState, asJSON bool) int {
 	if asJSON {
 		return printConnectionJSON(state)
 	}
+	if state.Harness == "opencode" {
+		fmt.Printf("%s: plugin socket bound to OpenCode session %s\n", client.ConnectionTarget(&state), state.ThreadID)
+		fmt.Println("The daemon handles waiting; no Monitor or re-arming is needed. Socket readiness is not receipt: delivery is confirmed only by the stored OpenCode message.")
+		return 0
+	}
 	if state.Harness == "claude" {
 		fmt.Printf("%s: native socket bound to Claude session %s\n", client.ConnectionTarget(&state), state.ThreadID)
 		fmt.Println("The daemon handles waiting; no Monitor or re-arming is needed. Socket readiness is not receipt: delivery is confirmed only by this session's exact transcript record.")

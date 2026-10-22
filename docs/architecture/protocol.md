@@ -1651,6 +1651,79 @@ permitted` and never reaches the subprocess (`codexqueue.go:253-257`). No
 method in this set can start or resume a recipient thread; that boundary is
 the allowlist itself, not a convention the caller has to honor.
 
+### 15.3 OpenCode plugin socket
+
+Shipped as two OpenCode modules in `integrations/opencode/`, installed by
+`cbus install-opencode` (`cmd/cbus/install_opencode.go`). OpenCode 1.19.3
+loads a module as exactly one kind (a default export with `server()` or
+`tui()`, never both), loads server plugins from `<config>/plugins/` on its
+own, and loads TUI plugins only when they are listed in `tui.json` or
+`tui.jsonc`. The installer therefore writes `plugins/cbus-server.js` and
+`cbus-tui.js`, creates `tui.jsonc` when the directory has none, and never
+rewrites an existing TUI config: a config without the `"./cbus-tui.js"`
+entry is reported with the entry to add and a non-zero exit.
+`install-assets`, which updates run, refreshes the plugins (overwriting, as
+for mods) only when they are already installed in the default OpenCode
+config directory, so an update never creates an OpenCode config on a machine
+that has none.
+
+**Server plugin** (`cbus-server.js`): its `shell.env` hook sets
+`CBUS_SESSION_ID` to the hook's own `sessionID` when that matches
+`ses_[A-Za-z0-9]{20,64}`, and to the empty string otherwise. It also sets
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` and `GROK_SESSION_ID` to the
+empty string, so an agent shell never resolves a session inherited from
+whatever launched OpenCode. PTYs opened inside OpenCode do not run this hook.
+
+**TUI plugin** (`cbus-tui.js`), one per TUI process, including each
+`opencode attach` client:
+
+- Endpoint: `$CBUS_DIR/.opencode/<pid>.sock` (default base `~/.claude-bus`),
+  mode 0600, in a directory forced to 0700. The socket is bound under a
+  private name and renamed into place, because Node unlinks a listen path on
+  close; dispose removes the public path only when its inode is still the
+  one this instance bound. An existing path is replaced only after a probe
+  connection is refused. A path over 103 bytes, or a path where a live
+  endpoint answers, is not bound; the reason goes to `<pid>.error` beside it.
+- Framing: one newline-terminated JSON request per connection, at most
+  1 MiB, answered with one JSON line and closed, except `watch`. A request
+  not completed within 10 s is dropped.
+- IDs: `sessionID` must match `ses_[A-Za-z0-9]{20,64}` and `messageID`
+  `msg_[A-Za-z0-9]{20,64}`. Anything else is `bad-request`.
+- The shown session is `api.route.current` when its name is `session`, else
+  `null`. A session with no status entry is `idle`.
+
+Requests and replies:
+
+| `op` | Reply |
+| --- | --- |
+| `hello` | `{ok, protocol: 1, plugin, pid, sessionID}` |
+| `status` | `{ok, sessionID, state}`; `state` is OpenCode's status type (`idle`, `busy`, `retry`) or `null` with no session shown |
+| `lookup` | `{ok, present: false}` or `{ok, present: true, texts}`, the message's text parts |
+| `deliver` | see below |
+| `watch` | `{ok, event: "snapshot", sessionID, state}`, then one event per line until dispose |
+
+`deliver {sessionID, messageID, text}` submits nothing unless `sessionID` is
+the session this pane shows (`session-not-shown`, `submitted: false`). It
+looks the ID up first and answers `{ok, receipt: "present", texts}` on a hit
+without resubmitting, since OpenCode's classic API appends a duplicate part
+when a message ID is resent. Otherwise it calls `session.promptAsync` with
+the given ID and one text part, then looks again: `receipt: "persisted"`
+with the stored texts, or `"submitted-unconfirmed"`. A failure carries
+`code` and `submitted`. `submitted: false` is proof that nothing was stored:
+any failure of the first lookup, or a submit that fails with
+`server-unreachable` or `session-not-found`. Any other submit failure is
+`submitted: "unknown"` and must be reconciled by `lookup`, never resent
+blindly. The plugin holds nothing; holding until idle is the daemon's job.
+
+Watch events: `status {sessionID, state}` for the shown session, sent only
+when the state changes; `route {sessionID, state}` when the pane changes
+session or leaves it (polled every 100 ms, OpenCode has no route
+subscription); `session.deleted {sessionID}` for any session this TUI's
+server deletes; `server.connected` when the TUI reconnects to its server;
+`dispose` before the plugin closes the stream. A session deleted by another
+process and a server that stops produce no event; see
+[opencode-adapter-feasibility.md](opencode-adapter-feasibility.md#presence).
+
 ## 16. Native contract: durable relay transport
 
 ### 16.1 durable-v1 WS protocol

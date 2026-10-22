@@ -105,12 +105,22 @@ func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	owner := c.Config.RuntimePID
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	var owner int
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		if c.Claude == nil {
 			return errors.New("Claude connection binding is missing")
 		}
 		owner = c.Claude.Binding.Endpoint.PID
+	case daemonHarnessCodex:
+		owner = c.Config.RuntimePID
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return errors.New("OpenCode connection binding is missing")
+		}
+		owner = c.Opencode.Binding.Endpoint.PID
+	default:
+		return errUnsupportedHarness(c.Harness)
 	}
 	if pid, _ := observedCLIProcess(c); pid > 0 {
 		owner = pid

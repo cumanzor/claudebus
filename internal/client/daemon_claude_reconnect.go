@@ -26,7 +26,7 @@ func (d *busDaemon) reconnectClaude(c *ConnectionState, req ConnectRequest, cfg 
 	}
 	defer unlock()
 	m, ok := ReadPeerMeta(filepath.Join(d.peerDir(c), "meta.json"))
-	if !ok || m.ConnectionID != c.ID || m.SessionID != c.ThreadID || m.Harness != daemonHarnessClaude {
+	if !ok || m.ConnectionID != c.ID || m.SessionID != c.ThreadID || m.Harness != daemonHarness(c.Harness) {
 		return nil, errors.New("Claude alias ownership changed; refusing to update its binding")
 	}
 	inbox, err := openSharedRead(filepath.Join(d.peerDir(c), "inbox.jsonl"))
