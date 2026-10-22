@@ -15,10 +15,14 @@ func TestInstallAssetsInstallsEveryAssetType(t *testing.T) {
 	testHome(t, home)
 	t.Setenv("CBUS_DIR", filepath.Join(home, ".claude-bus"))
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	var rc int
 	captureStdout(t, func() { rc = runInstallAssets(nil) })
 	if rc != 0 {
 		t.Fatalf("install-assets exit %d", rc)
+	}
+	if oc, _ := defaultOpencodeConfigDir(); dirExistsAt(oc) {
+		t.Errorf("install-assets created %s on a machine without OpenCode plugins", oc)
 	}
 	commands, _ := defaultCommandsDir()
 	skills, _ := defaultCodexSkillsDir()
@@ -90,4 +94,9 @@ func TestRefreshAssetsFallsBackForAnOlderBinary(t *testing.T) {
 	if strings.TrimSpace(string(got)) != want {
 		t.Fatalf("an older binary must get the legacy list, got %q", got)
 	}
+}
+
+func dirExistsAt(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

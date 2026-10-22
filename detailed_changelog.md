@@ -4,6 +4,70 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-22 15:44:16 UTC] [OpenCode/Plugin] OpenCode plugins and install-opencode
+
+[Attempt #1] Files: integrations/opencode/cbus-tui.js, cbus-server.js,
+plugin.test.mjs (new); assets.go (OpencodePlugins embed, the two modules
+only); cmd/cbus/install_opencode.go and install_opencode_test.go (new);
+cmd/cbus/install_assets.go (refresh entry in assetInstalls), main.go (verb
+route), usage.go; cmd/cbus/install_all_test.go (XDG_CONFIG_HOME cleared, no
+OpenCode dir created); opencode_plugin_test.go (embed matches source, runs
+the node suite); docs/architecture/protocol.md section 15.3.
+
+[What changed]
+- TUI plugin: one private Unix socket per TUI process at
+  `$CBUS_DIR/.opencode/<pid>.sock` speaking protocol 1 (hello, status,
+  lookup, deliver, watch). deliver refuses any session the pane is not
+  showing, looks the message ID up before submitting, and reports whether a
+  failed submit could have stored anything. watch streams state changes for
+  the shown session, route changes, deletions, reconnects and dispose.
+- Server plugin: `shell.env` sets `CBUS_SESSION_ID` from the hook's own
+  session ID and blanks `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` and
+  `GROK_SESSION_ID`.
+- `cbus install-opencode` writes `plugins/cbus-server.js` and `cbus-tui.js`
+  into the OpenCode config dir (default `~/.config/opencode`, honoring
+  `XDG_CONFIG_HOME`), creates `tui.jsonc` only when no TUI config exists,
+  and otherwise reports the entry to add with a non-zero exit.
+  `install-assets` refreshes the plugins only when they are already
+  installed in the default config dir.
+
+[Why]
+Second milestone of the OpenCode adapter. The feasibility work showed a plain
+TUI exposes no endpoint, so the daemon will talk to this plugin. Layout facts
+measured on OpenCode 1.19.3 while writing it: a module default-exports
+either server() or tui(), never both; .opencode/plugins/ loads server
+plugins only; TUI plugins load only from the tui.json(c) plugin list.
+
+[Possible Ripple Effects]
+- Nothing in the daemon talks to the socket yet; `cbus connect` from
+  OpenCode still refuses until the connect milestone.
+- A user who runs `cbus install-assets` with plugins already installed gets
+  them overwritten, as mods are, because they must match the binary.
+- Plugin tests need node 22 or later; without node the Go wrapper skips.
+
+[Testing Notes]
+- node --test: 14 protocol tests against a fake OpenCode api over a real
+  socket. 13 JS mutants: 12 killed on the aimed test; dropping only the
+  close-time clearTimeout survives because the timer is unref'd, and
+  dropping both timer lines (the original leak) is killed.
+- Two real defects found by the tests: a probe connection that never sent a
+  request kept a 10 s ref'd timer alive, and Node's server.close() unlinks
+  the listen path, so disposing one instance deleted a newer instance's
+  socket. Fixed by unref plus clear on close, and by binding under a private
+  name and renaming into place.
+- Go installer tests plus four mutants (rewriting an existing config,
+  installing the TUI module under plugins/, refresh creating a config,
+  treating a missing entry as registered), all killed.
+- go test -race ./... green with a short TMPDIR; builds for linux amd64/arm64
+  and windows.
+- Live on OpenCode 1.19.3 in a scratch project, installed by the built
+  binary: socket 0600 in a 0700 dir; hello and status; agent shell saw its
+  own session in CBUS_SESSION_ID and an empty CLAUDE_CODE_SESSION_ID although
+  the TUI was launched from a Claude Code shell; a missing message looked up
+  as present:false; deliver persisted and the model replied; a resend came
+  back present; a wrong session was refused; watch showed snapshot, route,
+  one idle, route to null after /new, dispose; the socket was gone after
+  exit.
 ## [2026-10-22 14:51:20 UTC] [Daemon/Harness] Explicit per-harness dispatch
 
 [Attempt #1] Files: internal/client/daemon_harness.go (opencode constant,

@@ -138,6 +138,9 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus install-mods [--path DIR] [--force]       write the embedded Claude Code mods
                                    to ~/.claude/skills/<mod> (sha-guarded per file;
                                    --force overwrites a locally-edited file)
+  cbus install-opencode [--path DIR] [--force]   write the OpenCode server and TUI
+                                   plugins to ~/.config/opencode (or DIR, e.g. a
+                                   project's .opencode) and register the TUI one
   cbus install-codex-skills [--path DIR] [--force] [--with-permissions]
                                    install session-side skills to $CODEX_HOME/skills
                                    (safe shipped-version upgrades; protects edits)
