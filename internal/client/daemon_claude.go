@@ -14,9 +14,41 @@ const claudeAwaitingReceiptState = "awaiting-receipt"
 // Only a clean write with a persisted submission time waits for its receipt;
 // ambiguous writes and attempts journaled without that time stay uncertain.
 func claudeReceiptWaiting(c *ConnectionState, now time.Time) bool {
-	return daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil &&
-		c.Pending.QueueID == "" && c.Pending.Evidence == nil &&
-		!c.Pending.SubmittedAt.IsZero() && now.Before(c.Pending.SubmittedAt.Add(claudeReceiptTimeout))
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		return c.Pending != nil && c.Pending.QueueID == "" && c.Pending.Evidence == nil &&
+			!c.Pending.SubmittedAt.IsZero() && now.Before(c.Pending.SubmittedAt.Add(claudeReceiptTimeout))
+	default:
+		return false
+	}
+}
+
+// A clean Claude socket write has no ACK; its receipt arrives in the transcript.
+func claudeCleanWrite(c *ConnectionState, err error) bool {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		var awaiting *claudeAwaitingReceiptError
+		return errors.As(err, &awaiting) && awaiting.State == claudeSubmitted && awaiting.Err == nil
+	default:
+		return false
+	}
+}
+
+// Only adapter-specific proof that nothing was submitted may release an attempt.
+func provedNotSubmitted(c *ConnectionState, err error) bool {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessCodex:
+		var rejection *rpcError
+		return errors.As(err, &rejection) && rejection.Code == -32600
+	case daemonHarnessClaude:
+		var rejected *claudeNotSubmittedError
+		return errors.As(err, &rejected)
+	case daemonHarnessOpencode:
+		var rejected *opencodeNotSubmittedError
+		return errors.As(err, &rejected)
+	default:
+		return false
+	}
 }
 
 func pendingConnectionState(c *ConnectionState, now time.Time) string {
@@ -37,7 +69,7 @@ func logClaudeAttempt(c *ConnectionState, a queueAttempt, outcome string) {
 // disabled until its session-side request and credential handoff are integrated.
 func validateConnectionAdapter(c *ConnectionState) error {
 	switch daemonHarness(c.Harness) {
-	case daemonHarnessCodex, daemonHarnessClaude:
+	case daemonHarnessCodex, daemonHarnessClaude, daemonHarnessOpencode:
 		return nil
 	default:
 		return fmt.Errorf("unsupported connection adapter %q", c.Harness)
@@ -48,8 +80,17 @@ func validateConnectionBinding(c *ConnectionState) error {
 	if err := validateConnectionAdapter(c); err != nil {
 		return err
 	}
-	if daemonHarness(c.Harness) == daemonHarnessCodex {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessCodex:
 		return validateCodexQueueBinding(c.Config)
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return errors.New("OpenCode connection binding is missing")
+		}
+		return validateOpencodeBinding(c.ThreadID, c.Opencode.Binding)
+	case daemonHarnessClaude:
+	default:
+		return errUnsupportedHarness(c.Harness)
 	}
 	if c.Claude == nil {
 		return errors.New("Claude connection binding is missing")
@@ -66,10 +107,14 @@ func validateConnectionBinding(c *ConnectionState) error {
 }
 
 func connectionReadyState(c *ConnectionState) string {
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude, daemonHarnessOpencode:
 		return "socket-ready"
+	case daemonHarnessCodex:
+		return "queue-ready"
+	default:
+		return "unsupported"
 	}
-	return "queue-ready"
 }
 
 func observeClaudeConsumer(c *ConnectionState) (consumerProbe, error) {
@@ -106,14 +151,23 @@ func observeClaudeConsumer(c *ConnectionState) (consumerProbe, error) {
 // pinnedConsumer is the consumer incarnation a connection records: the bound
 // Claude endpoint, or the Codex CLI the daemon last observed.
 func pinnedConsumer(c *ConnectionState) (int, string) {
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		if c.Claude == nil {
 			return 0, ""
 		}
 		return c.Claude.Binding.Endpoint.PID, c.Claude.Binding.Endpoint.StartToken
-	}
-	if c.Consumer == nil {
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return 0, ""
+		}
+		return c.Opencode.Binding.Endpoint.PID, c.Opencode.Binding.Endpoint.StartToken
+	case daemonHarnessCodex:
+		if c.Consumer == nil {
+			return 0, ""
+		}
+		return c.Consumer.PID, c.Consumer.StartToken
+	default:
 		return 0, ""
 	}
-	return c.Consumer.PID, c.Consumer.StartToken
 }

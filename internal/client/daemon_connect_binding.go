@@ -6,25 +6,58 @@ import (
 	"path/filepath"
 )
 
-func prepareConnectBinding(req ConnectRequest, token string) (*ClaudeConnectionConfig, error) {
-	if daemonHarness(req.Harness) == daemonHarnessCodex {
-		return nil, validateCodexQueueBinding(req.Config)
+// connectBindings carries the one adapter-specific binding a request admits.
+type connectBindings struct {
+	claude   *ClaudeConnectionConfig
+	opencode *OpencodeConnectionConfig
+}
+
+func prepareConnectBinding(req ConnectRequest, token string) (connectBindings, error) {
+	switch daemonHarness(req.Harness) {
+	case daemonHarnessCodex:
+		return connectBindings{}, validateCodexQueueBinding(req.Config)
+	case daemonHarnessClaude:
+		cfg, err := prepareClaudeAdmission(req, token)
+		return connectBindings{claude: cfg}, err
+	case daemonHarnessOpencode:
+		cfg, err := prepareOpencodeAdmission(req)
+		return connectBindings{opencode: cfg}, err
+	default:
+		return connectBindings{}, errUnsupportedHarness(req.Harness)
 	}
-	return prepareClaudeAdmission(req, token)
 }
 
 func sameConnectHome(c *ConnectionState, req ConnectRequest) bool {
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		return c.Claude != nil && req.Claude != nil && c.Claude.Binding.ConfigHome == req.Claude.ConfigHome
+	case daemonHarnessOpencode:
+		return c.Opencode != nil && req.Opencode != nil &&
+			filepath.Dir(c.Opencode.Binding.Endpoint.Socket) == filepath.Dir(req.Opencode.Endpoint.Socket)
+	case daemonHarnessCodex:
+		return sameCodexConnectionHome(c.Config, req.Config.Home)
+	default:
+		return false
 	}
-	return sameCodexConnectionHome(c.Config, req.Config.Home)
 }
 
 func connectionCwd(c *ConnectionState) string {
-	if c.Claude != nil && daemonHarness(c.Harness) == daemonHarnessClaude {
-		return c.Claude.Binding.Cwd
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude != nil {
+			return c.Claude.Binding.Cwd
+		}
+		return c.Config.Cwd
+	case daemonHarnessOpencode:
+		if c.Opencode != nil {
+			return c.Opencode.Binding.Cwd
+		}
+		return ""
+	case daemonHarnessCodex:
+		return c.Config.Cwd
+	default:
+		return ""
 	}
-	return c.Config.Cwd
 }
 
 // Called under the alias lock before any journal write. Never clean a reserved
