@@ -87,7 +87,7 @@ availability and message receipt are separate states.
 | --- | --- | --- |
 | Claude Code | **Shipped, v0.13.0:** a per-session native messaging socket bound at `cbus connect`, verified against the caller's actual process, socket and session transcript; receipt comes from the bound transcript, not a channel poll | Idle wake and signed-in authentication/policy proved in the v0.13.0 native signed-in acceptance (35 minutes idle, unchanged transcripts, real signed-in Claude 2.1.278; `docs/history/acceptance/claude-native-review.md`). Still open: network-loss/offline-spool injection, and a custom config root that automatic formation launch cannot recreate (§10 refuses it outright) |
 | Codex CLI | Native durable queue via a non-owning sidecar and `cbus connect`; existing wrapper remains compatible | Exact thread and local storage context; preserve TUI ownership; reconcile ambiguous enqueue because native client IDs do not deduplicate |
-| OpenCode | Session API and event stream, with a small plugin for session registration and shell identity | Runtime endpoint and session ID must both be explicit; a shared server can contain multiple sessions |
+| OpenCode | In-process TUI plugin on the classic session API, with a server plugin for shell identity ([feasibility](opencode-adapter-feasibility.md)) | A plain TUI exposes no endpoint; one bound endpoint per session ID; a shared server can contain multiple sessions |
 
 The daemon owns idle waiting and retries without model turns. Adapters report
 capabilities such as idle wake and delivery while busy; a common interface must
@@ -96,6 +96,13 @@ queue-until-idle policy can work across adapters; supported steering can remain 
 optional capability.
 
 ## OpenCode as a first-class target
+
+**Update (2026-10-22).** Measured feasibility against OpenCode 1.19.3 is in
+[opencode-adapter-feasibility.md](opencode-adapter-feasibility.md). It
+supersedes the HTTP-adapter candidate below: a plain TUI exposes no endpoint,
+so the adapter is an in-process plugin on the classic session API, with the
+daemon owning holding and liveness. The text below is the original 1.18.31
+assessment.
 
 The installed CLI reports **1.18.31**. Read-only local checks confirmed
 `opencode serve` and `opencode attach <url> --session <id>`. The documented server
