@@ -152,7 +152,7 @@ restart: [Claude](docs/claude.md), [Codex](docs/codex.md), the
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
 | [docs/claude-code-coordination.md](docs/claude-code-coordination.md) | why claudebus exists next to Subagents, Agent Teams, SendMessage and Workflow |
 | [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |
-| [docs/architecture/](docs/architecture/) | the living references: current architecture, the wire and disk protocol, command reference, cross-harness scope |
+| [docs/architecture/](docs/architecture/) | the living references: current architecture, the wire and disk protocol, command reference, cross-harness scope, OpenCode adapter feasibility |
 | [docs/history/](docs/history/) | dated records: acceptance reports (incl. the native Claude receive milestone), decision packages, explorations, and legacy (the bash-era spec, the original overview, the Monitor stopgap) |
 
 ## License

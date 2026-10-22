@@ -4,6 +4,43 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-22 03:37:53 UTC] [Docs/OpenCode] OpenCode adapter feasibility
+
+[Attempt #1] Files: docs/architecture/opencode-adapter-feasibility.md (new),
+docs/architecture/cross-harness-daemon-scope.md (update note at the top of the
+OpenCode section, adapter boundary table row), README.md (docs table row),
+simple_changelog.md, detailed_changelog.md. Documentation only; no code
+change.
+
+[What changed]
+- New feasibility record for an OpenCode adapter, measured against OpenCode
+  1.19.3 with a source review of the upstream v1.19.3 tag. Findings are tagged
+  measured, source or inferred.
+- The scope doc's 1.18.31 HTTP-adapter candidate is marked superseded: a plain
+  TUI binds no port, so the adapter becomes an in-process TUI plugin on the
+  classic session API, and the daemon owns holding, retries and liveness.
+
+[Why]
+The scope doc's OpenCode section predated 1.19.3 and proposed an external HTTP
+adapter. Live checks showed that path cannot reach an ordinary TUI, that the
+newer /api/session surface is not yet visible in the TUI, and that the classic
+API does not deduplicate a resent message ID. The design requirements in the
+new doc come from those results.
+
+[Possible Ripple Effects]
+- The OpenCode adapter milestone should be planned from the requirements list
+  in the new doc rather than the older scope text.
+- Findings are tied to OpenCode 1.19.3; both plugin APIs and the new session
+  surface are moving and need re-checking on upgrade.
+
+[Testing Notes]
+Live probes ran in a scratch project with throwaway plugins: one server,
+plain and attached TUIs, a real model. They covered duplicate IDs on both
+APIs, busy delivery with and without holding (two messages), a 20-run
+end-of-turn race probe, two sessions on one server, an 8-run concurrent
+same-ID delivery from two panes, kill -9 recovery, and presence signals. Raw
+logs are kept outside the repository. Documentation links checked by hand.
+
 ## [2026-10-11 05:49:10 UTC] [Release] v0.20.4: client User-Agent identity
 
 [Attempt #1] Range v0.20.3..8ca492e (pull request #77). Files:
