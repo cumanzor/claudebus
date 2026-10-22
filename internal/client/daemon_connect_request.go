@@ -43,12 +43,15 @@ func validateConnectEnvelope(req ConnectRequest, token string) error {
 	if req.Protocol != 0 && req.Protocol != DaemonProtocolVersion {
 		return errors.New("connect protocol is incompatible; use the matching cbus binary and daemon")
 	}
-	if daemonHarness(req.Harness) == daemonHarnessClaude {
+	switch daemonHarness(req.Harness) {
+	case daemonHarnessClaude:
 		if req.Protocol != DaemonProtocolVersion || req.Claude == nil || token == "" {
 			return errors.New("Claude connect requires protocol 3, an exact caller binding and its private capability")
 		}
-	} else if req.Claude != nil || token != "" {
-		return errors.New("Claude caller binding and capability require the Claude harness")
+	default:
+		if req.Claude != nil || token != "" {
+			return errors.New("Claude caller binding and capability require the Claude harness")
+		}
 	}
 	return nil
 }

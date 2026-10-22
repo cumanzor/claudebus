@@ -75,10 +75,14 @@ func (d *busDaemon) consumerProbe(c *ConnectionState) (consumerProbe, error) {
 	if d.probeConsumer != nil {
 		return d.probeConsumer(d.ctx, c)
 	}
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		return observeClaudeConsumer(c)
+	case daemonHarnessCodex:
+		return observeCodexConsumer(d.ctx, c)
+	default:
+		return consumerProbe{State: "unknown"}, errUnsupportedHarness(c.Harness)
 	}
-	return observeCodexConsumer(d.ctx, c)
 }
 
 // connectPresence runs with the connection lane held. It only records an outbox;
@@ -149,10 +153,7 @@ func (d *busDaemon) observeConsumer(c *ConnectionState) error {
 		if c.Consumer != nil {
 			last, _ = time.Parse(time.RFC3339, c.Consumer.ObservedAt)
 		}
-		every := 5 * time.Second
-		if daemonHarness(c.Harness) == daemonHarnessCodex {
-			every = 30 * time.Second // each probe runs lsof, and every pass now visits every connection
-		}
+		every := consumerProbeInterval(c)
 		if elapsed := time.Since(last); elapsed < 0 || elapsed >= every {
 			next := cloneConnection(c)
 			if next.Consumer == nil {

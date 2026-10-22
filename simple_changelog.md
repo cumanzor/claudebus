@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-22 14:51:20 UTC] [Daemon/Harness] Every daemon harness branch is now an explicit switch with a decided default, so a harness other than Codex or Claude gets a refusal or a no-op instead of silently inheriting Codex identity, queue, receipt or probe behavior. Session IDs are validated per harness (UUIDs for Codex and Claude, the `ses_` form for OpenCode). OpenCode is recognized and refused at connect until its adapter lands. A source-level test fails on any new two-way harness comparison or default-less harness switch.
+
 [2026-10-22 03:37:53 UTC] [Docs/OpenCode] New docs/architecture/opencode-adapter-feasibility.md records measured OpenCode 1.19.3 behavior for a cbus adapter: a plain TUI exposes no endpoint, the new /api/session surface does not reach the TUI conversation, and an in-process TUI plugin on the classic API can bind a socket, deliver, hold until idle and report presence. Lists the design requirements (one endpoint per session, daemon-owned holding, look up the message ID before every submit). The cross-harness scope doc and README point to it.
 
 [2026-10-11 05:49:10 UTC] [Release] v0.20.4 (tag at `8ca492e`): every cbus WebSocket dial and relay HTTP request carries `User-Agent: cbus/<version>` and the relay logs it on tail connect and upgrade failure (#77). Five assets byte-identical from two fresh clones at the tag; SHA256SUMS and build-provenance.json published. Installed by selfupdate on macOS, Linux and Windows.
