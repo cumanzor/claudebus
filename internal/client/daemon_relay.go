@@ -114,6 +114,11 @@ func (d *busDaemon) writeRemoteIdentity(c *ConnectionState) error {
 		owner = c.Claude.Binding.Endpoint.PID
 	case daemonHarnessCodex:
 		owner = c.Config.RuntimePID
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return errors.New("OpenCode connection binding is missing")
+		}
+		owner = c.Opencode.Binding.Endpoint.PID
 	default:
 		return errUnsupportedHarness(c.Harness)
 	}

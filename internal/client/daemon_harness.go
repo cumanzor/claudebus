@@ -1,7 +1,6 @@
 package client
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -24,12 +23,10 @@ func daemonHarness(harness string) string {
 
 func validateDaemonHarness(harness string) error {
 	switch daemonHarness(harness) {
-	case daemonHarnessCodex, daemonHarnessClaude:
+	case daemonHarnessCodex, daemonHarnessClaude, daemonHarnessOpencode:
 		return nil
-	case daemonHarnessOpencode:
-		return errors.New("the OpenCode adapter is not available in this cbus version")
 	default:
-		return fmt.Errorf("unsupported daemon harness %q; only codex and claude are available", harness)
+		return fmt.Errorf("unsupported daemon harness %q; only codex, claude and opencode are available", harness)
 	}
 }
 

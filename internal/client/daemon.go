@@ -26,50 +26,52 @@ import (
 )
 
 type ConnectRequest struct {
-	Protocol int                   `json:"protocol,omitempty"`
-	Harness  string                `json:"harness,omitempty"`
-	Channel  string                `json:"channel"`
-	Alias    string                `json:"alias,omitempty"`
-	ThreadID string                `json:"threadId"`
-	Config   CodexQueueConfig      `json:"config"`
-	Claude   *ClaudeConnectBinding `json:"claude,omitempty"`
-	Relay    *RelayConfig          `json:"relay,omitempty"`
-	Host     string                `json:"host,omitempty"`
+	Protocol int                     `json:"protocol,omitempty"`
+	Harness  string                  `json:"harness,omitempty"`
+	Channel  string                  `json:"channel"`
+	Alias    string                  `json:"alias,omitempty"`
+	ThreadID string                  `json:"threadId"`
+	Config   CodexQueueConfig        `json:"config"`
+	Claude   *ClaudeConnectBinding   `json:"claude,omitempty"`
+	Opencode *OpencodeConnectBinding `json:"opencode,omitempty"`
+	Relay    *RelayConfig            `json:"relay,omitempty"`
+	Host     string                  `json:"host,omitempty"`
 }
 
 // ConnectionState reports queue acceptance separately from recipient receipt.
 // Pending survives ambiguous RPC outcomes. Absence in a subsequent queue/history
 // read is NOT proof of rejection, so an uncertain submission is never replayed.
 type ConnectionState struct {
-	ID               string                  `json:"id"`
-	Harness          string                  `json:"harness,omitempty"`
-	Channel          string                  `json:"channel"`
-	Alias            string                  `json:"alias"`
-	ThreadID         string                  `json:"threadId"`
-	Config           CodexQueueConfig        `json:"config"`
-	Claude           *ClaudeConnectionConfig `json:"claude,omitempty"`
-	RecordedVersion  string                  `json:"recordedVersion"`
-	State            string                  `json:"state"`
-	Error            string                  `json:"error,omitempty"`
-	ListenerError    string                  `json:"listenerError,omitempty"`
-	Accepted         uint64                  `json:"accepted"`
-	LastQueueID      string                  `json:"lastQueueId,omitempty"`
-	Dev              uint64                  `json:"dev"`
-	Ino              uint64                  `json:"ino"`
-	Offset           int64                   `json:"offset"`
-	Pending          *queueAttempt           `json:"pending,omitempty"`
-	LastAccepted     *deliveryObservation    `json:"lastAccepted,omitempty"`
-	Abandoned        uint64                  `json:"abandoned"`
-	Resolutions      []abandonedAttempt      `json:"resolutions,omitempty"`
-	RolloutPath      string                  `json:"rolloutPath,omitempty"`
-	Consumer         *consumerObservation    `json:"consumer,omitempty"`
-	PresenceSequence uint64                  `json:"presenceSequence,omitempty"`
-	PresenceOutbox   []presenceTransition    `json:"presenceOutbox,omitempty"`
-	Relay            *RelayConfig            `json:"relay,omitempty"`
-	RelayStatus      *relayObservation       `json:"relayStatus,omitempty"`
-	Compaction       *compactionObservation  `json:"compaction,omitempty"`
-	Deferred         string                  `json:"deferred,omitempty"`            // set only on the copy a connect returns, never stored
-	Predecessor      *ArchivedConnection     `json:"archivedPredecessor,omitempty"` // likewise
+	ID               string                    `json:"id"`
+	Harness          string                    `json:"harness,omitempty"`
+	Channel          string                    `json:"channel"`
+	Alias            string                    `json:"alias"`
+	ThreadID         string                    `json:"threadId"`
+	Config           CodexQueueConfig          `json:"config"`
+	Claude           *ClaudeConnectionConfig   `json:"claude,omitempty"`
+	Opencode         *OpencodeConnectionConfig `json:"opencode,omitempty"`
+	RecordedVersion  string                    `json:"recordedVersion"`
+	State            string                    `json:"state"`
+	Error            string                    `json:"error,omitempty"`
+	ListenerError    string                    `json:"listenerError,omitempty"`
+	Accepted         uint64                    `json:"accepted"`
+	LastQueueID      string                    `json:"lastQueueId,omitempty"`
+	Dev              uint64                    `json:"dev"`
+	Ino              uint64                    `json:"ino"`
+	Offset           int64                     `json:"offset"`
+	Pending          *queueAttempt             `json:"pending,omitempty"`
+	LastAccepted     *deliveryObservation      `json:"lastAccepted,omitempty"`
+	Abandoned        uint64                    `json:"abandoned"`
+	Resolutions      []abandonedAttempt        `json:"resolutions,omitempty"`
+	RolloutPath      string                    `json:"rolloutPath,omitempty"`
+	Consumer         *consumerObservation      `json:"consumer,omitempty"`
+	PresenceSequence uint64                    `json:"presenceSequence,omitempty"`
+	PresenceOutbox   []presenceTransition      `json:"presenceOutbox,omitempty"`
+	Relay            *RelayConfig              `json:"relay,omitempty"`
+	RelayStatus      *relayObservation         `json:"relayStatus,omitempty"`
+	Compaction       *compactionObservation    `json:"compaction,omitempty"`
+	Deferred         string                    `json:"deferred,omitempty"`            // set only on the copy a connect returns, never stored
+	Predecessor      *ArchivedConnection       `json:"archivedPredecessor,omitempty"` // likewise
 }
 
 type queueAttempt struct {
@@ -563,6 +565,8 @@ func (d *busDaemon) queue(c *ConnectionState) (nativeQueue, error) {
 		q, err = newClaudeQueueContext(d.ctx, d.root, *c.Claude)
 	case daemonHarnessCodex:
 		q, err = d.openQueue(c.Config)
+	case daemonHarnessOpencode:
+		q, err = newOpencodeQueueContext(d.ctx, c.Opencode)
 	default:
 		err = errUnsupportedHarness(c.Harness)
 	}
@@ -607,6 +611,11 @@ func (d *busDaemon) requireCLIConsumer(c *ConnectionState) error {
 	case daemonHarnessClaude:
 		if c.Claude == nil || p.PID != c.Claude.Binding.Endpoint.PID || p.StartToken != c.Claude.Binding.Endpoint.StartToken {
 			return errors.New("Claude consumer does not match the caller's exact process identity")
+		}
+		return nil
+	case daemonHarnessOpencode:
+		if c.Opencode == nil || p.PID != c.Opencode.Binding.Endpoint.PID || p.StartToken != c.Opencode.Binding.Endpoint.StartToken {
+			return errors.New("OpenCode consumer does not match the caller's exact TUI process")
 		}
 		return nil
 	case daemonHarnessCodex:
@@ -680,9 +689,14 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if !validThreadID(req.Harness, req.ThreadID) {
 		return nil, errors.New("connect requires the exact CLI session ID")
 	}
-	claude, err := prepareConnectBinding(req, token)
+	bound, err := prepareConnectBinding(req, token)
 	if err != nil {
 		return nil, err
+	}
+	if bound.opencode != nil {
+		if err := d.refuseSecondOpencodeEndpoint(req, bound.opencode); err != nil {
+			return nil, err
+		}
 	}
 	if err := validateRelayConfig(req.Relay); err != nil {
 		return nil, err
@@ -713,7 +727,13 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 			}
 			switch req.Harness {
 			case daemonHarnessClaude:
-				state, err := d.reconnectClaude(c, req, claude, token)
+				state, err := d.reconnectClaude(c, req, bound.claude, token)
+				if err == nil {
+					d.wake(c.ID)
+				}
+				return state, err
+			case daemonHarnessOpencode:
+				state, err := d.reconnectOpencode(c, req, bound.opencode)
 				if err == nil {
 					d.wake(c.ID)
 				}
@@ -769,7 +789,7 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if err != nil {
 		return nil, err
 	}
-	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Claude: claude, Relay: cloneRelay(req.Relay), Consumer: &consumerObservation{State: "unknown"}}
+	c := &ConnectionState{ID: id, Harness: req.Harness, Channel: req.Channel, Alias: req.Alias, ThreadID: req.ThreadID, Config: req.Config, Claude: bound.claude, Opencode: bound.opencode, Relay: cloneRelay(req.Relay), Consumer: &consumerObservation{State: "unknown"}}
 	c.State = connectionReadyState(c)
 	_, finish, err := d.beginControl(c.ID)
 	if err != nil {
@@ -948,6 +968,10 @@ func (d *busDaemon) armLocked(c *ConnectionState) error {
 	case daemonHarnessClaude:
 		if c.Claude != nil {
 			m.Cwd = c.Claude.Binding.Cwd
+		}
+	case daemonHarnessOpencode:
+		if c.Opencode != nil {
+			m.Cwd = c.Opencode.Binding.Cwd
 		}
 	default:
 	}

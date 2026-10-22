@@ -80,6 +80,8 @@ func (d *busDaemon) consumerProbe(c *ConnectionState) (consumerProbe, error) {
 		return observeClaudeConsumer(c)
 	case daemonHarnessCodex:
 		return observeCodexConsumer(d.ctx, c)
+	case daemonHarnessOpencode:
+		return observeOpencodeConsumer(c)
 	default:
 		return consumerProbe{State: "unknown"}, errUnsupportedHarness(c.Harness)
 	}

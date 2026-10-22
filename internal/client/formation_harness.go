@@ -89,6 +89,15 @@ func formationManagedBackend(ch, alias string, m PeerMeta) (*formationManagedSna
 		// process exit or loaded-session change is required to release it.
 		s.LiveSession = err != nil || p.State != "exited"
 		return s, nil
+	case daemonHarnessOpencode:
+		if err := validateConnectionBinding(&c); err != nil {
+			return nil, fmt.Errorf("invalid managed OpenCode binding for %s/%s: %w", ch, alias, err)
+		}
+		// Formations record OpenCode peers; launching them is not supported yet.
+		s.Cwd = c.Opencode.Binding.Cwd
+		s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"
+		s.LiveSession = c.Consumer == nil || c.Consumer.State != "exited"
+		return s, nil
 	case daemonHarnessCodex:
 		s.CodexBackend = &FormationCodexBackend{Binary: c.Config.Binary, Home: c.Config.Home, SQLiteHome: c.Config.SQLiteHome, UserHome: c.Config.UserHome, BindingSource: c.Config.BindingSource}
 		s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"

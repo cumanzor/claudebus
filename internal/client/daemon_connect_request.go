@@ -53,5 +53,15 @@ func validateConnectEnvelope(req ConnectRequest, token string) error {
 			return errors.New("Claude caller binding and capability require the Claude harness")
 		}
 	}
+	switch daemonHarness(req.Harness) {
+	case daemonHarnessOpencode:
+		if req.Protocol != DaemonProtocolVersion || req.Opencode == nil {
+			return errors.New("OpenCode connect requires protocol 3 and an exact caller binding")
+		}
+	default:
+		if req.Opencode != nil {
+			return errors.New("an OpenCode caller binding requires the OpenCode harness")
+		}
+	}
 	return nil
 }
