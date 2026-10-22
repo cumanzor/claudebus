@@ -4,6 +4,58 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-22 18:39:29 UTC] [OpenCode/Presence] Watch-driven wake and presence
+
+[Attempt #1] Files: internal/client/daemon_opencode_watch.go (new);
+daemon.go (opencodeWatches, probeNow); daemon_presence.go (a hinted probe
+runs before its interval); daemon_scheduler.go (scheduled operations start
+the watch; parking covers OpenCode); daemon_opencode.go (probe looks inside
+the bound session; idle fallback 5 s); opencode_binding.go
+(opencodeWatchEvent); opencode_endpoint_unix.go and _windows.go
+(opencodeWatch). Tests: new opencode_presence_unix_test.go; the helper
+process streams watch events and can report a deleted session.
+
+[What changed]
+- One watch goroutine per OpenCode connection, started from scheduled
+  operations, derived from the daemon context and counted with the relay
+  workers so shutdown waits for it. Every event, and the stream ending,
+  clears the retry delay, marks an immediate probe and wakes the scheduler.
+  The watch stops when the endpoint is gone; a reconnect starts a new one.
+- Events are hints only. The probe decides presence, and it now also looks
+  a sentinel message up inside the bound session: `session-not-found` means
+  the session was deleted, which the TUI never reports when another process
+  deletes it.
+- Mail for an exited OpenCode TUI parks like Claude's until reconnect; a
+  pending attempt is not parked.
+- The idle gate's poll becomes a 5 s fallback behind the watch.
+
+[Why]
+Fifth milestone of the OpenCode adapter. Waiting on a poll delayed held
+mail by up to the poll interval and left exits visible only on the next
+5 s probe; the feasibility runs showed several OpenCode changes produce no
+event at all, so the stream wakes the probe rather than replacing it.
+
+[Possible Ripple Effects]
+- Each OpenCode connection holds one long-lived socket to its TUI.
+- A probe now makes two plugin requests (hello and the sentinel lookup).
+
+[Testing Notes]
+- Tests with the helper process: events (snapshot, idle, route) each clear
+  the retry, mark a probe and wake; a hinted probe runs inside its interval;
+  the stream ending without dispose still hints and the watch stops after
+  the TUI exits; dispose hints; a deleted session probes as exited; parking;
+  scheduled operations start the watch; the watch stops with the daemon
+  context. All pass under -race.
+- 9 mutants killed on the aimed tests; the one that moved the watch to a
+  background context was detected by the cleanup hanging.
+- go test -race ./... green; builds for linux amd64/arm64 and windows. Two
+  earlier -race runs of internal/client took 16 to 17 minutes wall time with
+  no test hung; a verbose rerun took 66 s. Load was high (load average up to
+  7.5). The cause was not isolated.
+- Live on OpenCode 1.19.3: a message sent during the user's 8 s turn was
+  stored 50 ms after that turn completed; a pane change showed as not online
+  0.06 s after Enter; exit showed as exited 1.7 s after ctrl-c.
+
 ## [2026-10-22 16:12:36 UTC] [OpenCode/Delivery] OpenCode delivery and receipt
 
 [Attempt #1] Files: internal/client/daemon_opencode.go (enqueue, lookupMessage,

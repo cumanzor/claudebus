@@ -43,6 +43,13 @@ type opencodeHello struct {
 	Error     string  `json:"error"`
 }
 
+// opencodeWatchEvent is one line of the plugin's watch stream.
+type opencodeWatchEvent struct {
+	Event     string  `json:"event"`
+	SessionID *string `json:"sessionID"`
+	State     *string `json:"state"`
+}
+
 func opencodeEndpointDir() string { return filepath.Join(CBUSDir(), ".opencode") }
 
 var opencodeSocketName = regexp.MustCompile(`^([1-9][0-9]{0,9})\.sock$`)

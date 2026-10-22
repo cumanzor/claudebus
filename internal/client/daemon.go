@@ -94,39 +94,41 @@ type nativeQueue interface {
 }
 
 type busDaemon struct {
-	mu            sync.Mutex
-	root          string
-	start         string
-	version       string
-	connections   map[string]*ConnectionState
-	queues        map[string]nativeQueue
-	openQueue     func(CodexQueueConfig) (nativeQueue, error)
-	nextTry       map[string]time.Time
-	ctx           context.Context
-	cancel        context.CancelFunc
-	connectGate   chan struct{} // one connect at a time; waiters queue rather than fail
-	controlWait   time.Duration
-	skipped       []string // connection records load could not read or validate
-	lanes         map[string]chan struct{}
-	snapshots     map[string]*ConnectionState
-	slots         chan struct{}
-	workers       sync.WaitGroup
-	closing       bool
-	rotation      int           // next connection a pass visits, guarded by mu
-	passLeft      int           // connections the current pass has yet to visit, guarded by mu
-	kick          chan struct{} // wakes the scheduler loop: a wake, a freed slot or a released lane
-	ready         map[string]struct{}
-	due           map[string]time.Time // receipt follow-ups, guarded by mu
-	followups     map[string]int
-	probeConsumer func(context.Context, *ConnectionState) (consumerProbe, error)
-	relays        map[string]*relaySubscription
-	relayViews    map[string]relayObservation
-	tickErrors    map[string]string // last logged tick error per connection, guarded by mu
-	lastGC        *GCStatus         // guarded by mu
-	gcFirst       time.Duration
-	gcEvery       time.Duration
-	relayWorkers  sync.WaitGroup
-	dialRelay     func(context.Context, *ConnectionState) (relaySocket, error)
+	mu              sync.Mutex
+	root            string
+	start           string
+	version         string
+	connections     map[string]*ConnectionState
+	queues          map[string]nativeQueue
+	openQueue       func(CodexQueueConfig) (nativeQueue, error)
+	nextTry         map[string]time.Time
+	ctx             context.Context
+	cancel          context.CancelFunc
+	connectGate     chan struct{} // one connect at a time; waiters queue rather than fail
+	controlWait     time.Duration
+	skipped         []string // connection records load could not read or validate
+	lanes           map[string]chan struct{}
+	snapshots       map[string]*ConnectionState
+	slots           chan struct{}
+	workers         sync.WaitGroup
+	closing         bool
+	rotation        int           // next connection a pass visits, guarded by mu
+	passLeft        int           // connections the current pass has yet to visit, guarded by mu
+	kick            chan struct{} // wakes the scheduler loop: a wake, a freed slot or a released lane
+	ready           map[string]struct{}
+	due             map[string]time.Time // receipt follow-ups, guarded by mu
+	followups       map[string]int
+	probeConsumer   func(context.Context, *ConnectionState) (consumerProbe, error)
+	relays          map[string]*relaySubscription
+	opencodeWatches map[string]*opencodeWatchSub
+	probeNow        map[string]bool
+	relayViews      map[string]relayObservation
+	tickErrors      map[string]string // last logged tick error per connection, guarded by mu
+	lastGC          *GCStatus         // guarded by mu
+	gcFirst         time.Duration
+	gcEvery         time.Duration
+	relayWorkers    sync.WaitGroup
+	dialRelay       func(context.Context, *ConnectionState) (relaySocket, error)
 }
 
 const DaemonProtocolVersion = 3
