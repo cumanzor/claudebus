@@ -1658,8 +1658,8 @@ Shipped as two OpenCode modules in `integrations/opencode/`, installed by
 loads a module as exactly one kind (a default export with `server()` or
 `tui()`, never both), loads server plugins from `<config>/plugins/` on its
 own, and loads TUI plugins only when they are listed in `tui.json` or
-`tui.jsonc`. The installer therefore writes `plugins/cbus-server.js` and
-`cbus-tui.js`, creates `tui.jsonc` when the directory has none, and never
+`tui.jsonc`. The installer therefore writes `plugins/cbus-server.js`,
+`cbus-tui.js` and the `/bus-join` command `commands/bus-join.md`, creates `tui.jsonc` when the directory has none, and never
 rewrites an existing TUI config: a config without the `"./cbus-tui.js"`
 entry is reported with the entry to add and a non-zero exit.
 `install-assets`, which updates run, refreshes the plugins (overwriting, as

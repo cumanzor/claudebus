@@ -15,6 +15,7 @@ const (
 	opencodeServerPlugin = "cbus-server.js"
 	opencodeTUIPlugin    = "cbus-tui.js"
 	opencodeTUIEntry     = "./" + opencodeTUIPlugin
+	opencodeJoinCommand  = "commands/bus-join.md"
 )
 
 // OpenCode loads server plugins from <config>/plugins/ on its own; TUI plugins
@@ -31,12 +32,19 @@ func installOpencodePlugins(fsys fs.FS, dir string, force bool) ([]assetResult, 
 	if err != nil {
 		return nil, fmt.Errorf("read embedded %s: %w", opencodeTUIPlugin, err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir %s: %w", filepath.Join(dir, "plugins"), err)
+	join, err := read(opencodeJoinCommand)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded %s: %w", opencodeJoinCommand, err)
+	}
+	for _, sub := range []string{"plugins", "commands"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", filepath.Join(dir, sub), err)
+		}
 	}
 	return []assetResult{
 		installAsset(filepath.Join(dir, "plugins", opencodeServerPlugin), "plugins/"+opencodeServerPlugin, server, force),
 		installAsset(filepath.Join(dir, opencodeTUIPlugin), opencodeTUIPlugin, tui, force),
+		installAsset(filepath.Join(dir, filepath.FromSlash(opencodeJoinCommand)), opencodeJoinCommand, join, force),
 		registerOpencodeTUIPlugin(dir),
 	}, nil
 }
