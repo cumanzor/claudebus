@@ -101,10 +101,10 @@ cbus will not substitute a fresh Claude session.
   fresh fleets from starter templates, or checkpoint the current channel with
   `/save-formation`; see the [advanced example](#advanced-example) below —
   [docs/formations.md](docs/formations.md)
-- **Harness-neutral peers** — ordinary Claude Code and Codex CLI sessions connect
-  from inside their conversation. Existing `cbus codex` launches remain supported;
-  OpenCode is the next adapter. Terminal placement remains independent —
-  [Claude](docs/claude.md), [Codex](docs/codex.md)
+- **Harness-neutral peers** — ordinary Claude Code, Codex CLI and OpenCode sessions
+  connect from inside their conversation. Existing `cbus codex` launches remain
+  supported. Terminal placement remains independent —
+  [Claude](docs/claude.md), [Codex](docs/codex.md), [OpenCode](docs/opencode.md)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
@@ -148,6 +148,7 @@ restart: [Claude](docs/claude.md), [Codex](docs/codex.md), the
 | [docs/formations.md](docs/formations.md) | save / apply / resume, starter templates, birth records, drift anchors |
 | [docs/claude.md](docs/claude.md) | Native Claude connections and legacy Monitor migration |
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
+| [docs/opencode.md](docs/opencode.md) | OpenCode sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
 | [docs/claude-code-coordination.md](docs/claude-code-coordination.md) | why claudebus exists next to Subagents, Agent Teams, SendMessage and Workflow |

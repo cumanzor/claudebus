@@ -34,13 +34,18 @@ func formationHarness(p *FormationPeer) string {
 
 func formationHarnessRefusal(p *FormationPeer) error {
 	harness := formationHarness(p)
-	if harness == "claude" && p.CodexBackend == nil {
+	codexRefusal := fmt.Errorf("peer %q records harness=codex; automated Formation launch/bootstrap for Codex is not supported yet: open or resume the exact Codex CLI thread with its recorded backend, then run cbus connect from that session; no Claude or fresh-session fallback was attempted", p.Alias)
+	if p.CodexBackend != nil {
+		return codexRefusal
+	}
+	switch harness {
+	case daemonHarnessClaude:
 		return nil
+	case daemonHarnessCodex:
+		return codexRefusal
+	default:
+		return fmt.Errorf("peer %q records harness=%s; automated Formation launch/bootstrap for this harness is not supported; start that harness explicitly and reconnect it", p.Alias, harness)
 	}
-	if harness == "codex" || p.CodexBackend != nil {
-		return fmt.Errorf("peer %q records harness=codex; automated Formation launch/bootstrap for Codex is not supported yet: open or resume the exact Codex CLI thread with its recorded backend, then run cbus connect from that session; no Claude or fresh-session fallback was attempted", p.Alias)
-	}
-	return fmt.Errorf("peer %q records harness=%s; automated Formation launch/bootstrap for this harness is not supported; start that harness explicitly and reconnect it", p.Alias, harness)
 }
 
 type formationManagedSnapshot struct {
@@ -68,7 +73,8 @@ func formationManagedBackend(ch, alias string, m PeerMeta) (*formationManagedSna
 		return nil, err
 	}
 	s := &formationManagedSnapshot{Harness: harness, Cwd: m.Cwd, Profile: m.Profile}
-	if harness == daemonHarnessClaude {
+	switch harness {
+	case daemonHarnessClaude:
 		if err := validateConnectionBinding(&c); err != nil {
 			return nil, fmt.Errorf("invalid managed Claude binding for %s/%s: %w", ch, alias, err)
 		}
@@ -88,11 +94,23 @@ func formationManagedBackend(ch, alias string, m PeerMeta) (*formationManagedSna
 		// process exit or loaded-session change is required to release it.
 		s.LiveSession = err != nil || p.State != "exited"
 		return s, nil
+	case daemonHarnessOpencode:
+		if err := validateConnectionBinding(&c); err != nil {
+			return nil, fmt.Errorf("invalid managed OpenCode binding for %s/%s: %w", ch, alias, err)
+		}
+		// Formations record OpenCode peers; launching them is not supported yet.
+		s.Cwd = c.Opencode.Binding.Cwd
+		s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"
+		s.LiveSession = c.Consumer == nil || c.Consumer.State != "exited"
+		return s, nil
+	case daemonHarnessCodex:
+		s.CodexBackend = &FormationCodexBackend{Binary: c.Config.Binary, Home: c.Config.Home, SQLiteHome: c.Config.SQLiteHome, UserHome: c.Config.UserHome, BindingSource: c.Config.BindingSource}
+		s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"
+		s.LiveSession = c.Consumer == nil || c.Consumer.State != "exited"
+		return s, nil
+	default:
+		return nil, errUnsupportedHarness(harness)
 	}
-	s.CodexBackend = &FormationCodexBackend{Binary: c.Config.Binary, Home: c.Config.Home, SQLiteHome: c.Config.SQLiteHome, UserHome: c.Config.UserHome, BindingSource: c.Config.BindingSource}
-	s.Online = c.State != "disconnected" && c.State != "detached" && c.Consumer != nil && c.Consumer.State == "online"
-	s.LiveSession = c.Consumer == nil || c.Consumer.State != "exited"
-	return s, nil
 }
 
 // readManagedJournal reads a registration's daemon journal without contacting the

@@ -166,3 +166,27 @@ func TestGCManagedConsumerUsesFrontendLifetime(t *testing.T) {
 		t.Fatal("missing frontend borrowed backend lifetime")
 	}
 }
+
+// A record's own harness picks the endpoint and transcript GC trusts: Claude
+// fields left in an OpenCode or Codex record must not keep it alive or active.
+func TestGCNeverBorrowsAnotherAdaptersFields(t *testing.T) {
+	claude := &ClaudeConnectionConfig{Binding: ClaudeConnectBinding{TranscriptPath: "/t/claude.jsonl", Endpoint: claudeEndpoint{PID: 42, StartToken: "s42"}}}
+	p := gcTestProbe(map[int]string{42: "s42", 77: "s77"}, map[string]time.Time{"/t/claude.jsonl": gcNow})
+	for _, harness := range []string{daemonHarnessOpencode, daemonHarnessCodex, "future-adapter"} {
+		c := &ConnectionState{Harness: harness, Claude: claude}
+		if gcConsumerKnown(c) || gcConsumerAlive(c, p) {
+			t.Errorf("%s record borrowed the Claude endpoint", harness)
+		}
+		if got := claudeTranscriptOf(c); got != "" {
+			t.Errorf("%s record borrowed the Claude transcript %q", harness, got)
+		}
+	}
+	oc := &ConnectionState{Harness: daemonHarnessOpencode, Opencode: &OpencodeConnectionConfig{Binding: OpencodeConnectBinding{Endpoint: opencodeEndpoint{PID: 77, StartToken: "s77"}}}}
+	if !gcConsumerKnown(oc) || !gcConsumerAlive(oc, p) {
+		t.Error("an OpenCode record's own TUI endpoint is not used for liveness")
+	}
+	cl := &ConnectionState{Harness: daemonHarnessClaude, Claude: claude}
+	if !gcConsumerAlive(cl, p) || claudeTranscriptOf(cl) != "/t/claude.jsonl" {
+		t.Error("a Claude record lost its own endpoint or transcript")
+	}
+}

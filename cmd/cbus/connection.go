@@ -72,13 +72,20 @@ func reportConnect(state client.ConnectionState, asJSON bool) int {
 	if asJSON {
 		return printConnectionJSON(state)
 	}
-	if state.Harness == "claude" {
-		fmt.Printf("%s: native socket bound to Claude session %s\n", client.ConnectionTarget(&state), state.ThreadID)
+	target := client.ConnectionTarget(&state)
+	switch state.Harness {
+	case "opencode":
+		fmt.Printf("%s: plugin socket bound to OpenCode session %s\n", target, state.ThreadID)
+		fmt.Println("The daemon handles waiting; no Monitor or re-arming is needed. Socket readiness is not receipt: delivery is confirmed only by the stored OpenCode message.")
+	case "claude":
+		fmt.Printf("%s: native socket bound to Claude session %s\n", target, state.ThreadID)
 		fmt.Println("The daemon handles waiting; no Monitor or re-arming is needed. Socket readiness is not receipt: delivery is confirmed only by this session's exact transcript record.")
-		return 0
+	case "codex", "":
+		fmt.Printf("%s: native queue storage available for Codex thread %s\n", target, state.ThreadID)
+		fmt.Println("Running consumer capability and receipt are unverified until recipient evidence. Supported CLIs consume without restart; native queue wake can take about 10 seconds. Busy sessions wait; interrupted sessions need user continuation.")
+	default:
+		fmt.Printf("%s: connected %s session %s (state %s)\n", target, state.Harness, state.ThreadID, state.State)
 	}
-	fmt.Printf("%s: native queue storage available for Codex thread %s\n", client.ConnectionTarget(&state), state.ThreadID)
-	fmt.Println("Running consumer capability and receipt are unverified until recipient evidence. Supported CLIs consume without restart; native queue wake can take about 10 seconds. Busy sessions wait; interrupted sessions need user continuation.")
 	return 0
 }
 

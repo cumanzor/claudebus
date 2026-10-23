@@ -194,8 +194,12 @@ func liveSids() map[string]string {
 			if m.ConnectionID != "" {
 				managed, err := formationManagedBackend(ch.Name(), al.Name(), m)
 				claimed := err != nil || managed.LiveSession
-				if err == nil && managed.Harness == daemonHarnessCodex {
-					claimed = claimed && MetaListenerAlive(metaPath)
+				if err == nil {
+					switch managed.Harness {
+					case daemonHarnessCodex:
+						claimed = claimed && MetaListenerAlive(metaPath)
+					default:
+					}
 				}
 				if claimed {
 					// A daemon PID is not the model process. Keep an unknown

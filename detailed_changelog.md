@@ -4,6 +4,395 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-23 14:34:24 UTC] [Tests/Harness] Wider harness-dispatch guard
+
+[Attempt #1] Files: internal/client/harness_dispatch_test.go (scanner
+extracted, wider rules, fixture tests for each shape, spawn, formation and
+legacy-record tests); connection_gc.go (gcBoundEndpoint, transcript by
+harness) and connection_gc_test.go; spawn.go; formation.go;
+formation_harness.go; formation_save.go (recordsNonCodexHarness); marker.go;
+cmd/cbus/connection.go and unsupported_windows.go; cmd/cbus
+install_opencode_test.go (connect report test).
+
+[What changed]
+- The guard scans internal/client and cmd/cbus. A comparison is flagged when
+  one side holds a harness (daemonHarness(x), a .Harness field, a variable
+  named harness, or strings.ToLower of those) and the other names one (a
+  harness constant or a "claude"/"codex"/"opencode"/"grok" literal). A switch
+  on such a value, or with such cases, must have a default. Comparing two
+  harness values is still allowed.
+- spawn resolves the harness in one switch that refuses anything but Claude
+  and Codex; the rest of the function reads a codex flag.
+- The connect report switches on the harness and prints a neutral line for
+  one it does not know, instead of Codex guidance.
+- GC liveness and the transcript activity check use only the fields of the
+  record's own harness; Claude fields left in another record are ignored and
+  OpenCode records use their TUI endpoint.
+
+[Why]
+A review of the explicit-dispatch change found compilable bypasses of the
+old guard (raw .Harness comparisons, literal-case switches) and field-based
+dispatch in GC that let a record borrow another adapter's liveness.
+
+[Possible Ripple Effects]
+- The guard is still syntactic and cannot judge whether a default is right;
+  field-presence dispatch (`c.Claude != nil`) is not flagged, since most
+  such checks are data handling, not routing.
+- Two classification switches gained an explicit default with no behavior
+  change (isHarnessComm, the Windows phase-1 refusal text).
+
+[Testing Notes]
+- Against the stack tip without these changes, the wider guard lists all 16
+  sites and the new GC test shows OpenCode, Codex and unknown records
+  borrowing the Claude endpoint and transcript. Both pass after.
+- Fixture tests: each bypass shape is flagged; two-harness equality, empty
+  normalization, a switch with a default and a non-harness literal are not.
+- Mutants: OpenCode GC arm reading Claude fields, a Claude fallback in the
+  GC default, the connect report defaulting to Codex, spawn admitting any
+  harness, the formation refusal ignoring a Codex backend on a Claude peer,
+  and a blank harness counted as non-Codex: all killed on the aimed test.
+  The spawn mutant first died on a nil forker panic; the test now uses a stub
+  forker and a temp store and fails on its assertion.
+- go test -race ./... green; builds for linux amd64/arm64 and windows.
+
+## [2026-10-23 01:24:09 UTC] [OpenCode/Docs] OpenCode bus-join command, user doc, three-way acceptance
+
+[Attempt #1] Files: integrations/opencode/commands/bus-join.md (new);
+docs/opencode.md (new); assets.go (embed the command);
+cmd/cbus/install_opencode.go (install it to commands/bus-join.md) and its
+test; opencode_plugin_test.go (embed list); docs/architecture/protocol.md,
+opencode-adapter-feasibility.md (status, open items),
+cross-harness-daemon-scope.md (route result); README.md.
+
+[What changed]
+- OpenCode gets a `/bus-join` command (OpenCode 1.19.3 loads commands from
+  both `command/` and `commands/`; the installer uses `commands/`).
+- docs/opencode.md is the user page; README links it.
+
+[Why]
+Sixth milestone of the OpenCode adapter: a user path in, and live acceptance
+across all three harnesses.
+
+[Possible Ripple Effects]
+- The installer now writes four files; an existing `commands/bus-join.md` that
+  differs is skipped unless --force.
+
+[Testing Notes]
+- Embed and installer tests updated and green.
+- Live three-way run on one scratch daemon (Claude Code, Codex CLI 0.163.0,
+  OpenCode 1.19.3): OpenCode joined through `/bus-join`; C->O, C->X, O->C,
+  O->X, X->C and X->O each arrived in the recipient's own conversation; no
+  attempt was left pending. OpenCode declined to run commands a peer asked
+  for until the operator asked, as its command text instructs.
+- Setup findings from that run, not code changes: an agent shell's profile
+  can put another cbus first on PATH; a Codex launched from a Claude shell
+  inherited CLAUDE_CODE_SESSION_ID and refused to connect until it was
+  removed; and a Codex agent followed the version-mismatch advice and ran
+  `cbus daemon restart` with an older binary against the scratch store.
+
+## [2026-10-22 18:39:29 UTC] [OpenCode/Presence] Watch-driven wake and presence
+
+[Attempt #1] Files: internal/client/daemon_opencode_watch.go (new);
+daemon.go (opencodeWatches, probeNow); daemon_presence.go (a hinted probe
+runs before its interval); daemon_scheduler.go (scheduled operations start
+the watch; parking covers OpenCode); daemon_opencode.go (probe looks inside
+the bound session; idle fallback 5 s); opencode_binding.go
+(opencodeWatchEvent); opencode_endpoint_unix.go and _windows.go
+(opencodeWatch). Tests: new opencode_presence_unix_test.go; the helper
+process streams watch events and can report a deleted session.
+
+[What changed]
+- One watch goroutine per OpenCode connection, started from scheduled
+  operations, derived from the daemon context and counted with the relay
+  workers so shutdown waits for it. Every event, and the stream ending,
+  clears the retry delay, marks an immediate probe and wakes the scheduler.
+  The watch stops when the endpoint is gone; a reconnect starts a new one.
+- Events are hints only. The probe decides presence, and it now also looks
+  a sentinel message up inside the bound session: `session-not-found` means
+  the session was deleted, which the TUI never reports when another process
+  deletes it.
+- Mail for an exited OpenCode TUI parks like Claude's until reconnect; a
+  pending attempt is not parked.
+- The idle gate's poll becomes a 5 s fallback behind the watch.
+
+[Why]
+Fifth milestone of the OpenCode adapter. Waiting on a poll delayed held
+mail by up to the poll interval and left exits visible only on the next
+5 s probe; the feasibility runs showed several OpenCode changes produce no
+event at all, so the stream wakes the probe rather than replacing it.
+
+[Possible Ripple Effects]
+- Each OpenCode connection holds one long-lived socket to its TUI.
+- A probe now makes two plugin requests (hello and the sentinel lookup).
+
+[Testing Notes]
+- Tests with the helper process: events (snapshot, idle, route) each clear
+  the retry, mark a probe and wake; a hinted probe runs inside its interval;
+  the stream ending without dispose still hints and the watch stops after
+  the TUI exits; dispose hints; a deleted session probes as exited; parking;
+  scheduled operations start the watch; the watch stops with the daemon
+  context. All pass under -race.
+- 9 mutants killed on the aimed tests; the one that moved the watch to a
+  background context was detected by the cleanup hanging.
+- go test -race ./... green; builds for linux amd64/arm64 and windows. Two
+  earlier -race runs of internal/client took 16 to 17 minutes wall time with
+  no test hung; a verbose rerun took 66 s. Load was high (load average up to
+  7.5). The cause was not isolated.
+- Live on OpenCode 1.19.3: a message sent during the user's 8 s turn was
+  stored 50 ms after that turn completed; a pane change showed as not online
+  0.06 s after Enter; exit showed as exited 1.7 s after ctrl-c.
+
+## [2026-10-22 16:12:36 UTC] [OpenCode/Delivery] OpenCode delivery and receipt
+
+[Attempt #1] Files: internal/client/daemon_opencode.go (enqueue, lookupMessage,
+idle gate, nativeAttemptKey, enqueueEvidence, message IDs); daemon.go
+(queueAttempt.MessageID, idle gate before an attempt, MessageID chosen with
+the write-ahead attempt, accept requires the attempt's own stored message,
+enqueue evidence); daemon_recovery.go (reconcile looks up by the adapter's
+key); opencode_endpoint_unix.go and _windows.go (errOpencodeNotDialed).
+Tests: new opencode_delivery_unix_test.go; the helper in
+opencode_connect_unix_test.go gained a message store and a control file;
+the store root for these tests is now short and test-name independent.
+
+[What changed]
+- Before an attempt exists, the daemon asks the plugin for status and starts
+  one only when the pane shows the bound session and it is idle; otherwise
+  the mail stays in the inbox and the check repeats every 2 s. A pending
+  attempt's lookup is not held behind that gate.
+- Each attempt gets an OpenCode message ID (`msg_` + 12 hex of
+  milliseconds*4096+counter + 14 base62) saved with the write-ahead record,
+  and every submit, lookup and reconcile uses it.
+- enqueue succeeds only on a receipt the plugin read back; that receipt is
+  the acceptance evidence, and accept refuses anything else.
+  submitted-unconfirmed and unknown failures keep the attempt pending. Only
+  `submitted: false` from the plugin, or a dial or peer-check failure before
+  any byte was written, releases it.
+
+[Why]
+Fourth milestone of the OpenCode adapter. OpenCode's classic API appends a
+duplicate part on a resent ID and the feasibility runs showed mid-turn
+delivery overriding the user's own request, so delivery waits for idle and
+never resends an attempt it cannot prove absent.
+
+[Possible Ripple Effects]
+- Between the status check and the submit the user can still start a turn;
+  the bus message then joins it. The classic API has no submit-if-idle.
+- Waiting for idle polls the plugin socket every 2 s while mail is waiting;
+  the next milestone wakes on the plugin's watch stream instead.
+- Journals gain an optional messageId on pending and last-accepted attempts.
+
+[Testing Notes]
+- Tests drive the helper process standing in for the plugin: delivery when
+  idle with the receipt naming the attempt's own ID; holding while busy, in
+  retry, or showing another or no session; an unconfirmed submit accepted by
+  lookup without a second submit, even while busy; proof of not-submitted
+  releasing the attempt; an unknown outcome never resent; the message ID
+  surviving a daemon restart; accept refusing missing, queued or foreign
+  evidence; ID form and ordering.
+- One test had been skipped silently because its long name pushed the temp
+  store past the socket path limit; the store root is now short and the
+  suite passes with no skips under both a short and the default macOS TMPDIR.
+- 11 mutants killed on the aimed tests; one first did not compile and was
+  rerun as a condition that does.
+- go test -race ./... green; builds for linux amd64/arm64 and windows.
+- Live on OpenCode 1.19.3 with a scratch daemon: idle delivery accepted and
+  answered; a message sent during a user's busy turn stayed in the inbox
+  until the user's own reply, then was delivered and answered; the export
+  shows the bus messages under ascending IDs among OpenCode's own.
+
+## [2026-10-22 16:00:12 UTC] [OpenCode/Connect] OpenCode connect binding
+
+[Attempt #1] Files: internal/client/opencode_binding.go,
+opencode_endpoint_unix.go, opencode_endpoint_windows.go,
+opencodeconnect_identity.go, daemon_opencode.go (new); daemon.go
+(ConnectRequest.Opencode, ConnectionState.Opencode, queue, requireCLIConsumer,
+connect admission and reconnect dispatch, meta cwd); daemon_harness.go
+(opencode admitted); daemon_claude.go (adapter whitelist, binding check, ready
+state, pinned consumer, not-submitted proof); daemon_connect_binding.go
+(connectBindings, home and cwd); daemon_connect_request.go (envelope);
+daemon_presence.go (probe); daemon_relay.go (owner pid); daemon_compaction.go;
+daemon_scheduler.go (deep copy); formation_harness.go (OpenCode peers saved,
+not launched); claude_endpoint_unix.go (privateSocket takes a label);
+connect_identity.go; cmd/cbus/connection.go (connect report). Tests: new
+opencode_connect_unix_test.go; harness_dispatch_test.go and
+daemon_harness_test.go updated for an admitted OpenCode;
+connect_identity_unix_test.go takes the third resolver.
+
+[What changed]
+- Client: the OpenCode resolver takes the session only from
+  `CBUS_SESSION_ID`, then scans `$CBUS_DIR/.opencode/*.sock`. Each candidate
+  must be a private socket named after a live pid whose peer credential
+  matches and whose plugin speaks protocol 1. Exactly one must show the
+  session; none or several is an error listing what was found and skipped.
+- Daemon: admission re-dials the endpoint, requires it inside this daemon's
+  endpoint directory, and requires the plugin to still show the session. A
+  session bound through a different live TUI under any alias is refused; the
+  same alias rebinds once the old TUI has exited.
+- The probe reports online only when the bound TUI is alive and shows the
+  session; exited when the pid is gone; unknown with a reason otherwise.
+- The OpenCode queue opens without contacting the TUI. Its enqueue refuses
+  with not-submitted proof, so the attempt is released and the message stays
+  in the inbox until the delivery milestone.
+
+[Why]
+Third milestone of the OpenCode adapter: an exact binding between a bus
+alias, one OpenCode session and the one TUI process showing it. Two panes on
+one session duplicated deliveries in the feasibility runs, so the
+one-endpoint rule is enforced at discovery and at admission.
+
+[Possible Ripple Effects]
+- `opencode` is now an admitted daemon harness. Every switch from the
+  explicit-dispatch change that defaulted to a refusal now has an OpenCode
+  arm or still refuses (close revalidation, formation launch, accept).
+- `cbus formation save` records OpenCode peers; launching them is still
+  refused by spawn.
+- An agent shell whose profile puts another cbus first on PATH runs that
+  binary; the live check had to call the scratch build by absolute path.
+
+[Testing Notes]
+- New tests drive a helper process that stands in for the TUI plugin, so
+  peer pids are real: discovery of exactly one, two panes refused, skipped
+  endpoints reported, a socket named after another pid rejected, an exited
+  TUI skipped; identity ignores an inherited `ses_`-shaped
+  CLAUDE_CODE_SESSION_ID; end-to-end daemon connect, journal reload, exit,
+  cross-channel refusal, rebind after exit, mail left unread.
+- 14 mutants killed on the aimed test. Two first showed "killed" without a
+  named test because they did not compile; rerun with conditions that keep
+  every variable used, they fail the aimed assertions. One survived
+  (identity falling back to SessionID) until the test used an inherited
+  value shaped like an OpenCode session.
+- go test -race ./... green; builds for linux amd64/arm64 and windows; test
+  binaries compile for linux and windows. Not run: the Linux runtime gate
+  for the new process-state code.
+- Live on OpenCode 1.19.3 with a scratch daemon: the agent shell ran
+  `cbus connect demo oc`; daemon state opencode socket-ready, consumer online,
+  `cbus list` showed the TUI pid; a sent message stayed at offset 0 with the
+  not-submitted error logged once; reconnect kept one registration; after
+  /new the consumer was unknown; after exit the next probe reported exited
+  and the socket was gone.
+
+## [2026-10-22 15:44:16 UTC] [OpenCode/Plugin] OpenCode plugins and install-opencode
+
+[Attempt #1] Files: integrations/opencode/cbus-tui.js, cbus-server.js,
+plugin.test.mjs (new); assets.go (OpencodePlugins embed, the two modules
+only); cmd/cbus/install_opencode.go and install_opencode_test.go (new);
+cmd/cbus/install_assets.go (refresh entry in assetInstalls), main.go (verb
+route), usage.go; cmd/cbus/install_all_test.go (XDG_CONFIG_HOME cleared, no
+OpenCode dir created); opencode_plugin_test.go (embed matches source, runs
+the node suite); docs/architecture/protocol.md section 15.3.
+
+[What changed]
+- TUI plugin: one private Unix socket per TUI process at
+  `$CBUS_DIR/.opencode/<pid>.sock` speaking protocol 1 (hello, status,
+  lookup, deliver, watch). deliver refuses any session the pane is not
+  showing, looks the message ID up before submitting, and reports whether a
+  failed submit could have stored anything. watch streams state changes for
+  the shown session, route changes, deletions, reconnects and dispose.
+- Server plugin: `shell.env` sets `CBUS_SESSION_ID` from the hook's own
+  session ID and blanks `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID` and
+  `GROK_SESSION_ID`.
+- `cbus install-opencode` writes `plugins/cbus-server.js` and `cbus-tui.js`
+  into the OpenCode config dir (default `~/.config/opencode`, honoring
+  `XDG_CONFIG_HOME`), creates `tui.jsonc` only when no TUI config exists,
+  and otherwise reports the entry to add with a non-zero exit.
+  `install-assets` refreshes the plugins only when they are already
+  installed in the default config dir.
+
+[Why]
+Second milestone of the OpenCode adapter. The feasibility work showed a plain
+TUI exposes no endpoint, so the daemon will talk to this plugin. Layout facts
+measured on OpenCode 1.19.3 while writing it: a module default-exports
+either server() or tui(), never both; .opencode/plugins/ loads server
+plugins only; TUI plugins load only from the tui.json(c) plugin list.
+
+[Possible Ripple Effects]
+- Nothing in the daemon talks to the socket yet; `cbus connect` from
+  OpenCode still refuses until the connect milestone.
+- A user who runs `cbus install-assets` with plugins already installed gets
+  them overwritten, as mods are, because they must match the binary.
+- Plugin tests need node 22 or later; without node the Go wrapper skips.
+
+[Testing Notes]
+- node --test: 14 protocol tests against a fake OpenCode api over a real
+  socket. 13 JS mutants: 12 killed on the aimed test; dropping only the
+  close-time clearTimeout survives because the timer is unref'd, and
+  dropping both timer lines (the original leak) is killed.
+- Two real defects found by the tests: a probe connection that never sent a
+  request kept a 10 s ref'd timer alive, and Node's server.close() unlinks
+  the listen path, so disposing one instance deleted a newer instance's
+  socket. Fixed by unref plus clear on close, and by binding under a private
+  name and renaming into place.
+- Go installer tests plus four mutants (rewriting an existing config,
+  installing the TUI module under plugins/, refresh creating a config,
+  treating a missing entry as registered), all killed.
+- go test -race ./... green with a short TMPDIR; builds for linux amd64/arm64
+  and windows.
+- Live on OpenCode 1.19.3 in a scratch project, installed by the built
+  binary: socket 0600 in a 0700 dir; hello and status; agent shell saw its
+  own session in CBUS_SESSION_ID and an empty CLAUDE_CODE_SESSION_ID although
+  the TUI was launched from a Claude Code shell; a missing message looked up
+  as present:false; deliver persisted and the model replied; a resend came
+  back present; a wrong session was refused; watch showed snapshot, route,
+  one idle, route to null after /new, dispose; the socket was gone after
+  exit.
+## [2026-10-22 14:51:20 UTC] [Daemon/Harness] Explicit per-harness dispatch
+
+[Attempt #1] Files: internal/client/daemon_harness.go (opencode constant,
+validThreadID, validOpencodeSessionID, errUnsupportedHarness,
+consumerProbeInterval), daemon.go (readConnectionRecord, queue,
+requireCLIConsumer, connect thread check and reconnect dispatch, meta cwd,
+deliver lookup and accept dispatch, accept), daemon_claude.go
+(claudeReceiptWaiting, validateConnectionBinding, connectionReadyState,
+pinnedConsumer, new claudeCleanWrite and provedNotSubmitted),
+daemon_compaction.go, daemon_connect_binding.go, daemon_connect_request.go,
+daemon_presence.go, daemon_relay.go, daemon_scheduler.go (parkedClaude, new
+logsAttemptOutcomes), daemon_codex_frontend.go, daemon_claude_reconnect.go,
+close_native_unix.go (default on the revalidation switch), formation_harness.go,
+formation_plan.go. Tests: new harness_dispatch_test.go; daemon_harness_test.go
+expects the OpenCode-specific refusal.
+
+[What changed]
+- 34 harness comparisons became switches. Each default is chosen per site:
+  refuse with an unsupported-harness error where the code would act (queue,
+  binding, probe, accept, relay owner, compaction, reconnect), and false or a
+  no-op where the code is a predicate (receipt waiting, parking, attempt
+  logging, managed Codex frontends).
+- Thread IDs are checked by validThreadID for the connection's harness at
+  connect and when journals load. The connect error now says "session ID"
+  rather than "session UUID".
+- OpenCode has a harness constant and a dedicated refusal message; admission
+  and the adapter whitelist still reject it.
+
+[Why]
+Most branches read `if claude {...}` with Codex as the implied else. An
+OpenCode connection admitted later would have been probed, queued and
+accepted as Codex. Making each default explicit, and pinning it with a test,
+turns that into a refusal the next adapter has to replace site by site.
+
+[Possible Ripple Effects]
+- Behavior for Codex and Claude is unchanged; legacy journals with an empty
+  harness still normalize to Codex.
+- Several new defaults are unreachable today because validateConnectionAdapter
+  rejects any third harness first. They become live when OpenCode is admitted.
+- The guard test is syntactic: it catches comparisons against the harness
+  constants or daemonHarness(...) with a literal, and harness switches with no
+  default. It cannot judge whether a default is correct.
+
+[Testing Notes]
+- New guard test run against main: fails with 34 sites listed. Passes after.
+- Mutants (each run against the new tests): borrowing the Codex consumer in
+  pinnedConsumer, "queue-ready" default, releasing attempts by default,
+  dropping a default, UUID check for OpenCode, admitting OpenCode,
+  reintroducing a two-way comparison, accept committing by default: all
+  killed on the aimed assertion. A Codex default in consumerProbe survives
+  because the adapter whitelist rejects first; it is equivalent until
+  OpenCode is admitted.
+- go test -race ./... green with a short TMPDIR; build and vet for linux
+  amd64/arm64 and windows; test binaries compile for linux and windows.
+- Live: a scratch daemon on the new binary, this change's own Claude session
+  connected natively, one message submitted, received from the transcript and
+  accepted, then disconnected.
+
 ## [2026-10-22 03:37:53 UTC] [Docs/OpenCode] OpenCode adapter feasibility
 
 [Attempt #1] Files: docs/architecture/opencode-adapter-feasibility.md (new),
