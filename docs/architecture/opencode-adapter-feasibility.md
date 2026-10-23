@@ -228,7 +228,10 @@ The adapter is implemented as described above; user setup is in
 no credential: the server plugin sets `CBUS_SESSION_ID`, which cbus already
 resolves against the registration. A live three-way run (Claude Code, Codex CLI
 0.163.0, OpenCode 1.19.3, one scratch daemon) delivered all six directed routes,
-each read in the recipient's own conversation, with no attempt left pending.
+each read in the recipient's own conversation, with no attempt left pending. On
+Linux (Debian 13, Go 1.26.2, race detector) the OpenCode and dispatch tests and
+the plugin's node suite pass; the full suite fails only a presence test that
+also fails on main there, where ext4 reuses an inode on remove and recreate.
 
 ## Still open
 
@@ -236,8 +239,5 @@ each read in the recipient's own conversation, with no attempt left pending.
   terminal.
 - Windows: named pipe in place of the Unix socket, and the peer check.
 - Bursts and ordering beyond the two-message hold test.
-- The Linux runtime gate for the OpenCode process-state code (peer
-  credentials, start times); the code builds for Linux but has only run on
-  macOS.
 - Re-checking all of the above on each OpenCode upgrade, since both plugin
   APIs and the new session surface are moving.
