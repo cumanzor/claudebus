@@ -34,13 +34,18 @@ func formationHarness(p *FormationPeer) string {
 
 func formationHarnessRefusal(p *FormationPeer) error {
 	harness := formationHarness(p)
-	if harness == "claude" && p.CodexBackend == nil {
+	codexRefusal := fmt.Errorf("peer %q records harness=codex; automated Formation launch/bootstrap for Codex is not supported yet: open or resume the exact Codex CLI thread with its recorded backend, then run cbus connect from that session; no Claude or fresh-session fallback was attempted", p.Alias)
+	if p.CodexBackend != nil {
+		return codexRefusal
+	}
+	switch harness {
+	case daemonHarnessClaude:
 		return nil
+	case daemonHarnessCodex:
+		return codexRefusal
+	default:
+		return fmt.Errorf("peer %q records harness=%s; automated Formation launch/bootstrap for this harness is not supported; start that harness explicitly and reconnect it", p.Alias, harness)
 	}
-	if harness == "codex" || p.CodexBackend != nil {
-		return fmt.Errorf("peer %q records harness=codex; automated Formation launch/bootstrap for Codex is not supported yet: open or resume the exact Codex CLI thread with its recorded backend, then run cbus connect from that session; no Claude or fresh-session fallback was attempted", p.Alias)
-	}
-	return fmt.Errorf("peer %q records harness=%s; automated Formation launch/bootstrap for this harness is not supported; start that harness explicitly and reconnect it", p.Alias, harness)
 }
 
 type formationManagedSnapshot struct {

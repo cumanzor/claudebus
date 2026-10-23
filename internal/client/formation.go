@@ -581,8 +581,12 @@ func (p *FormationPeer) validate() error {
 	if p.Harness != "" && !core.ValidName(p.Harness) {
 		return fmt.Errorf("invalid harness %q", p.Harness)
 	}
-	if p.CodexBackend != nil && p.Harness != "" && strings.ToLower(p.Harness) != "codex" {
-		return fmt.Errorf("codexBackend conflicts with harness %q", p.Harness)
+	if p.CodexBackend != nil && p.Harness != "" {
+		switch strings.ToLower(p.Harness) {
+		case daemonHarnessCodex:
+		default:
+			return fmt.Errorf("codexBackend conflicts with harness %q", p.Harness)
+		}
 	}
 	if !core.ValidName(p.Alias) {
 		return fmt.Errorf("alias must be [A-Za-z0-9._-], got %q", p.Alias)

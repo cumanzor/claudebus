@@ -168,7 +168,8 @@ func gcConsumerKnown(c *ConnectionState) bool {
 	if pid, start := observedCLIProcess(c); pid > 0 && start != "" {
 		return true
 	}
-	return c.Claude != nil && c.Claude.Binding.Endpoint.PID > 0 && c.Claude.Binding.Endpoint.StartToken != ""
+	pid, start := gcBoundEndpoint(c)
+	return pid > 0 && start != ""
 }
 
 // gcConsumerAlive trusts a pid only with the start time recorded beside it, so a
@@ -177,11 +178,25 @@ func gcConsumerAlive(c *ConnectionState, p gcProbe) bool {
 	if pid, start := observedCLIProcess(c); pid > 0 && start != "" && p.alive(pid, start) {
 		return true
 	}
-	if c.Claude != nil {
-		e := c.Claude.Binding.Endpoint
-		return e.PID > 0 && e.StartToken != "" && p.alive(e.PID, e.StartToken)
+	pid, start := gcBoundEndpoint(c)
+	return pid > 0 && start != "" && p.alive(pid, start)
+}
+
+// gcBoundEndpoint is the process a connection's own adapter binds; a field
+// another adapter populated in a malformed record is never borrowed.
+func gcBoundEndpoint(c *ConnectionState) (int, string) {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude != nil {
+			return c.Claude.Binding.Endpoint.PID, c.Claude.Binding.Endpoint.StartToken
+		}
+	case daemonHarnessOpencode:
+		if c.Opencode != nil {
+			return c.Opencode.Binding.Endpoint.PID, c.Opencode.Binding.Endpoint.StartToken
+		}
+	default:
 	}
-	return false
+	return 0, ""
 }
 
 // gcLastActive is when the session itself last wrote: its Claude transcript or
@@ -206,10 +221,14 @@ func gcLastActive(c *ConnectionState, record string, p gcProbe) time.Time {
 }
 
 func claudeTranscriptOf(c *ConnectionState) string {
-	if c.Claude == nil {
-		return ""
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude != nil {
+			return c.Claude.Binding.TranscriptPath
+		}
+	default:
 	}
-	return c.Claude.Binding.TranscriptPath
+	return ""
 }
 
 // gcUnread counts non-presence messages past the delivered offset, which a

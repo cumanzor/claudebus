@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claudebus/internal/client"
 )
 
 func TestInstallOpencodeFreshThenUpToDate(t *testing.T) {
@@ -129,5 +131,22 @@ func TestRefreshOpencodeSkipsWithoutAnInstallAndUpdatesOne(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(stale); string(b) == "// older plugin\n" {
 		t.Error("refresh left an outdated plugin in place")
+	}
+}
+
+func TestReportConnectNamesEachHarness(t *testing.T) {
+	for harness, want := range map[string]string{
+		"opencode":       "plugin socket bound to OpenCode session",
+		"claude":         "native socket bound to Claude session",
+		"codex":          "native queue storage available for Codex thread",
+		"":               "native queue storage available for Codex thread",
+		"future-adapter": "connected future-adapter session",
+	} {
+		out := captureStdout(t, func() {
+			reportConnect(client.ConnectionState{Harness: harness, Channel: "demo", Alias: "a", ThreadID: "t", State: "socket-ready"}, false)
+		})
+		if !strings.Contains(out, want) || (harness == "future-adapter" && strings.Contains(out, "Codex")) {
+			t.Errorf("harness %q: %q", harness, out)
+		}
 	}
 }

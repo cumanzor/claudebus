@@ -366,7 +366,7 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 	if r.CodexBackend != nil {
 		v := *r.CodexBackend
 		p.CodexBackend = &v
-	} else if p.SessionID != r.SessionID || (r.Harness != "" && strings.ToLower(r.Harness) != "codex") {
+	} else if p.SessionID != r.SessionID || recordsNonCodexHarness(r.Harness) {
 		p.CodexBackend = nil
 	}
 	p.SessionID = r.SessionID
@@ -522,4 +522,14 @@ func gitHead() (string, bool) {
 		return "", false
 	}
 	return head, true
+}
+
+// recordsNonCodexHarness: a blank harness is a legacy record, not evidence.
+func recordsNonCodexHarness(h string) bool {
+	switch strings.ToLower(h) {
+	case "", daemonHarnessCodex:
+		return false
+	default:
+		return true
+	}
 }

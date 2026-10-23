@@ -116,6 +116,7 @@ func isHarnessComm(base string) bool {
 	switch base {
 	case "claude", "grok", "xai-grok-pager", "opencode", "codex":
 		return true
+	default:
+		return strings.HasPrefix(base, "claude-")
 	}
-	return strings.HasPrefix(base, "claude-")
 }

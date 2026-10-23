@@ -48,18 +48,22 @@ type SpawnOptions struct {
 }
 
 func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptions, forker TerminalForker) (addr, childAlias string, err error) {
-	if opts.Harness == "" {
-		opts.Harness = "claude"
-	}
-	if opts.Harness != "claude" && opts.Harness != "codex" {
+	// Every later branch reads codex; a harness spawn cannot launch is refused here.
+	var codex bool
+	switch opts.Harness {
+	case "", daemonHarnessClaude:
+		opts.Harness = daemonHarnessClaude
+	case daemonHarnessCodex:
+		codex = true
+	default:
 		return "", "", fmt.Errorf("unsupported spawn harness %q; use claude or codex", opts.Harness)
 	}
-	if opts.Profile != "" && (opts.Harness != "codex" || !core.ValidName(opts.Profile) || strings.HasPrefix(opts.Profile, "-")) {
+	if opts.Profile != "" && (!codex || !core.ValidName(opts.Profile) || strings.HasPrefix(opts.Profile, "-")) {
 		return "", "", fmt.Errorf("--profile requires a valid Codex profile name and --harness codex")
 	}
 	// Resolve the selected runtime before reserving an alias.
 	var codexLaunch codexSpawnContext
-	if opts.Harness == "codex" {
+	if codex {
 		codexLaunch, err = resolveCodexSpawnContext()
 		if err != nil {
 			return "", "", err
@@ -76,7 +80,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		if roleBody, roleDefault, err = LoadRole(role); err != nil {
 			return "", "", err
 		}
-		if model == "" && opts.Harness == "claude" {
+		if model == "" && !codex {
 			model = roleDefault
 		}
 		if name == "" {
@@ -102,7 +106,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 	coord := spawnerAddress(addr)
 	childEnv := codexLaunch.env
 	var unsetEnv []string
-	if opts.Harness == "claude" {
+	if !codex {
 		childEnv, err = forkReplicatedEnv()
 		if err != nil {
 			return "", "", err
@@ -134,7 +138,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)
 	}
-	if opts.Harness == "codex" {
+	if codex {
 		prompt = CodexSpawnPrompt(codexLaunch.cbus, addr, childAlias)
 	}
 	if roleBody != "" {
@@ -156,7 +160,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		Dir:      cwd(),
 		Title:    title,
 	}
-	if opts.Harness == "codex" {
+	if codex {
 		spec.Argv = codexLaunch.argv(opts.Profile, model, prompt)
 		spec.Env = codexLaunch.env
 	}

@@ -41,6 +41,7 @@ func phase1Refusal(verb string) string {
 			"exec worker, and the whole codex subsystem is excluded from this build"
 	case "arrange", "scatter", "focus":
 		return verb + " is not available on windows in phase 1: it rearranges live peers across tmux panes, and tmux is unix-only"
+	default:
+		return ""
 	}
-	return ""
 }
