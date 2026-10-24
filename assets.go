@@ -31,3 +31,9 @@ var Roles embed.FS
 //
 //go:embed all:mods
 var Mods embed.FS
+
+// OpencodePlugins holds the OpenCode server and TUI plugin modules. OpenCode loads
+// a module as one kind only, so they ship as two files.
+//
+//go:embed integrations/opencode/cbus-server.js integrations/opencode/cbus-tui.js integrations/opencode/commands/bus-join.md
+var OpencodePlugins embed.FS

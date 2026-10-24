@@ -11,10 +11,10 @@ import (
 // store plus exact thread UUID retains detached attachment when none is visible;
 // an inherited session ID alone never selects an adapter. Tokens stay separate.
 func NativeConnectIdentity(opts CodexConnectOptions) (ConnectRequest, string, error) {
-	return nativeConnectIdentityForHarness(HarnessName(), opts, CodexConnectIdentityWithOptions, ClaudeConnectIdentity)
+	return nativeConnectIdentityForHarness(HarnessName(), opts, CodexConnectIdentityWithOptions, ClaudeConnectIdentity, OpencodeConnectIdentity)
 }
 
-func nativeConnectIdentityForHarness(harness string, opts CodexConnectOptions, codex func(CodexConnectOptions) (CodexQueueConfig, string, error), claude func() (ClaudeConnectBinding, error)) (ConnectRequest, string, error) {
+func nativeConnectIdentityForHarness(harness string, opts CodexConnectOptions, codex func(CodexConnectOptions) (CodexQueueConfig, string, error), claude func() (ClaudeConnectBinding, error), opencode func() (OpencodeConnectBinding, error)) (ConnectRequest, string, error) {
 	if harness == "" && opts.SQLiteHome != "" && uuidLike(os.Getenv("CODEX_THREAD_ID")) {
 		harness = "codex"
 	}
@@ -46,8 +46,21 @@ func nativeConnectIdentityForHarness(harness string, opts CodexConnectOptions, c
 		}
 		req.Claude, req.ThreadID = &binding, binding.SessionID
 		return req, token, nil
+	case "opencode":
+		if runtime.GOOS == "windows" {
+			return req, "", errors.New("OpenCode connect is not available on Windows yet")
+		}
+		if opts.SQLiteHome != "" {
+			return req, "", errors.New("--codex-sqlite-home applies only to Codex CLI sessions")
+		}
+		binding, err := opencode()
+		if err != nil {
+			return req, "", err
+		}
+		req.Opencode, req.ThreadID = &binding, binding.SessionID
+		return req, "", nil
 	case "":
-		return req, "", errors.New("cbus connect requires a verified Claude Code or Codex CLI ancestor; run it from the current session")
+		return req, "", errors.New("cbus connect requires a verified Claude Code, Codex CLI or OpenCode ancestor; run it from the current session")
 	default:
 		return req, "", fmt.Errorf("cbus connect has no native adapter for the nearest harness %q", harness)
 	}

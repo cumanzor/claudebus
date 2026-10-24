@@ -152,7 +152,7 @@ func (d *busDaemon) reconcile(target string) (*ConnectionState, error) {
 			if err != nil {
 				return nil, err
 			}
-			found, err := d.lookup(c, q, c.Pending.ClientID)
+			found, err := d.lookup(c, q, nativeAttemptKey(c, *c.Pending))
 			if err != nil {
 				return nil, err
 			}
@@ -185,7 +185,7 @@ func (d *busDaemon) reconcile(target string) (*ConnectionState, error) {
 	if err != nil {
 		return nil, err
 	}
-	found, err := d.lookup(c, q, c.LastAccepted.Attempt.ClientID)
+	found, err := d.lookup(c, q, nativeAttemptKey(c, c.LastAccepted.Attempt))
 	if err != nil {
 		return nil, err
 	}

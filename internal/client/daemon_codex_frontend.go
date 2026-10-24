@@ -3,7 +3,9 @@ package client
 import "time"
 
 func managedCodexConnection(c *ConnectionState) bool {
-	if daemonHarness(c.Harness) != daemonHarnessCodex {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessCodex:
+	default:
 		return false
 	}
 	if c.Consumer != nil && c.Consumer.Managed {

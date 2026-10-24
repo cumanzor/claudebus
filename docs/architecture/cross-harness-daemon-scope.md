@@ -142,6 +142,11 @@ messages, restart, resume, presence and permissions for their own two harnesses
 OpenCode and the three-way combination remain open. Verify all six directed
 send/reply routes among them, using exact session identity, plus:
 
+(2026-10-22: the six directed routes passed in one live scratch run with
+Claude Code, Codex CLI and OpenCode; see
+[opencode-adapter-feasibility.md](opencode-adapter-feasibility.md#status). The
+items below are still open for OpenCode unless marked.)
+
 - An unattended idle period with no housekeeping model calls, followed by a real
   message and recipient reply. (Claude/Codex: covered.)
 - Busy-session messages and bursts, with observed ordering and no lost input.
