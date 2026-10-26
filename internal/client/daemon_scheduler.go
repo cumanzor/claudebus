@@ -523,7 +523,7 @@ func (d *busDaemon) scheduledFailure(c *ConnectionState, err error) {
 	}
 	d.tickErrors[c.ID] = err.Error()
 	d.mu.Unlock()
-	if daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending != nil && c.Error != err.Error() {
+	if logsAttemptOutcomes(c) && c.Pending != nil && c.Error != err.Error() {
 		logClaudeAttempt(c, *c.Pending, "error: "+err.Error())
 	} else if !logged {
 		daemonLogf("%s: %s", ConnectionTarget(c), strings.ReplaceAll(err.Error(), "\n", "; "))
@@ -555,8 +555,22 @@ const (
 // waits for a reconnect, which clears the retry. A pending attempt still gets
 // its receipt lookup: the transcript outlives the process.
 func parkedClaude(c *ConnectionState) bool {
-	return daemonHarness(c.Harness) == daemonHarnessClaude && c.Pending == nil &&
-		c.Consumer != nil && c.Consumer.State == "exited"
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		return c.Pending == nil && c.Consumer != nil && c.Consumer.State == "exited"
+	default:
+		return false
+	}
+}
+
+// Claude attempts log each outcome; other adapters log only changed errors.
+func logsAttemptOutcomes(c *ConnectionState) bool {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *busDaemon) scheduledOperation(c *ConnectionState) error {

@@ -43,7 +43,11 @@ func TestDaemonHarnessRejectsUnsupportedRequestBeforeMutation(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			d, q, req := daemonFixture(t)
 			req.Harness = harness
-			if _, err := d.connect(req); err == nil || !strings.Contains(err.Error(), "unsupported daemon harness") {
+			want := "unsupported daemon harness"
+			if harness == "opencode" {
+				want = "OpenCode adapter is not available"
+			}
+			if _, err := d.connect(req); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("unsupported adapter was not rejected: %v", err)
 			}
 			if q.opens != 0 || len(d.statusSnapshots()) != 0 || dirExists(filepath.Join(CBUSDir(), req.Channel)) {

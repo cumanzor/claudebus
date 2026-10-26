@@ -7,24 +7,39 @@ import (
 )
 
 func prepareConnectBinding(req ConnectRequest, token string) (*ClaudeConnectionConfig, error) {
-	if daemonHarness(req.Harness) == daemonHarnessCodex {
+	switch daemonHarness(req.Harness) {
+	case daemonHarnessCodex:
 		return nil, validateCodexQueueBinding(req.Config)
+	case daemonHarnessClaude:
+		return prepareClaudeAdmission(req, token)
+	default:
+		return nil, errUnsupportedHarness(req.Harness)
 	}
-	return prepareClaudeAdmission(req, token)
 }
 
 func sameConnectHome(c *ConnectionState, req ConnectRequest) bool {
-	if daemonHarness(c.Harness) == daemonHarnessClaude {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
 		return c.Claude != nil && req.Claude != nil && c.Claude.Binding.ConfigHome == req.Claude.ConfigHome
+	case daemonHarnessCodex:
+		return sameCodexConnectionHome(c.Config, req.Config.Home)
+	default:
+		return false
 	}
-	return sameCodexConnectionHome(c.Config, req.Config.Home)
 }
 
 func connectionCwd(c *ConnectionState) string {
-	if c.Claude != nil && daemonHarness(c.Harness) == daemonHarnessClaude {
-		return c.Claude.Binding.Cwd
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessClaude:
+		if c.Claude != nil {
+			return c.Claude.Binding.Cwd
+		}
+		return c.Config.Cwd
+	case daemonHarnessCodex:
+		return c.Config.Cwd
+	default:
+		return ""
 	}
-	return c.Config.Cwd
 }
 
 // Called under the alias lock before any journal write. Never clean a reserved
