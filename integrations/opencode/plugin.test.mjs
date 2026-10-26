@@ -342,3 +342,16 @@ test("only the newest refresh applies", async (t) => {
   await settle();
   assert.equal((await request(ep.path, { op: "status" })).state, "busy");
 });
+
+test("a bind failure stops the status retry it started", async (t) => {
+  const dir = tempDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const f = fakeApi();
+  f.fail.statusError = new Error("Unable to connect. Is the computer able to access the url?");
+  const denied = (server) => process.nextTick(() => server.emit("error", Object.assign(new Error("listen EACCES"), { code: "EACCES" })));
+  assert.equal(await start(f.api, { dir, pid: 4242, listen: denied }), undefined);
+  assert.match(fs.readFileSync(path.join(dir, "4242.error"), "utf8"), /could not bind .*EACCES/);
+  const after = f.calls.status;
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(f.calls.status, after, "status reads kept retrying after startup failed");
+});
