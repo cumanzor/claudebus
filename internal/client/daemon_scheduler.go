@@ -555,12 +555,12 @@ const (
 	inboxEpochRetry   = 5 * time.Minute
 )
 
-// A Claude endpoint is pinned to one process, so mail for an exited consumer
-// waits for a reconnect, which clears the retry. A pending attempt still gets
-// its receipt lookup: the transcript outlives the process.
+// A Claude or OpenCode endpoint is pinned to one process, so mail for an exited
+// consumer waits for a reconnect, which clears the retry. A pending Claude
+// attempt still gets its receipt lookup: the transcript outlives the process.
 func parkedClaude(c *ConnectionState) bool {
 	switch daemonHarness(c.Harness) {
-	case daemonHarnessClaude:
+	case daemonHarnessClaude, daemonHarnessOpencode:
 		return c.Pending == nil && c.Consumer != nil && c.Consumer.State == "exited"
 	default:
 		return false
@@ -587,6 +587,11 @@ func (d *busDaemon) scheduledOperation(c *ConnectionState) error {
 		}
 	}
 	observationErr := d.observeConsumer(c)
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessOpencode:
+		d.startOpencodeWatch(c)
+	default:
+	}
 	compactionErr := d.observeCompaction(c)
 	if c.State == "disconnected" || c.State == "detached" || c.State == "binding-required" || parkedClaude(c) {
 		return errors.Join(observationErr, compactionErr)

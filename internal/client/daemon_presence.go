@@ -156,7 +156,7 @@ func (d *busDaemon) observeConsumer(c *ConnectionState) error {
 			last, _ = time.Parse(time.RFC3339, c.Consumer.ObservedAt)
 		}
 		every := consumerProbeInterval(c)
-		if elapsed := time.Since(last); elapsed < 0 || elapsed >= every {
+		if elapsed := time.Since(last); d.takeProbeNow(c.ID) || elapsed < 0 || elapsed >= every {
 			next := cloneConnection(c)
 			if next.Consumer == nil {
 				next.Consumer = &consumerObservation{State: "unknown"}

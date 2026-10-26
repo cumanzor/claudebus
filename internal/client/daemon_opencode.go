@@ -143,6 +143,23 @@ func observeOpencodeConsumer(c *ConnectionState) (consumerProbe, error) {
 	if h.shown() != c.ThreadID {
 		return consumerProbe{State: "unknown", Detail: fmt.Sprintf("OpenCode TUI %d does not show session %s", e.PID, c.ThreadID)}, nil
 	}
+	// A session deleted by another process stays on screen with no event, and
+	// a message lookup reads the same for it; only the session itself says.
+	var r struct {
+		OK     bool   `json:"ok"`
+		Exists bool   `json:"exists"`
+		Code   string `json:"code"`
+		Error  string `json:"error"`
+	}
+	if err := opencodeRequest(e, map[string]string{"op": "session", "sessionID": c.ThreadID}, &r); err != nil {
+		return unknown, err
+	}
+	if !r.OK {
+		return consumerProbe{State: "unknown", Detail: fmt.Sprintf("OpenCode session check failed: %s %s", r.Code, r.Error)}, nil
+	}
+	if !r.Exists {
+		return consumerProbe{State: "exited", Detail: "OpenCode session " + c.ThreadID + " was deleted; connect again from a live session"}, nil
+	}
 	return consumerProbe{State: "online", PID: e.PID, StartToken: e.StartToken,
 		Detail: "exact bound OpenCode TUI and plugin socket observed showing the session"}, nil
 }
@@ -254,7 +271,8 @@ func enqueueEvidence(c *ConnectionState, queueID string) *codexMessageLookup {
 	}
 }
 
-const opencodeIdleRetry = 2 * time.Second
+// The watch stream wakes delivery on idle; this is only the fallback.
+const opencodeIdleRetry = 5 * time.Second
 
 // Mail waits in the bus inbox until the pane shows the bound session and that
 // session is idle; a message submitted mid-turn can override the user's request.

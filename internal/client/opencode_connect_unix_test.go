@@ -85,6 +85,12 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 			}
 			var req struct{ Op, SessionID, MessageID, Text string }
 			_ = json.Unmarshal(line, &req)
+			if req.Op == "watch" {
+				mu.Unlock()
+				opencodeHelperWatch(c, ctlPath, ctl)
+				mu.Lock()
+				return
+			}
 			var sid any
 			if ctl.Shown != "" {
 				sid = ctl.Shown
@@ -96,8 +102,12 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 			case "status":
 				reply["sessionID"], reply["state"] = sid, ctl.State
 			case "lookup":
+				// OpenCode 1.19.3 answers a message lookup in a deleted session
+				// the same as a missing message
 				_, ok := stored[req.MessageID]
-				reply["present"] = ok
+				reply["present"] = ok && !ctl.Deleted
+			case "session":
+				reply["exists"] = !ctl.Deleted
 			case "deliver":
 				switch ctl.Deliver {
 				case "ok":
@@ -124,6 +134,49 @@ type opencodeHelperControl struct {
 	State   string `json:"state"`
 	Shown   string `json:"shown"`
 	Deliver string `json:"deliver"`
+	Deleted bool   `json:"deleted"`
+	Dispose bool   `json:"dispose"`
+}
+
+// opencodeHelperWatch mirrors the plugin's watch: a snapshot, then a status or
+// route event whenever the control file changes, and dispose on request.
+func opencodeHelperWatch(c net.Conn, ctlPath string, ctl opencodeHelperControl) {
+	write := func(v map[string]any) bool {
+		b, _ := json.Marshal(v)
+		_, err := c.Write(append(b, '\n'))
+		return err == nil
+	}
+	nullable := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	if !write(map[string]any{"ok": true, "event": "snapshot", "sessionID": nullable(ctl.Shown), "state": ctl.State}) {
+		return
+	}
+	last := ctl
+	for {
+		time.Sleep(20 * time.Millisecond)
+		next := last
+		if b, err := os.ReadFile(ctlPath); err == nil {
+			_ = json.Unmarshal(b, &next)
+		}
+		switch {
+		case next.Dispose:
+			write(map[string]any{"event": "dispose"})
+			return
+		case next.Shown != last.Shown:
+			if !write(map[string]any{"event": "route", "sessionID": nullable(next.Shown), "state": next.State}) {
+				return
+			}
+		case next.State != last.State:
+			if !write(map[string]any{"event": "status", "sessionID": nullable(next.Shown), "state": next.State}) {
+				return
+			}
+		}
+		last = next
+	}
 }
 
 type opencodeHelper struct {

@@ -2,7 +2,10 @@
 
 package client
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var errOpencodeWindows = errors.New("OpenCode connections are not available on Windows yet")
 
@@ -24,4 +27,8 @@ func opencodeHelloAt(opencodeEndpoint) (opencodeHello, error) {
 
 func discoverOpencodeEndpoint(string) (opencodeEndpoint, error) {
 	return opencodeEndpoint{}, errOpencodeWindows
+}
+
+func opencodeWatch(context.Context, opencodeEndpoint, func(opencodeWatchEvent)) error {
+	return errOpencodeWindows
 }

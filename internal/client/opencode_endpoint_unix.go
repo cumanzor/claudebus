@@ -4,6 +4,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,5 +158,45 @@ func discoverOpencodeEndpoint(sessionID string) (opencodeEndpoint, error) {
 			pids = append(pids, fmt.Sprint(m.PID))
 		}
 		return opencodeEndpoint{}, fmt.Errorf("%d OpenCode TUIs (pids %s) show session %s; close all but one before connecting, since two panes on one session can duplicate a delivery", len(matches), strings.Join(pids, ", "), sessionID)
+	}
+}
+
+// opencodeWatch streams the plugin's watch events to onEvent until the stream
+// ends, the context is cancelled, or the endpoint stops being the bound TUI.
+func opencodeWatch(ctx context.Context, e opencodeEndpoint, onEvent func(opencodeWatchEvent)) error {
+	if err := validateOpencodeEndpoint(e); err != nil {
+		return err
+	}
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "unix", e.Socket)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errOpencodeNotDialed, err)
+	}
+	defer c.Close()
+	conn := c.(*net.UnixConn)
+	if err := validateUnixSocketPeer(conn, e.PID); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	if _, err := conn.Write([]byte(`{"op":"watch"}` + "\n")); err != nil {
+		return err
+	}
+	r := bufio.NewReaderSize(conn, 4096)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		if len(line) > opencodeMaxLine {
+			return errors.New("OpenCode watch event exceeds the line limit")
+		}
+		var ev opencodeWatchEvent
+		if json.Unmarshal(line, &ev) == nil {
+			onEvent(ev)
+		}
 	}
 }
