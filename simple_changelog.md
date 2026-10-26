@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-26 18:46:28 UTC] [OpenCode/Fix] Review fixes for the OpenCode adapter: an exited TUI no longer makes the daemon wake itself in a loop; the presence probe asks the plugin whether the session exists (a message lookup cannot tell a deleted session in OpenCode 1.19.3); the plugin re-reads status when its server reconnects and holds delivery until it has; the private socket bind name is length-checked and bind failures are recorded; the installer reads the active plugin array instead of matching JSONC text.
+
 [2026-10-23 01:24:09 UTC] [OpenCode/Docs] `cbus install-opencode` also installs an OpenCode `/bus-join` command, and docs/opencode.md covers install, join, delivery, presence and limits. A live three-way run with Claude Code, Codex CLI and OpenCode delivered all six directed routes; the feasibility record and the cross-harness scope doc note it.
 
 [2026-10-22 18:39:29 UTC] [OpenCode/Presence] The daemon follows each OpenCode connection's plugin watch stream: every event wakes delivery and forces an immediate presence probe, so held mail goes in as soon as the session goes idle and pane changes, exits and reconnects show up within a second or two. Mail for an exited TUI is parked until reconnect, and a session deleted by another process is reported gone instead of looking online.

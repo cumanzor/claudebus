@@ -3,6 +3,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -140,4 +141,71 @@ func TestScheduledOperationStartsTheOpencodeWatch(t *testing.T) {
 	f := newOpencodeDeliveryFixture(t)
 	_ = f.d.scheduledOperation(f.c)
 	waitForOpencode(t, "a watch for the connection", func() bool { f.d.mu.Lock(); defer f.d.mu.Unlock(); return f.d.opencodeWatches[f.c.ID] != nil })
+}
+
+// An exited TUI must not wake the scheduler in a loop: a watch that cannot
+// reach its endpoint is no news, and an exited consumer gets no new watch.
+func TestOpencodeWatchDoesNotSelfWakeOnAnExitedTUI(t *testing.T) {
+	opencodeTestStore(t)
+	h := startOpencodeHelper(t, ocS1)
+	d := opencodeDaemon(t)
+	state, err := d.connect(opencodeConnectRequest(t, "oc", ocS1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := d.connections[state.ID]
+	probes := 0
+	d.probeConsumer = func(_ context.Context, c *ConnectionState) (consumerProbe, error) {
+		probes++
+		return observeOpencodeConsumer(c)
+	}
+	h.kill(t)
+	d.opencodeHint(c.ID)
+	ran := 0
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		d.mu.Lock()
+		_, ready := d.ready[c.ID]
+		delete(d.ready, c.ID)
+		d.mu.Unlock()
+		if ready {
+			ran++
+			_ = d.scheduledOperation(c)
+		}
+	}
+	if c.Consumer == nil || c.Consumer.State != "exited" {
+		t.Fatalf("consumer = %+v, want exited", c.Consumer)
+	}
+	if ran > 2 || probes > 2 {
+		t.Fatalf("exited TUI kept waking the scheduler: %d operations, %d probes in 300ms", ran, probes)
+	}
+}
+
+func TestOpencodeWatchIsNotStartedForAnExitedConsumer(t *testing.T) {
+	f := newOpencodeDeliveryFixture(t)
+	f.c.Consumer = &consumerObservation{State: "exited"}
+	f.d.startOpencodeWatch(f.c)
+	f.d.mu.Lock()
+	defer f.d.mu.Unlock()
+	if f.d.opencodeWatches[f.c.ID] != nil {
+		t.Fatal("a watch was started for a TUI known to have exited")
+	}
+}
+
+func TestOpencodeWatchThatNeverConnectsSendsNoHint(t *testing.T) {
+	opencodeTestStore(t)
+	h := startOpencodeHelper(t, ocS1)
+	d := opencodeDaemon(t)
+	state, err := d.connect(opencodeConnectRequest(t, "oc", ocS1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := d.connections[state.ID]
+	h.kill(t)
+	d.clearHint(c.ID)
+	d.startOpencodeWatch(c) // the consumer still reads online: no probe has run since the exit
+	waitForOpencode(t, "the watch to give up", func() bool { d.mu.Lock(); defer d.mu.Unlock(); return d.opencodeWatches[c.ID] == nil })
+	time.Sleep(50 * time.Millisecond)
+	if d.hinted(c.ID) {
+		t.Fatal("a watch that never reached its endpoint woke the scheduler")
+	}
 }

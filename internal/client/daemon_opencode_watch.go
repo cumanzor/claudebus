@@ -16,7 +16,9 @@ type opencodeWatchSub struct {
 }
 
 func (d *busDaemon) startOpencodeWatch(c *ConnectionState) {
-	if c.Opencode == nil || c.State == "disconnected" || c.State == "detached" || c.State == "binding-required" {
+	// An exited TUI has nothing to stream; a reconnect starts the next watch.
+	if c.Opencode == nil || c.State == "disconnected" || c.State == "detached" || c.State == "binding-required" ||
+		c.Consumer != nil && c.Consumer.State == "exited" {
 		d.stopOpencodeWatch(c.ID)
 		return
 	}
@@ -64,12 +66,16 @@ func (d *busDaemon) runOpencodeWatch(ctx context.Context, id string, w *opencode
 		d.mu.Unlock()
 	}()
 	for ctx.Err() == nil {
-		err := opencodeWatch(ctx, w.endpoint, func(opencodeWatchEvent) { d.opencodeHint(id) })
+		streamed := false
+		err := opencodeWatch(ctx, w.endpoint, func(opencodeWatchEvent) { streamed = true; d.opencodeHint(id) })
 		if ctx.Err() != nil {
 			return
 		}
-		// the stream ending is itself news: the TUI disposed, exited or restarted
-		d.opencodeHint(id)
+		// a stream that ends is news (dispose, exit, restart); one that never
+		// connected is not, and hinting on it would wake the scheduler in a loop
+		if streamed {
+			d.opencodeHint(id)
+		}
 		if errors.Is(err, errOpencodeEndpointGone) {
 			return // the probe reports the exit; a reconnect starts a new watch
 		}
