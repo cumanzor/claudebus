@@ -17,8 +17,8 @@ function fakeApi() {
   const handlers = new Map();
   const disposers = [];
   const store = new Map();
-  const calls = { promptAsync: 0, message: 0 };
-  const fail = { promptAsync: null, message: null };
+  const calls = { promptAsync: 0, message: 0, status: 0 };
+  const fail = { promptAsync: null, message: null, statusData: null, statusGate: null, sessionGone: null };
   const api = {
     route: { current: { name: "session", params: { sessionID: S1 } } },
     event: {
@@ -31,7 +31,15 @@ function fakeApi() {
     lifecycle: { onDispose: (fn) => disposers.push(fn) },
     client: {
       session: {
-        status: async () => ({ data: {} }),
+        status: async () => {
+          calls.status++;
+          if (fail.statusGate) await fail.statusGate;
+          return { data: fail.statusData ?? {} };
+        },
+        get: async ({ sessionID }) => {
+          if (fail.sessionGone?.has(sessionID)) throw new Error(`Session not found: ${sessionID}`);
+          return { data: { id: sessionID } };
+        },
         message: async ({ sessionID, messageID }) => {
           calls.message++;
           if (fail.message) throw fail.message;
@@ -245,4 +253,49 @@ test("classify recognizes the failure texts OpenCode 1.19.3 produced", () => {
   assert.equal(classify(new Error("Unable to connect. Is the computer able to access the url?")).code, "server-unreachable");
   assert.equal(classify({ data: { message: `Message not found: ${M1}` } }).code, "message-not-found");
   assert.equal(classify(new Error("boom")).code, "failed");
+});
+
+test("a reconnected server's status replaces the cached busy state", async (t) => {
+  const { ep, fire, fail, calls } = await setup(t);
+  fire("session.status", { sessionID: S1, status: { type: "busy" } });
+  assert.equal((await request(ep.path, { op: "status" })).state, "busy");
+  let release;
+  fail.statusGate = new Promise((r) => { release = r; });
+  fail.statusData = {}; // the restarted server lost its in-memory status
+  fire("server.connected", {});
+  assert.equal((await request(ep.path, { op: "status" })).state, "unknown", "delivery must hold while the refresh runs");
+  release();
+  for (let i = 0; i < 50 && (await request(ep.path, { op: "status" })).state !== "idle"; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await request(ep.path, { op: "status" })).state, "idle");
+  assert.equal(calls.status, 2, "the status map was not re-read on reconnect");
+});
+
+test("a status event that races the refresh wins over the stale read", async (t) => {
+  const { ep, fire, fail } = await setup(t);
+  let release;
+  fail.statusGate = new Promise((r) => { release = r; });
+  fail.statusData = {};
+  fire("server.connected", {});
+  fire("session.status", { sessionID: S1, status: { type: "busy" } });
+  release();
+  for (let i = 0; i < 50 && (await request(ep.path, { op: "status" })).state === "unknown"; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await request(ep.path, { op: "status" })).state, "busy");
+});
+
+test("session reports whether the session itself exists", async (t) => {
+  const { ep, fail } = await setup(t);
+  assert.deepEqual(await request(ep.path, { op: "session", sessionID: S1 }), { ok: true, exists: true });
+  fail.sessionGone = new Set([S1]);
+  assert.deepEqual(await request(ep.path, { op: "session", sessionID: S1 }), { ok: true, exists: false });
+  assert.equal((await request(ep.path, { op: "session", sessionID: "ses_x" })).code, "bad-request");
+});
+
+test("a private bind name too long for the OS is reported, not thrown", async (t) => {
+  const root = tempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // public <pid>.sock fits the limit, the private .<pid>.<tag>.sock does not
+  const dir = path.join(root, "d".repeat(103 - root.length - "/4242.sock".length - 1));
+  assert.ok(Buffer.byteLength(path.join(dir, "4242.sock")) <= 103);
+  assert.equal(await start(fakeApi().api, { dir, pid: 4242 }), undefined);
+  assert.match(fs.readFileSync(path.join(dir, "4242.error"), "utf8"), /exceeds 103 bytes/);
 });
