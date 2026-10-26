@@ -44,7 +44,7 @@ export function classify(e) {
   return { code: "failed", error: text };
 }
 
-export async function start(api, { dir, pid }) {
+export async function start(api, { dir, pid, listen = (server, p, cb) => server.listen(p, cb) }) {
   const sock = path.join(dir, `${pid}.sock`);
   // Node unlinks a Unix socket's listen path on close. Listening on a private
   // name and renaming it into place means close never removes a later
@@ -265,12 +265,14 @@ export async function start(api, { dir, pid }) {
   try {
     await new Promise((resolve, reject) => {
       server.once("error", reject);
-      server.listen(listenPath, () => { server.off("error", reject); resolve(); });
+      listen(server, listenPath, () => { server.off("error", reject); resolve(); });
     });
     fs.chmodSync(listenPath, 0o600);
     fs.renameSync(listenPath, sock);
     bound = fs.statSync(sock).ino;
   } catch (e) {
+    disposed = true;
+    clearTimeout(retryTimer);
     server.close();
     clearInterval(poll);
     for (const u of unsubscribe) u?.();
