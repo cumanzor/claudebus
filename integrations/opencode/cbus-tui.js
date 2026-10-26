@@ -44,9 +44,15 @@ export function classify(e) {
 
 export async function start(api, { dir, pid }) {
   const sock = path.join(dir, `${pid}.sock`);
-  if (sock.length > SOCKET_PATH_MAX) {
-    writeError(dir, pid, `socket path exceeds ${SOCKET_PATH_MAX} bytes: ${sock}`);
-    return undefined;
+  // Node unlinks a Unix socket's listen path on close. Listening on a private
+  // name and renaming it into place means close never removes a later
+  // instance's socket at the public path. Both names must fit the OS limit.
+  const listenPath = path.join(dir, `.${pid}.${Math.random().toString(36).slice(2, 8)}.sock`);
+  for (const p of [sock, listenPath]) {
+    if (Buffer.byteLength(p) > SOCKET_PATH_MAX) {
+      writeError(dir, pid, `socket path exceeds ${SOCKET_PATH_MAX} bytes: ${p}`);
+      return undefined;
+    }
   }
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dir, 0o700);
@@ -63,8 +69,8 @@ export async function start(api, { dir, pid }) {
     const r = api.route.current;
     return r?.name === "session" && typeof r.params?.sessionID === "string" ? r.params.sessionID : null;
   };
-  // An absent status entry means idle.
-  const stateOf = (sid) => (sid ? statuses.get(sid) ?? "idle" : null);
+  // An absent status entry means idle; nothing is known while a refresh runs.
+  const stateOf = (sid) => (!sid ? null : refreshing ? "unknown" : statuses.get(sid) ?? "idle");
   const emit = (ev) => {
     const line = JSON.stringify(ev) + "\n";
     for (const w of watchers) w.write(line);
@@ -78,12 +84,36 @@ export async function start(api, { dir, pid }) {
     emit({ event: "status", sessionID: sid, state });
   };
 
-  try {
-    const r = await api.client.session.status(undefined, { throwOnError: true });
-    for (const [sid, s] of Object.entries(r?.data ?? {})) statuses.set(sid, s?.type ?? "idle");
-  } catch {
-    // the first status event repopulates the map
+  // A reconnected server may have lost its in-memory status, so the map is
+  // replaced from a fresh read. Until that read lands every state is unknown,
+  // which keeps delivery held; events that arrive meanwhile win over it.
+  let refreshing = 0;
+  let racing = new Map();
+  async function refreshStatuses() {
+    const mine = ++refreshing;
+    racing = new Map();
+    let fresh = new Map();
+    try {
+      const r = await api.client.session.status(undefined, { throwOnError: true });
+      for (const [sid, s] of Object.entries(r?.data ?? {})) fresh.set(sid, s?.type ?? "idle");
+    } catch {
+      fresh = null;
+    }
+    if (mine !== refreshing) return;
+    if (fresh) {
+      for (const [sid, type] of racing) fresh.set(sid, type);
+      statuses.clear();
+      for (const [sid, type] of fresh) statuses.set(sid, type);
+    }
+    refreshing = 0;
+    const sid = shown();
+    if (sid) reportState(sid, stateOf(sid));
   }
+  const setStatus = (sid, type) => {
+    statuses.set(sid, type);
+    if (refreshing) racing.set(sid, type);
+  };
+  await refreshStatuses();
 
   let lastShown = shown();
   const poll = setInterval(() => {
@@ -101,14 +131,14 @@ export async function start(api, { dir, pid }) {
       const sid = e?.properties?.sessionID;
       if (typeof sid !== "string") return;
       const type = e.properties.status?.type ?? "idle";
-      statuses.set(sid, type);
-      if (sid === shown()) reportState(sid, type);
+      setStatus(sid, type);
+      if (sid === shown() && !refreshing) reportState(sid, type);
     }),
     api.event.on("session.idle", (e) => {
       const sid = e?.properties?.sessionID;
       if (typeof sid !== "string") return;
-      statuses.set(sid, "idle");
-      if (sid === shown()) reportState(sid, "idle");
+      setStatus(sid, "idle");
+      if (sid === shown() && !refreshing) reportState(sid, "idle");
     }),
     api.event.on("session.deleted", (e) => {
       const sid = e?.properties?.sessionID ?? e?.properties?.info?.id;
@@ -116,7 +146,10 @@ export async function start(api, { dir, pid }) {
       statuses.delete(sid);
       emit({ event: "session.deleted", sessionID: sid });
     }),
-    api.event.on("server.connected", () => emit({ event: "server.connected" })),
+    api.event.on("server.connected", () => {
+      emit({ event: "server.connected" });
+      refreshStatuses();
+    }),
   ];
 
   async function lookup(sessionID, messageID) {
@@ -146,6 +179,17 @@ export async function start(api, { dir, pid }) {
         if (!SESSION_ID.test(req.sessionID ?? "") || !MESSAGE_ID.test(req.messageID ?? "")) return { ok: false, code: "bad-request", error: "lookup needs sessionID and messageID" };
         const r = await lookup(req.sessionID, req.messageID);
         return r.failure ? { ok: false, ...r.failure } : { ok: true, ...r };
+      }
+      case "session": {
+        if (!SESSION_ID.test(req.sessionID ?? "")) return { ok: false, code: "bad-request", error: "session needs sessionID" };
+        try {
+          await api.client.session.get({ sessionID: req.sessionID }, { throwOnError: true });
+          return { ok: true, exists: true };
+        } catch (e) {
+          const c = classify(e);
+          if (c.code === "session-not-found") return { ok: true, exists: false };
+          return { ok: false, ...c };
+        }
       }
       case "deliver":
         return deliver(req);
@@ -204,17 +248,23 @@ export async function start(api, { dir, pid }) {
       else conn.end(JSON.stringify(res) + "\n");
     });
   });
-  // Node unlinks a Unix socket's listen path on close. Listening on a private
-  // name and renaming it into place means close never removes a later
-  // instance's socket at the public path.
-  const listenPath = path.join(dir, `.${pid}.${process.hrtime.bigint()}.sock`);
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(listenPath, () => { server.off("error", reject); resolve(); });
-  });
-  fs.chmodSync(listenPath, 0o600);
-  fs.renameSync(listenPath, sock);
-  const bound = fs.statSync(sock).ino;
+  let bound;
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(listenPath, () => { server.off("error", reject); resolve(); });
+    });
+    fs.chmodSync(listenPath, 0o600);
+    fs.renameSync(listenPath, sock);
+    bound = fs.statSync(sock).ino;
+  } catch (e) {
+    server.close();
+    clearInterval(poll);
+    for (const u of unsubscribe) u?.();
+    try { fs.rmSync(listenPath, { force: true }); } catch {}
+    writeError(dir, pid, `could not bind ${sock}: ${errorText(e)}`);
+    return undefined;
+  }
 
   const close = () => {
     if (disposed) return;

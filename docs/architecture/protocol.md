@@ -1660,8 +1660,10 @@ loads a module as exactly one kind (a default export with `server()` or
 own, and loads TUI plugins only when they are listed in `tui.json` or
 `tui.jsonc`. The installer therefore writes `plugins/cbus-server.js` and
 `cbus-tui.js`, creates `tui.jsonc` when the directory has none, and never
-rewrites an existing TUI config: a config without the `"./cbus-tui.js"`
-entry is reported with the entry to add and a non-zero exit.
+rewrites an existing TUI config: it parses the config's active `"plugin"`
+array (comments and trailing commas allowed, a mention in a comment does not
+count), and a config without the `"./cbus-tui.js"` entry, or one it cannot
+parse, is reported with the entry to add and a non-zero exit.
 `install-assets`, which updates run, refreshes the plugins (overwriting, as
 for mods) only when they are already installed in the default OpenCode
 config directory, so an update never creates an OpenCode config on a machine
@@ -1679,18 +1681,22 @@ whatever launched OpenCode. PTYs opened inside OpenCode do not run this hook.
 
 - Endpoint: `$CBUS_DIR/.opencode/<pid>.sock` (default base `~/.claude-bus`),
   mode 0600, in a directory forced to 0700. The socket is bound under a
-  private name and renamed into place, because Node unlinks a listen path on
-  close; dispose removes the public path only when its inode is still the
-  one this instance bound. An existing path is replaced only after a probe
-  connection is refused. A path over 103 bytes, or a path where a live
-  endpoint answers, is not bound; the reason goes to `<pid>.error` beside it.
+  private name (`.<pid>.<6 random>.sock`) and renamed into place, because
+  Node unlinks a listen path on close; dispose removes the public path only
+  when its inode is still the one this instance bound. An existing path is
+  replaced only after a probe connection is refused. When either path is over
+  103 bytes, a live endpoint already answers, or binding fails, nothing is
+  bound and the reason goes to `<pid>.error` beside it.
 - Framing: one newline-terminated JSON request per connection, at most
   1 MiB, answered with one JSON line and closed, except `watch`. A request
   not completed within 10 s is dropped.
 - IDs: `sessionID` must match `ses_[A-Za-z0-9]{20,64}` and `messageID`
   `msg_[A-Za-z0-9]{20,64}`. Anything else is `bad-request`.
 - The shown session is `api.route.current` when its name is `session`, else
-  `null`. A session with no status entry is `idle`.
+  `null`. A session with no status entry is `idle`. OpenCode keeps status in
+  server memory, so on `server.connected` the plugin re-reads it and replaces
+  its map; until that read lands every state is `unknown`, and status events
+  that arrive meanwhile win over the read.
 
 Requests and replies:
 
@@ -1698,7 +1704,8 @@ Requests and replies:
 | --- | --- |
 | `hello` | `{ok, protocol: 1, plugin, pid, sessionID}` |
 | `status` | `{ok, sessionID, state}`; `state` is OpenCode's status type (`idle`, `busy`, `retry`) or `null` with no session shown |
-| `lookup` | `{ok, present: false}` or `{ok, present: true, texts}`, the message's text parts |
+| `lookup` | `{ok, present: false}` or `{ok, present: true, texts}`, the message's text parts. A missing message and a deleted session both read `present: false` in 1.19.3 |
+| `session` | `{ok, exists}`; `exists: false` when OpenCode reports the session not found, which catches a session deleted by another process |
 | `deliver` | see below |
 | `watch` | `{ok, event: "snapshot", sessionID, state}`, then one event per line until dispose |
 
