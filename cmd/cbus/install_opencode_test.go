@@ -165,14 +165,23 @@ func TestOpencodePluginListedReadsOnlyTheActiveArray(t *testing.T) {
 		"slashes inside string": {`{"plugin": ["./cbus-tui.js"], "note": "see // not a comment"}`, true},
 		"nested under tui":      {`{"tui": {"plugin": ["./cbus-tui.js"]}}`, true},
 		"nested, other plugin":  {`{"tui": {"plugin": ["./other.js"]}}`, false},
+		"wrong key case":        {`{"Plugin": ["./cbus-tui.js"]}`, false},
+		"wrong nested key case": {`{"tui": {"PLUGIN": ["./cbus-tui.js"]}}`, false},
 	} {
 		got, err := opencodePluginListed([]byte(tc.cfg), "./cbus-tui.js")
 		if err != nil || got != tc.want {
 			t.Errorf("%s: listed=%v err=%v, want %v", name, got, err, tc.want)
 		}
 	}
-	if _, err := opencodePluginListed([]byte(`{"plugin": [`), "./cbus-tui.js"); err == nil {
-		t.Error("a config that does not parse was read as a plugin list")
+	for _, bad := range []string{
+		`{"plugin": [`,
+		`{"plugin": ["./cbus-tui.js"]} /* never closed`,
+		`{"plugin": ["./cbus-tui.js`,
+		`{"plugin": "./cbus-tui.js"}`,
+	} {
+		if listed, err := opencodePluginListed([]byte(bad), "./cbus-tui.js"); err == nil || listed {
+			t.Errorf("%q: listed=%v err=%v, want an error", bad, listed, err)
+		}
 	}
 }
 

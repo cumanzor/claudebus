@@ -135,16 +135,39 @@ func refreshOpencodePlugins(args []string) int {
 // mention in a comment or elsewhere does not count. Entries are a path, or a
 // [path, options] pair.
 func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
-	var cfg struct {
-		Plugin []json.RawMessage `json:"plugin"`
-		TUI    struct {
-			Plugin []json.RawMessage `json:"plugin"`
-		} `json:"tui"`
-	}
-	if err := json.Unmarshal(stripJSONC(jsonc), &cfg); err != nil {
+	clean, err := stripJSONC(jsonc)
+	if err != nil {
 		return false, err
 	}
-	for _, raw := range append(cfg.Plugin, cfg.TUI.Plugin...) {
+	// keys are matched exactly; encoding/json would also accept "Plugin"
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(clean, &top); err != nil {
+		return false, err
+	}
+	plugins := func(obj map[string]json.RawMessage) ([]json.RawMessage, error) {
+		var list []json.RawMessage
+		if raw, ok := obj["plugin"]; ok {
+			if err := json.Unmarshal(raw, &list); err != nil {
+				return nil, fmt.Errorf(`"plugin" is not a list: %w`, err)
+			}
+		}
+		return list, nil
+	}
+	entries, err := plugins(top)
+	if err != nil {
+		return false, err
+	}
+	if raw, ok := top["tui"]; ok {
+		var tui map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &tui); err == nil {
+			nested, err := plugins(tui)
+			if err != nil {
+				return false, err
+			}
+			entries = append(entries, nested...)
+		}
+	}
+	for _, raw := range entries {
 		var name string
 		if json.Unmarshal(raw, &name) == nil && name == entry {
 			return true, nil
@@ -159,13 +182,18 @@ func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
 
 // stripJSONC removes comments, then trailing commas, outside strings, so
 // encoding/json can read a JSONC file. The file itself is untouched.
-func stripJSONC(b []byte) []byte {
-	return scanJSONC(scanJSONC(b, true), false)
+func stripJSONC(b []byte) ([]byte, error) {
+	clean, err := scanJSONC(b, true)
+	if err != nil {
+		return nil, err
+	}
+	return scanJSONC(clean, false)
 }
 
 // scanJSONC copies b, dropping comments on the first pass and trailing commas
-// on the second; string contents are copied verbatim either way.
-func scanJSONC(b []byte, comments bool) []byte {
+// on the second; string contents are copied verbatim either way. An
+// unterminated string or block comment is an error, never silently dropped.
+func scanJSONC(b []byte, comments bool) ([]byte, error) {
 	out := make([]byte, 0, len(b))
 	for i := 0; i < len(b); i++ {
 		c := b[i]
@@ -179,7 +207,7 @@ func scanJSONC(b []byte, comments bool) []byte {
 				j++
 			}
 			if j >= len(b) {
-				j = len(b) - 1
+				return nil, errors.New("unterminated string")
 			}
 			out = append(out, b[i:j+1]...)
 			i = j
@@ -195,6 +223,9 @@ func scanJSONC(b []byte, comments bool) []byte {
 			for i+1 < len(b) && !(b[i] == '*' && b[i+1] == '/') {
 				i++
 			}
+			if i+1 >= len(b) {
+				return nil, errors.New("unterminated block comment")
+			}
 			i++
 		case !comments && c == ',':
 			j := i + 1
@@ -209,5 +240,5 @@ func scanJSONC(b []byte, comments bool) []byte {
 			out = append(out, c)
 		}
 	}
-	return out
+	return out, nil
 }
