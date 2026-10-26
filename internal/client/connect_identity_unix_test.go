@@ -23,7 +23,7 @@ func TestNativeConnectUsesNearestHarnessAndKeepsTokenPrivate(t *testing.T) {
 		return ClaudeConnectBinding{SessionID: daemonTestThread}, nil
 	}
 	for _, harness := range []string{"codex", "claude"} {
-		req, token, err := nativeConnectIdentityForHarness(harness, CodexConnectOptions{}, codex, claude)
+		req, token, err := nativeConnectIdentityForHarness(harness, CodexConnectOptions{}, codex, claude, opencodeNever)
 		if err != nil || req.Harness != harness || req.Protocol != DaemonProtocolVersion {
 			t.Fatalf("dispatch: %+v %v", req, err)
 		}
@@ -41,8 +41,8 @@ func TestNativeConnectUsesNearestHarnessAndKeepsTokenPrivate(t *testing.T) {
 	if codexCalls != 1 || claudeCalls != 1 {
 		t.Fatal("dispatch invoked another harness resolver")
 	}
-	for _, harness := range []string{"", "opencode", "grok"} {
-		if _, token, err := nativeConnectIdentityForHarness(harness, CodexConnectOptions{}, codex, claude); err == nil || token != "" {
+	for _, harness := range []string{"", "grok"} {
+		if _, token, err := nativeConnectIdentityForHarness(harness, CodexConnectOptions{}, codex, claude, opencodeNever); err == nil || token != "" {
 			t.Fatal("unsupported harness fell back to inherited identity")
 		}
 	}
@@ -60,31 +60,31 @@ func TestNativeConnectFailsBeforeReturningInvalidCapability(t *testing.T) {
 		claudeCalls++
 		return ClaudeConnectBinding{SessionID: daemonTestThread}, nil
 	}
-	if _, _, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude); err == nil || claudeCalls != 0 {
+	if _, _, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude, opencodeNever); err == nil || claudeCalls != 0 {
 		t.Fatal("Codex-only override reached Claude binding")
 	}
-	if req, _, err := nativeConnectIdentityForHarness("codex", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude); err != nil || req.Config.SQLiteHome != "/codex-store" {
+	if req, _, err := nativeConnectIdentityForHarness("codex", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude, opencodeNever); err != nil || req.Config.SQLiteHome != "/codex-store" {
 		t.Fatal("Codex option changed")
 	}
 	t.Setenv("CODEX_THREAD_ID", connectIdentityThread)
-	if _, _, err := nativeConnectIdentityForHarness("", CodexConnectOptions{}, codex, claude); err == nil {
+	if _, _, err := nativeConnectIdentityForHarness("", CodexConnectOptions{}, codex, claude, opencodeNever); err == nil {
 		t.Fatal("inherited exact UUID alone selected an adapter")
 	}
-	if req, token, err := nativeConnectIdentityForHarness("", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude); err != nil || req.Harness != "codex" || req.Config.SQLiteHome != "/codex-store" || token != "" {
+	if req, token, err := nativeConnectIdentityForHarness("", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude, opencodeNever); err != nil || req.Harness != "codex" || req.Config.SQLiteHome != "/codex-store" || token != "" {
 		t.Fatal("explicit detached Codex binding lost")
 	}
 	t.Setenv("CODEX_THREAD_ID", "not-a-thread-uuid")
-	if _, _, err := nativeConnectIdentityForHarness("", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude); err == nil {
+	if _, _, err := nativeConnectIdentityForHarness("", CodexConnectOptions{SQLiteHome: "/codex-store"}, codex, claude, opencodeNever); err == nil {
 		t.Fatal("detached binding guessed an inexact thread")
 	}
 	for _, token := range []string{"", "private\ncapability", strings.Repeat("x", claudeCredentialMaxBytes+1)} {
 		t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", token)
-		if _, secret, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{}, codex, claude); err == nil || secret != "" {
+		if _, secret, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{}, codex, claude, opencodeNever); err == nil || secret != "" {
 			t.Fatal("invalid capability returned")
 		}
 	}
 	t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", "private-capability")
-	if _, token, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{}, codex, func() (ClaudeConnectBinding, error) { return ClaudeConnectBinding{}, errors.New("identity failed") }); err == nil || token != "" {
+	if _, token, err := nativeConnectIdentityForHarness("claude", CodexConnectOptions{}, codex, func() (ClaudeConnectBinding, error) { return ClaudeConnectBinding{}, errors.New("identity failed") }, opencodeNever); err == nil || token != "" {
 		t.Fatal("capability escaped failed identity capture")
 	}
 }

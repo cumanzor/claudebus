@@ -45,7 +45,7 @@ func TestDaemonHarnessRejectsUnsupportedRequestBeforeMutation(t *testing.T) {
 			req.Harness = harness
 			want := "unsupported daemon harness"
 			if harness == "opencode" {
-				want = "OpenCode adapter is not available"
+				want = "OpenCode connect requires protocol 3 and an exact caller binding"
 			}
 			if _, err := d.connect(req); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("unsupported adapter was not rejected: %v", err)

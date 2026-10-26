@@ -6,14 +6,24 @@ import (
 	"path/filepath"
 )
 
-func prepareConnectBinding(req ConnectRequest, token string) (*ClaudeConnectionConfig, error) {
+// connectBindings carries the one adapter-specific binding a request admits.
+type connectBindings struct {
+	claude   *ClaudeConnectionConfig
+	opencode *OpencodeConnectionConfig
+}
+
+func prepareConnectBinding(req ConnectRequest, token string) (connectBindings, error) {
 	switch daemonHarness(req.Harness) {
 	case daemonHarnessCodex:
-		return nil, validateCodexQueueBinding(req.Config)
+		return connectBindings{}, validateCodexQueueBinding(req.Config)
 	case daemonHarnessClaude:
-		return prepareClaudeAdmission(req, token)
+		cfg, err := prepareClaudeAdmission(req, token)
+		return connectBindings{claude: cfg}, err
+	case daemonHarnessOpencode:
+		cfg, err := prepareOpencodeAdmission(req)
+		return connectBindings{opencode: cfg}, err
 	default:
-		return nil, errUnsupportedHarness(req.Harness)
+		return connectBindings{}, errUnsupportedHarness(req.Harness)
 	}
 }
 
@@ -21,6 +31,9 @@ func sameConnectHome(c *ConnectionState, req ConnectRequest) bool {
 	switch daemonHarness(c.Harness) {
 	case daemonHarnessClaude:
 		return c.Claude != nil && req.Claude != nil && c.Claude.Binding.ConfigHome == req.Claude.ConfigHome
+	case daemonHarnessOpencode:
+		return c.Opencode != nil && req.Opencode != nil &&
+			filepath.Dir(c.Opencode.Binding.Endpoint.Socket) == filepath.Dir(req.Opencode.Endpoint.Socket)
 	case daemonHarnessCodex:
 		return sameCodexConnectionHome(c.Config, req.Config.Home)
 	default:
@@ -35,6 +48,11 @@ func connectionCwd(c *ConnectionState) string {
 			return c.Claude.Binding.Cwd
 		}
 		return c.Config.Cwd
+	case daemonHarnessOpencode:
+		if c.Opencode != nil {
+			return c.Opencode.Binding.Cwd
+		}
+		return ""
 	case daemonHarnessCodex:
 		return c.Config.Cwd
 	default:

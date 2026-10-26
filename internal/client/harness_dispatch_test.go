@@ -108,20 +108,10 @@ func TestValidThreadIDPerHarness(t *testing.T) {
 	}
 }
 
-func TestOpencodeHarnessRefusedUntilAdapterLands(t *testing.T) {
-	err := validateDaemonHarness("opencode")
-	if err == nil || !strings.Contains(err.Error(), "OpenCode adapter is not available") {
-		t.Fatalf("validateDaemonHarness(opencode) = %v", err)
-	}
-	if err := validateConnectionAdapter(&ConnectionState{Harness: "opencode"}); err == nil {
-		t.Fatal("connection adapter accepted opencode before its adapter exists")
-	}
-}
-
 // A harness outside the known set must get refusals and no-ops, never Codex
 // behavior. These paths are reachable once a later adapter is admitted.
 func TestUnknownHarnessDefaultsAreNotCodex(t *testing.T) {
-	c := &ConnectionState{Harness: "opencode", ThreadID: "ses_ea0d7684affeaDXCT85BcZgp0m",
+	c := &ConnectionState{Harness: "future-adapter", ThreadID: "ses_ea0d7684affeaDXCT85BcZgp0m",
 		Config:   CodexQueueConfig{RuntimePID: 42, RuntimeStartToken: "t", Cwd: "/w", Home: "/h"},
 		Consumer: &consumerObservation{PID: 42, StartToken: "t", State: "exited"}}
 	if err := validateConnectionBinding(c); err == nil {
@@ -136,10 +126,10 @@ func TestUnknownHarnessDefaultsAreNotCodex(t *testing.T) {
 	if got := connectionCwd(c); got != "" {
 		t.Errorf("connectionCwd = %q", got)
 	}
-	if sameConnectHome(c, ConnectRequest{Harness: "opencode", Config: CodexQueueConfig{Home: "/h"}}) {
+	if sameConnectHome(c, ConnectRequest{Harness: "future-adapter", Config: CodexQueueConfig{Home: "/h"}}) {
 		t.Error("sameConnectHome matched on the Codex home")
 	}
-	if _, err := prepareConnectBinding(ConnectRequest{Harness: "opencode"}, ""); err == nil {
+	if _, err := prepareConnectBinding(ConnectRequest{Harness: "future-adapter"}, ""); err == nil {
 		t.Error("prepareConnectBinding accepted an unknown harness")
 	}
 	if managedCodexConnection(c) || parkedClaude(c) || logsAttemptOutcomes(c) || claudeReceiptWaiting(c, time.Now()) {

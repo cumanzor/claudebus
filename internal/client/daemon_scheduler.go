@@ -100,6 +100,10 @@ func cloneConnection(c *ConnectionState) *ConnectionState {
 		cfg := *c.Claude
 		next.Claude = &cfg
 	}
+	if c.Opencode != nil {
+		cfg := *c.Opencode
+		next.Opencode = &cfg
+	}
 	clonePresenceFields(&next, c)
 	if c.Relay != nil {
 		v := *c.Relay

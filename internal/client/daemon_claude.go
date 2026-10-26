@@ -43,6 +43,9 @@ func provedNotSubmitted(c *ConnectionState, err error) bool {
 	case daemonHarnessClaude:
 		var rejected *claudeNotSubmittedError
 		return errors.As(err, &rejected)
+	case daemonHarnessOpencode:
+		var rejected *opencodeNotSubmittedError
+		return errors.As(err, &rejected)
 	default:
 		return false
 	}
@@ -66,7 +69,7 @@ func logClaudeAttempt(c *ConnectionState, a queueAttempt, outcome string) {
 // disabled until its session-side request and credential handoff are integrated.
 func validateConnectionAdapter(c *ConnectionState) error {
 	switch daemonHarness(c.Harness) {
-	case daemonHarnessCodex, daemonHarnessClaude:
+	case daemonHarnessCodex, daemonHarnessClaude, daemonHarnessOpencode:
 		return nil
 	default:
 		return fmt.Errorf("unsupported connection adapter %q", c.Harness)
@@ -80,6 +83,11 @@ func validateConnectionBinding(c *ConnectionState) error {
 	switch daemonHarness(c.Harness) {
 	case daemonHarnessCodex:
 		return validateCodexQueueBinding(c.Config)
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return errors.New("OpenCode connection binding is missing")
+		}
+		return validateOpencodeBinding(c.ThreadID, c.Opencode.Binding)
 	case daemonHarnessClaude:
 	default:
 		return errUnsupportedHarness(c.Harness)
@@ -100,7 +108,7 @@ func validateConnectionBinding(c *ConnectionState) error {
 
 func connectionReadyState(c *ConnectionState) string {
 	switch daemonHarness(c.Harness) {
-	case daemonHarnessClaude:
+	case daemonHarnessClaude, daemonHarnessOpencode:
 		return "socket-ready"
 	case daemonHarnessCodex:
 		return "queue-ready"
@@ -149,6 +157,11 @@ func pinnedConsumer(c *ConnectionState) (int, string) {
 			return 0, ""
 		}
 		return c.Claude.Binding.Endpoint.PID, c.Claude.Binding.Endpoint.StartToken
+	case daemonHarnessOpencode:
+		if c.Opencode == nil {
+			return 0, ""
+		}
+		return c.Opencode.Binding.Endpoint.PID, c.Opencode.Binding.Endpoint.StartToken
 	case daemonHarnessCodex:
 		if c.Consumer == nil {
 			return 0, ""

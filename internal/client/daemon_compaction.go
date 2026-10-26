@@ -28,6 +28,8 @@ func (d *busDaemon) observeCompaction(c *ConnectionState) error {
 	switch daemonHarness(c.Harness) {
 	case daemonHarnessClaude:
 		return nil // Claude lifecycle hooks retain their own compaction grammar.
+	case daemonHarnessOpencode:
+		return nil // OpenCode compaction stays inside its session; no rollout to watch.
 	case daemonHarnessCodex:
 	default:
 		return errUnsupportedHarness(c.Harness)
