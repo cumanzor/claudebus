@@ -33,7 +33,9 @@ plugin.test.mjs, install_opencode_test.go.
 - A filename in a comment counted as a TUI plugin registration. The
   installer now parses the active plugin array (comments and trailing commas
   allowed), at the top level or nested under "tui" as OpenCode also loads,
-  and never edits the file.
+  with keys matched exactly, and never edits the file. A config it cannot
+  parse, including one with an unterminated comment or string, is reported
+  with the entry to add.
 - The private bind name was about 20 bytes longer than the checked public
   path. It is now short, both paths are checked in bytes, and any bind
   failure is recorded in <pid>.error instead of throwing.
