@@ -33,6 +33,13 @@ function fakeApi() {
       session: {
         status: async () => {
           calls.status++;
+          if (fail.statusReads) {
+            const read = {};
+            read.done = new Promise((resolve, reject) => { read.resolve = resolve; read.reject = reject; });
+            fail.statusReads.push(read);
+            return { data: await read.done };
+          }
+          if (fail.statusError) throw fail.statusError;
           if (fail.statusGate) await fail.statusGate;
           return { data: fail.statusData ?? {} };
         },
@@ -298,4 +305,40 @@ test("a private bind name too long for the OS is reported, not thrown", async (t
   assert.ok(Buffer.byteLength(path.join(dir, "4242.sock")) <= 103);
   assert.equal(await start(fakeApi().api, { dir, pid: 4242 }), undefined);
   assert.match(fs.readFileSync(path.join(dir, "4242.error"), "utf8"), /exceeds 103 bytes/);
+});
+
+const settle = () => new Promise((r) => setTimeout(r, 20));
+
+test("a failed refresh keeps delivery held and is retried", async (t) => {
+  const { ep, fire, fail, calls } = await setup(t);
+  fire("session.status", { sessionID: S1, status: { type: "busy" } });
+  fail.statusError = new Error("Unable to connect. Is the computer able to access the url?");
+  fire("server.connected", {});
+  await settle();
+  assert.equal((await request(ep.path, { op: "status" })).state, "unknown", "a failed read exposed the cached state");
+  const before = calls.status;
+  fail.statusError = null;
+  fail.statusData = {};
+  for (let i = 0; i < 100 && (await request(ep.path, { op: "status" })).state !== "idle"; i++) await settle();
+  assert.equal((await request(ep.path, { op: "status" })).state, "idle");
+  assert.ok(calls.status > before, "the failed refresh was not retried");
+});
+
+test("only the newest refresh applies", async (t) => {
+  const { ep, fire, fail } = await setup(t);
+  fail.statusReads = [];
+  fire("server.connected", {}); // A
+  fire("server.connected", {}); // B
+  await settle();
+  const [a, b] = fail.statusReads;
+  b.resolve({ [S1]: { type: "busy" } });
+  await settle();
+  fire("server.connected", {}); // C
+  await settle();
+  a.resolve({}); // A is older than C and must not apply
+  await settle();
+  assert.equal((await request(ep.path, { op: "status" })).state, "unknown", "an old read ended the newest refresh");
+  fail.statusReads[2].resolve({ [S1]: { type: "busy" } });
+  await settle();
+  assert.equal((await request(ep.path, { op: "status" })).state, "busy");
 });
