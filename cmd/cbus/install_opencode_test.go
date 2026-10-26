@@ -163,6 +163,8 @@ func TestOpencodePluginListedReadsOnlyTheActiveArray(t *testing.T) {
 		"elsewhere":             {`{"theme": "./cbus-tui.js", "plugin": []}`, false},
 		"trailing commas":       {"{\n  \"plugin\": [\"./cbus-tui.js\", // keep\n  ],\n}", true},
 		"slashes inside string": {`{"plugin": ["./cbus-tui.js"], "note": "see // not a comment"}`, true},
+		"nested under tui":      {`{"tui": {"plugin": ["./cbus-tui.js"]}}`, true},
+		"nested, other plugin":  {`{"tui": {"plugin": ["./other.js"]}}`, false},
 	} {
 		got, err := opencodePluginListed([]byte(tc.cfg), "./cbus-tui.js")
 		if err != nil || got != tc.want {
