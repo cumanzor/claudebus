@@ -156,17 +156,19 @@ func TestOpencodePluginListedReadsOnlyTheActiveArray(t *testing.T) {
 		cfg  string
 		want bool
 	}{
-		"listed":                {`{"plugin": ["./x.js", "./cbus-tui.js"]}`, true},
-		"listed with options":   {`{"plugin": [["./cbus-tui.js", {"a": 1}]]}`, true},
-		"commented out":         {"{\n  // Previously used \"./cbus-tui.js\"; currently disabled\n  \"plugin\": []\n}", false},
-		"block comment":         {`{ /* "./cbus-tui.js" */ "plugin": ["./other.js"] }`, false},
-		"elsewhere":             {`{"theme": "./cbus-tui.js", "plugin": []}`, false},
-		"trailing commas":       {"{\n  \"plugin\": [\"./cbus-tui.js\", // keep\n  ],\n}", true},
-		"slashes inside string": {`{"plugin": ["./cbus-tui.js"], "note": "see // not a comment"}`, true},
-		"nested under tui":      {`{"tui": {"plugin": ["./cbus-tui.js"]}}`, true},
-		"nested, other plugin":  {`{"tui": {"plugin": ["./other.js"]}}`, false},
-		"wrong key case":        {`{"Plugin": ["./cbus-tui.js"]}`, false},
-		"wrong nested key case": {`{"tui": {"PLUGIN": ["./cbus-tui.js"]}}`, false},
+		"listed":                    {`{"plugin": ["./x.js", "./cbus-tui.js"]}`, true},
+		"listed with options":       {`{"plugin": [["./cbus-tui.js", {"a": 1}]]}`, true},
+		"commented out":             {"{\n  // Previously used \"./cbus-tui.js\"; currently disabled\n  \"plugin\": []\n}", false},
+		"block comment":             {`{ /* "./cbus-tui.js" */ "plugin": ["./other.js"] }`, false},
+		"elsewhere":                 {`{"theme": "./cbus-tui.js", "plugin": []}`, false},
+		"trailing commas":           {"{\n  \"plugin\": [\"./cbus-tui.js\", // keep\n  ],\n}", true},
+		"slashes inside string":     {`{"plugin": ["./cbus-tui.js"], "note": "see // not a comment"}`, true},
+		"nested under tui":          {`{"tui": {"plugin": ["./cbus-tui.js"]}}`, true},
+		"nested, other plugin":      {`{"tui": {"plugin": ["./other.js"]}}`, false},
+		"wrong key case":            {`{"Plugin": ["./cbus-tui.js"]}`, false},
+		"top level overrides":       {`{"plugin": [], "tui": {"plugin": ["./cbus-tui.js"]}}`, false},
+		"overridden nested ignored": {`{"plugin": ["./cbus-tui.js"], "tui": {"plugin": "disabled"}}`, true},
+		"wrong nested key case":     {`{"tui": {"PLUGIN": ["./cbus-tui.js"]}}`, false},
 	} {
 		got, err := opencodePluginListed([]byte(tc.cfg), "./cbus-tui.js")
 		if err != nil || got != tc.want {
