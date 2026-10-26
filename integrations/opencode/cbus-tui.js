@@ -11,6 +11,8 @@ export const PROTOCOL = 1;
 export const PLUGIN_VERSION = "1";
 
 const ROUTE_POLL_MS = 100;
+const REFRESH_RETRY_MIN_MS = 250;
+const REFRESH_RETRY_MAX_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_REQUEST_BYTES = 1 << 20;
 const SOCKET_PATH_MAX = 103;
@@ -85,13 +87,19 @@ export async function start(api, { dir, pid }) {
   };
 
   // A reconnected server may have lost its in-memory status, so the map is
-  // replaced from a fresh read. Until that read lands every state is unknown,
-  // which keeps delivery held; events that arrive meanwhile win over it.
-  let refreshing = 0;
+  // replaced from a fresh read. Until a read lands every state is unknown,
+  // which keeps delivery held; a failed read is retried, only the newest
+  // read applies, and events that arrive meanwhile win over it.
+  let refreshing = false;
+  let generation = 0;
   let racing = new Map();
+  let retryTimer;
+  let retryDelay = REFRESH_RETRY_MIN_MS;
   async function refreshStatuses() {
-    const mine = ++refreshing;
+    const mine = ++generation;
+    refreshing = true;
     racing = new Map();
+    clearTimeout(retryTimer);
     let fresh = new Map();
     try {
       const r = await api.client.session.status(undefined, { throwOnError: true });
@@ -99,13 +107,18 @@ export async function start(api, { dir, pid }) {
     } catch {
       fresh = null;
     }
-    if (mine !== refreshing) return;
-    if (fresh) {
-      for (const [sid, type] of racing) fresh.set(sid, type);
-      statuses.clear();
-      for (const [sid, type] of fresh) statuses.set(sid, type);
+    if (mine !== generation || disposed) return;
+    if (!fresh) {
+      retryTimer = setTimeout(refreshStatuses, retryDelay);
+      retryTimer.unref?.();
+      retryDelay = Math.min(retryDelay * 2, REFRESH_RETRY_MAX_MS);
+      return;
     }
-    refreshing = 0;
+    retryDelay = REFRESH_RETRY_MIN_MS;
+    for (const [sid, type] of racing) fresh.set(sid, type);
+    statuses.clear();
+    for (const [sid, type] of fresh) statuses.set(sid, type);
+    refreshing = false;
     const sid = shown();
     if (sid) reportState(sid, stateOf(sid));
   }
@@ -270,6 +283,7 @@ export async function start(api, { dir, pid }) {
     if (disposed) return;
     disposed = true;
     clearInterval(poll);
+    clearTimeout(retryTimer);
     for (const u of unsubscribe) u?.();
     emit({ event: "dispose" });
     for (const w of watchers) w.end();
