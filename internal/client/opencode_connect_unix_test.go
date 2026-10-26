@@ -102,12 +102,12 @@ func TestOpencodePluginHelperProcess(t *testing.T) {
 			case "status":
 				reply["sessionID"], reply["state"] = sid, ctl.State
 			case "lookup":
-				if ctl.Deleted {
-					reply = map[string]any{"ok": false, "code": "session-not-found", "error": "Session not found"}
-					break
-				}
+				// OpenCode 1.19.3 answers a message lookup in a deleted session
+				// the same as a missing message
 				_, ok := stored[req.MessageID]
-				reply["present"] = ok
+				reply["present"] = ok && !ctl.Deleted
+			case "session":
+				reply["exists"] = !ctl.Deleted
 			case "deliver":
 				switch ctl.Deliver {
 				case "ok":
