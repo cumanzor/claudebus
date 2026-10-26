@@ -61,6 +61,57 @@ Findings from an independent review of the OpenCode PR stack.
   0.31 s CPU in a burst, the fixed one 0.01 s; for a session deleted by
   another process the sentinel lookup read present:false both before and
   after, while the session op read exists:true then exists:false.
+## [2026-10-23 14:34:24 UTC] [Tests/Harness] Wider harness-dispatch guard
+
+[Attempt #1] Files: internal/client/harness_dispatch_test.go (scanner
+extracted, wider rules, fixture tests for each shape, spawn, formation and
+legacy-record tests); connection_gc.go (gcBoundEndpoint, transcript by
+harness) and connection_gc_test.go; spawn.go; formation.go;
+formation_harness.go; formation_save.go (recordsNonCodexHarness); marker.go;
+cmd/cbus/connection.go and unsupported_windows.go; cmd/cbus
+install_opencode_test.go (connect report test).
+
+[What changed]
+- The guard scans internal/client and cmd/cbus. A comparison is flagged when
+  one side holds a harness (daemonHarness(x), a .Harness field, a variable
+  named harness, or strings.ToLower of those) and the other names one (a
+  harness constant or a "claude"/"codex"/"opencode"/"grok" literal). A switch
+  on such a value, or with such cases, must have a default. Comparing two
+  harness values is still allowed.
+- spawn resolves the harness in one switch that refuses anything but Claude
+  and Codex; the rest of the function reads a codex flag.
+- The connect report switches on the harness and prints a neutral line for
+  one it does not know, instead of Codex guidance.
+- GC liveness and the transcript activity check use only the fields of the
+  record's own harness; Claude fields left in another record are ignored and
+  OpenCode records use their TUI endpoint.
+
+[Why]
+A review of the explicit-dispatch change found compilable bypasses of the
+old guard (raw .Harness comparisons, literal-case switches) and field-based
+dispatch in GC that let a record borrow another adapter's liveness.
+
+[Possible Ripple Effects]
+- The guard is still syntactic and cannot judge whether a default is right;
+  field-presence dispatch (`c.Claude != nil`) is not flagged, since most
+  such checks are data handling, not routing.
+- Two classification switches gained an explicit default with no behavior
+  change (isHarnessComm, the Windows phase-1 refusal text).
+
+[Testing Notes]
+- Against the stack tip without these changes, the wider guard lists all 16
+  sites and the new GC test shows OpenCode, Codex and unknown records
+  borrowing the Claude endpoint and transcript. Both pass after.
+- Fixture tests: each bypass shape is flagged; two-harness equality, empty
+  normalization, a switch with a default and a non-harness literal are not.
+- Mutants: OpenCode GC arm reading Claude fields, a Claude fallback in the
+  GC default, the connect report defaulting to Codex, spawn admitting any
+  harness, the formation refusal ignoring a Codex backend on a Claude peer,
+  and a blank harness counted as non-Codex: all killed on the aimed test.
+  The spawn mutant first died on a nil forker panic; the test now uses a stub
+  forker and a temp store and fails on its assertion.
+- go test -race ./... green; builds for linux amd64/arm64 and windows.
+
 ## [2026-10-23 01:24:09 UTC] [OpenCode/Docs] OpenCode bus-join command, user doc, three-way acceptance
 
 [Attempt #1] Files: integrations/opencode/commands/bus-join.md (new);
