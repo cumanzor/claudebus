@@ -63,6 +63,9 @@ func validateOpencodeEndpoint(e opencodeEndpoint) error {
 
 var errOpencodeEndpointGone = errors.New("OpenCode TUI exited or changed; reconnect from that session")
 
+// errOpencodeNotDialed marks a failure before any request byte was written.
+var errOpencodeNotDialed = errors.New("OpenCode plugin not reached")
+
 // opencodeRequest sends one request line and reads one reply line. The socket
 // peer must be the bound TUI process before the request goes out.
 func opencodeRequest(e opencodeEndpoint, req, reply any) error {
@@ -71,12 +74,12 @@ func opencodeRequest(e opencodeEndpoint, req, reply any) error {
 	}
 	c, err := net.DialTimeout("unix", e.Socket, opencodeRequestTimeout)
 	if err != nil {
-		return fmt.Errorf("dial OpenCode plugin: %w", err)
+		return fmt.Errorf("%w: %v", errOpencodeNotDialed, err)
 	}
 	defer c.Close()
 	conn := c.(*net.UnixConn)
 	if err := validateUnixSocketPeer(conn, e.PID); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errOpencodeNotDialed, err)
 	}
 	if err := conn.SetDeadline(time.Now().Add(opencodeRequestTimeout)); err != nil {
 		return err

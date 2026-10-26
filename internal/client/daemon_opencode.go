@@ -2,9 +2,12 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -177,12 +180,128 @@ func (q *opencodeQueue) inspect(threadID string) (codexQueueThread, error) {
 	return codexQueueThread{ID: threadID, Source: "cli", Cwd: q.cfg.Binding.Cwd}, nil
 }
 
-var errOpencodeDeliveryDisabled = errors.New("OpenCode delivery is not enabled in this cbus build; mail stays unread in the inbox")
-
-func (q *opencodeQueue) enqueue(string, string, string) (string, error) {
-	return "", &opencodeNotSubmittedError{Err: errOpencodeDeliveryDisabled}
+type opencodeDeliverReply struct {
+	OK        bool     `json:"ok"`
+	Receipt   string   `json:"receipt"`
+	Texts     []string `json:"texts"`
+	Present   bool     `json:"present"`
+	Code      string   `json:"code"`
+	Error     string   `json:"error"`
+	Submitted any      `json:"submitted"`
 }
 
-func (q *opencodeQueue) lookupMessage(string, string) (codexMessageLookup, error) {
-	return codexMessageLookup{}, errOpencodeDeliveryDisabled
+// enqueue asks the plugin to submit and returns the message ID only when the
+// plugin read the stored message back. A failure counts as not submitted only
+// when the plugin says nothing could have been stored.
+func (q *opencodeQueue) enqueue(threadID, messageID, payload string) (string, error) {
+	if threadID != q.cfg.Binding.SessionID || !validOpencodeMessageID(messageID) || payload == "" {
+		return "", &opencodeNotSubmittedError{Err: errors.New("exact session, OpenCode message ID and payload required")}
+	}
+	var r opencodeDeliverReply
+	err := opencodeRequest(q.cfg.Binding.Endpoint, map[string]string{"op": "deliver", "sessionID": threadID, "messageID": messageID, "text": payload}, &r)
+	if err != nil {
+		if errors.Is(err, errOpencodeEndpointGone) || errors.Is(err, errOpencodeNotDialed) {
+			return "", &opencodeNotSubmittedError{Err: err}
+		}
+		return "", fmt.Errorf("OpenCode submit outcome unknown: %w", err)
+	}
+	switch {
+	case r.OK && (r.Receipt == "persisted" || r.Receipt == "present"):
+		return messageID, nil
+	case r.OK:
+		return "", fmt.Errorf("OpenCode accepted the submit but the message was not read back (%s)", r.Receipt)
+	case r.Submitted == false:
+		return "", &opencodeNotSubmittedError{Err: fmt.Errorf("%s: %s", r.Code, r.Error)}
+	default:
+		return "", fmt.Errorf("OpenCode submit outcome unknown: %s: %s", r.Code, r.Error)
+	}
+}
+
+func (q *opencodeQueue) lookupMessage(threadID, messageID string) (codexMessageLookup, error) {
+	if threadID != q.cfg.Binding.SessionID || !validOpencodeMessageID(messageID) {
+		return codexMessageLookup{}, errors.New("exact session and OpenCode message ID required")
+	}
+	var r opencodeDeliverReply
+	if err := opencodeRequest(q.cfg.Binding.Endpoint, map[string]string{"op": "lookup", "sessionID": threadID, "messageID": messageID}, &r); err != nil {
+		return codexMessageLookup{}, err
+	}
+	if !r.OK {
+		return codexMessageLookup{}, fmt.Errorf("OpenCode lookup failed: %s: %s", r.Code, r.Error)
+	}
+	if !r.Present {
+		return codexMessageLookup{State: codexMessageNotFound}, nil
+	}
+	return codexMessageLookup{State: codexMessageReceived, ItemID: messageID}, nil
+}
+
+// nativeAttemptKey is the ID an adapter knows an attempt by.
+func nativeAttemptKey(c *ConnectionState, a queueAttempt) string {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessOpencode:
+		return a.MessageID
+	default:
+		return a.ClientID
+	}
+}
+
+// OpenCode's enqueue already read the stored message back, so it is the receipt.
+func enqueueEvidence(c *ConnectionState, queueID string) *codexMessageLookup {
+	switch daemonHarness(c.Harness) {
+	case daemonHarnessOpencode:
+		return &codexMessageLookup{State: codexMessageReceived, ItemID: queueID}
+	default:
+		return nil
+	}
+}
+
+const opencodeIdleRetry = 2 * time.Second
+
+// Mail waits in the bus inbox until the pane shows the bound session and that
+// session is idle; a message submitted mid-turn can override the user's request.
+func (d *busDaemon) opencodeDeliveryReady(c *ConnectionState) (bool, error) {
+	if c.Opencode == nil {
+		return false, errors.New("OpenCode connection binding is missing")
+	}
+	var r struct {
+		OK        bool    `json:"ok"`
+		SessionID *string `json:"sessionID"`
+		State     *string `json:"state"`
+	}
+	err := opencodeRequest(c.Opencode.Binding.Endpoint, map[string]string{"op": "status"}, &r)
+	ready := err == nil && r.OK && r.SessionID != nil && *r.SessionID == c.ThreadID && r.State != nil && *r.State == "idle"
+	if !ready {
+		d.setRetry(c.ID, time.Now().Add(opencodeIdleRetry))
+	}
+	return ready, nil
+}
+
+var opencodeIDCounter atomic.Uint32
+
+const base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// newOpencodeMessageID follows OpenCode's ascending ID form, "msg_" plus 12 hex
+// of milliseconds*4096+counter and 14 random base62, so bus messages sort where
+// OpenCode's own messages of the same moment would.
+func newOpencodeMessageID(now time.Time) string {
+	n := uint64(now.UnixMilli())*0x1000 + uint64(opencodeIDCounter.Add(1)&0xfff)
+	var tail [14]byte
+	var r [14]byte
+	_, _ = rand.Read(r[:])
+	for i := range tail {
+		tail[i] = base62[int(r[i])%len(base62)]
+	}
+	return fmt.Sprintf("msg_%012x%s", n&0xffffffffffff, tail[:])
+}
+
+func validOpencodeMessageID(id string) bool {
+	tail, ok := strings.CutPrefix(id, "msg_")
+	if !ok || len(tail) < 20 || len(tail) > 64 {
+		return false
+	}
+	for _, c := range tail {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return true
 }
