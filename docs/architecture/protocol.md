@@ -1661,8 +1661,8 @@ own, and loads TUI plugins only when they are listed in `tui.json` or
 `tui.jsonc`. The installer therefore writes `plugins/cbus-server.js` and
 `cbus-tui.js`, creates `tui.jsonc` when the directory has none, and never
 rewrites an existing TUI config: it parses the config's active `"plugin"`
-array (comments and trailing commas allowed, a mention in a comment does not
-count), and a config without the `"./cbus-tui.js"` entry, or one it cannot
+array, at the top level or nested under `"tui"` (comments and trailing commas
+allowed, a mention in a comment does not count), and a config without the `"./cbus-tui.js"` entry, or one it cannot
 parse, is reported with the entry to add and a non-zero exit.
 `install-assets`, which updates run, refreshes the plugins (overwriting, as
 for mods) only when they are already installed in the default OpenCode
