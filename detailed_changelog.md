@@ -32,8 +32,9 @@ plugin.test.mjs, install_opencode_test.go.
   session-not-found answer and now answers as OpenCode does.
 - A filename in a comment counted as a TUI plugin registration. The
   installer now parses the active plugin array (comments and trailing commas
-  allowed), at the top level or nested under "tui" as OpenCode also loads,
-  with keys matched exactly, and never edits the file. A config it cannot
+  allowed): the top-level list, or the one under "tui" when there is no
+  top-level key, as OpenCode resolves them, with keys matched exactly. It
+  never edits the file. A config it cannot
   parse, including one with an unterminated comment or string, is reported
   with the entry to add.
 - The private bind name was about 20 bytes longer than the checked public

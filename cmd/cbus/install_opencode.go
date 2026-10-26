@@ -131,9 +131,9 @@ func refreshOpencodePlugins(args []string) int {
 }
 
 // opencodePluginListed reports whether entry is in the config's active
-// "plugin" array, at the top level or under "tui" as OpenCode also accepts; a
-// mention in a comment or elsewhere does not count. Entries are a path, or a
-// [path, options] pair.
+// "plugin" array: the top-level one, or the one under "tui" when there is no
+// top-level key, as OpenCode resolves them. A mention in a comment or
+// elsewhere does not count. Entries are a path, or a [path, options] pair.
 func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
 	clean, err := stripJSONC(jsonc)
 	if err != nil {
@@ -153,19 +153,20 @@ func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
 		}
 		return list, nil
 	}
-	entries, err := plugins(top)
+	// OpenCode merges the "tui" object under the top level, so a top-level
+	// "plugin", even an empty one, replaces the nested list entirely.
+	scope := top
+	if _, ok := top["plugin"]; !ok {
+		if raw, ok := top["tui"]; ok {
+			var tui map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &tui); err == nil {
+				scope = tui
+			}
+		}
+	}
+	entries, err := plugins(scope)
 	if err != nil {
 		return false, err
-	}
-	if raw, ok := top["tui"]; ok {
-		var tui map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &tui); err == nil {
-			nested, err := plugins(tui)
-			if err != nil {
-				return false, err
-			}
-			entries = append(entries, nested...)
-		}
 	}
 	for _, raw := range entries {
 		var name string
