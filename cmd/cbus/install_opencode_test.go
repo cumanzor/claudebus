@@ -131,3 +131,42 @@ func TestRefreshOpencodeSkipsWithoutAnInstallAndUpdatesOne(t *testing.T) {
 		t.Error("refresh left an outdated plugin in place")
 	}
 }
+
+func TestOpencodePluginListedReadsOnlyTheActiveArray(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg  string
+		want bool
+	}{
+		"listed":                {`{"plugin": ["./x.js", "./cbus-tui.js"]}`, true},
+		"listed with options":   {`{"plugin": [["./cbus-tui.js", {"a": 1}]]}`, true},
+		"commented out":         {"{\n  // Previously used \"./cbus-tui.js\"; currently disabled\n  \"plugin\": []\n}", false},
+		"block comment":         {`{ /* "./cbus-tui.js" */ "plugin": ["./other.js"] }`, false},
+		"elsewhere":             {`{"theme": "./cbus-tui.js", "plugin": []}`, false},
+		"trailing commas":       {"{\n  \"plugin\": [\"./cbus-tui.js\", // keep\n  ],\n}", true},
+		"slashes inside string": {`{"plugin": ["./cbus-tui.js"], "note": "see // not a comment"}`, true},
+	} {
+		got, err := opencodePluginListed([]byte(tc.cfg), "./cbus-tui.js")
+		if err != nil || got != tc.want {
+			t.Errorf("%s: listed=%v err=%v, want %v", name, got, err, tc.want)
+		}
+	}
+	if _, err := opencodePluginListed([]byte(`{"plugin": [`), "./cbus-tui.js"); err == nil {
+		t.Error("a config that does not parse was read as a plugin list")
+	}
+}
+
+func TestInstallOpencodeTreatsACommentedEntryAsUnregistered(t *testing.T) {
+	dst := t.TempDir()
+	cfg := "{\n  // Previously used \"./cbus-tui.js\"; currently disabled\n  \"plugin\": []\n}\n"
+	if err := os.WriteFile(filepath.Join(dst, "tui.jsonc"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rc int
+	out := captureStdout(t, func() { rc = runInstallOpencode([]string{"--path", dst}) })
+	if rc == 0 || !strings.Contains(out, `add "./cbus-tui.js" to its "plugin" list`) {
+		t.Errorf("rc=%d, out:\n%s", rc, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dst, "tui.jsonc")); string(b) != cfg {
+		t.Error("the config was modified")
+	}
+}

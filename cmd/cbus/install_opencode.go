@@ -1,12 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"claudebus"
 )
@@ -56,11 +56,15 @@ func registerOpencodeTUIPlugin(dir string) assetResult {
 			res.outcome, res.reason = "failed", "read: "+err.Error()
 			return res
 		}
-		if strings.Contains(string(b), `"`+opencodeTUIEntry+`"`) {
+		listed, err := opencodePluginListed(b, opencodeTUIEntry)
+		switch {
+		case err != nil:
+			res.outcome, res.reason = "skipped", fmt.Sprintf(`cannot read its plugin list (%v); make sure %q is in its "plugin" list`, err, opencodeTUIEntry)
+		case listed:
 			res.outcome = "up-to-date"
-			return res
+		default:
+			res.outcome, res.reason = "skipped", fmt.Sprintf(`add %q to its "plugin" list; the TUI plugin does not load until it is listed`, opencodeTUIEntry)
 		}
-		res.outcome, res.reason = "skipped", fmt.Sprintf(`add %q to its "plugin" list; the TUI plugin does not load until it is listed`, opencodeTUIEntry)
 		return res
 	}
 	res := assetResult{name: "tui.jsonc"}
@@ -116,4 +120,82 @@ func refreshOpencodePlugins(args []string) int {
 	}
 	fmt.Printf("OpenCode plugins not installed in %s; skipped (cbus install-opencode installs them)\n", dir)
 	return 0
+}
+
+// opencodePluginListed reports whether entry is in the config's active
+// "plugin" array; a mention in a comment or elsewhere does not count. Entries
+// are a path, or a [path, options] pair.
+func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
+	var cfg struct {
+		Plugin []json.RawMessage `json:"plugin"`
+	}
+	if err := json.Unmarshal(stripJSONC(jsonc), &cfg); err != nil {
+		return false, err
+	}
+	for _, raw := range cfg.Plugin {
+		var name string
+		if json.Unmarshal(raw, &name) == nil && name == entry {
+			return true, nil
+		}
+		var pair []json.RawMessage
+		if json.Unmarshal(raw, &pair) == nil && len(pair) > 0 && json.Unmarshal(pair[0], &name) == nil && name == entry {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// stripJSONC removes comments, then trailing commas, outside strings, so
+// encoding/json can read a JSONC file. The file itself is untouched.
+func stripJSONC(b []byte) []byte {
+	return scanJSONC(scanJSONC(b, true), false)
+}
+
+// scanJSONC copies b, dropping comments on the first pass and trailing commas
+// on the second; string contents are copied verbatim either way.
+func scanJSONC(b []byte, comments bool) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c == '"':
+			j := i + 1
+			for j < len(b) && b[j] != '"' {
+				if b[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(b) {
+				j = len(b) - 1
+			}
+			out = append(out, b[i:j+1]...)
+			i = j
+		case comments && c == '/' && i+1 < len(b) && b[i+1] == '/':
+			for i < len(b) && b[i] != '\n' {
+				i++
+			}
+			if i < len(b) {
+				out = append(out, '\n')
+			}
+		case comments && c == '/' && i+1 < len(b) && b[i+1] == '*':
+			i += 2
+			for i+1 < len(b) && !(b[i] == '*' && b[i+1] == '/') {
+				i++
+			}
+			i++
+		case !comments && c == ',':
+			j := i + 1
+			for j < len(b) && (b[j] == ' ' || b[j] == '\t' || b[j] == '\n' || b[j] == '\r') {
+				j++
+			}
+			if j < len(b) && (b[j] == ']' || b[j] == '}') {
+				continue
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }
