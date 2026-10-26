@@ -143,24 +143,26 @@ func observeOpencodeConsumer(c *ConnectionState) (consumerProbe, error) {
 	if h.shown() != c.ThreadID {
 		return consumerProbe{State: "unknown", Detail: fmt.Sprintf("OpenCode TUI %d does not show session %s", e.PID, c.ThreadID)}, nil
 	}
-	// A session deleted by another process stays on screen with no event; only
-	// a lookup inside it says it is gone.
-	var r opencodeDeliverReply
-	if err := opencodeRequest(e, map[string]string{"op": "lookup", "sessionID": c.ThreadID, "messageID": opencodeProbeMessageID}, &r); err != nil {
+	// A session deleted by another process stays on screen with no event, and
+	// a message lookup reads the same for it; only the session itself says.
+	var r struct {
+		OK     bool   `json:"ok"`
+		Exists bool   `json:"exists"`
+		Code   string `json:"code"`
+		Error  string `json:"error"`
+	}
+	if err := opencodeRequest(e, map[string]string{"op": "session", "sessionID": c.ThreadID}, &r); err != nil {
 		return unknown, err
 	}
 	if !r.OK {
-		if r.Code == "session-not-found" {
-			return consumerProbe{State: "exited", Detail: "OpenCode session " + c.ThreadID + " was deleted; connect again from a live session"}, nil
-		}
-		return consumerProbe{State: "unknown", Detail: fmt.Sprintf("OpenCode lookup in the bound session failed: %s %s", r.Code, r.Error)}, nil
+		return consumerProbe{State: "unknown", Detail: fmt.Sprintf("OpenCode session check failed: %s %s", r.Code, r.Error)}, nil
+	}
+	if !r.Exists {
+		return consumerProbe{State: "exited", Detail: "OpenCode session " + c.ThreadID + " was deleted; connect again from a live session"}, nil
 	}
 	return consumerProbe{State: "online", PID: e.PID, StartToken: e.StartToken,
 		Detail: "exact bound OpenCode TUI and plugin socket observed showing the session"}, nil
 }
-
-// opencodeProbeMessageID is a well-formed ID no message carries.
-const opencodeProbeMessageID = "msg_000000000000cbusprobe00000"
 
 type opencodeQueue struct {
 	ctx    context.Context

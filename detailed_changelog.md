@@ -4,6 +4,58 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-26 18:46:28 UTC] [OpenCode/Fix] Review fixes F1-F5
+
+[Attempt #1] Files: internal/client/daemon_opencode_watch.go (no watch for an
+exited consumer; stream-end hint only after a connected stream);
+daemon_opencode.go (probe uses the plugin session op);
+integrations/opencode/cbus-tui.js (status refresh on server.connected,
+session op, bounded private bind name, bind failures to <pid>.error);
+cmd/cbus/install_opencode.go (opencodePluginListed, stripJSONC);
+docs/architecture/protocol.md 15.3. Tests: opencode_presence_unix_test.go,
+opencode_connect_unix_test.go (helper answers like OpenCode 1.19.3),
+plugin.test.mjs, install_opencode_test.go.
+
+[What changed]
+- F1: after the bound TUI exited, each scheduled operation started a watch
+  that failed to connect, hinted, cleared the retry and woke the scheduler
+  again. No watch is started for an exited consumer, and only a stream that
+  delivered its snapshot hints when it ends.
+- F2: OpenCode keeps session status in server memory. On server.connected
+  the plugin re-reads it and reports unknown (delivery holds) until the
+  read lands; events that race the read win.
+- F3: the deleted-session probe looked up a sentinel message, which OpenCode
+  1.19.3 answers the same for a live and a deleted session. A new plugin op
+  asks for the session itself; the test helper had fabricated the
+  session-not-found answer and now answers as OpenCode does.
+- F4: a filename in a comment counted as a TUI plugin registration. The
+  installer now parses the active plugin array (comments and trailing commas
+  allowed) and never edits the file.
+- F5: the private bind name was about 20 bytes longer than the checked public
+  path. It is now short, both paths are checked in bytes, and any bind
+  failure is recorded in <pid>.error instead of throwing.
+
+[Why]
+Findings from an independent review of the OpenCode PR stack.
+
+[Possible Ripple Effects]
+- The plugin gains a session op; protocol stays 1 because the adapter has
+  not been released.
+- A probe now asks for the session rather than a message: still two plugin
+  requests per probe.
+
+[Testing Notes]
+- Each fix has a test that fails on the code before it, on the aimed
+  assertion: the scheduler-emulating loop test (241 operations and probes in
+  300 ms before), the reconnect refresh, the session op, the long private
+  path, a commented-out entry, and the deleted-session probe with the
+  corrected helper (reported online before).
+- Mutants on every guard were killed on their own tests.
+- Live on OpenCode 1.19.3: after a TUI kill the previous build's daemon spent
+  0.31 s CPU in a burst, the fixed one 0.01 s; for a session deleted by
+  another process the sentinel lookup read present:false both before and
+  after, while the session op read exists:true then exists:false.
+
 ## [2026-10-22 18:39:29 UTC] [OpenCode/Presence] Watch-driven wake and presence
 
 [Attempt #1] Files: internal/client/daemon_opencode_watch.go (new);
