@@ -123,16 +123,20 @@ func refreshOpencodePlugins(args []string) int {
 }
 
 // opencodePluginListed reports whether entry is in the config's active
-// "plugin" array; a mention in a comment or elsewhere does not count. Entries
-// are a path, or a [path, options] pair.
+// "plugin" array, at the top level or under "tui" as OpenCode also accepts; a
+// mention in a comment or elsewhere does not count. Entries are a path, or a
+// [path, options] pair.
 func opencodePluginListed(jsonc []byte, entry string) (bool, error) {
 	var cfg struct {
 		Plugin []json.RawMessage `json:"plugin"`
+		TUI    struct {
+			Plugin []json.RawMessage `json:"plugin"`
+		} `json:"tui"`
 	}
 	if err := json.Unmarshal(stripJSONC(jsonc), &cfg); err != nil {
 		return false, err
 	}
-	for _, raw := range cfg.Plugin {
+	for _, raw := range append(cfg.Plugin, cfg.TUI.Plugin...) {
 		var name string
 		if json.Unmarshal(raw, &name) == nil && name == entry {
 			return true, nil
