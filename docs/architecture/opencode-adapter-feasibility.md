@@ -221,14 +221,23 @@ From the findings above, for the first adapter milestone:
 8. **No unauthenticated listener.** Do not depend on `--port`, mDNS or an
    unsecured `serve` for delivery.
 
+## Status
+
+The adapter is implemented as described above; user setup is in
+[docs/opencode.md](../opencode.md). Identity for `cbus send` turned out to need
+no credential: the server plugin sets `CBUS_SESSION_ID`, which cbus already
+resolves against the registration. A live three-way run (Claude Code, Codex CLI
+0.163.0, OpenCode 1.19.3, one scratch daemon) delivered all six directed routes,
+each read in the recipient's own conversation, with no attempt left pending. On
+Linux (Debian 13, Go 1.26.2, race detector) the OpenCode and dispatch tests and
+the plugin's node suite pass; the full suite fails only a presence test that
+also fails on main there, where ext4 reuses an inode on remove and recreate.
+
 ## Still open
 
-- Identity flow from the server plugin to `cbus send` (which credential the
-  agent shell receives, and how it is scoped to one session).
 - Formation launch and resume for OpenCode, on iTerm2, tmux and a plain
   terminal.
 - Windows: named pipe in place of the Unix socket, and the peer check.
 - Bursts and ordering beyond the two-message hold test.
-- The three-way Claude Code, Codex CLI and OpenCode acceptance gate.
 - Re-checking all of the above on each OpenCode upgrade, since both plugin
   APIs and the new session surface are moving.

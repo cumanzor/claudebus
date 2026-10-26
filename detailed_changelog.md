@@ -61,6 +61,40 @@ Findings from an independent review of the OpenCode PR stack.
   0.31 s CPU in a burst, the fixed one 0.01 s; for a session deleted by
   another process the sentinel lookup read present:false both before and
   after, while the session op read exists:true then exists:false.
+## [2026-10-23 01:24:09 UTC] [OpenCode/Docs] OpenCode bus-join command, user doc, three-way acceptance
+
+[Attempt #1] Files: integrations/opencode/commands/bus-join.md (new);
+docs/opencode.md (new); assets.go (embed the command);
+cmd/cbus/install_opencode.go (install it to commands/bus-join.md) and its
+test; opencode_plugin_test.go (embed list); docs/architecture/protocol.md,
+opencode-adapter-feasibility.md (status, open items),
+cross-harness-daemon-scope.md (route result); README.md.
+
+[What changed]
+- OpenCode gets a `/bus-join` command (OpenCode 1.19.3 loads commands from
+  both `command/` and `commands/`; the installer uses `commands/`).
+- docs/opencode.md is the user page; README links it.
+
+[Why]
+Sixth milestone of the OpenCode adapter: a user path in, and live acceptance
+across all three harnesses.
+
+[Possible Ripple Effects]
+- The installer now writes four files; an existing `commands/bus-join.md` that
+  differs is skipped unless --force.
+
+[Testing Notes]
+- Embed and installer tests updated and green.
+- Live three-way run on one scratch daemon (Claude Code, Codex CLI 0.163.0,
+  OpenCode 1.19.3): OpenCode joined through `/bus-join`; C->O, C->X, O->C,
+  O->X, X->C and X->O each arrived in the recipient's own conversation; no
+  attempt was left pending. OpenCode declined to run commands a peer asked
+  for until the operator asked, as its command text instructs.
+- Setup findings from that run, not code changes: an agent shell's profile
+  can put another cbus first on PATH; a Codex launched from a Claude shell
+  inherited CLAUDE_CODE_SESSION_ID and refused to connect until it was
+  removed; and a Codex agent followed the version-mismatch advice and ran
+  `cbus daemon restart` with an older binary against the scratch store.
 
 ## [2026-10-22 18:39:29 UTC] [OpenCode/Presence] Watch-driven wake and presence
 

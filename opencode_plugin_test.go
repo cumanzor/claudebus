@@ -16,14 +16,21 @@ func TestOpencodePluginEmbedMatchesSource(t *testing.T) {
 	}
 	var got []string
 	for _, e := range entries {
+		if e.IsDir() {
+			sub, _ := fs.ReadDir(OpencodePlugins, "integrations/opencode/"+e.Name())
+			for _, f := range sub {
+				got = append(got, e.Name()+"/"+f.Name())
+			}
+			continue
+		}
 		got = append(got, e.Name())
 	}
-	if want := []string{"cbus-server.js", "cbus-tui.js"}; !equalStrings(got, want) {
+	if want := []string{"cbus-server.js", "cbus-tui.js", "commands/bus-join.md"}; !equalStrings(got, want) {
 		t.Fatalf("embedded OpenCode plugins = %v, want %v (tests and docs stay out of the install)", got, want)
 	}
 	for _, name := range got {
 		served, _ := fs.ReadFile(OpencodePlugins, "integrations/opencode/"+name)
-		source, err := os.ReadFile(filepath.Join("integrations", "opencode", name))
+		source, err := os.ReadFile(filepath.Join("integrations", "opencode", filepath.FromSlash(name)))
 		if err != nil || !bytes.Equal(served, source) {
 			t.Errorf("%s: embedded bytes differ from the source file (%v)", name, err)
 		}

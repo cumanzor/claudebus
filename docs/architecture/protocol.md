@@ -1658,13 +1658,14 @@ Shipped as two OpenCode modules in `integrations/opencode/`, installed by
 loads a module as exactly one kind (a default export with `server()` or
 `tui()`, never both), loads server plugins from `<config>/plugins/` on its
 own, and loads TUI plugins only when they are listed in `tui.json` or
-`tui.jsonc`. The installer therefore writes `plugins/cbus-server.js` and
-`cbus-tui.js`, creates `tui.jsonc` when the directory has none, and never
-rewrites an existing TUI config: it parses the config's active `"plugin"`
-array, the top-level one or, when there is no top-level key, the one under
-`"tui"` (comments and trailing commas allowed, a mention in a comment does not
-count), and a config without the `"./cbus-tui.js"` entry, or one it cannot
-parse, is reported with the entry to add and a non-zero exit.
+`tui.jsonc`. The installer therefore writes `plugins/cbus-server.js`,
+`cbus-tui.js` and the `/bus-join` command `commands/bus-join.md`, creates
+`tui.jsonc` when the directory has none, and never rewrites an existing TUI
+config: it parses the config's active `"plugin"` array, the top-level one or,
+when there is no top-level key, the one under `"tui"` (comments and trailing
+commas allowed, a mention in a comment does not count), and a config without
+the `"./cbus-tui.js"` entry, or one it cannot parse, is reported with the entry
+to add and a non-zero exit.
 `install-assets`, which updates run, refreshes the plugins (overwriting, as
 for mods) only when they are already installed in the default OpenCode
 config directory, so an update never creates an OpenCode config on a machine

@@ -14,7 +14,7 @@ func TestInstallOpencodeFreshThenUpToDate(t *testing.T) {
 			t.Fatalf("fresh install rc=%d", rc)
 		}
 	})
-	for _, f := range []string{"plugins/cbus-server.js", "cbus-tui.js", "tui.jsonc"} {
+	for _, f := range []string{"plugins/cbus-server.js", "cbus-tui.js", "commands/bus-join.md", "tui.jsonc"} {
 		if _, err := os.Stat(filepath.Join(dst, f)); err != nil {
 			t.Errorf("%s not installed: %v\n%s", f, err, out)
 		}
@@ -30,8 +30,8 @@ func TestInstallOpencodeFreshThenUpToDate(t *testing.T) {
 			t.Fatalf("second install rc=%d", rc)
 		}
 	})
-	if strings.Count(out, "up-to-date") != 3 {
-		t.Errorf("second install should leave all three files alone:\n%s", out)
+	if strings.Count(out, "up-to-date") != 4 {
+		t.Errorf("second install should leave all four files alone:\n%s", out)
 	}
 }
 
