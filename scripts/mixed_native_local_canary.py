@@ -227,7 +227,8 @@ class MixedCanary(ResumeCanary):
 
     def check_codex_identity(self, meta):
         self.result["codexRolloutVersion"] = meta.get("cli_version")
-        self.check("ordinary_codex_cli", meta.get("source") == "cli")
+        # Codex 0.163.0 records an ordinary interactive CLI thread as "vscode"
+        self.check("ordinary_codex_cli", meta.get("source") in ("cli", "vscode"))
         self.check("codex_rollout_version_matches_expected", meta.get("cli_version") == self.args.expected_codex_version)
 
     def run(self):

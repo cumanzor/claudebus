@@ -17,7 +17,7 @@ import sys
 import time
 import uuid
 
-from codex_cli_resume_canary import ResumeCanary, process_descendants, process_exists
+from codex_cli_resume_canary import ResumeCanary, is_native_codex, process_descendants, process_exists
 
 
 class PresenceCanary(ResumeCanary):
@@ -67,7 +67,7 @@ class PresenceCanary(ResumeCanary):
         self.wait(lambda: self.consumer().get("state") == "online", "exact writer ownership")
         initial = self.status()
         original_tree = process_descendants(self.process.pid)
-        original_native = {r["pid"] for r in original_tree if Path(r["comm"]).name == "codex"}
+        original_native = {r["pid"] for r in original_tree if is_native_codex(r)}
         self.check("owner_is_actual_native_cli", self.consumer().get("frontend", self.consumer()).get("pid") in original_native)
         self.check("explicit_store_did_not_claim_parent_pid", connected["config"].get("RuntimePID", 0) == 0)
         self.check_events(["join"])
@@ -114,7 +114,7 @@ class PresenceCanary(ResumeCanary):
         self.start_cli(resume=True)
         self.wait(lambda: self.consumer().get("state") == "online", "automatic exact-thread resume discovery")
         resumed_tree = process_descendants(self.process.pid)
-        resumed_native = {r["pid"] for r in resumed_tree if Path(r["comm"]).name == "codex"}
+        resumed_native = {r["pid"] for r in resumed_tree if is_native_codex(r)}
         self.check("resume_owner_is_new_native_cli", self.consumer().get("frontend", self.consumer()).get("pid") in resumed_native
                    and not resumed_native & original_native)
         self.check_events(["join", "departed", "join"])

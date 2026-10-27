@@ -50,6 +50,13 @@ def process_descendants(pid):
     return [rows[key] for key in sorted(selected) if key in rows]
 
 
+def is_native_codex(row):
+    """A native codex process, by comm or argv[0]. ps truncates comm to a short
+    prefix of a long path, as for the vendor binary of an npm-installed Codex."""
+    argv0 = row["args"].split(None, 1)[0] if row["args"] else ""
+    return Path(row["comm"]).name == "codex" or Path(argv0).name == "codex"
+
+
 def process_exists(pid):
     try:
         os.kill(pid, 0)
@@ -139,7 +146,7 @@ class ResumeCanary(Canary):
         self.result["originalProcessTree"] = tree
         frontend = [row for row in tree if " app-server " not in row.get("args", "")]
         self.result["originalFrontendProcessTree"] = frontend
-        self.check("ordinary_native_cli_process_observed", any(Path(row["comm"]).name == "codex" for row in tree))
+        self.check("ordinary_native_cli_process_observed", any(is_native_codex(row) for row in tree))
         os.write(self.master, b"/quit")
         self.pump(.4)  # Let the TUI's paste-burst detector settle before Enter.
         os.write(self.master, b"\r")
@@ -314,8 +321,8 @@ class ResumeCanary(Canary):
             self.check("same_managed_backend_and_new_frontend", current["pid"] == prior["pid"]
                        and current["frontend"]["pid"] != prior["frontend"]["pid"])
         resumed_tree = process_descendants(self.process.pid)
-        original_native = {row["pid"] for row in self.result["originalProcessTree"] if Path(row["comm"]).name == "codex"}
-        resumed_native = {row["pid"] for row in resumed_tree if Path(row["comm"]).name == "codex"}
+        original_native = {row["pid"] for row in self.result["originalProcessTree"] if is_native_codex(row)}
+        resumed_native = {row["pid"] for row in resumed_tree if is_native_codex(row)}
         self.check("resumed_native_cli_pid_changed", bool(resumed_native) and not resumed_native & original_native)
         self.result.update(initialConnection=initial_connection, afterResume=self.status(),
                            daemonBefore=daemon_before, daemonAfter=daemon_after,
