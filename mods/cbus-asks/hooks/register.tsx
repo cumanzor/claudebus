@@ -4,7 +4,7 @@ import type { Register } from 'claude-code'
 import type { Asks } from '../types'
 import type { AskInput } from './asks'
 import type { Ask } from '../types'
-import { addAsk, BAND_ROWS, draftPart, EMPTY, normId, openNote, optionLabel, resolveAsk } from './asks'
+import { addAsk, BAND_ROWS, draftPart, EMPTY, normId, openNote, optionLabel, paneHotkeys, resolveAsk } from './asks'
 
 const PANE = 'cbus-asks'
 
@@ -114,8 +114,8 @@ export const register: Register = on => {
       await $.ui.close({ id: PANE })
       return { text: 'Questions pane closed.' }
     }
-    await $.ui.open({ id: PANE, title: 'Questions for you' })
-    return { text: 'Questions pane opened.' }
+    await $.ui.open({ id: PANE, title: 'Questions for you', focus: true, closeOnEscape: true })
+    return { text: 'Questions pane opened. Number keys pick an answer, Esc closes.' }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -147,6 +147,7 @@ export const register: Register = on => {
       const { text } = await $.prompt.read()
       await $.prompt.fill({ text: draftPart(text, ask, opt), mode: 'append' })
     }
+    const hotkeys = paneHotkeys(open)
     return (
       <Box flexDirection="column" rowGap={1}>
         {open.length === 0 && <Text dimColor>Nothing is waiting on you.</Text>}
@@ -161,9 +162,17 @@ export const register: Register = on => {
             {ask.context && <Text dimColor>{ask.context}</Text>}
             {ask.options.length > 0 && (
               <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-                {ask.options.map((opt, i) => (
-                  <Button key={`${ask.id}:${i}`} label={optionLabel(ask, opt)} onPress={pick(ask, opt)} />
-                ))}
+                {ask.options.map((opt, i) => {
+                  const key = hotkeys.get(`${ask.id}:${i}`)
+                  return (
+                    <Button
+                      key={`${ask.id}:${i}`}
+                      label={optionLabel(ask, opt)}
+                      onPress={pick(ask, opt)}
+                      {...(key ? { hotkey: key, plain: true } : {})}
+                    />
+                  )
+                })}
               </Box>
             )}
           </Box>
@@ -178,7 +187,7 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        <Button key="close" label="Close" onPress={() => $.ui.close({ id: PANE })} />
+        <Text dimColor>Number keys add an answer to your draft; Esc closes.</Text>
       </Box>
     )
   })

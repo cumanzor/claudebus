@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { RenderElement } from 'claude-code'
 import type { TestBody } from 'claude-code/testing'
 
-import { addAsk, draftPart, EMPTY, normId, openNote, resolveAsk } from './asks'
+import { addAsk, draftPart, EMPTY, normId, openNote, paneHotkeys, resolveAsk } from './asks'
 
 const AT = '2026-10-30T22:00:00Z'
 
@@ -57,6 +57,19 @@ test('a button press joins what the user already typed', () => {
   expect(draftPart('q2: develop, ', q1, 'yes')).toBe('q1: yes')
 })
 
+test('pane hotkeys number options in reading order and stop at 9', () => {
+  const keys = paneHotkeys(two().open)
+  expect([...keys.entries()].map(([k, v]) => `${k}=${v}`).join(',')).toBe('q1:0=1,q1:1=2,q2:0=3,q2:1=4')
+  const many = addAsk(EMPTY, { question: 'x', options: ['a', 'b', 'c', 'd', 'e', 'f'] }, AT)
+  if ('error' in many) throw new Error(many.error)
+  const more = addAsk(many.state, { question: 'y', options: ['a', 'b', 'c', 'd', 'e', 'f'] }, AT)
+  if ('error' in more) throw new Error(more.error)
+  const big = paneHotkeys(more.state.open)
+  expect(big.size).toBe(9)
+  expect(big.get('q2:2')).toBe('9')
+  expect(big.get('q2:3')).toBe(undefined)
+})
+
 const BAND = {
   plugin: 'cbus-asks',
   component: 'AbovePrompt',
@@ -92,7 +105,7 @@ test('the band shows the question, the pane its buttons, resolve clears both', a
   await band.unmount()
 
   const pane = await $.ui.mount(PANE)
-  expect(await pane.find({ type: 'Button', key: 'q1:0' })).toBeTruthy()
+  expect((await pane.find({ type: 'Button', key: 'q1:0' }))?.props.hotkey).toBe('1')
   expect((await pane.find({ type: 'Text', text: 'release is frozen' }))?.text).toBe('release is frozen')
   await pane.unmount()
 
@@ -113,4 +126,16 @@ test('the band stops at three questions and counts the rest', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: 'Question 4?' })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /more/ }))?.text).toBe('+2 more in /asks')
   await ui.unmount()
+})
+
+test('/asks opens the pane with the keyboard and Esc to close', async ($, on) => {
+  const opened: unknown[] = []
+  on('ui.open', (_, e) => {
+    opened.push(e)
+    return { value: { isPlaced: true } }
+  })
+  await boot($, on)
+  const out = await $.command.run({ command: 'asks', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  expect(out.text).toContain('Esc closes')
+  expect(opened[0]).toEqual({ id: 'cbus-asks', title: 'Questions for you', focus: true, closeOnEscape: true })
 })

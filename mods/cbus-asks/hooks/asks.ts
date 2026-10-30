@@ -96,3 +96,13 @@ export const draftPart = (draft: string, ask: Ask, opt: string) => {
   const sep = draft.trim() === '' ? '' : /[\s,;]$/.test(draft) ? '' : '; '
   return `${sep}${ask.id}: ${opt}`
 }
+
+// digits 1-9 across every option in the pane, in reading order; the rest get none
+export const paneHotkeys = (open: readonly Ask[]): Map<string, string> => {
+  const keys = new Map<string, string>()
+  for (const ask of open)
+    ask.options.forEach((_, i) => {
+      if (keys.size < 9) keys.set(`${ask.id}:${i}`, String(keys.size + 1))
+    })
+  return keys
+}
