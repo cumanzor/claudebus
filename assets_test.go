@@ -131,6 +131,10 @@ func TestModsEmbedMatchesSource(t *testing.T) {
 			}
 			return nil
 		}
+		// written by Claude Code beside a mod loaded from this checkout; gitignored, never installed
+		if strings.HasSuffix(p, "/tsconfig.json") && strings.Count(p, "/") == 2 {
+			return nil
+		}
 		got = append(got, p)
 		emb, _ := fs.ReadFile(Mods, p)
 		src, err := os.ReadFile(filepath.FromSlash(p))

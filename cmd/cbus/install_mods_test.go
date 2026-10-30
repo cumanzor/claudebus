@@ -70,6 +70,7 @@ func TestInstallModsSkipsGeneratedTypes(t *testing.T) {
 		"mods/demo/.claude-plugin/types/claude-code/index.d.ts": {Data: []byte("// generated")},
 		"mods/demo/hooks/register.ts":                           {Data: []byte("export const register = () => {}")},
 		"mods/demo/hooks/demo.test.ts":                          {Data: []byte("test")},
+		"mods/demo/tsconfig.json":                               {Data: []byte(`{"extends":"./.claude-plugin/types/tsconfig.json"}`)},
 	}
 	dst := t.TempDir()
 	keep := filepath.Join(dst, "demo", ".claude-plugin", "types", "claude-code", "index.d.ts")
