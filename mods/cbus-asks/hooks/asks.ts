@@ -106,3 +106,17 @@ export const paneHotkeys = (open: readonly Ask[]): Map<string, string> => {
     })
   return keys
 }
+
+// explicit "qN: answer" parts of a prompt, each running to the next "qM:"; bare "1 yes" is left to the model
+export const parseAnswers = (text: string): { id: string; answer: string }[] => {
+  const marks = [...text.matchAll(/(?:^|[\s;,(])q(\d+)\s*:/gi)]
+  return marks.map((m, i) => {
+    const start = (m.index ?? 0) + m[0].length
+    const stop = marks[i + 1]?.index ?? text.length
+    const answer = text.slice(start, stop).trim().replace(/[\s;,.]+$/, '')
+    return { id: `q${Number(m[1])}`, answer }
+  }).filter(a => a.answer !== '')
+}
+
+export const statusLine = (open: readonly Ask[]) =>
+  open.length === 0 ? undefined : `${open.length} waiting on you · /asks`

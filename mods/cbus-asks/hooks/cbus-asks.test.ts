@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { RenderElement } from 'claude-code'
 import type { TestBody } from 'claude-code/testing'
 
-import { addAsk, draftPart, EMPTY, normId, openNote, paneHotkeys, resolveAsk } from './asks'
+import { addAsk, draftPart, EMPTY, normId, openNote, paneHotkeys, parseAnswers, resolveAsk, statusLine } from './asks'
 
 const AT = '2026-10-30T22:00:00Z'
 
@@ -70,6 +70,22 @@ test('pane hotkeys number options in reading order and stop at 9', () => {
   expect(big.get('q2:3')).toBe(undefined)
 })
 
+test('explicit qN: answers parse out of a prompt, bare ones do not', () => {
+  const said = 'q3: own commit q4: add it q5: probably stay in the "queue" for now. q6: hidden, shows in the asks pane.'
+  expect(parseAnswers(said).map(a => `${a.id}=${a.answer}`).join('|')).toBe(
+    'q3=own commit|q4=add it|q5=probably stay in the "queue" for now|q6=hidden, shows in the asks pane',
+  )
+  expect(parseAnswers('q1: yes; q2: develop').map(a => a.id).join(',')).toBe('q1,q2')
+  expect(parseAnswers('1 yes, 2 develop')).toEqual([])
+  expect(parseAnswers('see faq2: nothing')).toEqual([])
+  expect(parseAnswers('q1:')).toEqual([])
+})
+
+test('status line counts what is open', () => {
+  expect(statusLine([])).toBe(undefined)
+  expect(statusLine(two().open)).toBe('2 waiting on you · /asks')
+})
+
 const BAND = {
   plugin: 'cbus-asks',
   component: 'AbovePrompt',
@@ -91,7 +107,13 @@ const boot = async (...[$, on]: Parameters<TestBody>) => {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('clock.now', () => ({ value: Date.parse('2026-10-30T22:00:00Z') }))
   on('ui.render', ($, e) => h($.ui.resolve(e).Text, null, 'engine') as RenderElement)
+  const statuses: (string | undefined)[] = []
+  on('ui.status', (_, e) => {
+    statuses.push(e.text)
+    return { value: undefined }
+  })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  return statuses
 }
 
 test('the band shows the question, the pane its buttons, resolve clears both', async ($, on) => {
@@ -138,4 +160,38 @@ test('/asks opens the pane with the keyboard and Esc to close', async ($, on) =>
   const out = await $.command.run({ command: 'asks', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
   expect(out.text).toContain('Esc closes')
   expect(opened[0]).toEqual({ id: 'cbus-asks', title: 'Questions for you', focus: true, closeOnEscape: true })
+})
+
+test('a prompt with qN: answers closes them before the model reads it', async ($, on) => {
+  const seen: string[][] = []
+  on('prompt.submit', (_, e) => {
+    seen.push([...(e.context ?? [])])
+    return { text: e.text } as never
+  })
+  const statuses = await boot($, on)
+  await $.tool.call({ tool: 'mcp__cbus-asks__ask', question: 'Ship it?', options: ['yes', 'no'] })
+  await $.tool.call({ tool: 'mcp__cbus-asks__ask', question: 'Which branch?' })
+  expect(statuses.at(-1)).toBe('2 waiting on you · /asks')
+  await $.prompt.submit({ text: 'q1: yes, and 2 is main', wait: false, origin: { kind: 'composer' } })
+  const ctx = (seen[0] ?? []).join('\n')
+  expect(ctx).toContain('closed them already')
+  expect(ctx).toContain('q1: yes, and 2 is main')
+  expect(ctx).toContain('q2: Which branch?')
+  expect(statuses.at(-1)).toBe('1 waiting on you · /asks')
+  const band = await $.ui.mount(BAND)
+  expect(await band.find({ type: 'Text', text: 'Ship it?' })).toBeFalsy()
+  expect((await band.find({ type: 'Text', text: 'Which branch?' }))?.text).toBe('Which branch?')
+  await band.unmount()
+})
+
+test('/asks clear closes every open question', async ($, on) => {
+  const statuses = await boot($, on)
+  await $.tool.call({ tool: 'mcp__cbus-asks__ask', question: 'One?' })
+  await $.tool.call({ tool: 'mcp__cbus-asks__ask', question: 'Two?' })
+  const out = await $.command.run({ command: 'asks', args: 'clear', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  expect(out.text).toBe('Cleared q1, q2.')
+  expect(statuses.at(-1)).toBe(undefined)
+  const band = await $.ui.mount(BAND)
+  expect(await band.find({ type: 'Text', text: 'One?' })).toBeFalsy()
+  await band.unmount()
 })

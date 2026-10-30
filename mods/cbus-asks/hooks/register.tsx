@@ -4,7 +4,7 @@ import type { Register } from 'claude-code'
 import type { Asks } from '../types'
 import type { AskInput } from './asks'
 import type { Ask } from '../types'
-import { addAsk, BAND_ROWS, draftPart, EMPTY, normId, openNote, optionLabel, paneHotkeys, resolveAsk } from './asks'
+import { addAsk, BAND_ROWS, draftPart, EMPTY, normId, openNote, optionLabel, paneHotkeys, parseAnswers, resolveAsk, statusLine } from './asks'
 
 const PANE = 'cbus-asks'
 
@@ -16,7 +16,7 @@ const now = async ($: { clock: { now: () => Promise<number> } }) =>
 
 // runs a transition under update's retry and hands back the last attempt's outcome
 const apply = async <T extends object>(
-  $: Parameters<typeof read>[0],
+  $: Parameters<typeof read>[0] & { ui: { status: (text: string | undefined) => void } },
   step: (s: Asks) => ({ state: Asks } & T) | { error: string },
 ): Promise<T | { error: string }> => {
   const box: { out: ({ state: Asks } & T) | { error: string } } = { out: { error: 'not run' } }
@@ -24,6 +24,7 @@ const apply = async <T extends object>(
     box.out = step(s)
     return 'error' in box.out ? s : box.out.state
   })
+  if (!('error' in box.out)) $.ui.status(statusLine(box.out.state.open))
   return box.out
 }
 
@@ -69,9 +70,10 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'asks',
-      description: 'Open the questions pane with answer buttons; "/asks drop q2" closes a question, "/asks close" the pane',
-      argumentHint: '[drop <id> | close]',
+      description: 'Open the questions pane with answer buttons; "/asks drop q2" closes a question, "/asks clear" all of them, "/asks close" the pane',
+      argumentHint: '[drop <id> | clear | close]',
     })
+    $.ui.status(statusLine((await read($, asks)).open))
     return next(e)
   })
 
@@ -97,9 +99,18 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     if (e.isMeta || e.command) return next(e)
+    const at = await now($)
+    const closed: string[] = []
+    for (const { id, answer } of parseAnswers(e.text)) {
+      const out = await apply($, s => resolveAsk(s, id, answer, at))
+      if (!('error' in out)) closed.push(`${out.ask.id}: ${out.ask.answer}`)
+    }
+    const notes = [...(e.context ?? [])]
+    if (closed.length > 0)
+      notes.push(`The user answered these in this prompt and cbus-asks closed them already; act on the answers, no resolve call needed:\n${closed.join('\n')}`)
     const note = openNote((await read($, asks)).open)
-    if (!note) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), note] })
+    if (note) notes.push(note)
+    return notes.length === (e.context ?? []).length ? next(e) : next({ ...e, context: notes })
   })
 
   on('command.run', { command: 'asks' }, async ($, e) => {
@@ -109,6 +120,12 @@ export const register: Register = on => {
       const at = await now($)
       const out = await apply($, s => resolveAsk(s, rawId, 'dropped by the user', at))
       return { text: 'error' in out ? out.error : `${out.ask.id} dropped.` }
+    }
+    if (verb === 'clear') {
+      const at = await now($)
+      const ids = (await read($, asks)).open.map(a => a.id)
+      for (const id of ids) await apply($, s => resolveAsk(s, id, 'cleared by the user', at))
+      return { text: ids.length ? `Cleared ${ids.join(', ')}.` : 'Nothing to clear.' }
     }
     if (verb === 'close') {
       await $.ui.close({ id: PANE })
