@@ -324,6 +324,10 @@ Saved formations preserve Codex harness/backend identity. Automated Codex format
 restore currently refuses with manual exact-thread resume/connect guidance;
 it never substitutes a fresh Claude session when a Codex transcript is absent.
 
+The Claude Code mods (`cbus-compact`, `cbus-asks`) have no Codex equivalent:
+peer messages reach a Codex session as full frames, and its questions stay in
+the reply.
+
 ## Existing launch and bridge compatibility
 
 The bus is harness-neutral: a Codex CLI session can hold a channel alias the

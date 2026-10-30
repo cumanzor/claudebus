@@ -62,17 +62,23 @@ release is installed by the first update to that release. Use the single verbs
 without `--force` to keep a locally edited command, role or mod.
 
 **Claude Code mods.** Claude Code 2.1.287 and later loads function-hook plugins
-("mods") from `~/.claude/skills/<name>/`. cbus ships one:
+("mods") from `~/.claude/skills/<name>/`. cbus ships two. Both are Claude Code
+only: Codex CLI and OpenCode have no equivalent hook, so their sessions on the same
+channel see raw frames and keep asking in prose. Nothing in the bus protocol
+depends on a mod.
 
 - `cbus-compact` redraws a peer message in the transcript as one line,
   `▸ [14:02] from bob: got it, on it now`, and a presence event as
   `▸ [14:02] bob joined`. Only the drawing changes: the model still reads the full
   frame, including the `from=` address it replies to. ctrl+o shows the raw frame.
   Times are local, from the host's UTC offset read once per session.
+- `cbus-asks` keeps the questions a session is waiting on you for in a band above
+  the prompt, so they survive peer traffic and narration. See
+  [Questions for you](claude.md#questions-for-you-cbus-asks).
 
 `install-mods` writes each file sha-guarded like the other verbs, never ships the
-mod's tests, and leaves the `.claude-plugin/types/` folder Claude Code generates
-alone. A CCS profile whose `skills` directory is not shared with `~/.claude/skills`
+mod's tests, and leaves alone the `.claude-plugin/types/` folder and `tsconfig.json`
+Claude Code generates beside a loaded mod. A CCS profile whose `skills` directory is not shared with `~/.claude/skills`
 needs `--path "$CLAUDE_CONFIG_DIR/skills"`. To remove a mod, delete its folder.
 
 The install verbs are content-guarded: an unchanged file is left alone, a locally-edited
