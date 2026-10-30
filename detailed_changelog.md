@@ -4,6 +4,69 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-30 23:14:39 UTC] [Mods/Feature] cbus-asks: open questions above the prompt
+
+[Attempt #1] Files: mods/cbus-asks/ (plugin.json, types/index.d.ts,
+hooks/asks.ts, hooks/register.tsx, hooks/cbus-asks.test.ts);
+cmd/cbus/install_assets.go and install_mods_test.go (skip the generated
+tsconfig.json); assets_test.go (embed set); .gitignore; docs/install.md,
+docs/claude.md, docs/codex.md, docs/opencode.md, README.md, CHEATSHEET.md.
+
+[What changed]
+- An orchestrator's questions for the user ended up mid-reply, then got
+  buried under peer traffic, and later turns only said "my question about
+  X is still open" without restating it. The mod gives the model an `ask`
+  tool (question, options, recommended, context; returns q1, q2, ...), a
+  `resolve` tool, and a deferred `list`. `ask` and `resolve` are in the
+  tool list from the first turn.
+- Open questions draw in the AbovePrompt band, which shows at any terminal
+  width (a Pane only opens unasked from 110 to 144 columns, too wide for a
+  formation pane). The band holds the question text, at most three, then a
+  "+N more" line, and no buttons, so a digit typed into an empty prompt
+  stays a digit. A status line entry carries the count to surfaces without
+  the band.
+- `/asks` opens a pane with each question's context and its options as
+  buttons numbered 1-9. It requests focus and closes on Esc, so it works
+  in tmux or over ssh without a mouse. A press appends `qN: option` to the
+  draft.
+- `qN: answer` parts of a typed prompt close those questions before the
+  model reads it, and the model is told which ones closed. Live testing
+  showed the model acting on answers and forgetting `resolve`, so the
+  explicit form no longer depends on it. Bare answers ("1 yes") still go
+  through the model, which gets the open ids beside every prompt.
+- `/asks drop <id>`, `/asks clear` and `/asks close` let the user manage
+  it without the model.
+- State is `$.state` under the shape tag asks-1: it survives a mod reload,
+  not a new session.
+- Loading a mod from the checkout with --plugin-dir makes Claude Code write
+  tsconfig.json at the mod root. go:embed ignores .gitignore, so a build
+  from that checkout would have shipped it. install-mods and the embed
+  test now skip it like .claude-plugin/types.
+
+[Possible Ripple Effects]
+- Every Claude Code session with the mod installed carries the two tool
+  schemas in its prompt. Nothing else changes in sessions that never call
+  them.
+- A prompt that happens to contain "q3: ..." while q3 is open closes q3.
+- Claude Code only. Codex and OpenCode seats keep asking in prose; the
+  docs now say so for both mods.
+- Roles and skills don't mention the tools yet. That change goes with the
+  narration work.
+
+[Testing Notes]
+- claude plugin validate and claude plugin test mods/cbus-asks: 13 pass.
+  Hook-level tests drive ask, the band, the pane's numbered buttons,
+  resolve by a bare "1", the three-row cap, /asks focus and Esc, a prompt
+  with `q1: yes` closing q1 before the model reads it, /asks clear, and the
+  status line count.
+- Mutants: band never draws (fails on the question lookup); auto-close
+  disabled (fails on "closed them already").
+- tsc strict over the mod and the engine types: clean.
+- go test ./ ./cmd/cbus: pass, including the generated tsconfig.json case
+  failing first on the old installer.
+- Live in a Claude Code session: questions filed, band, pane, number keys,
+  Esc, answers by `qN:` and the overflow line all checked by hand.
+
 ## [2026-10-26 18:46:28 UTC] [OpenCode/Fix] Fixes from a review of the OpenCode stack
 
 [Attempt #1] Files: internal/client/daemon_opencode_watch.go (no watch for an
