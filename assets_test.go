@@ -145,6 +145,12 @@ func TestModsEmbedMatchesSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"mods/cbus-asks/.claude-plugin/plugin.json",
+		"mods/cbus-asks/hooks/asks.ts",
+		"mods/cbus-asks/hooks/cbus-asks.test.ts",
+		"mods/cbus-asks/hooks/hooks.json",
+		"mods/cbus-asks/hooks/register.tsx",
+		"mods/cbus-asks/types/index.d.ts",
 		"mods/cbus-compact/.claude-plugin/plugin.json",
 		"mods/cbus-compact/hooks/cbus-compact.test.ts",
 		"mods/cbus-compact/hooks/frame.ts",
