@@ -90,7 +90,7 @@ class PresenceCanary(ResumeCanary):
         self.check("real_presence_join_is_model_visible_with_user_notice_and_no_bus_reply",
                    len(visitor_inputs) == 1 and all(text in visitor_inputs[0] for text in (
                        "from=cli-resume-canary/visitor", "kind=presence", 'event="join"',
-                       "Briefly tell the user which peer joined, left, departed or was renamed",
+                       "Update your known channel roster silently",
                        "Do not send a bus reply or acknowledgment solely for this event.")))
         accepted_before = self.status()["accepted"]
         daemon_before = json.loads(self.command(["daemon", "status", "--json"]).stdout)

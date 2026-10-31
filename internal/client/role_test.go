@@ -204,6 +204,9 @@ func TestSpawnRoleNamesTheSpawnerAsCoordinator(t *testing.T) {
 	if !strings.Contains(prompt, delegationOutOfEffort) || !strings.Contains(prompt, delegationReserved) {
 		t.Fatalf("spawn --role must carry the out-of-effort and reserved lines:\n%s", prompt)
 	}
+	if !strings.Contains(prompt, "Questions for the operator go to dev/lead on the bus") {
+		t.Fatalf("a seat with a coordinator must route its questions to it:\n%s", prompt)
+	}
 	if strings.Index(prompt, "--- delegation ---") < strings.Index(prompt, "## Mission") {
 		t.Fatalf("delegation must follow the role brief:\n%s", prompt)
 	}
@@ -270,7 +273,7 @@ func TestSpawnRoleFixesTheEffortAndOrchestratorCoordinates(t *testing.T) {
 			t.Fatal(err)
 		}
 		prompt := f.spec.Argv[len(f.spec.Argv)-1]
-		if !strings.Contains(prompt, "You coordinate every peer whose launch prompt names you as its coordinator") || !strings.Contains(prompt, delegationCoordNoEff) {
+		if !strings.Contains(prompt, "You coordinate every peer whose launch prompt names you as its coordinator") || !strings.Contains(prompt, delegationCoordNoEff) || !strings.Contains(prompt, "setting from to the seat that asked") {
 			t.Fatalf("%s: spawn --role orchestrator must get the coordinator side:\n%s", addr, prompt)
 		}
 		if strings.Contains(prompt, "Your coordinator is") || strings.Contains(prompt, "No coordinator is named") {

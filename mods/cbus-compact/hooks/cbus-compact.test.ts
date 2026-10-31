@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
+import type { RenderElement } from 'claude-code'
 
-import { clock, compact, parseOffset } from './frame'
+import { clock, compact, parseOffset, presenceOnly } from './frame'
 
 const frame = (body: string, opts: { from?: string; to?: string; kind?: string } = {}) => {
   const from = opts.from ?? 'dev/bob'
@@ -27,7 +28,7 @@ test('cross-channel sender keeps its channel', () => {
 
 test('presence collapses and drops the guidance', () => {
   const t = frame('CLI session connected (or resumed)', { kind: 'presence' }) +
-    '\nThis is a cbus presence notification (event="join"). Briefly tell the user which peer joined.'
+    '\nThis is a cbus presence notification (event="join"). Update your known channel roster silently.'
   expect(compact(t)).toBe('▸ [10:00] bob joined')
 })
 
@@ -68,5 +69,46 @@ test('rewrites the row when collapsed, passes when expanded', async ($, on) => {
       expect(seen.startsWith('▸ [10:00] from bob: got it')).toBe(!isExpanded)
       await ui.unmount()
     }
+  }
+})
+
+test('presence-only means every frame is presence', () => {
+  const join = frame('CLI session connected', { kind: 'presence' })
+  expect(presenceOnly(join)).toBe(true)
+  expect(presenceOnly(join + frame('hi'))).toBe(false)
+  expect(presenceOnly('plain prompt')).toBe(false)
+})
+
+const presence = frame('CLI session connected (or resumed)', { kind: 'presence' }) + '\nThis is a cbus presence notification (event="join"). Update your known channel roster silently.'
+const LONG = 'The reviewer leaving changes the plan: ' + 'x'.repeat(300)
+
+const turn = async ($: any, id: string, text: string, answer: string, tools = 0) => {
+  await $.turn.start({ text, turnId: id })
+  for (let i = 0; i < tools; i++) await $.tool.call({ tool: 'Bash', command: 'cbus list acc' })
+  await $.turn.complete({ turnId: id, answer, durationMs: 1, isAborted: false, reason: 'answer' })
+}
+
+test('the short reply to a presence-only delivery is hidden; anything else is drawn', async ($, on) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('tool.call', () => ({ result: {} }) as never)
+  on('ui.render', ($, e) => h($.ui.resolve(e).Text, null, 'text' in e.props ? String(e.props.text) : 'engine') as RenderElement)
+  await turn($, 't1', presence, 'Roster updated. Still waiting for the diff.')
+  await turn($, 't2', presence, 'Roster checked, still waiting.', 1)
+  await turn($, 't3', presence, LONG)
+  await turn($, 't4', presence + frame('step 1 green'), 'Coder is on step 2.')
+  await turn($, 't5', 'what is the status?', 'Still waiting.')
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const drawn = async (text: string) => {
+      const ui = await $.ui.mount({ plugin: 'cbus-compact', surface, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+      const row = await ui.find({ type: 'Text', text })
+      await ui.unmount()
+      return Boolean(row)
+    }
+    expect(await drawn('Roster updated. Still waiting for the diff.')).toBe(false)
+    expect(await drawn('Roster checked, still waiting.')).toBe(true)
+    expect(await drawn(LONG)).toBe(true)
+    expect(await drawn('Coder is on step 2.')).toBe(true)
+    expect(await drawn('Still waiting.')).toBe(true)
   }
 })

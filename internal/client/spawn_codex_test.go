@@ -55,8 +55,8 @@ func TestCodexSpawnIsIndependentOfTerminalAndParentHarness(t *testing.T) {
 		if !strings.Contains(prompt, " connect 'codex-test' '"+alias+"' --json") || !strings.Contains(prompt, "do not start a Monitor") {
 			t.Fatalf("wrong bootstrap: %s", prompt)
 		}
-		if !strings.Contains(prompt, " list 'codex-test' once") || !strings.Contains(prompt, "role unknown") || !strings.Contains(prompt, "Briefly tell the user") {
-			t.Fatalf("spawned peer lacks roster and visible presence guidance: %s", prompt)
+		if !strings.Contains(prompt, " list 'codex-test' once") || !strings.Contains(prompt, "role unknown") || !strings.Contains(prompt, "do not restate it to them") || !strings.Contains(prompt, "do not restate or summarize one") {
+			t.Fatalf("spawned peer lacks roster, presence or no-restating guidance: %s", prompt)
 		}
 	}
 }

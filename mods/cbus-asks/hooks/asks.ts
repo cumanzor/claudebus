@@ -10,6 +10,7 @@ export type AskInput = {
   options?: unknown
   recommended?: unknown
   context?: unknown
+  from?: unknown
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
@@ -36,6 +37,7 @@ export const addAsk = (
   if (recommended && options.length > 0 && !options.includes(recommended))
     return { error: `recommended must be one of the options: ${options.join(', ')}` }
   const context = str(input.context)
+  const from = str(input.from)
   const seq = s.seq + 1
   const ask: Ask = {
     id: `q${seq}`,
@@ -44,6 +46,7 @@ export const addAsk = (
     at,
     ...(recommended ? { recommended } : {}),
     ...(context ? { context } : {}),
+    ...(from ? { from } : {}),
   }
   return { state: { ...s, seq, open: [...s.open, ask] }, ask }
 }
@@ -76,9 +79,12 @@ export const optionLabel = (ask: Ask, opt: string) =>
 
 export const BAND_ROWS = 3
 
+// "q3 (coder)": the seat a coordinator is asking for, by alias
+export const label = (ask: Ask) => (ask.from ? `${ask.id} (${ask.from.split('/').pop()})` : ask.id)
+
 export const describe = (ask: Ask) => {
   const opts = ask.options.map(o => optionLabel(ask, o)).join(' / ')
-  return `${ask.id}: ${ask.question}${opts ? ` [${opts}]` : ''}`
+  return `${ask.id}${ask.from ? ` (from ${ask.from})` : ''}: ${ask.question}${opts ? ` [${opts}]` : ''}`
 }
 
 // what the model reads beside a user prompt while questions are open

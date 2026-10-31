@@ -76,9 +76,9 @@ tested 0.154.0 lifecycle, rejoining or cold-resuming the thread alone preserved
 that pause, even with public status `idle`; a subsequent user turn had to complete
 before queued input drained. No model calls are used to maintain an idle
 connection. Real peer join, disconnect, exit and resume events become
-model-visible presence notices. Codex briefly tells the user who joined, left,
-departed or was renamed and updates its known roster and role assignments. It
-does not send bus acknowledgments or greetings for these events, or repeat roster
+model-visible presence notices. Codex updates its known roster and role
+assignments without restating the event to the user, who sees it in the same
+conversation, unless it changes the plan. It does not send bus acknowledgments or greetings for these events, or repeat roster
 reads after each event. These notices can incur a recipient turn; they are not
 periodic maintenance calls. Queued notices retain their event timestamps and
 describe observed transitions, not a fresh liveness check. Completed-compaction

@@ -32,12 +32,13 @@ the bus scope.
 The connection result also reports observed CLI consumer state separately from
 queue state. `unknown` is inconclusive, not a confirmed exit. Actual join/leave
 presence notices can invoke a recipient turn; no periodic model turn is used.
-For join, leave, departed or rename events, briefly tell the user which peer
-changed (and its explicitly known role), then update the known roster: joins add,
-leave/departed mark unavailable, and renames update the address. Keep the event's
-observation time in mind when processing queued notices. This is a user-facing
-notice, not a bus reply: do not send acknowledgments, greetings or roster requests
-solely because of presence. Completed-compaction notices update peer context,
+For join, leave, departed or rename events, update the known roster silently:
+joins add, leave/departed mark unavailable, and renames update the address. The
+user sees the event in this conversation, so do not restate it; mention it only
+when it changes the plan, for example a peer you are waiting on left. Keep the
+event's observation time in mind when processing queued notices. Do not send
+acknowledgments, greetings or roster requests solely because of presence. The
+same holds for peer messages: do not restate or summarize them for the user. Completed-compaction notices update peer context,
 not membership, and need no standalone user-facing reply. Use the initial roster
 and later events to maintain awareness; do not poll or repeat roster reads after
 each event.

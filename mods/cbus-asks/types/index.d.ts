@@ -1,6 +1,7 @@
 export type Ask = {
   id: string
   question: string
+  from?: string
   options: string[]
   recommended?: string
   context?: string
