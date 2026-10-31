@@ -54,6 +54,11 @@ save-formation command.
   double-launching.
 - Apply claims the same launch-intent marker `formation resume` uses before
   it resumes a peer, so a second apply before the child joins is refused.
+- A join or daemon connect under an alias the session did not reserve was
+  always recorded `origin=joined`, so a branch child joining a second
+  channel looked resumable there. Join now checks the session's own history
+  (metas in other channels, then self-recorded join/resume ledger lines)
+  and records `fork` when that session is fork-born.
 - A blank `mode` in a hand-written file still plans as template.
 
 [Possible Ripple Effects]
