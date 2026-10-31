@@ -148,6 +148,7 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 	}
 	live := liveSids()
 	addResumedSids(live, resumedSids())
+	addRegistrySids(live, registrySids())
 	return &PlanWorld{
 		Host:             host,
 		GitHead:          head,
@@ -165,8 +166,8 @@ func GatherPlanWorld(ch string) (*PlanWorld, error) {
 //
 // The limit, named rather than hidden: this sees sessions ON THE BUS. A live session
 // that never joined, or left, is invisible here, so GatherPlanWorld adds the ones a
-// running process resumes by sid (resumedSids). A fresh session that never joined
-// remains invisible.
+// running process resumes by sid (resumedSids) and the ones Claude Code's own
+// session registry lists as running (registrySids).
 func liveSids() map[string]string {
 	out := map[string]string{}
 	root := CBUSDir()

@@ -102,7 +102,7 @@ func TestHostOverrideRecordedInMetaLedgerAndFormation(t *testing.T) {
 			t.Errorf("ledger %s event host = %q, want laptop", ev.Event, ev.Host)
 		}
 	}
-	f, _, err := SaveFormation("hostpin", "cc", nil)
+	f, _, err := SaveFormation("hostpin", "cc", SaveOptions{})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}

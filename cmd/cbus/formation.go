@@ -84,7 +84,7 @@ func runFormationSave(args []string) int {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormationWith(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes})
+	f, rep, err := client.SaveFormation(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -115,12 +115,14 @@ func runFormationSave(args []string) int {
 		for _, a := range rep.Added {
 			added[a] = true
 		}
-		var resume, template []string
+		var resume, fork, template []string
 		for _, p := range f.Peers {
 			switch {
 			case !added[p.Alias]:
 			case p.Mode == client.ModeResume:
 				resume = append(resume, p.Alias)
+			case p.Mode == client.ModeFork:
+				fork = append(fork, p.Alias)
 			default:
 				template = append(template, p.Alias)
 			}
@@ -128,8 +130,11 @@ func runFormationSave(args []string) int {
 		if len(resume) > 0 {
 			fmt.Printf("  mode=resume (own transcript): %s\n", strings.Join(resume, ", "))
 		}
+		if len(fork) > 0 {
+			fmt.Printf("  mode=fork (set by --mode): %s\n", strings.Join(fork, ", "))
+		}
 		if len(template) > 0 {
-			fmt.Printf("  mode=template (fork-born, origin unknown or no session): %s\n", strings.Join(template, ", "))
+			fmt.Printf("  mode=template (fork-born, origin unknown, no session, or set by --mode): %s\n", strings.Join(template, ", "))
 		}
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the
