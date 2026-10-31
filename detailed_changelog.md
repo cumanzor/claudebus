@@ -7,7 +7,7 @@ previous repository and may not resolve.
 ## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
 
 [Attempt #1] Files: internal/client/formation_save.go (newPeerMode,
-SaveOptions, SaveFormationWith, setHandModes), cmd/cbus/formation.go (save
+SaveOptions, setHandModes), cmd/cbus/formation.go (save
 --mode, per-mode report lines), cmd/cbus/usage.go; docs and the
 save-formation command.
 
