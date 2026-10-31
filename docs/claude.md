@@ -134,6 +134,10 @@ Claude Code only; Codex and OpenCode seats are unaffected.
   are open, each prompt carries their ids to the model, which closes them.
 - `/asks drop q2` closes one question yourself, `/asks clear` all of them,
   `/asks close` the pane.
+- In a formation, only the coordinator uses the band. A seat whose launch prompt
+  names a coordinator sends its questions for you to that coordinator on the bus.
+  The coordinator answers what falls inside its delegation and files the rest,
+  shown with the seat that asked: `q3 (coder) Target develop or release?`.
 
 Questions live in the session's state. They survive a mod reload, not a new
 session. To try a checkout's copy in one session without installing it, start

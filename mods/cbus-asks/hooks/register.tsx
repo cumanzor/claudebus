@@ -4,7 +4,7 @@ import type { Register } from 'claude-code'
 import type { Asks } from '../types'
 import type { AskInput } from './asks'
 import type { Ask } from '../types'
-import { addAsk, BAND_ROWS, draftPart, EMPTY, normId, openNote, optionLabel, paneHotkeys, parseAnswers, resolveAsk, statusLine } from './asks'
+import { addAsk, BAND_ROWS, draftPart, EMPTY, label, normId, openNote, optionLabel, paneHotkeys, parseAnswers, resolveAsk, statusLine } from './asks'
 
 const PANE = 'cbus-asks'
 
@@ -36,7 +36,8 @@ export const register: Register = on => {
         'Put a question you are waiting on the user for in a band above their prompt, where it stays until resolved. ' +
         'Use it for every decision or approval you need from the user instead of leaving it in a reply, where peer traffic and narration bury it. ' +
         'Write the question so it stands alone: name the thing being decided and the choices, as if the user read nothing else you wrote. ' +
-        'Never write "my question about X is still open"; the band already shows it. Returns the id (q1, q2, ...).',
+        'Never write "my question about X is still open"; the band already shows it. ' +
+        'If your launch prompt names a coordinator, do not call this tool: send the question to the coordinator on the bus instead. A coordinator carrying a peer\'s question sets from to that seat. Returns the id (q1, q2, ...).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -44,6 +45,7 @@ export const register: Register = on => {
           options: { type: 'array', items: { type: 'string' }, maxItems: 6, description: 'Short answer labels, drawn as buttons in the /asks pane. Leave out for an open question.' },
           recommended: { type: 'string', description: 'The option you would pick; must be one of options.' },
           context: { type: 'string', description: 'One or two lines on why it matters, shown in the /asks pane.' },
+          from: { type: 'string', description: 'The seat that asked, as channel/alias, when you carry a peer\'s question.' },
         },
         required: ['question'],
       },
@@ -147,7 +149,7 @@ export const register: Register = on => {
         {shown.map(ask => (
           <Box key={ask.id} flexDirection="row" columnGap={1}>
             <Box flexShrink={0}>
-              <Text bold>{ask.id}</Text>
+              <Text bold>{label(ask)}</Text>
             </Box>
             <Text>{ask.question}</Text>
           </Box>
@@ -172,7 +174,7 @@ export const register: Register = on => {
           <Box key={ask.id} flexDirection="column">
             <Box flexDirection="row" columnGap={1}>
               <Box flexShrink={0}>
-                <Text bold>{ask.id}</Text>
+                <Text bold>{label(ask)}</Text>
               </Box>
               <Text>{ask.question}</Text>
             </Box>
