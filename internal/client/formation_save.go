@@ -233,15 +233,16 @@ func SaveFormationWith(name, ch string, opts SaveOptions) (*Formation, *SaveRepo
 			"(save it under a different name, or fix the channel field)", name, f.Channel, ch)
 	}
 
-	byAlias := make(map[string]*FormationPeer, len(f.Peers))
+	// indices, not pointers: appending a new peer below can reallocate f.Peers
+	byAlias := make(map[string]int, len(f.Peers))
 	for i := range f.Peers {
-		byAlias[f.Peers[i].Alias] = &f.Peers[i]
+		byAlias[f.Peers[i].Alias] = i
 	}
 	onChannel := make(map[string]bool, len(roster))
 	for _, r := range roster {
 		onChannel[r.Alias] = true
-		if p, ok := byAlias[r.Alias]; ok {
-			capturePeer(p, r, rep) // captured facts only; hand-edits survive
+		if i, ok := byAlias[r.Alias]; ok {
+			capturePeer(&f.Peers[i], r, rep) // captured facts only; hand-edits survive
 			rep.Updated = append(rep.Updated, r.Alias)
 			continue
 		}
@@ -457,8 +458,8 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: origin %q (meta not one of fresh|fork|joined)", r.Alias, r.Origin))
 		}
 	}
-	// a recorded role fills the brief only while it is still blank or the TODO marker
-	if r.Role != "" && p.RoleTODO() {
+	// a recorded role fills the brief only while it is blank or save's own TODO marker
+	if r.Role != "" && briefUnset(p) {
 		if validRoleName(r.Role) {
 			p.Rolefile = "roles/" + r.Role + ".md"
 			p.Role = nil
@@ -473,6 +474,11 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: model %q (meta not a usable model token)", r.Alias, r.Model))
 		}
 	}
+}
+
+// briefUnset is stricter than RoleTODO: hand prose that mentions "todo" is still a brief.
+func briefUnset(p *FormationPeer) bool {
+	return p.Rolefile == "" && (p.Role == nil || strings.TrimSpace(*p.Role) == "" || *p.Role == roleTODOMarker)
 }
 
 func validOrigin(o string) bool {

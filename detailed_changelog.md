@@ -48,8 +48,13 @@ formation_save.go (RosterPeer.Role, capturePeer), role.go
   or freeform role is never overwritten; an unusable role token is skipped
   and reported like a corrupted origin.
 - `formation apply` stamps the role parsed from the peer's rolefile when it
-  reserves a template or fork seat, so a restored seat re-saves with its
-  role even if the envelope is rebuilt.
+  reserves a template or fork seat, and only when that role resolves here, so
+  a restored seat re-saves with a rolefile apply can load.
+- A refresh that added a new peer ahead of an existing one in roster order
+  could lose the existing peer's update: save held pointers into the peer
+  slice and the append reallocated it. It now indexes the slice.
+- The fill treats only a blank brief or save's own TODO marker as unset, so
+  hand-written role text that mentions "todo" is never replaced.
 
 [Possible Ripple Effects]
 - `ReserveAlias` takes a fifth argument; branch passes none, since a fork
