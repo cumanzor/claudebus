@@ -68,8 +68,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus formation save <name> [ch]  capture a channel's topology (channel
                                    defaults to this session's); refreshes an
                                    existing file, preserving hand-edited fields
-                                   (origin/model come from the birth-record when
-                                   recorded; role/profile stay hand-maintained)
+                                   (origin/model/role come from the birth-record
+                                   when recorded; other roles stay hand-maintained)
        --anchor key=value          record a hand anchor in drift_anchors
                                    (repeatable; a flag overwrites its own key,
                                    git_head stays machine-owned; convention:

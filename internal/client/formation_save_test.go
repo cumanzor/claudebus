@@ -491,6 +491,75 @@ func TestCapturePeerFillTable(t *testing.T) {
 	}
 }
 
+// TestCapturePeerRoleFill: a recorded role fills only a blank or TODO brief, and hand edits win.
+func TestCapturePeerRoleFill(t *testing.T) {
+	freeform := "reviews the swift side"
+	for _, tc := range []struct {
+		name         string
+		rolefile     string
+		role         *string
+		metaRole     string
+		wantRolefile string
+		wantRole     *string
+		wantSkip     bool
+	}{
+		{"TODO marker -> filled", "", strPtr(roleTODOMarker), "coder", "roles/coder.md", nil, false},
+		{"absent -> filled", "", nil, "coder", "roles/coder.md", nil, false},
+		{"hand rolefile wins", "roles/reviewer.md@abc", nil, "coder", "roles/reviewer.md@abc", nil, false},
+		{"freeform role wins", "", &freeform, "coder", "", &freeform, false},
+		{"no meta role -> TODO stays", "", strPtr(roleTODOMarker), "", "", strPtr(roleTODOMarker), false},
+		{"garbage role skipped", "", strPtr(roleTODOMarker), "../etc", "", strPtr(roleTODOMarker), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &FormationPeer{Alias: "a", Rolefile: tc.rolefile, Role: tc.role}
+			rep := &SaveReport{}
+			capturePeer(p, RosterPeer{Alias: "a", Role: tc.metaRole}, rep)
+			if p.Rolefile != tc.wantRolefile {
+				t.Errorf("rolefile = %q, want %q", p.Rolefile, tc.wantRolefile)
+			}
+			if (p.Role == nil) != (tc.wantRole == nil) || p.Role != nil && *p.Role != *tc.wantRole {
+				t.Errorf("role = %v, want %v", p.Role, tc.wantRole)
+			}
+			if got := len(rep.SkippedBirth) > 0; got != tc.wantSkip {
+				t.Errorf("skipped = %v, want %v", rep.SkippedBirth, tc.wantSkip)
+			}
+		})
+	}
+}
+
+// TestSaveEndToEndRole: spawn --role, then the child's join, then save leaves no TODO.
+func TestSaveEndToEndRole(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-parent")
+	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "coder.md"), []byte("you write code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Spawn("tab", "eff", "", "", "coder", &fakeForker{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-child")
+	if _, _, err := Join("eff", "coder"); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := SaveFormation("eff", "eff", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range f.Peers {
+		if p := &f.Peers[i]; p.Alias == "coder" {
+			if p.Rolefile != "roles/coder.md" || p.RoleTODO() {
+				t.Errorf("coder brief = rolefile %q role %v, want roles/coder.md", p.Rolefile, p.Role)
+			}
+			return
+		}
+	}
+	t.Fatal("coder not captured")
+}
+
 // TestCapturePeerHardening is G6: a hand-corrupted meta origin/model must NOT ride
 // into the envelope silently — it is skipped and surfaced.
 func TestCapturePeerHardening(t *testing.T) {

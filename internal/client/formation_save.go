@@ -38,6 +38,7 @@ type RosterPeer struct {
 	Machine      string // meta.host, which is HostLabel() on the writing machine
 	Origin       string
 	Model        string
+	Role         string // role name from the birth-record, blank when the peer was not briefed from one
 	Profile      string // the CCS instance the session stamped about itself at join
 	ProfileKnown bool   // captured native default profile is a known blank, not missing metadata
 	Listening    bool
@@ -100,6 +101,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Machine:      m.Host,
 			Origin:       m.Origin,
 			Model:        m.Model,
+			Role:         m.Role,
 			Profile:      m.Profile,
 			ProfileKnown: managed != nil && managed.ProfileKnown,
 			Listening:    listening,
@@ -154,8 +156,8 @@ func loadRepoTemplate(name string) (*Formation, error) {
 //
 // What it captures is bounded by what the substrate records. meta.json holds a
 // peer's alias, sessionId, cwd and host, a profile when the session stamped one at
-// join, and origin/model when the launcher recorded them; there is no role and no
-// prose anywhere on disk. Save refreshes the session facts, fills the
+// join, and origin/model/role when the launcher recorded them; there is no prose
+// anywhere on disk. Save refreshes the session facts, fills the
 // launcher-recorded ones once, and treats everything else as the human's: it never
 // overwrites a hand edit. That is what makes a re-save at a milestone boundary
 // safe — it refreshes sid checkpoints without eating the prose around them.
@@ -389,6 +391,15 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			p.Origin = r.Origin
 		} else {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: origin %q (meta not one of fresh|fork|joined)", r.Alias, r.Origin))
+		}
+	}
+	// a recorded role fills the brief only while it is still blank or the TODO marker
+	if r.Role != "" && p.RoleTODO() {
+		if validRoleName(r.Role) {
+			p.Rolefile = "roles/" + r.Role + ".md"
+			p.Role = nil
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: role %q (meta not a usable role name)", r.Alias, r.Role))
 		}
 	}
 	if p.Model == "" && r.Model != "" {

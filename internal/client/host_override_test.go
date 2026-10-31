@@ -130,7 +130,7 @@ func TestInvalidHostLabelLeavesNoTrace(t *testing.T) {
 	if _, _, err := Join("cc", "coder"); !errors.Is(err, ErrBadHostLabel) {
 		t.Errorf("Join under an invalid CBUS_HOST: want ErrBadHostLabel, got %v", err)
 	}
-	if _, err := ReserveAlias("cc", "coder", OriginFresh, ""); !errors.Is(err, ErrBadHostLabel) {
+	if _, err := ReserveAlias("cc", "coder", OriginFresh, "", ""); !errors.Is(err, ErrBadHostLabel) {
 		t.Errorf("ReserveAlias under an invalid CBUS_HOST: want ErrBadHostLabel, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "cc")); !os.IsNotExist(err) {

@@ -4,6 +4,34 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 19:01:56 UTC] [Formation/Roles] role in the birth record; save fills rolefile
+
+[Attempt #1] Files: internal/client/store.go (peerMeta.Role, ReserveAlias
+role parameter, birthForJoin), daemon.go (reservation claim),
+spawn.go, harness.go, formation_apply.go (peerRoleName), liveness.go,
+formation_save.go (RosterPeer.Role, capturePeer), role.go
+(validRoleName); docs and the save-formation/bus-formation commands.
+
+[What changed]
+- `cbus spawn --role <r>` briefed the child from roles/<r>.md and then
+  dropped the name, so a later `formation save` wrote a TODO role for every
+  spawned seat. The reservation meta now carries `role` next to origin and
+  model; the child's join and a daemon connect carry it through the reclaim
+  under the same identity rules as origin (a takeover never inherits it).
+- `formation save` fills `rolefile: roles/<role>.md` from a recorded role
+  while the peer's brief is still blank or the TODO marker. A hand rolefile
+  or freeform role is never overwritten; an unusable role token is skipped
+  and reported like a corrupted origin.
+- `formation apply` stamps the role parsed from the peer's rolefile when it
+  reserves a template or fork seat, so a restored seat re-saves with its
+  role even if the envelope is rebuilt.
+
+[Possible Ripple Effects]
+- `ReserveAlias` takes a fifth argument; branch passes none, since a fork
+  inherits its parent's intent.
+- `role` is omitempty, so metas without one rewrite byte-identically. An
+  older binary that rewrites the meta drops the field, as with profile.
+
 ## [2026-10-31 01:28:19 UTC] [Tests/Canary] npm-installed Codex in the canaries; managed fixture socket paths
 
 [Attempt #1] Files: scripts/codex_cli_resume_canary.py (shared

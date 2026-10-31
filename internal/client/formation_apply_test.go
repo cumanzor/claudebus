@@ -593,7 +593,11 @@ func TestApplyReservationBirthPerMode(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	applierOn(t, "ch", "applier")
 	f := applyFixture(
-		peer("fresh1", func(p *FormationPeer) { p.Machine = thisHost(); p.Model = "opus" }), // template (default mode)
+		peer("fresh1", func(p *FormationPeer) {
+			p.Machine = thisHost()
+			p.Model = "opus"
+			p.Rolefile = "roles/coder.md@b3a806e"
+		}), // template (default mode)
 		peer("clone1", func(p *FormationPeer) {
 			p.Machine = thisHost()
 			p.Model = "sonnet"
@@ -629,13 +633,13 @@ func TestApplyReservationBirthPerMode(t *testing.T) {
 	// template -> reservation stamped fresh + model
 	if m, ok := readReservation("fresh1"); !ok {
 		t.Error("template must reserve its alias")
-	} else if m["sessionId"] != "reserved" || m["origin"] != "fresh" || m["model"] != "opus" {
-		t.Errorf("template reservation = %v, want reserved+fresh+opus", m)
+	} else if m["sessionId"] != "reserved" || m["origin"] != "fresh" || m["model"] != "opus" || m["role"] != "coder" {
+		t.Errorf("template reservation = %v, want reserved+fresh+opus+coder", m)
 	}
 	// fork -> reservation stamped fork + model (so a future restore R1-refuses it)
 	if m, ok := readReservation("clone1"); !ok {
 		t.Error("fork must reserve its alias")
-	} else if m["sessionId"] != "reserved" || m["origin"] != "fork" || m["model"] != "sonnet" {
+	} else if m["sessionId"] != "reserved" || m["origin"] != "fork" || m["model"] != "sonnet" || m["role"] != nil {
 		t.Errorf("fork reservation = %v, want reserved+fork+sonnet", m)
 	}
 	// resume -> NO reservation (the pinned invariant)

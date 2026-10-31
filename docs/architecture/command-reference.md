@@ -654,7 +654,7 @@ for hooks and scripted multi-session drivers.
    (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host,
    ts}`, where `host` is `$CBUS_HOST` or the system hostname (see the
    environment variables table), plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
-   launcher's birth record supplied it, with `model`; `profile` and
+   launcher's birth record supplied it, with `model` and `role`; `profile` and
    `harness` are stamped too (`store.go:295`). `listenerStart` arrives only
    at arm, and `connectionId` stays absent until a native `connect` claims
    the alias.
@@ -2167,7 +2167,9 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
   skipped with a note), and the birth-record `origin`/`model` **when the
   launcher recorded them** (§9 / protocol.md birth records). It fills a blank
-  origin/model **once** and never overwrites a hand-edited field;
+  origin/model **once** and never overwrites a hand-edited field; a recorded
+  birth-record `role` fills `rolefile: roles/<role>.md` while the peer's brief
+  is still blank or the TODO marker, never over a hand rolefile or freeform role;
   The **saving session's own** peer also gets its `target` reconciled with
   the terminal save runs in: `$TMUX` set moves `tab`/`window`/blank to
   `tmux`, a plain iTerm2 session moves `tmux` back to `tab`, and `pane` or a
@@ -2175,7 +2177,7 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   terminal — <alias>: tab -> tmux`. Other peers keep their recorded target,
   since save cannot see their terminals; the saver is normally the anchor,
   the one seat `resume` launches.
-  `rolefile`/`role` and `split` are yours to fill in — `save` never writes
+  `rolefile`/`role` for a peer with no recorded role, and `split`, are yours to fill in — `save` never writes
   `split` at all, even on a blank one. A corrupted birth-record is skipped with
   a note, not fatal. (Fleet caveat until every binary carries the profile
   field: an older binary's meta rewrite drops the stamp — hand fills in the
@@ -2483,7 +2485,7 @@ continues a session's own transcript; `fork` tells the child plainly it is not
 the original and must not act on unfinished parent work; `template` comes back on
 a fresh transcript, briefed from its role file. **A peer is never forked across
 roles** — the exact design mistake formations exist to fix. The `origin`/`model`
-that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
+(and `role`) that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
 the peer's `meta.json` at birth, before the child boots, and `save` picks them up
 automatically. Full field-level mechanics: protocol.md (meta.json birth records).
 
@@ -2829,8 +2831,8 @@ Wraps the whole `cbus formation` family (§10): `save`, `show`, `apply`
 command and reports its output.
 
 **save** records only what the bus knows (alias, sessionId, cwd, machine),
-auto-stamping origin/model from a launcher birth-record when one exists,
-while role/profile/split stay hand-maintained; points the user at `show` for
+auto-stamping origin/model/role from a launcher birth-record when one exists,
+while split and the role of a peer that was not spawned with one stay hand-maintained; points the user at `show` for
 what still needs filling in. **show** flags stale sids and TODO roles before
 anything applies. **apply** relaunches missing peers, anchor-first,
 sequentially: this session must be joined to the formation's channel first

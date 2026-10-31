@@ -307,15 +307,16 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	// reservation placeholder would win over that id in birthForJoin and clobber the
 	// resumed peer's preserved origin. TestApplyResumeNeverReserves pins this.
 	model := peerModel(p) // resolved once: explicit, else the role file's MODEL: line
+	role := peerRoleName(p)
 	reserved := false
 	switch pp.Action {
 	case ActionTemplate:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model, role); err != nil {
 			return "", err
 		}
 		reserved = true
 	case ActionFork:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model, role); err != nil {
 			return "", err
 		}
 		reserved = true
@@ -373,6 +374,18 @@ func peerModel(p *FormationPeer) string {
 		}
 	}
 	return ""
+}
+
+// peerRoleName is the committed role a peer is briefed from, "" for freeform or no role.
+func peerRoleName(p *FormationPeer) string {
+	if p.Rolefile == "" {
+		return ""
+	}
+	name, _ := parseRolefile(p.Rolefile)
+	if !validRoleName(name) {
+		return ""
+	}
+	return name
 }
 
 // peerLaunchArgv builds the launch per mode. The distinction IS the feature:
