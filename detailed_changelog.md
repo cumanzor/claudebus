@@ -4,6 +4,31 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
+
+[Attempt #1] Files: internal/client/formation_save.go (newPeerMode,
+SaveOptions, SaveFormationWith, setHandModes), cmd/cbus/formation.go (save
+--mode, per-mode report lines), cmd/cbus/usage.go; docs and the
+save-formation command.
+
+[What changed]
+- New peers saved with `mode=template`, a rule from before apply could tell
+  a safe resume from an unsafe one. Apply now refuses a fork-born resume
+  (R1), an unattributed one (D12), a session claimed twice, and a session
+  still held live, and `onStale=template` degrades a lost transcript, so the
+  template default only threw context away. Save now picks `resume` for a
+  peer with a real session id and origin fresh or joined, and `template`
+  otherwise.
+- `formation save --mode alias=mode` (repeatable) sets a peer's saved mode.
+  An unknown alias or a mode outside the enum refuses the save.
+- A blank `mode` in a hand-written file still plans as template.
+
+[Possible Ripple Effects]
+- Existing envelopes keep their recorded modes; only peers new to the file
+  get the new default.
+- A resume of a seat whose original is still running is refused at apply,
+  as before; the operator either stops it or sets `mode=fork`.
+
 ## [2026-10-31 19:01:56 UTC] [Formation/Roles] role in the birth record; save fills rolefile
 
 [Attempt #1] Files: internal/client/store.go (peerMeta.Role, ReserveAlias

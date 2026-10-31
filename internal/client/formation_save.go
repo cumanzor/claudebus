@@ -12,10 +12,8 @@ import (
 	"claudebus/internal/core"
 )
 
-// Save-side defaults. meta.json records a peer's alias, sessionId, cwd and host —
-// and nothing else — so these four are POLICY, not captured facts (see SaveFormation).
-// template/template is the safe pair: a template peer never touches a transcript, so
-// a freshly saved formation cannot resume or fork anything until a human says so.
+// Save-side defaults for fields the store does not record. defaultMode is the
+// fallback for a peer save cannot attribute; newPeerMode picks resume when it can.
 const (
 	defaultMode    = ModeTemplate
 	defaultOnStale = OnStaleTemplate
@@ -168,6 +166,21 @@ func loadRepoTemplate(name string) (*Formation, error) {
 // anchors are the caller's --anchor pairs, written into drift_anchors (nil is
 // fine). git_head is refused up front — it is the one machine-owned key.
 func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *SaveReport, error) {
+	return SaveFormationWith(name, ch, SaveOptions{Anchors: anchors})
+}
+
+// SaveOptions are the caller's hand fields: each flag is the hand acting, so it
+// overwrites what the file holds for that key or peer.
+type SaveOptions struct {
+	Anchors map[string]string
+	Modes   map[string]string // alias -> resume|fork|template
+}
+
+func SaveFormationWith(name, ch string, opts SaveOptions) (*Formation, *SaveReport, error) {
+	anchors := opts.Anchors
+	if err := checkModes(opts.Modes); err != nil {
+		return nil, nil, err
+	}
 	if err := checkHandAnchors(anchors); err != nil {
 		return nil, nil, err
 	}
@@ -234,13 +247,13 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		}
 		p := FormationPeer{
 			Alias:     r.Alias,
-			Mode:      defaultMode,
 			OnStale:   defaultOnStale,
 			Target:    defaultTarget,
 			Role:      strPtr(roleTODOMarker),
 			Addresses: []string{},
 		}
 		capturePeer(&p, r, rep)
+		p.Mode = newPeerMode(&p)
 		f.Peers = append(f.Peers, p)
 		rep.Added = append(rep.Added, r.Alias)
 	}
@@ -250,6 +263,9 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		}
 	}
 	retargetSelf(ch, f.Peers, observedSurface(), rep)
+	if err := setHandModes(f.Peers, opts.Modes); err != nil {
+		return nil, nil, err
+	}
 
 	f.SavedAt = Now()
 	if f.SavedBy, err = savedBy(ch); err != nil {
@@ -318,6 +334,54 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		return nil, nil, err
 	}
 	return f, rep, nil
+}
+
+// newPeerMode resumes a peer whose transcript is its own: a real session and an
+// origin of fresh or joined. A fork-born or unattributed peer would be refused a
+// resume at apply (R1, D12), so it starts as a template; onStale covers a lost transcript.
+func newPeerMode(p *FormationPeer) string {
+	if p.SessionID == "" || p.SessionID == "reserved" {
+		return defaultMode
+	}
+	switch p.Origin {
+	case OriginFresh, OriginJoined:
+		return ModeResume
+	}
+	return defaultMode
+}
+
+func checkModes(modes map[string]string) error {
+	for alias, m := range modes {
+		if m == "" {
+			return fmt.Errorf("--mode %s= needs resume|fork|template", alias)
+		}
+		if err := oneOf("--mode "+alias, m, ModeResume, ModeFork, ModeTemplate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setHandModes applies --mode alias=mode; an alias the formation does not hold is an
+// error, so a typo cannot pass as a clean save.
+func setHandModes(peers []FormationPeer, modes map[string]string) error {
+	var unknown []string
+	for alias, m := range modes {
+		found := false
+		for i := range peers {
+			if peers[i].Alias == alias {
+				peers[i].Mode, found = m, true
+			}
+		}
+		if !found {
+			unknown = append(unknown, alias)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("--mode names no peer in this formation: %s", strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 // checkHandAnchors refuses the machine-owned key before any store work: git_head

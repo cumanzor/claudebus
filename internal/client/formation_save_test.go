@@ -641,7 +641,9 @@ func TestSaveEndToEndBirth(t *testing.T) {
 	w := testWorld()
 	w.Host = coder.Machine // the peer was born on this host; match it
 	w = withTranscripts(w, coder.SessionID)
-	coder.Mode = ModeResume
+	if coder.Mode != ModeResume {
+		t.Errorf("mode = %q, want resume chosen by save for a fresh-born peer", coder.Mode)
+	}
 	pp := decidePeer(coder, f, w, map[string]bool{}, map[string]bool{}, map[string]bool{})
 	if pp.Action != ActionResume {
 		t.Errorf("a fresh-born peer with a transcript should resume, got %v (%s)", pp.Action, pp.Reason)
@@ -844,5 +846,73 @@ func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
 	}
 	if len(rep.SkippedBirth) != 1 || !strings.Contains(rep.SkippedBirth[0], "profile") {
 		t.Errorf("skip must be surfaced, got %v", rep.SkippedBirth)
+	}
+}
+
+func TestNewPeerMode(t *testing.T) {
+	for _, tc := range []struct {
+		sid, origin, want string
+	}{
+		{"sid-1", OriginFresh, ModeResume},
+		{"sid-1", OriginJoined, ModeResume},
+		{"sid-1", OriginFork, ModeTemplate},
+		{"sid-1", "", ModeTemplate},
+		{"reserved", OriginFresh, ModeTemplate},
+		{"", OriginJoined, ModeTemplate},
+	} {
+		if got := newPeerMode(&FormationPeer{SessionID: tc.sid, Origin: tc.origin}); got != tc.want {
+			t.Errorf("newPeerMode(sid %q, origin %q) = %q, want %q", tc.sid, tc.origin, got, tc.want)
+		}
+	}
+}
+
+// TestSaveFormationModes: a refresh never flips a recorded mode, and --mode is the hand acting.
+func TestSaveFormationModes(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if _, _, err := Join("eff", "main"); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "eff", "coder", "sid-coder")
+	modeOf := func(f *Formation, alias string) string {
+		for i := range f.Peers {
+			if f.Peers[i].Alias == alias {
+				return f.Peers[i].Mode
+			}
+		}
+		t.Fatalf("%s not in formation", alias)
+		return ""
+	}
+	f, _, err := SaveFormation("eff", "eff", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeResume || modeOf(f, "coder") != ModeTemplate {
+		t.Fatalf("modes = main %q coder %q, want resume (joined) and template (no origin)", modeOf(f, "main"), modeOf(f, "coder"))
+	}
+	for i := range f.Peers {
+		if f.Peers[i].Alias == "main" {
+			f.Peers[i].Mode = ModeTemplate // hand edit
+		}
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if f, _, err = SaveFormation("eff", "eff", nil); err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeTemplate {
+		t.Errorf("a refresh flipped a recorded mode to %q", modeOf(f, "main"))
+	}
+	if f, _, err = SaveFormationWith("eff", "eff", SaveOptions{Modes: map[string]string{"main": ModeResume}}); err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeResume {
+		t.Errorf("--mode main=resume left %q", modeOf(f, "main"))
+	}
+	for _, bad := range []map[string]string{{"ghost": ModeResume}, {"main": "later"}, {"main": ""}} {
+		if _, _, err := SaveFormationWith("eff", "eff", SaveOptions{Modes: bad}); err == nil {
+			t.Errorf("--mode %v saved, want an error", bad)
+		}
 	}
 }

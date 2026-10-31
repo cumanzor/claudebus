@@ -2153,7 +2153,7 @@ variants:
 A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
 committed role files states the matching rule from the peer's side.
 
-### `cbus formation save <name> [channel]`
+### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...]`
 
 Snapshots the channel's current peers into the runtime store. Channel defaults to
 this session's own registration (`not joined to a channel in this session — pass
@@ -2204,9 +2204,17 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   refusing would strand the files the invariant exists to converge), and any
   joined re-save heals via the anchor default. `show` renders the absence as a
   named `DEFECT` row.
-- New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
-  `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
-  this with the peer's brief`).
+- New peers get `mode=resume` when they hold a real session id and their
+  origin is `fresh` or `joined` (the transcript is their own), else
+  `mode=template` (fork-born, origin unknown, or no session yet; `apply` would
+  refuse a resume of those). Also `onStale=template`, so a lost transcript
+  degrades to a fresh start, `target=tab`, and, unless a birth-record role
+  filled `rolefile`, a `role` TODO marker (`TODO: set rolefile to
+  roles/<alias>.md@<commit>, or replace this with the peer's brief`). A refresh
+  never changes a recorded mode; the CLI lists which new peers got which mode.
+- `--mode alias=resume|fork|template` (repeatable) sets that peer's mode in
+  the file, overwriting what it held. An alias the formation does not hold, or
+  a mode outside the enum, refuses the save with nothing written.
 - Peers in the file but no longer on the channel are **kept**, not dropped.
 - Refusals: `refusing to overwrite an envelope that will not load: <err>` and
   `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
@@ -2911,7 +2919,7 @@ file, never launches, kills, renames or edits a peer.
    freeform `role` text; stale sids mean `onStale=template` applies and that
    seat comes back fresh; `kept, not on the channel now` seats are usually
    fine but worth stating; a `mode=template` peer that still has a live sid
-   is worth flagging as probably better off `resume`d; the anchor peer is
+   is offered a `--mode <alias>=resume` re-save; the anchor peer is
    named, or flagged if `show` reports none.
 4. **Report** in a few lines: name, channel, peer count, new vs kept, then
    only the items needing a decision, each tied to its peer; a clean
