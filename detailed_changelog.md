@@ -4,6 +4,61 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations
+
+[Attempt #1] Files: internal/client/daemon_presence.go (membershipNotice),
+claude_native_prompt.go, spawn_codex.go, delegation.go; roles/*.md
+(doctrines 2 and 6, shared core still identical); mods/cbus-compact
+(presenceOnly, turn tracking, quiet replies, types/index.d.ts);
+mods/cbus-asks (from field, label, description); commands/bus-join.md,
+integrations/opencode/commands/bus-join.md, skills/codex/cbus-connect/SKILL.md;
+docs/usage.md, docs/codex.md, docs/claude.md, docs/install.md;
+scripts/codex_presence_canary.py; tests in daemon_presence_test.go,
+daemon_test.go, spawn_codex_test.go, spawn_test.go, role_test.go and both
+mods.
+
+[What changed]
+- The presence notice told every harness to briefly tell the user who
+  joined, left or was renamed, and the connect prompts and roles repeated
+  it. The user already sees each frame in their own transcript, so every
+  event produced the frame plus a model turn restating it. The notice now
+  says to update the roster silently and mention an event only when it
+  changes the plan. The Claude and Codex connect prompts add: do not restate
+  or summarize peer messages; speak to the user for a decision, a result or
+  a problem. Doctrine 2 drops the announcement and doctrine 6 extends "facts,
+  not narration" to the user.
+- A delivered event still starts a turn, and the model ends it with a line.
+  cbus-compact now hides the reply to a turn started by a presence-only
+  delivery when that turn ran no tool and answered in at most 280
+  characters. A mod cannot swallow the delivery itself: Claude receipts
+  need the message UUID in the transcript, and an unconfirmed attempt would
+  hold every later message for that seat.
+- In a formation each seat had its own ask band. The delegation text now
+  sends a seat's operator questions to its coordinator on the bus, and the
+  coordinator answers inside its delegation or files the rest with ask,
+  setting from to the seat. cbus-asks draws that as q3 (coder).
+
+[Possible Ripple Effects]
+- Codex and OpenCode seats get the same notice and prompt text; only Claude
+  gets the reply hiding and the ask band.
+- The Codex presence canary now expects the new notice text; it needs a
+  Codex run before the next release.
+- A hidden presence reply is still in the transcript and still costs a turn.
+
+[Testing Notes]
+- go test ./... and both mods' tests pass; new assertions fail without
+  their change (connect prompt line, both delegation lines, reply hiding,
+  tool counting).
+- Live narration probe (real Claude Code orchestrator on fable, scripted
+  joins, FYI messages and a leave, scratch daemon): join replies averaged
+  about 370 characters on the current build and about 155 with the notice
+  change; with cbus-compact they were hidden on screen 8 of 8 times while
+  12 of 12 message replies and 4 of 4 leave replies stayed visible. Peer
+  message narration did not change measurably.
+- Live seat probe (coder on opus, coordinator named, an operator decision
+  needed): before, 3 of 3 seats used their own ask band; after, 3 of 3 sent
+  a ruling request to the coordinator and none asked locally.
+
 ## [2026-10-31 01:28:19 UTC] [Tests/Canary] npm-installed Codex in the canaries; managed fixture socket paths
 
 [Attempt #1] Files: scripts/codex_cli_resume_canary.py (shared
