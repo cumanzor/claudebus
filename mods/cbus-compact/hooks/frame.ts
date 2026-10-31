@@ -60,3 +60,9 @@ export const compact = (text: string, offsetMin = 0): string | null => {
     })
     .join('\n')
 }
+
+// a delivery made only of presence frames; one plain message among them makes it false
+export const presenceOnly = (text: string): boolean => {
+  const heads = [...text.matchAll(HEAD)]
+  return heads.length > 0 && heads.every(m => m[4] === 'presence')
+}

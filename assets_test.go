@@ -160,6 +160,7 @@ func TestModsEmbedMatchesSource(t *testing.T) {
 		"mods/cbus-compact/hooks/frame.ts",
 		"mods/cbus-compact/hooks/hooks.json",
 		"mods/cbus-compact/hooks/register.tsx",
+		"mods/cbus-compact/types/index.d.ts",
 	}
 	sort.Strings(got)
 	if strings.Join(got, ",") != strings.Join(want, ",") {

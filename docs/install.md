@@ -71,7 +71,11 @@ depends on a mod.
   `▸ [14:02] from bob: got it, on it now`, and a presence event as
   `▸ [14:02] bob joined`. Only the drawing changes: the model still reads the full
   frame, including the `from=` address it replies to. ctrl+o shows the raw frame.
-  Times are local, from the host's UTC offset read once per session.
+  Times are local, from the host's UTC offset read once per session. When a
+  delivery holds only presence frames, the model's short reply to it (no tool
+  calls, at most 280 characters) is hidden too, so a join shows as its one
+  `▸` line. The turn still runs and the reply stays in the transcript; a longer
+  reply, such as a peer you were waiting on leaving, is drawn as usual.
 - `cbus-asks` keeps the questions a session is waiting on you for in a band above
   the prompt, so they survive peer traffic and narration. See
   [Questions for you](claude.md#questions-for-you-cbus-asks).
