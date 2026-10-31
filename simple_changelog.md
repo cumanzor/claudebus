@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-31 01:28:19 UTC] [Tests/Canary] The Codex canaries recognize an npm-installed Codex (ps truncates its comm, so argv[0] is checked too) and accept the vscode source Codex 0.163.0 records for an ordinary CLI thread. The managed Codex test fixtures use short temp dirs, so their control socket paths stay under macOS's 104-byte limit with the default TMPDIR.
+
 [2026-10-30 23:14:39 UTC] [Mods/Feature] New cbus-asks Claude Code mod: the model files each question it is waiting on the user for with an `ask` tool, written to stand alone, and it stays in a band above the prompt (and a status line count) until answered. `/asks` opens a keyboard-driven pane with context and numbered answers; `qN: answer` in a prompt closes that question before the model reads it. install-mods no longer ships the tsconfig.json Claude Code writes beside a loaded mod. Docs mark both mods as Claude Code only.
 
 [2026-10-26 18:46:28 UTC] [OpenCode/Fix] Review fixes for the OpenCode adapter: an exited TUI no longer makes the daemon wake itself in a loop; the presence probe asks the plugin whether the session exists (a message lookup cannot tell a deleted session in OpenCode 1.19.3); the plugin re-reads status when its server reconnects and holds delivery until it has; the private socket bind name is length-checked and bind failures are recorded; the installer reads the active plugin array instead of matching JSONC text.
