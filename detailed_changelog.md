@@ -4,6 +4,36 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 01:28:19 UTC] [Tests/Canary] npm-installed Codex in the canaries; managed fixture socket paths
+
+[Attempt #1] Files: scripts/codex_cli_resume_canary.py (shared
+is_native_codex), scripts/codex_native_queue_canary.py,
+scripts/codex_presence_canary.py, scripts/mixed_native_local_canary.py;
+internal/client/codex_managed_consumer_unix_test.go and
+codex_managed_frontend_unix_test.go (temp dirs under /tmp).
+
+[What changed]
+- ps truncates comm for the long vendor path of an npm-installed Codex, so
+  the canaries never saw a native codex process and failed on v0.20.4 and
+  the release candidate alike. is_native_codex also checks argv[0]. The
+  mixed canary accepts "vscode", the source Codex 0.163.0 records for an
+  ordinary interactive CLI thread.
+- The managed Codex fixtures built their app-server-control socket under
+  os.MkdirTemp(""). With the macOS default TMPDIR the path passes 104
+  bytes, the fixture child exits before printing its pid, and eight tests
+  fail with "managed fixture did not start". They now use short dirs
+  under /tmp, as the tmux and wake tests already do.
+
+[Possible Ripple Effects]
+- Test and canary code only; no production change.
+- The canaries still have to run from a shell with no Claude ancestor:
+  connect walks the process tree and would find the claude process.
+
+[Testing Notes]
+- go test ./internal/client under TMPDIR=/var/folders/... (49 chars):
+  8 failures before, ok after. TMPDIR=/tmp passed before and after.
+- Canary runs from a plain terminal: see the PR.
+
 ## [2026-10-30 23:14:39 UTC] [Mods/Feature] cbus-asks: open questions above the prompt
 
 [Attempt #1] Files: mods/cbus-asks/ (plugin.json, types/index.d.ts,

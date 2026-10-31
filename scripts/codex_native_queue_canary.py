@@ -86,11 +86,11 @@ class Canary:
         self.target = "native-canary/advisor"
 
     def ordinary_cli_runtime(self, meta):
-        from codex_cli_resume_canary import process_descendants
+        from codex_cli_resume_canary import is_native_codex, process_descendants
         tree = process_descendants(self.process.pid)
         self.result["initialProcessTree"] = tree
         return (self.process.poll() is None and meta.get("id") == self.thread
-                and any(Path(row["comm"]).name == "codex" and " app-server " not in row["args"]
+                and any(is_native_codex(row) and " app-server " not in row["args"]
                         for row in tree))
 
     def command(self, args, recipient=False, allowed=(0,)):
