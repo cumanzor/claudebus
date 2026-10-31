@@ -92,6 +92,8 @@ the reserved machine-wide channel for an orchestrator session.
 | Fork + put both sides on the repo channel | `/bus-branch window` (or `tab` \| `tmux` \| `pane`) |
 | Fork onto a named channel | `/bus-branch window <channel>` |
 | N sessions | join the same channel from each — any-to-any |
+| See and answer the questions a session is waiting on (cbus-asks mod, Claude only) | `/asks`, number keys, Esc; or type `q1: yes; q2: develop` |
+| Close questions yourself | `/asks drop q2`, `/asks clear` |
 
 For ordinary Claude CLI sessions, `/bus-join` runs native `cbus connect`:
 
@@ -309,7 +311,7 @@ cbus selfupdate --check                             # is there a newer release?
 cbus install-commands                               # (re)write the /bus-* skills
 cbus install-roles                                  # (re)write role prompts to $CBUS_DIR/roles
 cbus install-codex-skills                           # refresh the Codex skill, preserve edited files
-cbus install-mods                                   # (re)write Claude Code mods to ~/.claude/skills
+cbus install-mods                                   # (re)write Claude Code mods to ~/.claude/skills (Claude only)
 cbus install-assets                                 # all of the above, as an update installs them
 cbus connection gc --dry-run                        # which stale connections the daemon would collect
 cbus connection gc                                  # collect now (the daemon also does it every 5 min)

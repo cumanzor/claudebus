@@ -130,7 +130,8 @@ func installCodexSkills(fsys fs.FS, dstDir string, force bool) ([]assetResult, e
 
 // installMods writes every file of each embedded mods/<name>/ into dstDir/<name>/,
 // sha-guarded per file like installAssets. Claude Code writes typings into a loaded
-// mod's .claude-plugin/types, and the plugin tests are dev-only: neither is shipped.
+// mod's .claude-plugin/types and a tsconfig.json extending them, and the plugin tests
+// are dev-only: none of them is shipped.
 func installMods(fsys fs.FS, dstDir string, force bool) ([]assetResult, error) {
 	const subdir = "mods"
 	entries, err := fs.ReadDir(fsys, subdir)
@@ -167,7 +168,7 @@ func installMods(fsys fs.FS, dstDir string, force bool) ([]assetResult, error) {
 				}
 				return nil
 			}
-			if isModTestFile(rel) {
+			if isModTestFile(rel) || rel == "tsconfig.json" {
 				return nil
 			}
 			res := assetResult{name: name + "/" + rel, outcome: "failed"}

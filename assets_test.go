@@ -131,6 +131,10 @@ func TestModsEmbedMatchesSource(t *testing.T) {
 			}
 			return nil
 		}
+		// written by Claude Code beside a mod loaded from this checkout; gitignored, never installed
+		if strings.HasSuffix(p, "/tsconfig.json") && strings.Count(p, "/") == 2 {
+			return nil
+		}
 		got = append(got, p)
 		emb, _ := fs.ReadFile(Mods, p)
 		src, err := os.ReadFile(filepath.FromSlash(p))
@@ -145,6 +149,12 @@ func TestModsEmbedMatchesSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"mods/cbus-asks/.claude-plugin/plugin.json",
+		"mods/cbus-asks/hooks/asks.ts",
+		"mods/cbus-asks/hooks/cbus-asks.test.ts",
+		"mods/cbus-asks/hooks/hooks.json",
+		"mods/cbus-asks/hooks/register.tsx",
+		"mods/cbus-asks/types/index.d.ts",
 		"mods/cbus-compact/.claude-plugin/plugin.json",
 		"mods/cbus-compact/hooks/cbus-compact.test.ts",
 		"mods/cbus-compact/hooks/frame.ts",

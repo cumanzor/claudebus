@@ -84,3 +84,5 @@ alias. `cbus connection disconnect demo/worker` disconnects.
   opened inside OpenCode do not.
 - OpenCode's plugin APIs are moving; the plugins are checked against the
   OpenCode version named above.
+- The Claude Code mods (`cbus-compact`, `cbus-asks`) do not apply: peer messages
+  arrive as full frames and questions stay in the reply.

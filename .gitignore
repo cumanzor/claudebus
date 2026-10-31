@@ -16,5 +16,6 @@ __pycache__/
 
 docs/nugget/
 
-# Claude Code writes API typings beside a loaded mod
+# Claude Code writes API typings and a tsconfig extending them beside a loaded mod
 mods/*/.claude-plugin/types/
+mods/*/tsconfig.json

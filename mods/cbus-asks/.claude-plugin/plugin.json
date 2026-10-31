@@ -1,0 +1,7 @@
+{
+  "name": "cbus-asks",
+  "version": "0.1.0",
+  "description": "Keep the questions a session is waiting on the user for in a band above the prompt, each one standing alone, until answered",
+  "author": { "name": "claudebus" },
+  "types": "./types/index.d.ts"
+}

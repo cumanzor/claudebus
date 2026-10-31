@@ -114,6 +114,31 @@ The opt-in [Monitor stopgap](history/legacy/claude-monitor-stopgap.md) is for se
 the legacy transport. Native receive does not require the GrowthBook snapshot or
 telemetry-off workaround.
 
+## Questions for you (cbus-asks)
+
+An orchestrator's questions for you tend to land mid-reply and then scroll away
+under peer messages. The `cbus-asks` mod, installed by `cbus install-mods` (or
+`install-assets`), gives the model two tools: `ask` files a question written to
+stand alone (what is being decided, the choices, its pick) and `resolve` closes it.
+Claude Code only; Codex and OpenCode seats are unaffected.
+
+- Open questions show above the prompt as `Waiting on you (2), /asks to answer`,
+  one row per question, at most three, then `+N more in /asks`. A status line
+  entry, `2 waiting on you · /asks`, carries the count to surfaces that do not
+  draw the band, such as Remote Control.
+- `/asks` opens a pane with each question's context and its options. It takes the
+  keyboard: number keys add an answer such as `q2: develop` to your draft, Esc
+  closes the pane. No mouse is needed, so it works the same in tmux or over ssh.
+- Answer in your next prompt. `q1: yes; q2: develop` closes those questions
+  before the model reads the prompt. A bare `1 yes` also works: while questions
+  are open, each prompt carries their ids to the model, which closes them.
+- `/asks drop q2` closes one question yourself, `/asks clear` all of them,
+  `/asks close` the pane.
+
+Questions live in the session's state. They survive a mod reload, not a new
+session. To try a checkout's copy in one session without installing it, start
+Claude Code with `--plugin-dir <repo>/mods/cbus-asks`.
+
 ## Updating instructions
 
 Use `cbus install-commands` and `cbus install-roles` to install reviewed command and

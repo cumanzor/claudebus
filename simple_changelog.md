@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-30 23:14:39 UTC] [Mods/Feature] New cbus-asks Claude Code mod: the model files each question it is waiting on the user for with an `ask` tool, written to stand alone, and it stays in a band above the prompt (and a status line count) until answered. `/asks` opens a keyboard-driven pane with context and numbered answers; `qN: answer` in a prompt closes that question before the model reads it. install-mods no longer ships the tsconfig.json Claude Code writes beside a loaded mod. Docs mark both mods as Claude Code only.
+
 [2026-10-26 18:46:28 UTC] [OpenCode/Fix] Review fixes for the OpenCode adapter: an exited TUI no longer makes the daemon wake itself in a loop; the presence probe asks the plugin whether the session exists (a message lookup cannot tell a deleted session in OpenCode 1.19.3); the plugin re-reads status when its server reconnects and holds delivery until it has; the private socket bind name is length-checked and bind failures are recorded; the installer reads the active plugin array instead of matching JSONC text.
 
 [2026-10-23 14:34:24 UTC] [Tests/Harness] The harness-dispatch guard now also scans cmd/cbus and catches `.Harness` fields and `harness` variables compared with harness names, lowercased comparisons, and literal-case harness switches without a default. The 16 sites it found became explicit switches: spawn refuses any harness it cannot launch before deciding anything else, the connect report no longer calls an unknown harness Codex, and GC takes liveness and activity only from the record's own adapter fields.

@@ -105,6 +105,10 @@ cbus will not substitute a fresh Claude session.
   connect from inside their conversation. Existing `cbus codex` launches remain
   supported. Terminal placement remains independent —
   [Claude](docs/claude.md), [Codex](docs/codex.md), [OpenCode](docs/opencode.md)
+- **Claude Code mods** (Claude only, optional): one draws peer messages as one
+  line, one keeps the questions a session is waiting on you for above the prompt.
+  The bus works the same without them. See [docs/install.md](docs/install.md)
+  and [questions for you](docs/claude.md#questions-for-you-cbus-asks)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
   [docs/relay.md](docs/relay.md)
