@@ -218,7 +218,7 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"role TODO (no recorded role; set one with --role <alias>=<role>): coder, orchestrator", "mode=template (fork-born, origin unknown or no session): coder, orchestrator",
+		"role TODO (no recorded role; set one with --role <alias>=<role>): coder, orchestrator", "mode=template (fork-born, origin unknown, no session, or set by --mode): coder, orchestrator",
 		"cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
@@ -226,17 +226,11 @@ func TestFormationSaveVerb(t *testing.T) {
 	}
 
 	// --mode is the hand acting; a typo'd alias refuses
-	if rc := runFormation([]string{"save", "roles", "--mode", "coder=resume"}); rc != 0 {
-		t.Fatalf("--mode rc=%d", rc)
+	if rc := runFormation([]string{"save", "roles", "--mode", "coder=resume"}); rc == 0 {
+		t.Error("--mode resume for a peer with no recorded origin must refuse")
 	}
-	if f, err := client.LoadFormation("roles"); err != nil {
-		t.Fatal(err)
-	} else {
-		for _, p := range f.Peers {
-			if p.Alias == "coder" && p.Mode != client.ModeResume {
-				t.Errorf("--mode coder=resume left %q", p.Mode)
-			}
-		}
+	if rc := runFormation([]string{"save", "roles", "--mode", "coder=fork"}); rc == 0 {
+		t.Error("--mode fork for a peer with no recorded origin must refuse")
 	}
 	if rc := runFormation([]string{"save", "roles", "--mode", "ghost=resume"}); rc == 0 {
 		t.Error("--mode for an unknown alias must refuse")

@@ -2213,8 +2213,9 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   roles/<alias>.md@<commit>, or replace this with the peer's brief`). A refresh
   never changes a recorded mode; the CLI lists which new peers got which mode.
 - `--mode alias=resume|fork|template` (repeatable) sets that peer's mode in
-  the file, overwriting what it held. An alias the formation does not hold, or
-  a mode outside the enum, refuses the save with nothing written.
+  the file, overwriting what it held. An alias the formation does not hold, a
+  mode outside the enum, or `resume`/`fork` for a peer whose origin is `fork`
+  or unknown (apply would refuse it) refuses the save with nothing written.
 - `--role alias=role` (repeatable) points that peer's `rolefile` at
   `roles/<role>.md` and clears any freeform `role`. It is the fill for a seat
   that joined instead of being spawned with `--role`. The role must resolve
@@ -2318,15 +2319,24 @@ surfaced as the per-peer detail — the load-bearing ones:
   → refused (D14): `session <sid> is held at <where> (live or availability
   unresolved) — resume risks a second process on one transcript; confirm the
   original has stopped, or set mode=fork if a copy of it is what you want`
-  (`formation_plan.go:309-315`, quoted verbatim). "Held" covers two sources:
-  a live listener or managed consumer on the bus, and, on macOS and Linux, a
+  (`formation_plan.go`, quoted verbatim). "Held" covers three sources:
+  a live listener or managed consumer on the bus; on macOS and Linux, a
   running process whose argv resumes the sid (`--resume <sid>`, `-r <sid>`,
   `--resume=<sid>`, read from `ps`), reported as `held at pid <n> (a process
-  resuming it, not on the bus)`. The second catches a session reopened by hand
-  or by another launcher that never re-joined. A fresh session that never
-  joined carries no sid in its argv and stays invisible; Windows has no argv
-  read and reports only bus holders. `formation resume` gates its anchor on
-  the same set.
+  resuming it, not on the bus)`; and Claude Code's own session registry,
+  `<config>/sessions/<pid>.json` under `~/.claude`, `$CLAUDE_CONFIG_DIR` and
+  each CCS instance, where a file whose pid is alive and names the sid is
+  reported as `held at pid <n> (Claude Code's session registry lists it
+  running)`. The registry catches a session started fresh that left the bus
+  or lost its listener, which carries no sid in its argv. A stale file whose
+  pid was recycled reads as held: the refusal fails closed. `formation resume`
+  gates its anchor on the same set.
+- a resume whose launch-intent marker another launch holds → `failed`: before
+  it forks a `resume`, apply claims the same marker `formation resume` uses
+  (`a launch of "<alias>" was started <age> ago (pid <n>) and has not joined
+  yet ...`). It closes the gap between a fork and the child's join, when no
+  bus record shows the session yet, so two applies cannot resume one
+  session. The marker clears on that session's join or after 180s.
 - one transcript recorded under two aliases → refused: `session <sid> is
   recorded under more than one alias in this formation — one of them is wrong;
   fix the file` (`formation_plan.go:278-282`).

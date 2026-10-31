@@ -320,6 +320,12 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 			return "", err
 		}
 		reserved = true
+	case ActionResume:
+		// the plan's liveness read cannot see a resume launched since, by this apply
+		// or another one, before the child joins; the marker can
+		if err := claimResumeIntent(f.Channel, p.Alias, p.SessionID); err != nil {
+			return "", err
+		}
 	}
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
@@ -341,6 +347,21 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 		return "", err
 	}
 	return created, nil
+}
+
+func claimResumeIntent(ch, alias, sid string) error {
+	in, age, claimed, err := ClaimLaunchIntent(ch, alias, sid)
+	if err != nil {
+		return fmt.Errorf("cannot record the launch intent for %q: %w", alias, err)
+	}
+	if claimed {
+		return nil
+	}
+	if in.TS == "" {
+		return fmt.Errorf("another launch of %q claimed it a moment ago — only one may run at a time", alias)
+	}
+	return fmt.Errorf("a launch of %q was started %s ago (pid %d) and has not joined yet — it is most likely still booting; "+
+		"this refusal expires in %s", alias, age.Round(time.Second), in.Pid, LaunchIntentExpiry(age).Round(time.Second))
 }
 
 func launchTarget(t string) string {
@@ -376,13 +397,13 @@ func peerModel(p *FormationPeer) string {
 	return ""
 }
 
-// peerRoleName is the committed role a peer is briefed from, "" for freeform or no role.
+// peerRoleName is the committed role a peer is briefed from, "" unless it resolves here
 func peerRoleName(p *FormationPeer) string {
 	if p.Rolefile == "" {
 		return ""
 	}
 	name, _ := parseRolefile(p.Rolefile)
-	if !validRoleName(name) {
+	if _, _, err := LoadRole(name); err != nil {
 		return ""
 	}
 	return name
