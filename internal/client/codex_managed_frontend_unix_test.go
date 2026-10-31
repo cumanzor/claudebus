@@ -25,7 +25,8 @@ func TestManagedFrontendOriginRequiresLiteralLocalEndpoint(t *testing.T) {
 func TestManagedFrontendRejectsWrongControlSocketOwner(t *testing.T) {
 	c, backend, _ := managedConsumerFixture(t, nil, "managed", false)
 	fake := startFakeCodex(t, nil)
-	home, err := os.MkdirTemp("", "cbus-control-")
+	// short for the same 104-byte socket path limit as the consumer fixture
+	home, err := os.MkdirTemp("/tmp", "cbct")
 	if err != nil {
 		t.Fatal(err)
 	}

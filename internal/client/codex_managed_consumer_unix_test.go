@@ -118,7 +118,8 @@ func runManagedCodexFixture(mode string) {
 
 func managedConsumerFixture(t *testing.T, parentArgs []string, mode string, readOnly bool) (*ConnectionState, int, func()) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "cbus-managed-")
+	// a short dir: under the macOS default TMPDIR the control socket path exceeds the 104-byte limit
+	dir, err := os.MkdirTemp("/tmp", "cbmc")
 	if err != nil {
 		t.Fatal(err)
 	}
