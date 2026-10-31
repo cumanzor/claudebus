@@ -27,7 +27,7 @@ test('cross-channel sender keeps its channel', () => {
 
 test('presence collapses and drops the guidance', () => {
   const t = frame('CLI session connected (or resumed)', { kind: 'presence' }) +
-    '\nThis is a cbus presence notification (event="join"). Briefly tell the user which peer joined.'
+    '\nThis is a cbus presence notification (event="join"). Update your known channel roster silently.'
   expect(compact(t)).toBe('▸ [10:00] bob joined')
 })
 

@@ -397,7 +397,7 @@ func TestManagedPresencePayloadDistinguishesMembershipFromCompaction(t *testing.
 				t.Fatal("lost original frame, remote identity or event type")
 			}
 			membership := event == "join" || event == "leave" || event == "departed" || event == "rename"
-			if strings.Contains(payload, "Briefly tell the user") != membership {
+			if strings.Contains(payload, "do not restate it to them") != membership {
 				t.Fatal("membership notification guidance applied to the wrong event")
 			}
 			if !strings.Contains(payload, "Do not send a bus reply or acknowledgment") || !strings.Contains(payload, "No polling") {
