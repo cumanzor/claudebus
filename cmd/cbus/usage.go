@@ -77,6 +77,8 @@ const usage = `cbus — message bus between coding sessions, in named channels
        --mode alias=mode           set that peer's saved mode (resume|fork|template,
                                    repeatable); new peers default to resume when
                                    their origin is fresh/joined, else template
+       --role alias=role           point that peer's rolefile at roles/<role>.md
+                                   (repeatable; the role must resolve from here)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); connect to the
                                    channel first — peers are briefed to answer you.

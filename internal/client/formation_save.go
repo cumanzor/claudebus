@@ -174,11 +174,15 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 type SaveOptions struct {
 	Anchors map[string]string
 	Modes   map[string]string // alias -> resume|fork|template
+	Roles   map[string]string // alias -> committed role name, written as rolefile
 }
 
 func SaveFormationWith(name, ch string, opts SaveOptions) (*Formation, *SaveReport, error) {
 	anchors := opts.Anchors
 	if err := checkModes(opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := checkRoles(opts.Roles); err != nil {
 		return nil, nil, err
 	}
 	if err := checkHandAnchors(anchors); err != nil {
@@ -264,6 +268,9 @@ func SaveFormationWith(name, ch string, opts SaveOptions) (*Formation, *SaveRepo
 	}
 	retargetSelf(ch, f.Peers, observedSurface(), rep)
 	if err := setHandModes(f.Peers, opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := setHandRoles(f.Peers, opts.Roles); err != nil {
 		return nil, nil, err
 	}
 
@@ -380,6 +387,37 @@ func setHandModes(peers []FormationPeer, modes map[string]string) error {
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
 		return fmt.Errorf("--mode names no peer in this formation: %s", strings.Join(unknown, ", "))
+	}
+	return nil
+}
+
+// checkRoles refuses a role that does not resolve here, so a typo is not saved as a brief.
+func checkRoles(roles map[string]string) error {
+	for alias, r := range roles {
+		if _, _, err := LoadRole(r); err != nil {
+			return fmt.Errorf("--role %s=%s: %v", alias, r, err)
+		}
+	}
+	return nil
+}
+
+// setHandRoles points each named peer's rolefile at roles/<role>.md, replacing any brief.
+func setHandRoles(peers []FormationPeer, roles map[string]string) error {
+	var unknown []string
+	for alias, r := range roles {
+		found := false
+		for i := range peers {
+			if peers[i].Alias == alias {
+				peers[i].Rolefile, peers[i].Role, found = "roles/"+r+".md", nil, true
+			}
+		}
+		if !found {
+			unknown = append(unknown, alias)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("--role names no peer in this formation: %s", strings.Join(unknown, ", "))
 	}
 	return nil
 }

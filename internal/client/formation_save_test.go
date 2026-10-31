@@ -916,3 +916,31 @@ func TestSaveFormationModes(t *testing.T) {
 		}
 	}
 }
+
+// TestSaveFormationHandRoles: --role writes rolefile for a joined seat and refuses typos.
+func TestSaveFormationHandRoles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "zz-lead.md"), []byte("you lead\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Join("eff", "main"); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := SaveFormationWith("eff", "eff", SaveOptions{Roles: map[string]string{"main": "zz-lead"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := f.Peers[0]; p.Rolefile != "roles/zz-lead.md" || p.Role != nil || p.RoleTODO() {
+		t.Errorf("main brief = rolefile %q role %v, want roles/zz-lead.md", p.Rolefile, p.Role)
+	}
+	for _, bad := range []map[string]string{{"ghost": "zz-lead"}, {"main": "zz-missing"}, {"main": "../x"}} {
+		if _, _, err := SaveFormationWith("eff", "eff", SaveOptions{Roles: bad}); err == nil {
+			t.Errorf("--role %v saved, want an error", bad)
+		}
+	}
+}

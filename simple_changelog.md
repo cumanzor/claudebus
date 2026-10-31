@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-10-31 19:09:04 UTC] [Formation/Roles] `formation save --role alias=role` points a seat that joined rather than being spawned with `--role` at `roles/<role>.md`; the role must resolve and the alias must be in the formation. `/save-formation` now proposes a role (its own seat as orchestrator when it coordinates) and a resume for each template seat with a live transcript, asks once, and applies the approved fills in one re-save.
+
 [2026-10-31 19:06:50 UTC] [Formation/Modes] `formation save` gives a new peer `mode=resume` when its transcript is its own (a real session id, origin fresh or joined), and `mode=template` only when it is fork-born or unattributed. Before, every new peer saved as template, so a restore started each seat fresh and lost its context. A refresh never changes a recorded mode; `--mode alias=resume|fork|template` sets one by hand, and the save output lists which peers got which mode.
 
 [2026-10-31 19:01:56 UTC] [Formation/Roles] `spawn --role` records the role in the peer's birth record, and `formation save` fills that peer's `rolefile` (`roles/<role>.md`) instead of a TODO. A `template` or `fork` restore records the role from the peer's rolefile, and a daemon connect that claims a reservation keeps it. Hand-set rolefiles and freeform roles still win; peers that joined without being spawned keep the TODO.

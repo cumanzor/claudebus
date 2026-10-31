@@ -43,7 +43,7 @@ func runFormation(args []string) int {
 }
 
 func runFormationSave(args []string) int {
-	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=resume|fork|template ...]"
+	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=resume|fork|template ...] [--role alias=role ...]"
 	if len(args) == 0 {
 		return die(use)
 	}
@@ -56,7 +56,7 @@ func runFormationSave(args []string) int {
 		ch = rest[0]
 		rest = rest[1:]
 	}
-	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true, "--mode": true}, nil, true)
+	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true, "--mode": true, "--role": true}, nil, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
@@ -79,12 +79,20 @@ func runFormationSave(args []string) int {
 		}
 		modes[k] = v
 	}
+	roles := map[string]string{}
+	for _, kv := range p.all("--role") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || v == "" {
+			return die("--role: want alias=role, got %q", kv)
+		}
+		roles[k] = v
+	}
 	if ch == "" {
 		if ch, err = ownChannel(); err != nil {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormationWith(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes})
+	f, rep, err := client.SaveFormationWith(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes, Roles: roles})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -109,14 +117,16 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
 	}
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them;")
-		fmt.Println("  a TODO role is yours to fill in — as are profile/origin/model on peers older binaries recorded")
+		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them")
 		added := map[string]bool{}
 		for _, a := range rep.Added {
 			added[a] = true
 		}
-		var resume, template []string
+		var resume, template, todo []string
 		for _, p := range f.Peers {
+			if added[p.Alias] && p.RoleTODO() {
+				todo = append(todo, p.Alias)
+			}
 			switch {
 			case !added[p.Alias]:
 			case p.Mode == client.ModeResume:
@@ -130,6 +140,9 @@ func runFormationSave(args []string) int {
 		}
 		if len(template) > 0 {
 			fmt.Printf("  mode=template (fork-born, origin unknown or no session): %s\n", strings.Join(template, ", "))
+		}
+		if len(todo) > 0 {
+			fmt.Printf("  role TODO (no recorded role; set one with --role <alias>=<role>): %s\n", strings.Join(todo, ", "))
 		}
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the

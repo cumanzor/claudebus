@@ -218,7 +218,7 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"a TODO role is yours to fill in", "mode=template (fork-born, origin unknown or no session): coder, orchestrator",
+		"role TODO (no recorded role; set one with --role <alias>=<role>): coder, orchestrator", "mode=template (fork-born, origin unknown or no session): coder, orchestrator",
 		"cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
