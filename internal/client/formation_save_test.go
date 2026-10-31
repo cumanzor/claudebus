@@ -494,6 +494,7 @@ func TestCapturePeerFillTable(t *testing.T) {
 // TestCapturePeerRoleFill: a recorded role fills only a blank or TODO brief, and hand edits win.
 func TestCapturePeerRoleFill(t *testing.T) {
 	freeform := "reviews the swift side"
+	mentionsTodo := "owns the TODO.md backlog triage"
 	for _, tc := range []struct {
 		name         string
 		rolefile     string
@@ -507,6 +508,7 @@ func TestCapturePeerRoleFill(t *testing.T) {
 		{"absent -> filled", "", nil, "coder", "roles/coder.md", nil, false},
 		{"hand rolefile wins", "roles/reviewer.md@abc", nil, "coder", "roles/reviewer.md@abc", nil, false},
 		{"freeform role wins", "", &freeform, "coder", "", &freeform, false},
+		{"freeform mentioning todo wins", "", &mentionsTodo, "coder", "", &mentionsTodo, false},
 		{"no meta role -> TODO stays", "", strPtr(roleTODOMarker), "", "", strPtr(roleTODOMarker), false},
 		{"garbage role skipped", "", strPtr(roleTODOMarker), "../etc", "", strPtr(roleTODOMarker), true},
 	} {
@@ -844,5 +846,35 @@ func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
 	}
 	if len(rep.SkippedBirth) != 1 || !strings.Contains(rep.SkippedBirth[0], "profile") {
 		t.Errorf("skip must be surfaced, got %v", rep.SkippedBirth)
+	}
+}
+
+// TestSaveFormationRefreshWithNewPeerFirst: a new peer appended before an existing one
+// in roster order must not strand the existing peer's refresh in a stale array.
+func TestSaveFormationRefreshWithNewPeerFirst(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if _, _, err := Join("eff", "zmain"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := SaveFormation("eff", "eff", nil); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "eff", "alpha", "sid-alpha")
+	plantPeer(t, "eff", "zmain", "sid-main2")
+	f, _, err := SaveFormation("eff", "eff", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadFormation("eff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ff := range []*Formation{f, loaded} {
+		for _, p := range ff.Peers {
+			if p.Alias == "zmain" && p.SessionID != "sid-main2" {
+				t.Errorf("zmain sid = %q, want the refreshed sid-main2", p.SessionID)
+			}
+		}
 	}
 }

@@ -4,7 +4,7 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
-[2026-10-31 19:01:56 UTC] [Formation/Roles] `spawn --role` records the role in the peer's birth record, and `formation save` fills that peer's `rolefile` (`roles/<role>.md`) instead of a TODO. A `template` or `fork` restore records the role from the peer's rolefile, and a daemon connect that claims a reservation keeps it. Hand-set rolefiles and freeform roles still win; peers that joined without being spawned keep the TODO.
+[2026-10-31 19:01:56 UTC] [Formation/Roles] `spawn --role` records the role in the peer's birth record, and `formation save` fills that peer's `rolefile` (`roles/<role>.md`) instead of a TODO. A `template` or `fork` restore records the role from the peer's rolefile, and a daemon connect that claims a reservation keeps it. Hand-set rolefiles and freeform roles still win; peers that joined without being spawned keep the TODO. Also fixes a refresh that could drop an existing peer's update when a new peer was added ahead of it.
 
 [2026-10-31 01:28:19 UTC] [Tests/Canary] The Codex canaries recognize an npm-installed Codex (ps truncates its comm, so argv[0] is checked too) and accept the vscode source Codex 0.163.0 records for an ordinary CLI thread. The managed Codex test fixtures use short temp dirs, so their control socket paths stay under macOS's 104-byte limit with the default TMPDIR.
 

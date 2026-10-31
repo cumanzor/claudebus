@@ -376,13 +376,13 @@ func peerModel(p *FormationPeer) string {
 	return ""
 }
 
-// peerRoleName is the committed role a peer is briefed from, "" for freeform or no role.
+// peerRoleName is the committed role a peer is briefed from, "" unless it resolves here
 func peerRoleName(p *FormationPeer) string {
 	if p.Rolefile == "" {
 		return ""
 	}
 	name, _ := parseRolefile(p.Rolefile)
-	if !validRoleName(name) {
+	if _, _, err := LoadRole(name); err != nil {
 		return ""
 	}
 	return name
