@@ -56,7 +56,7 @@ export const compact = (text: string, offsetMin = 0): string | null => {
         const ev = EVENT.exec(tail)?.[1] ?? ''
         return `▸ [${at}] ${who} ${PRESENCE[ev] ?? (ev || 'presence')}`
       }
-      return `▸ [${at}] from ${who}: ${kind === 'grant' ? '[grant] ' : ''}${body}`
+      return `▸ [${at}] from ${who}: ${kind === 'grant' ? '[grant] ' : kind === 'denied' ? '[denied] ' : ''}${body}`
     })
     .join('\n')
 }

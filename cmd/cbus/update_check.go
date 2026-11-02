@@ -43,7 +43,7 @@ func maybeStartUpdateCheck(cmd string, jsonMode bool) {
 		return
 	}
 	switch cmd {
-	case "selfupdate", "hook-exit", "hook-compact", updateCheckSubcmd, "--version", "version":
+	case "selfupdate", "hook-exit", "hook-compact", "hook-denied", updateCheckSubcmd, "--version", "version":
 		return
 	}
 	if _, ok := resolveRepoSlug(); !ok {

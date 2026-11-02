@@ -103,6 +103,8 @@ func run(args []string) int {
 		return runHookExit()
 	case "hook-compact": // PreCompact/PostCompact hooks: announce compaction (never fails the session)
 		return runHookCompact(args[1:])
+	case "hook-denied": // PermissionDenied hook: tell the coordinator (never fails the session)
+		return runHookDenied()
 	case "hook-join": // cbus-6ij.4: SessionStart hook — harness-neutral auto-join (never fails the session)
 		return runHookJoin()
 	case "codex-stop-hook": // cbus-6ij.4: Stop hook — fallback delivery for a codex exec worker
@@ -325,12 +327,21 @@ func runHookCompact(args []string) int {
 	return 0
 }
 
+// runHookDenied runs the PermissionDenied hook. It ALWAYS returns 0 and writes nothing to
+// stdout, which Claude Code parses for a retry decision.
+func runHookDenied() int {
+	if err := client.HookDenied(os.Stdin); err != nil {
+		fmt.Fprintf(os.Stderr, "cbus: hook-denied: %v\n", err)
+	}
+	return 0
+}
+
 // hostLabelGated: every verb refuses up front on an invalid CBUS_HOST, except help
 // and version (they never resolve it) and the hooks, whose contract is exit 0: a
 // PreCompact hook exiting 2 blocks compaction. The hooks fail closed internally.
 func hostLabelGated(verb string) bool {
 	switch verb {
-	case "", "-h", "--help", "--version", "version", "hook-exit", "hook-compact", "hook-join", "codex-stop-hook":
+	case "", "-h", "--help", "--version", "version", "hook-exit", "hook-compact", "hook-denied", "hook-join", "codex-stop-hook":
 		return false
 	}
 	return true

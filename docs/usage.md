@@ -242,6 +242,18 @@ not a promise of current availability. Do not acknowledge presence on the bus.
 Compaction updates context without implying a membership change. Native managed
 aliases cannot currently be renamed in place.
 
+A seat's coordinator hears about auto mode denials through the `PermissionDenied`
+hook, which you add to Claude Code's settings by hand:
+
+```json
+{"hooks": {"PermissionDenied": [{"matcher": "*", "hooks": [
+  {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}]}}
+```
+
+A machine without the hook is silent, so no notice does not mean no denials. Manual
+denials and deny rules do not fire it. See
+[`cbus hook-denied`](architecture/command-reference.md#cbus-hook-denied--the-permissiondenied-flow).
+
 Legacy `join`/Monitor peers retain their listener-based presence and optional
 `cbus hook-exit` / `cbus hook-compact pre|post` hooks. Relay presence differs by
 transport; see [relay.md](relay.md). Before replacing a legacy membership, follow

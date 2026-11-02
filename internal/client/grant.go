@@ -532,26 +532,32 @@ func grantNoticeText(g Grant) string {
 		g.ID, g.Channel, g.Alias, g.SessionID, g.Action, g.ID, g.ID)
 }
 
-// DeliverGrantNotice appends a kind=grant line to the grantee's inbox, under the
-// same alias lock a send takes. Best-effort: the grant is valid without it.
-func DeliverGrantNotice(g Grant) (err error) {
+// DeliverGrantNotice appends a kind=grant line to the grantee's inbox. Best-effort: the
+// grant is valid without it.
+func DeliverGrantNotice(g Grant) error {
+	return deliverNotice(g.Channel, g.Alias, core.Message{From: g.Channel + "/" + GrantNoticeFrom, To: g.Channel + "/" + g.Alias,
+		TS: Now(), Kind: "grant", Text: grantNoticeText(g)})
+}
+
+// deliverNotice appends a machine-written line to a local inbox, under the same alias
+// lock a send takes.
+func deliverNotice(ch, alias string, msg core.Message) (err error) {
 	var wake string
 	defer func() {
 		if err == nil {
 			WakeDaemon(wake)
 		}
 	}()
-	unlock, err := lockPeer(g.Channel, g.Alias)
+	unlock, err := lockPeer(ch, alias)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	dir := filepath.Join(CBUSDir(), g.Channel, g.Alias)
+	dir := filepath.Join(CBUSDir(), ch, alias)
 	if !fileExists(filepath.Join(dir, "meta.json")) {
-		return fmt.Errorf("%s/%s is no longer registered", g.Channel, g.Alias)
+		return fmt.Errorf("%s/%s is no longer registered", ch, alias)
 	}
-	line, err := json.Marshal(core.Message{From: g.Channel + "/" + GrantNoticeFrom, To: g.Channel + "/" + g.Alias,
-		TS: Now(), Kind: "grant", Text: grantNoticeText(g)})
+	line, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}

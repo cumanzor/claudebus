@@ -177,7 +177,7 @@ set`. The Go port unified both into the single `cbus: usage: ...` form.
 
 | Code | When |
 |---|---|
-| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
+| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-denied` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
 | 1 | Every `die()` (the one error path in the Go client, see above); `whoami` with no registrations; `leave` with nothing to leave; `auth status <bad-host>` (host is validated, not unconditional 0); `connection status <target>` with no managed connection for that target; `cbus list @host` transport failure |
 
 ### Environment variables (not exhaustive)
@@ -215,6 +215,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | `cbus auth set ... --token - / --cf-id - / --cf-secret -` | Each `-` value reads **all of stdin** — only one `-` per invocation is practical |
 | `cbus hook-exit` | Reads the SessionEnd hook's JSON payload; extracts `session_id`. **Blocks awaiting EOF at an interactive TTY** |
 | `cbus hook-compact <pre\|post>` | Reads the PreCompact/PostCompact hook's JSON payload; extracts `session_id` + `trigger`. Same TTY-block behavior as `hook-exit` |
+| `cbus hook-denied` | Reads the PermissionDenied hook's JSON payload; never forwards `tool_input`. Same TTY-block behavior as `hook-exit` |
 | `cbus hook-join` | Reads the SessionStart hook's JSON payload (`main.go:313`) |
 | `cbus codex-stop-hook` | Reads the Codex Stop hook's JSON payload; long-polls the inbox under the hook's timeout |
 | (internal) | The Go client dials the relay directly over `net/http`, never a shelled-out `curl`; Keychain writes go through `security -i`; secrets never appear in any argv |
@@ -250,7 +251,7 @@ switch to a `run*` function).
 
 > **Go-native verbs (post-cutover).** `connect`, `connection`, `daemon`,
 > `codex`, `codex-bridge`, `hook-join`, `hook-compact <pre|post>`,
-> `codex-stop-hook`,
+> `hook-denied`, `codex-stop-hook`,
 > `install-codex-skills`, `codex-permissions`, `spawn`, the `formation …`
 > family, `close`, `arrange`/`scatter`/`focus` (§9), `selfupdate`,
 > `install-commands`, `install-roles`, and
@@ -1549,6 +1550,45 @@ profile. Applied by hand, Carlos-gated; no installer or `cbus` verb does this.)
 
 **Quirk:** args are dropped past `phase` — same family as `hook-exit`'s
 dropped args, different reason underneath (point 1 above).
+
+### `cbus hook-denied` — the PermissionDenied flow
+
+Lets a seat's coordinator hear that the auto mode classifier refused a tool call
+in that seat, with no model involved. The coordinator cannot override a denial: it
+reroutes the work or asks the operator. Claude Code fires this hook only in auto
+mode, so manual denials and deny rules never reach it.
+
+Behavior, exactly:
+
+1. Reads `session_id`, `tool_name`, `reason` and `tool_input` from stdin; env
+   fallback for the session, silent no-op without one. Always exits 0 and writes
+   nothing to stdout, so it never asks for a retry.
+2. For each local registration of that session, reads the coordinator record
+   (`CoordinatorOf`). No coordinator means no notice.
+3. Appends a `kind=denied` line to the coordinator's inbox, from the seat's address:
+   `coder denied: Bash, [Credential Exploration], "Read the deploy config"`. The
+   quoted part is the Bash `description` field; other tools have none.
+4. Never forwards the command or `tool_input`. `reason` and `description` are written
+   by a classifier and a model and could quote the input, so any piece of 8 or more
+   characters from a `tool_input` string is replaced with `[withheld]` before
+   rendering, a field echoing two or more such pieces is withheld whole, and each
+   field is one line of at most 200 characters. This cannot catch a short secret, or
+   one that was paraphrased, split or re-encoded. Common words in the command can
+   withhold more than they need to.
+5. Collapses repeats per seat, session, tool and reason (`.denials/<channel>/<alias>.json`).
+   The first sends; repeats within 10 minutes only count; the next send after that
+   adds `(N more since HH:MMZ)`. A count with no later denial is never reported.
+   A notice that could not be delivered does not count as sent.
+
+Local only, like the coordinator record: a coordinator on another machine hears nothing.
+
+**Wiring is manual** — no installer touches settings. A machine without the hook is
+silent, so no notice does not mean no denials. Add to `~/.claude/settings.json`:
+
+```json
+{"hooks": {"PermissionDenied": [{"matcher": "*", "hooks": [
+  {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}]}}
+```
 
 ### Codex integration — `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`
 

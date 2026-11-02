@@ -37,6 +37,11 @@ test('grant keeps the body, drops the notice', () => {
   expect(compact(t)).toBe('▸ [10:00] from bob: [grant] write access to repo')
 })
 
+test('denied keeps the body, drops the notice', () => {
+  const t = frame('coder denied: Bash, [Credential Exploration]', { kind: 'denied' }) + '\nThis is a cbus denial notice. You cannot override it.'
+  expect(compact(t)).toBe('▸ [10:00] from bob: [denied] coder denied: Bash, [Credential Exploration]')
+})
+
 test('a burst of two frames gives two lines', () => {
   expect(compact(frame('one') + frame('two', { from: 'dev/carol' }))).toBe('▸ [10:00] from bob: one\n▸ [10:00] from carol: two')
 })
