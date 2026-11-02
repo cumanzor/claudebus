@@ -541,14 +541,18 @@ func DeliverGrantNotice(g Grant) error {
 
 // deliverNotice appends a machine-written line to a local inbox, under the same alias
 // lock a send takes.
-func deliverNotice(ch, alias string, msg core.Message) (err error) {
+func deliverNotice(ch, alias string, msg core.Message) error {
+	return deliverNoticeWithin(ch, alias, msg, 5*time.Second)
+}
+
+func deliverNoticeWithin(ch, alias string, msg core.Message, lockWait time.Duration) (err error) {
 	var wake string
 	defer func() {
 		if err == nil {
 			WakeDaemon(wake)
 		}
 	}()
-	unlock, err := lockPeer(ch, alias)
+	unlock, err := lockPeerFor(ch, alias, lockWait)
 	if err != nil {
 		return err
 	}

@@ -348,6 +348,7 @@ cbus close <ch>/<alias> [...] [--force]  # end a peer's process (SIGTERM, then
 cbus hook-exit                   # SessionEnd hook target (announces departure)
 cbus hook-compact <pre|post>     # PreCompact/PostCompact hook target (announces compaction)
 cbus hook-denied                 # PermissionDenied hook target (tells the seat's coordinator)
+cbus hook-regressed              # Stop hook target (reports a classifier model fallback)
 cbus hook-join                   # SessionStart hook target (auto-joins $CBUS_CHANNEL)
 cbus --version                   # installed client version
 CBUS_DIR=/path cbus ...          # override store (default ~/.claude-bus)

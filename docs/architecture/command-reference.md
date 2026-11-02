@@ -177,7 +177,7 @@ set`. The Go port unified both into the single `cbus: usage: ...` form.
 
 | Code | When |
 |---|---|
-| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-denied` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
+| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-denied` / `hook-regressed` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
 | 1 | Every `die()` (the one error path in the Go client, see above); `whoami` with no registrations; `leave` with nothing to leave; `auth status <bad-host>` (host is validated, not unconditional 0); `connection status <target>` with no managed connection for that target; `cbus list @host` transport failure |
 
 ### Environment variables (not exhaustive)
@@ -216,6 +216,7 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | `cbus hook-exit` | Reads the SessionEnd hook's JSON payload; extracts `session_id`. **Blocks awaiting EOF at an interactive TTY** |
 | `cbus hook-compact <pre\|post>` | Reads the PreCompact/PostCompact hook's JSON payload; extracts `session_id` + `trigger`. Same TTY-block behavior as `hook-exit` |
 | `cbus hook-denied` | Reads the PermissionDenied hook's JSON payload; never forwards `tool_input`. Same TTY-block behavior as `hook-exit` |
+| `cbus hook-regressed` | Reads the Stop hook's JSON payload; reads the transcript only for a seat with someone to tell. Same TTY-block behavior as `hook-exit` |
 | `cbus hook-join` | Reads the SessionStart hook's JSON payload (`main.go:313`) |
 | `cbus codex-stop-hook` | Reads the Codex Stop hook's JSON payload; long-polls the inbox under the hook's timeout |
 | (internal) | The Go client dials the relay directly over `net/http`, never a shelled-out `curl`; Keychain writes go through `security -i`; secrets never appear in any argv |
@@ -251,7 +252,7 @@ switch to a `run*` function).
 
 > **Go-native verbs (post-cutover).** `connect`, `connection`, `daemon`,
 > `codex`, `codex-bridge`, `hook-join`, `hook-compact <pre|post>`,
-> `hook-denied`, `codex-stop-hook`,
+> `hook-denied`, `hook-regressed`, `codex-stop-hook`,
 > `install-codex-skills`, `codex-permissions`, `spawn`, the `formation …`
 > family, `close`, `arrange`/`scatter`/`focus` (§9), `selfupdate`,
 > `install-commands`, `install-roles`, and
@@ -1584,11 +1585,53 @@ Behavior, exactly:
 Local only, like the coordinator record: a coordinator on another machine hears nothing.
 
 **Wiring is manual** — no installer touches settings. A machine without the hook is
-silent, so no notice does not mean no denials. Add to `~/.claude/settings.json`:
+silent, so no notice does not mean no denials. The entry is in the snippet under
+`cbus hook-regressed` below.
+
+### `cbus hook-regressed` — the Stop flow
+
+Lets a coordinator hear that a seat fell back to another model after a classifier
+refusal. Claude Code writes a `type: system`, `subtype: model_refusal_fallback` line to
+the transcript and the session stays on the fallback until someone runs `/model` there.
+That step stays with the operator.
+
+Behavior, exactly:
+
+1. Reads `session_id` and `transcript_path` from stdin. Always exits 0 and writes nothing
+   to stdout. The path's file name must be `<session_id>.jsonl`.
+2. Picks a recipient for each local registration of that session: its coordinator
+   (`CoordinatorOf`), or itself if any record on the channel names it, or nobody. With
+   nobody the transcript is not read, so a plain session pays for a directory read at most.
+3. Reads the transcript from a per-seat offset (`.regressions/<channel>/<alias>.json`), at
+   most 4 MiB per Stop, whole lines only. A slice with no newline is one oversized line
+   and is skipped. A large backlog takes several Stops.
+4. Counts only an entry with `isSidechain` false and `sessionId` equal to this session,
+   so a fork does not report what it inherited from its parent's transcript.
+5. Appends a `kind=regressed` line: `coder regressed: claude-a -> claude-b, [cyber],
+   session stays on the fallback until /model`. Only those three fields are read, each
+   reduced to `[A-Za-z0-9._-]`. Never the entry's content or explanation.
+6. The offset moves past an entry only once it was delivered. Lock waits are 250 ms, and
+   a busy lock leaves the entry for the next Stop.
+
+The coordinator's model files the ask, so this reaches the asks band only if that model
+does. The notice's guidance tells it to.
+
+**Limits.** The transcript entry is undocumented: if a Claude Code version renames it, this
+goes silent with no signal. `PostModelSwitch` with `source: "auto"` may cover the same
+event, but that was not measured, because no way to trigger it short of a real refusal
+was available. A session that ends before its next Stop reports nothing until it resumes.
+
+**Wiring is manual** — no installer touches settings. A machine without these hooks is
+silent, so no notice does not mean no denials and no fallbacks. Add to
+`~/.claude/settings.json`:
 
 ```json
-{"hooks": {"PermissionDenied": [{"matcher": "*", "hooks": [
-  {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}]}}
+{"hooks": {
+  "PermissionDenied": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}],
+  "Stop": [{"hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-regressed"}]}]
+}}
 ```
 
 ### Codex integration — `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`
