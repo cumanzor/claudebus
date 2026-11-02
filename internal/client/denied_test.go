@@ -205,6 +205,26 @@ func TestDeniedShortMultilineReasonIsFlattened(t *testing.T) {
 	}
 }
 
+// TestDeniedDocumentedReasonFormsRender: the prose forms the hooks reference gives, beside
+// the bracket form real denials show.
+func TestDeniedDocumentedReasonFormsRender(t *testing.T) {
+	long := "Auto mode could not evaluate this action and is blocking it for safety"
+	for reason, want := range map[string]string{
+		"[Irreversible Local Destruction]": "coder denied: Bash, [Irreversible Local Destruction]",
+		"Classifier unavailable":           "coder denied: Bash, [Classifier unavailable]",
+		long + ". Try again.":              "coder denied: Bash, [" + long + ". Try again.]",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			deniedFixture(t)
+			fireDenied(t, deniedPayloadJSON(t, deniedSeatSID, "Bash", reason, map[string]any{"command": "ls"}))
+			got := inboxLines(t, "ch", "lead")
+			if len(got) != 1 || got[0].Text != want {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
 func withDeniedClock(t *testing.T) *time.Time {
 	t.Helper()
 	at := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
