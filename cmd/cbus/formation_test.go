@@ -516,3 +516,36 @@ func TestFormationSaveReportsRetarget(t *testing.T) {
 		t.Errorf("save output does not name the retarget:\n%s", out)
 	}
 }
+
+// TestFormationBootstrapRecordsUnlessDryRun: the verb writes the coordinator record
+// the prompt names, and --dry-run leaves the store untouched.
+func TestFormationBootstrapRecordsUnlessDryRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	saveFixture(t, dir, "roles", fixtureRoles())
+	record := filepath.Join(dir, ".coordinators", "roles", "coder.json")
+
+	withStdout := func(args ...string) string {
+		t.Helper()
+		return captureStdout(t, func() {
+			if rc := runFormation(args); rc != 0 {
+				t.Fatalf("%v: rc = %d", args, rc)
+			}
+		})
+	}
+	dry := withStdout("bootstrap", "roles", "coder", "--dry-run")
+	if !strings.Contains(dry, "--- delegation ---") {
+		t.Fatalf("--dry-run must still print the prompt:\n%s", dry)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".coordinators")); !os.IsNotExist(err) {
+		t.Fatalf("--dry-run wrote to the store: %v", err)
+	}
+	if got := withStdout("bootstrap", "roles", "coder"); !strings.Contains(got, "Your coordinator is roles/orchestrator,") {
+		t.Fatalf("prompt:\n%s", got)
+	}
+	b, err := os.ReadFile(record)
+	if err != nil || !strings.Contains(string(b), `"coordinator": "roles/orchestrator"`) || !strings.Contains(string(b), "deadbeef-") {
+		t.Fatalf("record %q: %v", b, err)
+	}
+}

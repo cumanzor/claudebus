@@ -301,6 +301,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
 	}
+	_ = settleCoordinatorRecord(ch, alias, m.SessionID)
 	// A launch intent for this name is answered the moment the SAME session arrives:
 	// the child is here, the window it guarded is shut, and the launcher's own opinion
 	// never enters into it. A different session joining this name leaves the marker
@@ -620,6 +621,7 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 		return "", "", false, fmt.Errorf("rename failed")
 	}
 	_ = renameMeta(newDir, newAlias) // best-effort, like bash `|| true`
+	_ = moveCoordinatorRecord(ch, old, newAlias)
 	// prevAlias is the whole point: without it a consumer sees one session vanish and
 	// an unrelated one appear, and alias+time-window correlation guesses the link
 	RecordEvent(LedgerRename, ch, newAlias, metaSessionID(filepath.Join(newDir, "meta.json")), func(ev *LedgerEvent) {

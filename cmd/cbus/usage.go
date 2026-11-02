@@ -114,10 +114,12 @@ const usage = `cbus — message bus between coding sessions, in named channels
        --brief TEXT                effort brief appended to the anchor's kickoff
        --target T                  launch on window|tab|pane|tmux this time
                                    instead of the recorded target
-  cbus formation bootstrap <name> <alias> [--brief TEXT]
+  cbus formation bootstrap <name> <alias> [--brief TEXT] [--dry-run]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not
                                    launch — e.g. one recorded on another machine)
+                                   and record the coordinator it names
+       --dry-run                   print only; write nothing
   cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles

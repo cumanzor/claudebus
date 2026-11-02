@@ -884,6 +884,11 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
 	}
+	if c.Relay == nil { // the record is local; a relay peer's name belongs to another store
+		if err := settleCoordinatorRecord(c.Channel, c.Alias, c.ThreadID); err != nil {
+			daemonLogf("%s: settle coordinator record: %v", ConnectionTarget(c), err)
+		}
+	}
 	if err = d.armLocked(c); err != nil {
 		return nil, err
 	}
