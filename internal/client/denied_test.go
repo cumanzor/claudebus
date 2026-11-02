@@ -414,6 +414,13 @@ func TestDeniedOneInputWordInProseKeepsTheProse(t *testing.T) {
 	}
 }
 
+// TestDeniedInputWordsApartKeepTheProse: a run means adjacent.
+func TestDeniedInputWordsApartKeepTheProse(t *testing.T) {
+	if got := deniedClean("pw then abc1234", readDeniedInput("pw abc1234")); got != "pw then abc1234" {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestDeniedStripsControlBytes(t *testing.T) {
 	deniedFixture(t)
 	fireDenied(t, deniedPayloadJSON(t, deniedSeatSID, "Bash", "line1\nline2\u001b[31m\u202e", map[string]any{"command": "ls"}))
