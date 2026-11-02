@@ -296,9 +296,9 @@ func runFormationResume(args []string) int {
 	return 0
 }
 
-// runFormationBootstrap prints one peer's first-turn prompt — the paste-it-yourself path for when a peer is launched by hand, or when apply cannot
-// (another machine), or when someone wants to READ what a peer would be told before
-// a fleet is opened.
+// runFormationBootstrap prints one peer's first-turn prompt — the paste-it-yourself path
+// for when a peer is launched by hand, or when apply cannot (another machine), or when
+// someone wants to READ what a peer would be told before a fleet is opened.
 //
 // It composes through the same KickoffPrompt apply uses. A second renderer would
 // drift, and the two drifting silently is how a peer gets briefed differently

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -237,24 +238,54 @@ func TestUnboundRecordReadsNoneUntilTheChildAnswers(t *testing.T) {
 	}
 }
 
-func TestRecordSurvivesRejoinAndCollection(t *testing.T) {
+// TestRecordOutlivesLeaveAndReadsNoneMeanwhile: nobody holds the name in the gap, so
+// nobody is coordinated, but the file is what the returning session gets back.
+func TestRecordOutlivesLeaveAndReadsNoneMeanwhile(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	spawnedChild(t, "dev", "kid")
 	sessionJoins(t, "sid-kid", "dev", "kid")
-	// connection collection removes the peer dir while the session is gone
-	if err := os.RemoveAll(filepath.Join(CBUSDir(), "dev", "kid")); err != nil {
+	wantCoordinator(t, "dev", "kid", "dev/lead")
+	if _, err := Leave("dev"); err != nil {
 		t.Fatal(err)
 	}
-	wantCoordinator(t, "dev", "kid", "dev/lead")
+	wantCoordinator(t, "dev", "kid", "")
+	if rec, ok := rawCoordinatorRecord(t, "dev", "kid"); !ok || rec.SessionID != "sid-kid" {
+		t.Fatalf("the file must survive the gap: %+v present=%v", rec, ok)
+	}
 	sessionJoins(t, "sid-kid", "dev", "kid")
 	wantCoordinator(t, "dev", "kid", "dev/lead")
+}
+
+func TestRecordOutlivesRealCollection(t *testing.T) {
+	d, _, req := daemonFixture(t)
+	if _, err := recordCoordinator(req.Channel, req.Alias, req.Channel+"/lead", coordinatorDoorSpawn, ""); err != nil {
+		t.Fatal(err)
+	}
+	c := mustDaemonConnect(t, d, req)
+	wantCoordinator(t, req.Channel, req.Alias, req.Channel+"/lead")
+	c.State = "detached"
+	c.Consumer = &consumerObservation{State: "online", PID: 4242, StartToken: "s"}
+	if err := d.save(c); err != nil {
+		t.Fatal(err)
+	}
+	d.publish(c)
+	pass, err := d.collectConnections(context.Background(), gcTestLimits, gcDaemonProbe(false))
+	if err != nil || len(pass.Records) != 1 || !pass.Records[0].Collected {
+		t.Fatalf("collect: %+v, %v", pass.Records, err)
+	}
+	if fileExists(filepath.Join(CBUSDir(), req.Channel, req.Alias, "meta.json")) {
+		t.Fatal("precondition: collection removes the peer dir")
+	}
+	wantCoordinator(t, req.Channel, req.Alias, "")
+	mustDaemonConnect(t, d, req)
+	wantCoordinator(t, req.Channel, req.Alias, req.Channel+"/lead")
 }
 
 func TestAnotherSessionTakingTheAliasInheritsNothing(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	spawnedChild(t, "dev", "kid")
 	sessionJoins(t, "sid-kid", "dev", "kid")
-	if err := os.RemoveAll(filepath.Join(CBUSDir(), "dev", "kid")); err != nil {
+	if _, err := Leave("dev"); err != nil {
 		t.Fatal(err)
 	}
 	sessionJoins(t, "sid-stranger", "dev", "kid")
@@ -271,9 +302,107 @@ func TestStaleRecordCannotSpeakForANewHolder(t *testing.T) {
 	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, "sid-kid"); err != nil {
 		t.Fatal(err)
 	}
+	plantPeer(t, "dev", "kid", "sid-kid")
 	wantCoordinator(t, "dev", "kid", "dev/lead")
 	plantPeer(t, "dev", "kid", "sid-stranger")
 	wantCoordinator(t, "dev", "kid", "")
+}
+
+func TestUnreadableHolderReadsNone(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, "sid-kid"); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "dev", "kid", "sid-kid")
+	if err := os.WriteFile(filepath.Join(CBUSDir(), "dev", "kid", "meta.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantCoordinator(t, "dev", "kid", "")
+}
+
+func TestOversizedRecordReadsNone(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	plantPeer(t, "dev", "kid", "sid-kid")
+	path := coordinatorRecordPath("dev", "kid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"coordinator":"dev/lead","sessionId":"sid-kid"}` + strings.Repeat(" ", coordinatorRecordMax)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantCoordinator(t, "dev", "kid", "")
+}
+
+func TestSettleWithNoSessionKeepsNothing(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := settleCoordinatorRecord("dev", "kid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if rec, ok := rawCoordinatorRecord(t, "dev", "kid"); ok {
+		t.Fatalf("%+v", rec)
+	}
+}
+
+func TestRenameOntoANameClearsItsStaleRecord(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	sessionJoins(t, "sid-kid", "dev", "kid")
+	if _, err := recordCoordinator("dev", "renamed", "dev/old", coordinatorDoorApply, "sid-kid"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := Rename("renamed", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	if rec, ok := rawCoordinatorRecord(t, "dev", "renamed"); ok {
+		t.Fatalf("this session never had that coordinator: %+v", rec)
+	}
+}
+
+type answeringThenFailingForker struct {
+	t   *testing.T
+	sid string
+}
+
+func (f answeringThenFailingForker) Fork(ForkSpec) (string, error) {
+	sessionJoins(f.t, f.sid, "dev", "kid")
+	return "", errors.New("the terminal reported a failure after the window opened")
+}
+
+// TestLaunchErrorAfterTheChildAnsweredKeepsItsRecord: undo must not take a record from a
+// seat that is up and bound.
+func TestLaunchErrorAfterTheChildAnsweredKeepsItsRecord(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CBUS_DIR", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-spawner")
+	t.Chdir(t.TempDir())
+	writeRoleFile(t, root, "documenter", "# documenter\nMODEL: sonnet\n\n## Mission\nwrite entries.\n")
+	plantPeer(t, "dev", "lead", "sid-spawner")
+	if _, _, err := Spawn("window", "dev", "", "kid", "documenter", answeringThenFailingForker{t, "sid-kid"}); err == nil {
+		t.Fatal("want the fork error")
+	}
+	wantCoordinator(t, "dev", "kid", "dev/lead")
+}
+
+func TestUndoOfARemovalLeavesALaterWrite(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	if _, err := recordCoordinator("dev", "kid", "dev/old", coordinatorDoorApply, "sid-old"); err != nil {
+		t.Fatal(err)
+	}
+	undo, err := recordCoordinator("dev", "kid", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recordCoordinator("dev", "kid", "dev/new", coordinatorDoorApply, "sid-new"); err != nil {
+		t.Fatal(err)
+	}
+	undo()
+	if rec, ok := rawCoordinatorRecord(t, "dev", "kid"); !ok || rec.Coordinator != "dev/new" {
+		t.Fatalf("%+v present=%v", rec, ok)
+	}
 }
 
 func TestLaunchThatNeverBootedExpiresBeforeBinding(t *testing.T) {
@@ -307,7 +436,11 @@ func TestCorruptRecordReadsNone(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
+			plantPeer(t, "dev", "kid", "sid-kid")
 			wantCoordinator(t, "dev", "kid", "")
+			if err := os.RemoveAll(filepath.Join(CBUSDir(), "dev", "kid")); err != nil {
+				t.Fatal(err)
+			}
 			sessionJoins(t, "sid-kid", "dev", "kid")
 			wantCoordinator(t, "dev", "kid", "")
 			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -326,6 +459,13 @@ func TestReaderRefusesBadNames(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := writeCoordinatorRecord(path, coordinatorRecord{Coordinator: "dev/lead", SessionID: "sid-kid"}); err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(CBUSDir(), tc[0], tc[1])
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeMeta(dir, peerMeta{Alias: tc[1], Channel: tc[0], SessionID: "sid-kid", ListenerPid: jsonNull, OwnerPid: jsonNull}); err != nil {
 			t.Fatal(err)
 		}
 		wantCoordinator(t, tc[0], tc[1], "")
@@ -453,7 +593,9 @@ func TestFailedAnchorResumeRestoresThePriorRecord(t *testing.T) {
 	if _, _, err := resumeAnchorWorld(resumeFixture(), "", &recForker{err: errors.New("no terminal")}, resumeWorld()); err == nil {
 		t.Fatal("want the fork error")
 	}
-	wantCoordinator(t, "dd", "orchestrator", "dd/previous")
+	if rec, ok := rawCoordinatorRecord(t, "dd", "orchestrator"); !ok || rec.Coordinator != "dd/previous" {
+		t.Fatalf("%+v present=%v", rec, ok)
+	}
 }
 
 // TestBootstrapLeavesAHeldNameAlone: bootstrap is also how someone reads what a peer

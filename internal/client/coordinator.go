@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,9 +45,9 @@ func coordinatorRecordPath(ch, alias string) string {
 	return filepath.Join(CBUSDir(), ".coordinators", ch, alias+".json")
 }
 
-// CoordinatorOf returns the address that coordinates ch/alias on this machine. Every
-// miss reads the same: missing, corrupt, unanswered by a session, or held by a session
-// other than the one the record is bound to.
+// CoordinatorOf returns the address that coordinates the session holding ch/alias on this
+// machine. Every miss reads the same: missing, corrupt, unanswered by a session, nobody
+// holding the name, or held by a session other than the one the record is bound to.
 func CoordinatorOf(ch, alias string) (string, bool) {
 	if !core.ValidStoreName(ch) || !core.ValidStoreName(alias) {
 		return "", false
@@ -57,11 +58,8 @@ func CoordinatorOf(ch, alias string) (string, bool) {
 	}
 	// settling a new holder is best-effort, so this is what actually keeps a stale
 	// record from speaking for them
-	metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
-	if fileExists(metaPath) {
-		if m, ok := ReadPeerMeta(metaPath); !ok || m.SessionID != rec.SessionID {
-			return "", false
-		}
+	if m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), ch, alias, "meta.json")); !ok || m.SessionID != rec.SessionID {
+		return "", false
 	}
 	return rec.Coordinator, true
 }
@@ -123,11 +121,15 @@ func checkCoordinatorKey(ch, alias string) error {
 func writeCoordinatorLocked(ch, alias, coord, door, sid string) (undo func(), err error) {
 	path := coordinatorRecordPath(ch, alias)
 	prev, prevErr := readCoordinatorFile(path)
+	var wrote []byte
 	if coord == "" {
 		err = removeCoordinatorFile(path)
 	} else {
-		err = writeCoordinatorRecord(path, coordinatorRecord{Coordinator: coord, Door: door, SessionID: sid,
+		wrote, err = marshalCoordinatorRecord(coordinatorRecord{Coordinator: coord, Door: door, SessionID: sid,
 			TS: coordinatorNow().UTC().Format(time.RFC3339)})
+		if err == nil {
+			err = writeCoordinatorBytes(path, wrote)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("record coordinator of %s/%s: %w", ch, alias, err)
@@ -138,6 +140,11 @@ func writeCoordinatorLocked(ch, alias, coord, door, sid string) (undo func(), er
 			return
 		}
 		defer unlock()
+		// a forker can report failure after the window opened: a child that has since
+		// answered owns what is there now
+		if cur, curErr := readCoordinatorFile(path); wrote == nil && curErr == nil || wrote != nil && (curErr != nil || !bytes.Equal(cur, wrote)) {
+			return
+		}
 		if prevErr == nil {
 			_ = writeCoordinatorBytes(path, prev)
 			return
@@ -146,12 +153,20 @@ func writeCoordinatorLocked(ch, alias, coord, door, sid string) (undo func(), er
 	}, nil
 }
 
-func writeCoordinatorRecord(path string, rec coordinatorRecord) error {
+func marshalCoordinatorRecord(rec coordinatorRecord) ([]byte, error) {
 	b, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
+
+func writeCoordinatorRecord(path string, rec coordinatorRecord) error {
+	b, err := marshalCoordinatorRecord(rec)
 	if err != nil {
 		return err
 	}
-	return writeCoordinatorBytes(path, append(b, '\n'))
+	return writeCoordinatorBytes(path, b)
 }
 
 func writeCoordinatorBytes(path string, b []byte) error {
