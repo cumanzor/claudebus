@@ -4,6 +4,56 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-02 23:50:11 UTC] [Delegation/Coordinator] Record the coordinator at launch
+
+[Attempt #1] Files: internal/client/coordinator.go (new: record store and
+resolver), delegation.go (prompt and record share one resolver),
+formation_apply.go, formation_kickoff.go, formation_resume.go, spawn.go,
+daemon.go, harness.go, store.go, bootstrap_prompt.go; cmd/cbus/formation.go,
+usage.go; docs/architecture/protocol.md (store layout), command-reference.md,
+docs/formations.md; tests in coordinator_test.go, coordinator_unix_test.go,
+formation_test.go.
+
+[What changed]
+- The coordinator a seat answers to existed only as launch prompt text, so
+  no hook or permit check could read it later. Formation apply, resume and
+  kickoff, and spawn with a role now write the coordinator the prompt names
+  to `.coordinators/<channel>/<alias>.json`. The prompt and the record come
+  from one resolver, so they cannot disagree. A seat with no coordinator
+  gets no record.
+- The record sits outside the peer dir because connection collection and
+  alias reclaim remove that dir, and an exact-session resume must keep the
+  record. A launched child binds it at first arrival; the same session
+  returning keeps it; any other session taking the alias inherits nothing.
+  An unanswered record, a corrupt or oversized one, or one bound to a
+  session other than the holder reads as none. The store is owner-only.
+- `cbus formation bootstrap` records too, with `--dry-run` to print only.
+  The low-level `cbus bootstrap` stays print-only, so a seat pasted from it
+  has no coordinator.
+- Review finding folded in: a bound record was answering when no meta.json
+  existed, so a session that had left still looked coordinated; it now
+  speaks only for the session holding the name. Undo restored the prior
+  record unconditionally, so a forker reporting failure after the window
+  opened could take the record from a child that had already answered; undo
+  now applies only if the file is still what that write left. The tests run
+  a real connection collection instead of removing the peer dir and pin an
+  unreadable holder, an oversized record, settling with no session, and a
+  rename onto a name with a stale record.
+
+[Possible Ripple Effects]
+- Nothing reads the record yet; later milestones consume it, so a wrong
+  record is invisible until then.
+- The record survives leave and collection by design. Deleting a channel's
+  store directory is the only cleanup.
+- A seat started from the low-level `cbus bootstrap` has no record.
+
+[Testing Notes]
+- Table test per launch door asserts the record equals the coordinator named
+  in the rendered prompt; the no-coordinator case writes none; a resumed
+  seat keeps its record.
+- A live formation run read the records back from the store.
+- Run `go test ./...` and the linux amd64/arm64 compile gate before release.
+
 ## [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations
 
 [Attempt #1] Files: internal/client/daemon_presence.go (membershipNotice),

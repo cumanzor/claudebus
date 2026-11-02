@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-11-02 23:50:11 UTC] [Delegation/Coordinator] Every launch door now records who coordinates a seat, at `.coordinators/<channel>/<alias>.json`, resolved by the same code that renders the delegation prompt. The record lives outside the peer dir so connection collection and alias reclaim leave it and an exact-session resume keeps it; a launched child binds it on first arrival, and a different session taking the alias inherits nothing. `cbus formation bootstrap` records too (`--dry-run` prints only); the low-level `cbus bootstrap` stays print-only. Nothing reads the record yet.
+
 [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations. The presence notice and connect prompts stop asking peers to tell the user about bus events (update the roster silently; speak up for a decision, a result or a problem), and the roles say the same. cbus-compact hides the short reply to a presence-only delivery. Seats with a coordinator send operator questions to it instead of their own ask band; cbus-asks shows the asking seat as q3 (coder).
 
 [2026-10-31 01:28:19 UTC] [Tests/Canary] The Codex canaries recognize an npm-installed Codex (ps truncates its comm, so argv[0] is checked too) and accept the vscode source Codex 0.163.0 records for an ordinary CLI thread. The managed Codex test fixtures use short temp dirs, so their control socket paths stay under macOS's 104-byte limit with the default TMPDIR.
