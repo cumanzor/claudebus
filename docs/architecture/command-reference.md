@@ -1568,13 +1568,14 @@ Behavior, exactly:
 3. Appends a `kind=denied` line to the coordinator's inbox, from the seat's address:
    `coder denied: Bash, [Credential Exploration], "Read the deploy config"`. The
    quoted part is the Bash `description` field; other tools have none.
-4. Never forwards the command or `tool_input`. `reason` and `description` are written
-   by a classifier and a model and could quote the input, so any piece of 8 or more
-   characters from a `tool_input` string is replaced with `[withheld]` before
-   rendering, a field echoing two or more such pieces is withheld whole, and each
-   field is one line of at most 200 characters. This cannot catch a short secret, or
-   one that was paraphrased, split or re-encoded. Common words in the command can
-   withhold more than they need to.
+4. Reads no command or `tool_input` into the notice. `reason` and `description` are
+   written by a classifier and a model and could quote the input, so a field holding
+   two adjacent words from any `tool_input` string, or two or more pieces of 8 or more
+   characters, is withheld whole. A single such piece, or a whole short value, becomes
+   `[withheld]`. Control characters are dropped and each field is one line of at most
+   200 characters. This cannot catch one short word on its own, or a secret that was
+   paraphrased, split or re-encoded. Common words in the command can withhold more than
+   they need to.
 5. Collapses repeats per seat, session, tool and reason (`.denials/<channel>/<alias>.json`).
    The first sends; repeats within 10 minutes only count; the next send after that
    adds `(N more since HH:MMZ)`. A count with no later denial is never reported.

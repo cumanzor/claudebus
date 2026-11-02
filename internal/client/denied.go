@@ -23,6 +23,7 @@ const (
 	deniedFieldMax   = 200
 	deniedWithheld   = "[withheld]"
 	deniedMinToken   = 8
+	deniedMinValue   = 4
 	deniedPayloadMax = 16 << 20
 )
 
@@ -102,7 +103,10 @@ func notifyDenied(reg LocalReg, coord, sid, tool, reason, desc string) error {
 func deniedText(alias, tool, reason, desc string, more int, since time.Time) string {
 	parts := []string{tool}
 	if reason != "" {
-		parts = append(parts, "["+strings.Trim(reason, "[] ")+"]")
+		if strings.HasPrefix(reason, "[") && strings.HasSuffix(reason, "]") {
+			reason = reason[1 : len(reason)-1]
+		}
+		parts = append(parts, "["+reason+"]")
 	}
 	if desc != "" {
 		parts = append(parts, fmt.Sprintf("%q", desc))
@@ -131,25 +135,47 @@ func deniedFields(in deniedPayload) (tool, reason, desc string) {
 		desc, _ = fields["description"].(string)
 		delete(fields, "description") // the one input field this notice is allowed to carry
 	}
-	tokens := deniedTokens(input)
-	return tool, deniedClean(in.Reason, tokens), deniedClean(desc, tokens)
+	guard := readDeniedInput(input)
+	return tool, deniedClean(in.Reason, guard), deniedClean(desc, guard)
 }
 
-// deniedTokens is every long-enough piece of the tool input, longest first, so a whole
-// value is withheld before a piece of it.
-func deniedTokens(v any) []string {
-	seen := map[string]bool{}
+const deniedSeparators = "=:'\"`,;|&<>()[]{}/\\$"
+
+func deniedPieces(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(deniedSeparators, r)
+	})
+}
+
+// deniedInput is what a notice must not repeat from the tool input: tokens to withhold
+// wherever they appear, longest first so a whole value goes before a piece of it, and
+// every word, for spotting a quoted run of them.
+type deniedInput struct {
+	tokens []string
+	words  map[string]bool
+}
+
+func readDeniedInput(v any) deniedInput {
+	tokens := map[string]bool{}
+	in := deniedInput{words: map[string]bool{}}
+	add := func(t string, minLen int) {
+		in.words[t] = true
+		if len(t) >= minLen {
+			tokens[t] = true
+		}
+	}
 	var walk func(any)
 	walk = func(v any) {
 		switch x := v.(type) {
 		case string:
-			for _, t := range strings.Fields(x) {
-				seen[t] = true
+			if whole := strings.TrimSpace(x); len(whole) >= deniedMinValue {
+				tokens[whole] = true
 			}
-			for _, t := range strings.FieldsFunc(x, func(r rune) bool {
-				return unicode.IsSpace(r) || strings.ContainsRune("=:'\"`,;|&<>()[]{}/\\$", r)
-			}) {
-				seen[t] = true
+			for _, t := range strings.Fields(x) {
+				add(t, deniedMinToken)
+			}
+			for _, t := range deniedPieces(x) {
+				add(t, deniedMinToken)
 			}
 		case []any:
 			for _, e := range x {
@@ -162,26 +188,41 @@ func deniedTokens(v any) []string {
 		}
 	}
 	walk(v)
-	out := make([]string, 0, len(seen))
-	for t := range seen {
-		if len(t) >= deniedMinToken {
-			out = append(out, t)
-		}
+	in.tokens = make([]string, 0, len(tokens))
+	for t := range tokens {
+		in.tokens = append(in.tokens, t)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if len(out[i]) != len(out[j]) {
-			return len(out[i]) > len(out[j])
+	sort.Slice(in.tokens, func(i, j int) bool {
+		if len(in.tokens[i]) != len(in.tokens[j]) {
+			return len(in.tokens[i]) > len(in.tokens[j])
 		}
-		return out[i] < out[j]
+		return in.tokens[i] < in.tokens[j]
 	})
-	return out
+	return in
 }
 
-// deniedClean withholds echoed input. Two or more echoes read as a quoted command, whose
-// short words could be the secret, so the whole field goes.
-func deniedClean(s string, tokens []string) string {
+// quotesARun reports two adjacent words of s that both come from the input, whatever
+// their length: a command made of short words holds no token to withhold.
+func (in deniedInput) quotesARun(s string) bool {
+	prev := false
+	for _, p := range deniedPieces(s) {
+		cur := in.words[p] || in.words[strings.TrimRight(p, ".!?")]
+		if cur && prev {
+			return true
+		}
+		prev = cur
+	}
+	return false
+}
+
+// deniedClean withholds echoed input. A run of input words, or two or more tokens, reads
+// as a quoted command, whose short words could be the secret, so the whole field goes.
+func deniedClean(s string, in deniedInput) string {
+	if in.quotesARun(s) {
+		return deniedWithheld
+	}
 	echoes := 0
-	for _, t := range tokens {
+	for _, t := range in.tokens {
 		if strings.Contains(s, t) {
 			echoes++
 			s = strings.ReplaceAll(s, t, deniedWithheld)
@@ -190,6 +231,15 @@ func deniedClean(s string, tokens []string) string {
 	if echoes > 1 {
 		return deniedWithheld
 	}
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case !unicode.IsPrint(r):
+			return -1
+		}
+		return r
+	}, s)
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > deniedFieldMax {
 		s = string(r[:deniedFieldMax]) + "..."

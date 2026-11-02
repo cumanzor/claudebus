@@ -356,8 +356,87 @@ func TestDeniedNativePayloadSaysItCannotBeOverridden(t *testing.T) {
 }
 
 func TestDeniedTokensAreLongestFirst(t *testing.T) {
-	got := deniedClean(fmt.Sprintf("x %s y", "abcdefgh12345678"), deniedTokens("abcdefgh abcdefgh12345678"))
+	got := deniedClean(fmt.Sprintf("x %s y", "abcdefgh12345678"), readDeniedInput("abcdefgh abcdefgh12345678"))
 	if got != "x "+deniedWithheld+" y" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// TestDeniedShortWordCommandsDoNotReachTheNotice: nothing here is long enough to be a
+// token on its own.
+func TestDeniedShortWordCommandsDoNotReachTheNotice(t *testing.T) {
+	for command, leaks := range map[string][]string{
+		"pw abc1234":                 {"abc1234"},
+		"cat .env":                   {".env"},
+		`echo "abc def ghi jkl mno"`: {"abc", "mno"},
+		"mysql -u root -phunter2":    {"mysql", "root"},
+	} {
+		t.Run(command, func(t *testing.T) {
+			deniedFixture(t)
+			fireDenied(t, deniedPayloadJSON(t, deniedSeatSID, "Bash", "Blocked: "+command+".", map[string]any{"command": command, "description": "run " + command}))
+			raw := rawInbox(t, "ch", "lead")
+			for _, leak := range leaks {
+				if strings.Contains(raw, leak) {
+					t.Errorf("notice carries %q: %s", leak, raw)
+				}
+			}
+			got := inboxLines(t, "ch", "lead")
+			if len(got) != 1 || got[0].Text != `coder denied: Bash, `+deniedWithheld+`, "`+deniedWithheld+`"` {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+func TestDeniedWholeShortValueIsWithheld(t *testing.T) {
+	deniedFixture(t)
+	fireDenied(t, deniedPayloadJSON(t, deniedSeatSID, "mcp__x__y", "tried abc1 here", map[string]any{"token": "abc1"}))
+	if raw := rawInbox(t, "ch", "lead"); strings.Contains(raw, "abc1") {
+		t.Fatal(raw)
+	}
+}
+
+func TestDeniedEchoCountBoundary(t *testing.T) {
+	const a, b = "aaaaaaaa11", "bbbbbbbb22"
+	guard := readDeniedInput("zz " + a + " yy " + b)
+	if got := deniedClean("one "+a+" kept", guard); got != "one "+deniedWithheld+" kept" {
+		t.Errorf("one echo: %q", got)
+	}
+	if got := deniedClean(a+" not adjacent "+b, guard); got != deniedWithheld {
+		t.Errorf("two echoes: %q", got)
+	}
+}
+
+func TestDeniedOneInputWordInProseKeepsTheProse(t *testing.T) {
+	got := deniedClean("Blocked because of ls here", readDeniedInput("ls"))
+	if got != "Blocked because of ls here" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestDeniedStripsControlBytes(t *testing.T) {
+	deniedFixture(t)
+	fireDenied(t, deniedPayloadJSON(t, deniedSeatSID, "Bash", "line1\nline2\u001b[31m\u202e", map[string]any{"command": "ls"}))
+	got := inboxLines(t, "ch", "lead")
+	if len(got) != 1 || got[0].Text != "coder denied: Bash, [line1 line2[31m]" {
+		t.Fatalf("%q", got[0].Text)
+	}
+}
+
+func TestDeniedKeepsATrailingWithheldBalanced(t *testing.T) {
+	if got := deniedText("coder", "Bash", "ran with "+deniedWithheld, "", 0, time.Time{}); got != "coder denied: Bash, [ran with "+deniedWithheld+"]" {
+		t.Errorf("%q", got)
+	}
+	if got := deniedText("coder", "Bash", deniedWithheld, "", 0, time.Time{}); got != "coder denied: Bash, "+deniedWithheld {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestDeniedFallsBackToTheEnvSession(t *testing.T) {
+	deniedFixture(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", deniedSeatSID)
+	fireDenied(t, deniedPayloadJSON(t, "", "Bash", "r", map[string]any{"command": "ls"}))
+	if got := inboxLines(t, "ch", "lead"); len(got) != 1 {
+		t.Fatalf("%+v", got)
 	}
 }
