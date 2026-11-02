@@ -176,6 +176,8 @@ $CBUS_DIR/
 │                               # Go client only: who coordinates a seat, written at launch,
 │                               #   bound to the session at its first arrival. Outside the
 │                               #   peer dir so collection and reclaim leave it (coordinator.go)
+├── .denials/<channel>/<alias>.json
+│                               # Go client only: collapse state for cbus hook-denied
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
                                  # prompts; a channel literally named "roles" would
