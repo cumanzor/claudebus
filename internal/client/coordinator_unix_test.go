@@ -24,3 +24,17 @@ func TestFailedBindStaysUnread(t *testing.T) {
 	sessionJoins(t, "sid-kid", "dev", "kid")
 	wantCoordinator(t, "dev", "kid", "")
 }
+
+func TestRecordStoreIsOwnerOnly(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, ""); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Dir(coordinatorRecordPath("dev", "kid")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("mode = %o", got)
+	}
+}
