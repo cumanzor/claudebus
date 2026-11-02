@@ -136,7 +136,7 @@ func TestRegressedIgnoresWhatIsNotThisSessionsFallback(t *testing.T) {
 			return regressedLine(t, deniedSeatSID, func(m map[string]any) { m["type"] = "user" })
 		},
 		"another subtype quoting this one": func(t *testing.T) string {
-			return regressedLine(t, deniedSeatSID, func(m map[string]any) { m["subtype"] = "other"; m["content"] = `"` + regressedSubtype + `"` })
+			return regressedLine(t, deniedSeatSID, func(m map[string]any) { m["subtype"] = "other"; m["note"] = regressedSubtype })
 		},
 		"a garbled line": func(t *testing.T) string { return `{"subtype":"` + regressedSubtype + `",` + "\n" },
 	} {
@@ -178,6 +178,9 @@ func TestRegressedPlainSessionIsNotReadOrTold(t *testing.T) {
 	t.Setenv("CBUS_SESSION_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	plantPeer(t, "ch", "solo", "sid-solo")
+	if _, err := recordCoordinator("ch", "other", "ch/boss", coordinatorDoorApply, ""); err != nil {
+		t.Fatal(err)
+	}
 	fireStop(t, "sid-solo", seatTranscript(t, "sid-solo", regressedLine(t, "sid-solo", nil)))
 	if got := inboxLines(t, "ch", "solo"); len(got) != 0 {
 		t.Fatalf("%+v", got)
