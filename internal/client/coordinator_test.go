@@ -308,6 +308,17 @@ func TestStaleRecordCannotSpeakForANewHolder(t *testing.T) {
 	wantCoordinator(t, "dev", "kid", "")
 }
 
+// TestUnboundRecordDoesNotMatchASessionlessHolder: an empty session on both sides is not
+// a match.
+func TestUnboundRecordDoesNotMatchASessionlessHolder(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, ""); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "dev", "kid", "")
+	wantCoordinator(t, "dev", "kid", "")
+}
+
 func TestUnreadableHolderReadsNone(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	if _, err := recordCoordinator("dev", "kid", "dev/lead", coordinatorDoorApply, "sid-kid"); err != nil {
