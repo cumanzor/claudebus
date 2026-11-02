@@ -2421,11 +2421,14 @@ liveness is volatile, so the brief hands it to the dry-run by name. It closes
 with the reconvene re-save instruction, then the coordinator's side of the
 delegation section (§10, above).
 
-### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
+### `cbus formation bootstrap <name> <alias> [--brief TEXT] [--dry-run]`
 
 Prints **one** peer's first-turn prompt to stdout for you to paste by hand — the
 path for a peer `apply` will not launch (recorded on another machine; cross-
-machine launch is not in v1) or for previewing a brief. It refuses whatever
+machine launch is not in v1). It also records the coordinator that prompt names,
+so use `--dry-run` to preview a brief: it prints the same prompt and writes nothing.
+A name already in the store keeps its record, with a note on stderr, so a preview
+without the flag cannot unbind a running seat. It refuses whatever
 the file alone proves wrong, the same identity checks apply enforces
 (`harness=codex`/`formationHarnessRefusal`, duplicate sid, `origin=fork`,
 empty origin for a resume/fork mode), without gathering apply's world. The one

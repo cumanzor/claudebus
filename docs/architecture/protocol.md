@@ -172,6 +172,10 @@ $CBUS_DIR/
 │                               #   channel, append-only join/leave/rename/spawn/
 │                               #   resume/restore/rebind events (ledger.go:28-36)
 ├── .formations/<name>.json     # Go client only: saved formation envelopes
+├── .coordinators/<channel>/<alias>.json
+│                               # Go client only: who coordinates a seat, written at launch,
+│                               #   bound to the session at its first arrival. Outside the
+│                               #   peer dir so collection and reclaim leave it (coordinator.go)
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
                                  # prompts; a channel literally named "roles" would

@@ -20,7 +20,7 @@ cbus formation save myeffort              # snapshot this channel's peers
 cbus formation show myeffort              # inspect it — stale sids, TODO roles
 cbus formation apply myeffort --dry-run   # preview the relaunch plan
 cbus formation apply myeffort             # relaunch the peers that are missing
-cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt
+cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt, record its coordinator
 cbus formation list                       # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                # delete a saved formation
 ```
@@ -44,8 +44,9 @@ cbus formation rm myeffort                # delete a saved formation
   only, without editing the saved file, and composes with `--only`.
 - **`bootstrap`** prints one peer's first-turn prompt for you to paste by
   hand — the path for a peer `apply` won't launch itself (recorded on another
-  machine; cross-machine launch isn't in v1) or for previewing a brief before
-  opening a fleet.
+  machine; cross-machine launch isn't in v1). It also records the coordinator
+  that prompt names; `--dry-run` prints the same prompt and writes nothing, for
+  previewing a brief before opening a fleet.
 - Every kickoff says who coordinates the peer. That is the seat that launched
   it, or the formation's orchestrator seat when the file declares exactly one
   and someone else ran `apply`. The kickoff says the coordinator's rulings on
