@@ -85,6 +85,8 @@ func run(args []string) int {
 		return runUnregister(args[1:])
 	case "prune":
 		return runPrune(args[1:])
+	case "forward":
+		return runForward(args[1:])
 	case "grant": // operator approval of one action for one local peer (friction, not a boundary)
 		return runGrant(args[1:])
 	case "grants":

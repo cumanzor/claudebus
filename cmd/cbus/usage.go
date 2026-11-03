@@ -200,6 +200,16 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    drives, leaving it the writer role
   cbus prune [channel]             remove dead peers (and empty channels);
                                    [channel]@host reaps the RELAY spool instead
+  cbus forward <ch>@<host>/<alias> --webhook-config FILE
+                                   deliver a relay mailbox to an outbound HTTPS
+                                   webhook (durable consumer: POST, then ACK; no
+                                   inbound port). FILE holds url= and key= (mode
+                                   600; key sent as a bearer token)
+       --per-min N / --per-hour N  rate cap that holds, never drops (6 / 30)
+       --max-attempts N            retries before a message is dead-lettered (10)
+       --dead-letter FILE          default $CBUS_DIR/forward/<ch>@<host>/<alias>.deadletter.jsonl
+       --once                      exit once the mailbox has been idle 3s
+       --dry-run                   log the next message without POST or ACK
   cbus leave [channel]             remove this session's legacy memberships/inboxes
   cbus rename <new-alias> [channel]  rename this session's legacy alias (mv dir +
                                    meta); re-arm the Monitor on the new address

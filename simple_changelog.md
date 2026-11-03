@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-11-03 06:22:24 UTC] [Relay/Feature] New `cbus forward <channel>@<host>/<alias> --webhook-config FILE` delivers a relay mailbox to an outbound HTTPS webhook with no inbound port. It is a durable relay consumer: each message is POSTed (bearer key from a mode-600 config file, spool id as `id`) and only then ACKed, so the relay keeps the cursor and redelivers anything unacknowledged. Presence is skipped; 5xx, 401/403/408/429, transport errors and redirects are retried with backoff and dead-lettered to a local JSONL file after `--max-attempts`; other 4xx are dead-lettered at once. A rate cap (`--per-min`, `--per-hour`) holds instead of dropping. `--once` and `--dry-run` for setup.
+
 [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations. The presence notice and connect prompts stop asking peers to tell the user about bus events (update the roster silently; speak up for a decision, a result or a problem), and the roles say the same. cbus-compact hides the short reply to a presence-only delivery. Seats with a coordinator send operator questions to it instead of their own ask band; cbus-asks shows the asking seat as q3 (coder).
 
 [2026-10-31 01:28:19 UTC] [Tests/Canary] The Codex canaries recognize an npm-installed Codex (ps truncates its comm, so argv[0] is checked too) and accept the vscode source Codex 0.163.0 records for an ordinary CLI thread. The managed Codex test fixtures use short temp dirs, so their control socket paths stay under macOS's 104-byte limit with the default TMPDIR.
