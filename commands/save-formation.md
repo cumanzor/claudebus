@@ -32,7 +32,8 @@ formation name, second bare word is the channel, and flags pass through to
 
    A save refreshes an existing file in place and preserves hand-edited fields.
    It records alias, sessionId, cwd, machine, profile when the session stamped
-   one, and origin/model when the launcher recorded a birth-record. It reports
+   one, and origin/model/role when the launcher recorded a birth-record. A peer
+   spawned with `--role` saves with its `rolefile` already set. It reports
    `+N new` and `N kept, not on the channel now`.
 
    Drift anchors: the convention is `--anchor tracker=<id>`, which links the
@@ -43,7 +44,8 @@ formation name, second bare word is the channel, and flags pass through to
 3. **Show and triage.** Run `cbus formation show <name>` and surface the things
    that bite on restore. Report them per peer, by name, not as a count.
 
-   **`role: TODO`**: a bare save does not fill rolefile/role, so `apply` would
+   **`role: TODO`**: a peer with no recorded role (one that joined rather than
+   being spawned with `--role`) keeps the TODO, so `apply` would
    brief that peer with nothing and it would come back with no idea what the
    effort is. Fix one of two ways: point its `rolefile` at
    `$CBUS_DIR/roles/<role>.md` (the set `cbus install-roles` places: coder,

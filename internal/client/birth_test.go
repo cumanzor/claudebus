@@ -38,15 +38,15 @@ func metaAt(t *testing.T, ch, alias string) map[string]any {
 func TestReserveAliasStampsBirth(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-parent")
-	if _, err := ReserveAlias("ch", "kid", OriginFresh, "opus"); err != nil {
+	if _, err := ReserveAlias("ch", "kid", OriginFresh, "opus", "coder"); err != nil {
 		t.Fatal(err)
 	}
 	m := metaAt(t, "ch", "kid")
-	if m["sessionId"] != "reserved" || m["origin"] != "fresh" || m["model"] != "opus" {
+	if m["sessionId"] != "reserved" || m["origin"] != "fresh" || m["model"] != "opus" || m["role"] != "coder" {
 		t.Errorf("reservation birth-record = %v", m)
 	}
 	// a blank birth-record omits the keys entirely (omitempty)
-	if _, err := ReserveAlias("ch", "kid2", "", ""); err != nil {
+	if _, err := ReserveAlias("ch", "kid2", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	m2 := metaAt(t, "ch", "kid2")
@@ -55,6 +55,33 @@ func TestReserveAliasStampsBirth(t *testing.T) {
 	}
 	if _, ok := m2["model"]; ok {
 		t.Error("blank model must be omitted")
+	}
+	if _, ok := m2["role"]; ok {
+		t.Error("blank role must be omitted")
+	}
+}
+
+// TestJoinCarriesRole: a reclaim or resume-rejoin keeps the launcher's role, a takeover never inherits it.
+func TestJoinCarriesRole(t *testing.T) {
+	for _, tc := range []struct {
+		name, selfSid, meta, want string
+	}{
+		{"reservation reclaim", "sid-child", `{"alias":"kid","channel":"ch","sessionId":"reserved","origin":"fresh","role":"reviewer","listenerPid":null}`, "reviewer"},
+		{"resume-rejoin", "sid-mine", `{"alias":"kid","channel":"ch","sessionId":"sid-mine","origin":"fresh","role":"reviewer","listenerPid":null}`, "reviewer"},
+		{"takeover", "sid-mine", `{"alias":"kid","channel":"ch","sessionId":"sid-other","origin":"fresh","role":"reviewer","listenerPid":null}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CBUS_DIR", t.TempDir())
+			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.selfSid)
+			writeRawMeta(t, "ch", "kid", tc.meta)
+			if _, _, err := Join("ch", "kid"); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := metaAt(t, "ch", "kid")["role"].(string)
+			if got != tc.want {
+				t.Errorf("role = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

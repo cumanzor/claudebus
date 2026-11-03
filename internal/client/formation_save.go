@@ -38,6 +38,7 @@ type RosterPeer struct {
 	Machine      string // meta.host, which is HostLabel() on the writing machine
 	Origin       string
 	Model        string
+	Role         string // role name from the birth-record, blank when the peer was not briefed from one
 	Profile      string // the CCS instance the session stamped about itself at join
 	ProfileKnown bool   // captured native default profile is a known blank, not missing metadata
 	Listening    bool
@@ -100,6 +101,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Machine:      m.Host,
 			Origin:       m.Origin,
 			Model:        m.Model,
+			Role:         m.Role,
 			Profile:      m.Profile,
 			ProfileKnown: managed != nil && managed.ProfileKnown,
 			Listening:    listening,
@@ -154,8 +156,8 @@ func loadRepoTemplate(name string) (*Formation, error) {
 //
 // What it captures is bounded by what the substrate records. meta.json holds a
 // peer's alias, sessionId, cwd and host, a profile when the session stamped one at
-// join, and origin/model when the launcher recorded them; there is no role and no
-// prose anywhere on disk. Save refreshes the session facts, fills the
+// join, and origin/model/role when the launcher recorded them; there is no prose
+// anywhere on disk. Save refreshes the session facts, fills the
 // launcher-recorded ones once, and treats everything else as the human's: it never
 // overwrites a hand edit. That is what makes a re-save at a milestone boundary
 // safe — it refreshes sid checkpoints without eating the prose around them.
@@ -218,15 +220,16 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 			"(save it under a different name, or fix the channel field)", name, f.Channel, ch)
 	}
 
-	byAlias := make(map[string]*FormationPeer, len(f.Peers))
+	// indices, not pointers: appending a new peer below can reallocate f.Peers
+	byAlias := make(map[string]int, len(f.Peers))
 	for i := range f.Peers {
-		byAlias[f.Peers[i].Alias] = &f.Peers[i]
+		byAlias[f.Peers[i].Alias] = i
 	}
 	onChannel := make(map[string]bool, len(roster))
 	for _, r := range roster {
 		onChannel[r.Alias] = true
-		if p, ok := byAlias[r.Alias]; ok {
-			capturePeer(p, r, rep) // captured facts only; hand-edits survive
+		if i, ok := byAlias[r.Alias]; ok {
+			capturePeer(&f.Peers[i], r, rep) // captured facts only; hand-edits survive
 			rep.Updated = append(rep.Updated, r.Alias)
 			continue
 		}
@@ -391,6 +394,15 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: origin %q (meta not one of fresh|fork|joined)", r.Alias, r.Origin))
 		}
 	}
+	// a recorded role fills the brief only while it is blank or save's own TODO marker
+	if r.Role != "" && briefUnset(p) {
+		if validRoleName(r.Role) {
+			p.Rolefile = "roles/" + r.Role + ".md"
+			p.Role = nil
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: role %q (meta not a usable role name)", r.Alias, r.Role))
+		}
+	}
 	if p.Model == "" && r.Model != "" {
 		if validModel(r.Model) {
 			p.Model = r.Model
@@ -398,6 +410,11 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: model %q (meta not a usable model token)", r.Alias, r.Model))
 		}
 	}
+}
+
+// briefUnset is stricter than RoleTODO: hand prose that mentions "todo" is still a brief.
+func briefUnset(p *FormationPeer) bool {
+	return p.Rolefile == "" && (p.Role == nil || strings.TrimSpace(*p.Role) == "" || *p.Role == roleTODOMarker)
 }
 
 func validOrigin(o string) bool {

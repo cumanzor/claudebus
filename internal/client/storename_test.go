@@ -58,10 +58,10 @@ func TestReserveAliasRefusesStoreIllegalNames(t *testing.T) {
 		t.Run(bad, func(t *testing.T) {
 			root := t.TempDir()
 			t.Setenv("CBUS_DIR", root)
-			if _, err := ReserveAlias("dev", bad, OriginFresh, ""); err == nil {
+			if _, err := ReserveAlias("dev", bad, OriginFresh, "", ""); err == nil {
 				t.Fatalf("ReserveAlias(dev, %q) succeeded", bad)
 			}
-			if _, err := ReserveAlias(bad, "peer", OriginFresh, ""); err == nil {
+			if _, err := ReserveAlias(bad, "peer", OriginFresh, "", ""); err == nil {
 				t.Fatalf("ReserveAlias(%q, peer) succeeded", bad)
 			}
 			if es, _ := os.ReadDir(root); len(es) != 0 {

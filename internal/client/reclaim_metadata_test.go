@@ -43,7 +43,7 @@ func TestReclaimPreservesUntrustedMetadataAndQueuedMail(t *testing.T) {
 				case "join":
 					_, _, err = Join("ch", "target")
 				case "reserve":
-					_, err = ReserveAlias("ch", "target", OriginFresh, "")
+					_, err = ReserveAlias("ch", "target", OriginFresh, "", "")
 				case "rename":
 					seedMeta(t, CBUSDir(), "ch", "self", "SELF")
 					_, _, _, err = Rename("target", "ch")
