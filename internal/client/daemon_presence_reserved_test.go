@@ -27,7 +27,7 @@ func presenceEvents(t *testing.T, inbox string) []string {
 func TestManagedPresenceReservedSiblingDoesNotFailConnect(t *testing.T) {
 	d, _, req := daemonFixture(t)
 	inbox := presencePeer(t, req.Channel, "observer")
-	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model"); err != nil {
+	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model", ""); err != nil {
 		t.Fatal(err)
 	}
 	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }
@@ -42,7 +42,7 @@ func TestManagedPresenceReservedSiblingDoesNotFailConnect(t *testing.T) {
 func TestManagedPresenceAbandonedReservationNeverDelaysPresence(t *testing.T) {
 	d, _, req := daemonFixture(t)
 	inbox := presencePeer(t, req.Channel, "observer")
-	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model"); err != nil {
+	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model", ""); err != nil {
 		t.Fatal(err)
 	}
 	probe := onlinePresence(nil)
@@ -64,7 +64,7 @@ func TestManagedPresenceAbandonedReservationNeverDelaysPresence(t *testing.T) {
 
 func TestManagedPresenceReservedInboxGetsNothingBeforeClaim(t *testing.T) {
 	d, _, req := daemonFixture(t)
-	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model"); err != nil {
+	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := LocalSend(req.Channel+"/sibling", "dev/sender", false, "queued before launch"); err != nil {
@@ -83,7 +83,7 @@ func TestManagedPresenceReservedInboxGetsNothingBeforeClaim(t *testing.T) {
 func TestManagedPresenceReservedSiblingJoinsLaterAndReceivesPresence(t *testing.T) {
 	d, _, req := daemonFixture(t)
 	observer := presencePeer(t, req.Channel, "observer")
-	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model"); err != nil {
+	if _, err := ReserveAlias(req.Channel, "sibling", OriginFresh, "test-model", ""); err != nil {
 		t.Fatal(err)
 	}
 	d.probeConsumer = func(context.Context, *ConnectionState) (consumerProbe, error) { return onlinePresence(nil), nil }

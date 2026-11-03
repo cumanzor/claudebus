@@ -126,7 +126,7 @@ func TestSaveBasedOnRepoTemplate(t *testing.T) {
 	repoPath := filepath.Join(root, "formations", "dev-trio.json")
 	repoBefore, _ := os.ReadFile(repoPath)
 
-	f, rep, err := SaveFormation("dev-trio", "dev-trio", nil)
+	f, rep, err := SaveFormation("dev-trio", "dev-trio", SaveOptions{})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestSaveRepoBaseChannelInterplay(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantPeer(t, "un", "orchestrator", "sid-orch") // live on channel "un"
 
-	_, _, err := SaveFormation("dev-trio", "un", nil)
+	_, _, err := SaveFormation("dev-trio", "un", SaveOptions{})
 	if err == nil || !strings.Contains(err.Error(), "records channel") {
 		t.Errorf("basing a dev-trio-channel template into 'un' must refuse the repoint, got %v", err)
 	}

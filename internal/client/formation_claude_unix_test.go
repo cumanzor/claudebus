@@ -58,7 +58,7 @@ func writeFormationClaudeJournal(t *testing.T, c *ConnectionState) {
 func TestFormationClaudeCapturesBindingAndPreservesAuthoredRole(t *testing.T) {
 	c, _ := formationClaudeFixture(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), ".ccs", "instances", "saver"))
-	f, _, err := SaveFormation("native", "native", nil)
+	f, _, err := SaveFormation("native", "native", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestFormationClaudeCapturesBindingAndPreservesAuthoredRole(t *testing.T) {
 	c.Claude.Binding.ConfigHome = filepath.Join(c.Claude.Binding.UserHome, ".claude")
 	writeClaudeSessionRegistry(t, c.Claude.Binding)
 	writeFormationClaudeJournal(t, c)
-	if _, _, err := SaveFormation("native", "native", nil); err != nil {
+	if _, _, err := SaveFormation("native", "native", SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	back, err := LoadFormation("native")
@@ -104,7 +104,7 @@ func TestFormationClaudeRejectsMismatchedManagedIdentity(t *testing.T) {
 			bad := cloneConnection(c)
 			mutate(bad)
 			writeFormationClaudeJournal(t, bad)
-			if _, _, err := SaveFormation("native", "native", nil); err == nil {
+			if _, _, err := SaveFormation("native", "native", SaveOptions{}); err == nil {
 				t.Fatal("saved a different or incomplete managed identity")
 			}
 		})
@@ -113,7 +113,7 @@ func TestFormationClaudeRejectsMismatchedManagedIdentity(t *testing.T) {
 
 func TestFormationClaudeCustomConfigRefusesWithoutRewritingSavedIdentity(t *testing.T) {
 	c, _ := formationClaudeFixture(t)
-	if _, _, err := SaveFormation("native", "native", nil); err != nil {
+	if _, _, err := SaveFormation("native", "native", SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	path, _ := FormationPath("native")
@@ -123,7 +123,7 @@ func TestFormationClaudeCustomConfigRefusesWithoutRewritingSavedIdentity(t *test
 	}
 	c.Claude.Binding.ConfigHome = filepath.Join(c.Claude.Binding.UserHome, "custom-config")
 	writeFormationClaudeJournal(t, c)
-	if _, _, err := SaveFormation("native", "native", nil); err == nil || !strings.Contains(err.Error(), "custom config root") {
+	if _, _, err := SaveFormation("native", "native", SaveOptions{}); err == nil || !strings.Contains(err.Error(), "custom config root") {
 		t.Fatalf("unrepresented config root must refuse: %v", err)
 	}
 	after, err := os.ReadFile(path)

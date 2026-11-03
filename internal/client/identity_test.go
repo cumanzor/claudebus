@@ -12,6 +12,8 @@ func TestMain(m *testing.M) {
 	// Running the suite inside Codex inherits its native thread id. Session fixtures
 	// must opt into that identity explicitly instead of accidentally joining the runner.
 	_ = os.Unsetenv("CODEX_THREAD_ID")
+	// the real registry lists this machine's sessions; tests stub it per case
+	registrySids = func() map[string]int { return nil }
 	violations := installSignalGuard()
 	stores, err := guardStore()
 	if err != nil {

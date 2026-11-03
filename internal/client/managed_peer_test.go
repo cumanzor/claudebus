@@ -107,7 +107,7 @@ func TestManagedPeerRejectsAliasReplacement(t *testing.T) {
 		root := setupStore(t)
 		path := seedManagedPeer(t, root, "managed", "OTHER")
 		unchanged := managedPeerSnapshot(t, path)
-		if _, err := ReserveAlias("dev", "managed", OriginFresh, ""); err == nil || !strings.Contains(err.Error(), "daemon-managed") {
+		if _, err := ReserveAlias("dev", "managed", OriginFresh, "", ""); err == nil || !strings.Contains(err.Error(), "daemon-managed") {
 			t.Errorf("reservation must preserve a managed alias: %v", err)
 		}
 		unchanged()
