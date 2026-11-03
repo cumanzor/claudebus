@@ -4,6 +4,29 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 19:09:04 UTC] [Formation/Roles] save --role for joined seats; /save-formation fills
+
+[Attempt #1] Files: internal/client/formation_save.go (SaveOptions.Roles,
+checkRoles, setHandRoles), cmd/cbus/formation.go, cmd/cbus/usage.go,
+commands/save-formation.md; docs.
+
+[What changed]
+- A seat that joined with `cbus join` or `cbus connect` has no launcher, so
+  no birth-record role, and its brief stayed TODO. `formation save --role
+  alias=role` (repeatable) sets that peer's `rolefile` to `roles/<role>.md`
+  and clears freeform text. The role resolves through LoadRole before
+  anything is written, so a typo refuses instead of saving a brief that
+  apply cannot load.
+- `/save-formation` used to list TODO roles and template modes and stop. It
+  now proposes a fill per peer (its own seat as orchestrator when it
+  coordinates the channel; other peers only from what the conversation
+  shows), asks once, and re-saves with `--role`/`--mode`.
+
+[Possible Ripple Effects]
+- `join`/`connect` do not take `--role`: carrying it through connect would
+  change the daemon connect request and journal. The save flag covers
+  joined seats instead.
+
 ## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
 
 [Attempt #1] Files: internal/client/formation_save.go (newPeerMode,

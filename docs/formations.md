@@ -32,7 +32,8 @@ cbus formation rm myeffort                # delete a saved formation
   hand-edited field. A new peer whose transcript is its own (spawned fresh or
   joined) is saved with `mode=resume`; a fork-born or unattributed one gets
   `mode=template`. `--mode alias=resume|fork|template` changes one peer's
-  saved mode.
+  saved mode, and `--role alias=role` points a seat that joined (rather than
+  being spawned with `--role`) at `roles/<role>.md`.
 - **`apply`** relaunches exactly the peers missing from the channel,
   sequentially and anchor-first (the orchestrator comes up before anyone who
   expects to reach it). Convergence is a round-trip, not a timer: each kickoff
@@ -126,8 +127,8 @@ myeffort --dry-run`, and so on — for driving formations from inside a Claude
 Code session rather than shelling out directly. `/save-formation` is the
 no-argument sibling: it resolves the channel from `cbus whoami`, saves, then
 names the peers whose `role: TODO`, stale sid, or `mode: template` would bite
-on the next `apply`. It only saves and reports; it never applies, resumes,
-bootstraps or removes.
+on the next `apply`, then offers the `--role`/`--mode` fills and re-saves with
+the ones you approve. It never applies, resumes, bootstraps or removes.
 
 ## Coming back after a reboot
 

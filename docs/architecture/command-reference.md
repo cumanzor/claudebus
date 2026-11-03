@@ -2153,7 +2153,7 @@ variants:
 A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
 committed role files states the matching rule from the peer's side.
 
-### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...]`
+### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...] [--role alias=role ...]`
 
 Snapshots the channel's current peers into the runtime store. Channel defaults to
 this session's own registration (`not joined to a channel in this session — pass
@@ -2216,6 +2216,11 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   the file, overwriting what it held. An alias the formation does not hold, a
   mode outside the enum, or `resume`/`fork` for a peer whose origin is `fork`
   or unknown (apply would refuse it) refuses the save with nothing written.
+- `--role alias=role` (repeatable) points that peer's `rolefile` at
+  `roles/<role>.md` and clears any freeform `role`. It is the fill for a seat
+  that joined instead of being spawned with `--role`. The role must resolve
+  from here (this repo's `roles/`, else `$CBUS_DIR/roles`) and the alias must
+  be in the formation, or the save refuses with nothing written.
 - Peers in the file but no longer on the channel are **kept**, not dropped.
 - Refusals: `refusing to overwrite an envelope that will not load: <err>` and
   `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
@@ -2227,8 +2232,10 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 ```
 saved formation "myeffort" (<path>, new)
   channel "myeffort": +3 new (orchestrator, coder, reviewer)
-  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;
-  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded
+  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them
+  mode=resume (own transcript): coder, reviewer
+  mode=template (fork-born, origin unknown or no session): orchestrator
+  role TODO (no recorded role; set one with --role <alias>=<role>): orchestrator
   check it: cbus formation show myeffort
 ```
 
@@ -2911,8 +2918,9 @@ Do nothing else.
 `allowed-tools: Bash(cbus:*), Bash(git rev-parse:*)`
 
 Zero-friction checkpoint: saves the channel's topology, then triages what the
-bare save left unusable for a later `apply`. Read-mostly, writes one envelope
-file, never launches, kills, renames or edits a peer.
+bare save left unusable for a later `apply`. Read-mostly: writes one envelope
+file, re-saves with the role and mode fills the user approves, never launches,
+kills, renames or edits a peer.
 
 1. **Resolve the channel** from `cbus whoami`: one local channel, use it;
    several, ask which (never guess); none (exit 1), fall back to the git repo
@@ -2929,11 +2937,15 @@ file, never launches, kills, renames or edits a peer.
    freeform `role` text; stale sids mean `onStale=template` applies and that
    seat comes back fresh; `kept, not on the channel now` seats are usually
    fine but worth stating; a `mode=template` peer that still has a live sid
-   is offered a `--mode <alias>=resume` re-save; the anchor peer is
+   is proposed for `resume`; the anchor peer is
    named, or flagged if `show` reports none.
 4. **Report** in a few lines: name, channel, peer count, new vs kept, then
    only the items needing a decision, each tied to its peer; a clean
    checkpoint (no warnings, no TODO roles) says so and stops.
+5. **Fill**: asks once with every proposed role (its own seat as
+   `orchestrator` when it coordinates; other peers only from what the
+   conversation shows) and mode, then applies the approved ones in one
+   `save --role <alias>=<role> --mode <alias>=resume` re-save and shows again.
 
 Never runs `apply`, `resume`, `bootstrap` or `rm` from here, and never arms a
 Monitor; send the user to `/bus-formation` for those.

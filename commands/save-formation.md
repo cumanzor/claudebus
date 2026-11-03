@@ -6,8 +6,8 @@ allowed-tools: Bash(cbus:*), Bash(git rev-parse:*)
 
 Zero-friction checkpoint of the fleet this session is sitting in: save the
 channel's topology, then say what the save left unusable for a later `apply`.
-Read-mostly. It writes one envelope file and reports. It never launches, kills,
-renames, or edits a peer.
+Read-mostly. It writes one envelope file, reports, and re-saves with the fills
+the user approves. It never launches, kills, renames, or edits a peer.
 
 The user passed: "$ARGUMENTS", and everything in it is optional. First bare word is the
 formation name, second bare word is the channel, and flags pass through to
@@ -47,11 +47,14 @@ formation name, second bare word is the channel, and flags pass through to
    **`role: TODO`**: a peer with no recorded role (one that joined rather than
    being spawned with `--role`) keeps the TODO, so `apply` would
    brief that peer with nothing and it would come back with no idea what the
-   effort is. Fix one of two ways: point its `rolefile` at
-   `$CBUS_DIR/roles/<role>.md` (the set `cbus install-roles` places: coder,
-   documenter, orchestrator, reviewer), or write freeform role text into that
-   peer's `role` field in `$CBUS_DIR/.formations/<name>.json`. Name every
-   affected peer.
+   effort is. Name every affected peer and propose a role for each from the
+   committed set (`cbus install-roles` places coder, documenter, orchestrator,
+   reviewer; a repo's own `roles/` may add more). This session knows its own
+   seat: if it is coordinating the channel, propose `orchestrator` for itself.
+   For other peers, propose only what the conversation shows they were doing,
+   never a guess from the alias. A peer whose work fits no committed role
+   gets freeform text in its `role` field in
+   `$CBUS_DIR/.formations/<name>.json`, which the user writes.
 
    **Stale sids**: `STALE, no transcript found on this machine`. Those peers
    cannot resume or fork, `onStale=template` applies and they come back fresh,
@@ -68,8 +71,8 @@ formation name, second bare word is the channel, and flags pass through to
    origin is fresh or joined, and `template` for a fork-born or unattributed
    one. It never changes the mode of a peer already in the file, so an older
    save can hold `mode=template` peers whose transcript is present. Name each
-   one and give the fix: `cbus formation save <name> --mode <alias>=resume`.
-   Do not suggest it for a fork-born peer, since apply refuses to resume those.
+   one and propose `resume` for it. Do not propose it for a fork-born peer,
+   since apply refuses to resume those.
 
    **The anchor peer**: `apply` launches it first and `cbus formation resume`
    needs it. Say which peer it is, and flag it if show reports no anchor.
@@ -77,6 +80,14 @@ formation name, second bare word is the channel, and flags pass through to
 4. **Report** in a few lines: formation name, channel, peer count, new vs kept,
    then only the items that need a decision, each tied to its peer. If show
    reports no warnings and no TODO roles, say the checkpoint is clean and stop.
+
+5. **Fill what the user approves.** Ask once, listing every proposed role and
+   mode by peer. Apply the approved ones in one re-save:
+   `cbus formation save <name> [channel] --role <alias>=<role> ... --mode <alias>=resume ...`.
+   A flag sets that peer's field even over a hand edit, so pass only what the
+   user approved. If the save refuses (an unknown alias, or a role file that
+   does not resolve from here), report the error as is. Then run
+   `cbus formation show <name>` again and report what is left.
 
 Never run `apply`, `resume`, `bootstrap`, or `rm` from here, and never arm a
 Monitor. If the user wants to relaunch or delete a formation, send them to

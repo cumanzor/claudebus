@@ -152,6 +152,7 @@ func loadRepoTemplate(name string) (*Formation, error) {
 type SaveOptions struct {
 	Anchors map[string]string
 	Modes   map[string]string // alias -> resume|fork|template
+	Roles   map[string]string // alias -> committed role name, written as rolefile
 }
 
 // SaveFormation captures ch's topology into the named envelope, refreshing an
@@ -173,6 +174,9 @@ type SaveOptions struct {
 func SaveFormation(name, ch string, opts SaveOptions) (*Formation, *SaveReport, error) {
 	anchors := opts.Anchors
 	if err := checkModes(opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := checkRoles(opts.Roles); err != nil {
 		return nil, nil, err
 	}
 	if err := checkHandAnchors(anchors); err != nil {
@@ -259,6 +263,9 @@ func SaveFormation(name, ch string, opts SaveOptions) (*Formation, *SaveReport, 
 	}
 	retargetSelf(ch, f.Peers, observedSurface(), rep)
 	if err := setHandModes(f.Peers, opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := setHandRoles(f.Peers, opts.Roles); err != nil {
 		return nil, nil, err
 	}
 
@@ -357,18 +364,46 @@ func checkModes(modes map[string]string) error {
 
 // setHandModes applies --mode alias=mode, refusing what apply would refuse later
 func setHandModes(peers []FormationPeer, modes map[string]string) error {
+	return applyHand(peers, "--mode", modes, func(p *FormationPeer, m string) error {
+		if o := p.Origin; m != ModeTemplate && o != OriginFresh && o != OriginJoined {
+			return fmt.Errorf("--mode %s=%s: origin is %s, and apply only resumes or forks a peer born fresh or joined; use template",
+				p.Alias, m, orUnset(o))
+		}
+		p.Mode = m
+		return nil
+	})
+}
+
+// checkRoles refuses a role that does not resolve here, so a typo is not saved as a brief.
+func checkRoles(roles map[string]string) error {
+	for alias, r := range roles {
+		if _, _, err := LoadRole(r); err != nil {
+			return fmt.Errorf("--role %s=%s: %v", alias, r, err)
+		}
+	}
+	return nil
+}
+
+// setHandRoles points each named peer's rolefile at roles/<role>.md, replacing any brief.
+func setHandRoles(peers []FormationPeer, roles map[string]string) error {
+	return applyHand(peers, "--role", roles, func(p *FormationPeer, r string) error {
+		p.Rolefile, p.Role = "roles/"+r+".md", nil
+		return nil
+	})
+}
+
+// applyHand sets one hand flag per alias; an alias the formation does not hold is an error
+func applyHand(peers []FormationPeer, flag string, vals map[string]string, set func(*FormationPeer, string) error) error {
 	var unknown []string
-	for alias, m := range modes {
+	for alias, v := range vals {
 		found := false
 		for i := range peers {
-			if peers[i].Alias != alias {
-				continue
+			if peers[i].Alias == alias {
+				if err := set(&peers[i], v); err != nil {
+					return err
+				}
+				found = true
 			}
-			if o := peers[i].Origin; m != ModeTemplate && o != OriginFresh && o != OriginJoined {
-				return fmt.Errorf("--mode %s=%s: origin is %s, and apply only resumes or forks a peer born fresh or joined; use template",
-					alias, m, orUnset(o))
-			}
-			peers[i].Mode, found = m, true
 		}
 		if !found {
 			unknown = append(unknown, alias)
@@ -376,7 +411,7 @@ func setHandModes(peers []FormationPeer, modes map[string]string) error {
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return fmt.Errorf("--mode names no peer in this formation: %s", strings.Join(unknown, ", "))
+		return fmt.Errorf("%s names no peer in this formation: %s", flag, strings.Join(unknown, ", "))
 	}
 	return nil
 }
