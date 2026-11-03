@@ -4,6 +4,28 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 19:09:58 UTC] [Codex/Fix] A defunct codex process no longer breaks consumer checks on Linux
+
+[Attempt #1] Files: internal/client/codex_runtime_writer_linux.go,
+internal/client/codex_runtime_writer_linux_test.go.
+
+[What changed]
+- `codexRolloutWriters` and the TUI listener lookup read `/proc/<pid>/fd` for
+  each process named `codex`. That read returns EACCES for a zombie, and both
+  scans returned the error, so one unreaped child failed the check for every
+  session on the machine. A Codex app-server that does not reap a child can
+  leave one in place for days.
+- `codexProcessFiles` now returns no files for a zombie. The state is read
+  after the last `)` in `/proc/<pid>/stat`, because the name may hold spaces
+  and parens. Other permission errors still fail the scan.
+
+[Testing]
+- A real unreaped child named `codex` fails the scan without the fix and passes
+  with it. A live unreadable process still returns a permission error. Mutating
+  the check to skip every permission error, or to parse from the first `)`,
+  fails a test. Eight managed Codex tests that failed on a machine with a zombie
+  now pass there.
+
 ## [2026-11-03 01:15:02 UTC] [Delegation/Permits] Doctrine: seats check a permit and ask their coordinator
 
 [Attempt #1] Files: roles/coder.md, documenter.md, orchestrator.md, reviewer.md
