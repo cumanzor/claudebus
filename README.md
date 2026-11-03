@@ -111,7 +111,8 @@ cbus will not substitute a fresh Claude session.
   and [questions for you](docs/claude.md#questions-for-you-cbus-asks)
 - **Cross-machine relay** — a std-lib-only Go daemon extends channels across
   machines (`<channel>@<host>/<alias>`) behind an authenticated tunnel —
-  [docs/relay.md](docs/relay.md)
+  [docs/relay.md](docs/relay.md); hand a mailbox to an outbound webhook with
+  [docs/forward.md](docs/forward.md)
 
 ## Advanced example
 
@@ -154,6 +155,7 @@ restart: [Claude](docs/claude.md), [Codex](docs/codex.md), the
 | [docs/codex.md](docs/codex.md) | Codex sessions as bus peers |
 | [docs/opencode.md](docs/opencode.md) | OpenCode sessions as bus peers |
 | [docs/relay.md](docs/relay.md) | the networked relay and `@host` remote channels |
+| [docs/forward.md](docs/forward.md) | hand a relay mailbox to an outbound webhook |
 | [docs/security.md](docs/security.md) | the trust boundary, stated honestly |
 | [docs/claude-code-coordination.md](docs/claude-code-coordination.md) | why claudebus exists next to Subagents, Agent Teams, SendMessage and Workflow |
 | [docs/shared-instructions.md](docs/shared-instructions.md) | repo-policy vs harness-join-instructions split, for AGENTS.md/CLAUDE.md authors |

@@ -218,9 +218,12 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    600; key sent as a bearer token)
        --per-min N / --per-hour N  rate cap that holds, never drops (6 / 30)
        --max-attempts N            retries before a message is dead-lettered (10)
+       --timeout D                 one webhook request, e.g. 90s (30s)
        --dead-letter FILE          default $CBUS_DIR/forward/<ch>@<host>/<alias>.deadletter.jsonl
        --once                      exit once the mailbox has been idle 3s
        --dry-run                   log the next message without POST or ACK
+       --print-service             print a systemd unit or launchd plist for this
+                                   forwarder; installs nothing (docs/forward.md)
   cbus leave [channel]             remove this session's legacy memberships/inboxes
   cbus rename <new-alias> [channel]  rename this session's legacy alias (mv dir +
                                    meta); re-arm the Monitor on the new address

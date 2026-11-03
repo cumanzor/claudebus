@@ -238,6 +238,7 @@ switch to a `run*` function).
 | `cbus active [ch]` | `cmd_list --active` | |
 | `cbus channels` | `cmd_channels` | Extra args **refused** (usage error, rc 1), not silently dropped |
 | `cbus prune [ch]` | `cmd_prune` | |
+| `cbus forward <ch>@<host>/<alias> --webhook-config FILE` | Go client only | durable relay consumer; POST to a webhook, then ACK ([forward.md](../forward.md)) |
 | `cbus leave [target]` | `cmd_leave` | |
 | `cbus hook-exit` | `cmd_hook_exit` | SessionEnd hook; args dropped |
 | `cbus unregister <ch>/<al>` | `cmd_unregister` | |

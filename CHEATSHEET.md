@@ -185,6 +185,7 @@ cbus list @server                     # relay peers: connected/queued/lastSeen
 cbus prune @server                    # reap off relay peers with no queued mail (server-side)
 cbus prune dev@server                 # same, scoped to one channel
 cbus connection disconnect dev@server/laptop  # retain local inbox and delivery history
+cbus forward dev@server/hook --webhook-config FILE  # POST a mailbox to a webhook (docs/forward.md)
 ```
 
 - Native receive requires the matching `/tail/durable-v1` relay endpoint; an older

@@ -4,6 +4,32 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 23:32:15 UTC] [Forward/Docs] Service definition, request timeout and docs
+
+[Attempt #1] Files: cmd/cbus/forward.go, cmd/cbus/forward_service.go,
+cmd/cbus/forward_service_test.go, cmd/cbus/usage.go, internal/client/forward.go,
+internal/client/forward_test.go, docs/forward.md, docs/architecture/command-reference.md,
+README.md, CHEATSHEET.md.
+
+[What changed]
+- `--print-service` prints a systemd user unit on Linux or a LaunchAgent on macOS,
+  with the install commands in a comment, and installs nothing. Other platforms
+  are refused. It names the webhook config file instead of copying it. A service
+  does not inherit the shell, so `CBUS_SITE_<HOST>_URL` for this host, `CBUS_DIR`,
+  `CBUS_HOST`, `CBUS_RELAY_LOCAL_URL` and `XDG_CONFIG_HOME` go into the definition
+  when set. Paths and values are quoted for systemd and escaped for XML.
+- `--timeout D` limits one webhook request (default 30 s). Before, a receiver that
+  took longer could never succeed.
+- docs/forward.md: setup, the payload contract, how a response settles a message,
+  dead letters, the rate cap, running as a service and security.
+
+[Testing]
+- `systemd-analyze verify` accepts the printed unit, with a good and a broken
+  control unit so a verifier that cannot run here does not pass silently. Unit
+  tests for quoting, XML round trip, the carried settings and no secrets in the
+  output. A receiver slower than the timeout is dead-lettered and succeeds with a
+  larger one. `plutil -lint` accepted the plist on macOS.
+
 ## [2026-11-03 23:00:56 UTC] [Install/Hooks] cbus install-hooks
 
 [Attempt #1] Files: cmd/cbus/install_hooks.go, cmd/cbus/install_hooks_test.go,
