@@ -107,6 +107,7 @@ type ForwardOptions struct {
 	Base, Token          string
 	Webhook              WebhookConfig
 	PerMin, PerHour      int
+	Timeout              time.Duration // one webhook request; 0 means the default
 	MaxAttempts          int
 	DeadLetter           string
 	DryRun               bool
@@ -123,9 +124,15 @@ func DefaultDeadLetter(channel, host, alias string) string {
 	return filepath.Join(CBUSDir(), "forward", channel+"@"+host, alias+".deadletter.jsonl")
 }
 
-func newForwardClient() *http.Client {
+// DefaultForwardTimeout bounds one webhook request.
+const DefaultForwardTimeout = 30 * time.Second
+
+func newForwardClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = DefaultForwardTimeout
+	}
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: timeout,
 		// a redirected POST would be replayed as a bodiless GET and look delivered
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -150,7 +157,7 @@ func Forward(ctx context.Context, o ForwardOptions) error {
 		o.Logf = func(string, ...any) {}
 	}
 	if o.client == nil {
-		o.client = newForwardClient()
+		o.client = newForwardClient(o.Timeout)
 	}
 	if o.sleep == nil {
 		o.sleep = relayWait

@@ -114,7 +114,7 @@ func TestForwardHandleRedirectIsNeverFollowed(t *testing.T) {
 	f := &forwarder{ForwardOptions: ForwardOptions{
 		Webhook: WebhookConfig{URL: srv.URL + "/hook", Key: "secret-key"}, PerMin: 100, PerHour: 100, MaxAttempts: 3,
 		DeadLetter: filepath.Join(t.TempDir(), "dl.jsonl"), sleep: noSleep,
-		client: newForwardClient(),
+		client: newForwardClient(0),
 		Logf:   func(f string, a ...any) { logs.WriteString(strings.TrimSpace(fmt.Sprintf(f, a...)) + "\n") },
 	}}
 	msg, _ := json.Marshal(core.Message{From: "demo/a", To: "demo/hook", TS: "t", Text: "hi"})
@@ -307,5 +307,48 @@ func TestForwardAbandonedDeliveryIsRedelivered(t *testing.T) {
 	}
 	if len(hook.bodies) != 2 || hook.bodies[1]["id"] != first {
 		t.Fatalf("want the same message redelivered after an abandoned attempt, got %v", hook.bodies)
+	}
+}
+
+func TestForwardTimeoutReachesTheRequest(t *testing.T) {
+	if c := newForwardClient(0); c.Timeout != DefaultForwardTimeout {
+		t.Fatalf("default timeout = %v", c.Timeout)
+	}
+	release := make(chan struct{})
+	defer close(release)
+	var got sync.Mutex
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Lock()
+		posts++
+		got.Unlock()
+		select {
+		case <-time.After(150 * time.Millisecond):
+			w.WriteHeader(200)
+		case <-release:
+		}
+	}))
+	defer srv.Close()
+	msg, _ := json.Marshal(core.Message{From: "demo/a", To: "demo/hook", TS: "t", Text: "slow"})
+	run := func(timeout time.Duration, dl string) error {
+		f := &forwarder{ForwardOptions: ForwardOptions{
+			Webhook: WebhookConfig{URL: srv.URL, Key: "k"}, PerMin: 100, PerHour: 100, MaxAttempts: 1,
+			DeadLetter: dl, sleep: noSleep, Logf: func(string, ...any) {}, client: newForwardClient(timeout),
+		}}
+		return f.handle(context.Background(), relayFrame{Type: "message", SpoolID: "1.a.json", Message: msg})
+	}
+	short := filepath.Join(t.TempDir(), "short.jsonl")
+	if err := run(20*time.Millisecond, short); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(short); !strings.Contains(string(b), "after 1 attempts") {
+		t.Fatalf("a receiver slower than the timeout was not dead-lettered: %s", b)
+	}
+	long := filepath.Join(t.TempDir(), "long.jsonl")
+	if err := run(5*time.Second, long); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(long); !os.IsNotExist(err) {
+		t.Fatal("the same receiver failed with a larger timeout")
 	}
 }
