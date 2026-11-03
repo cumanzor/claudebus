@@ -141,8 +141,9 @@ the cbus-compact hook test.
   coordinator's own fallback goes to itself; a plain session is not told.
 - The hook runs on every session, so it reads at most 4 MiB per Stop from a
   per-seat offset, does not read the transcript when nobody would be told,
-  and gives up on a busy lock after 250 ms. Only the two model names and the
-  refusal category are read from the entry.
+  and gives up on a busy lock after 250 ms. The notice renders the two model
+  names, the refusal category and the entry's time; the entry's content and
+  explanation are never decoded.
 - Review findings folded in: --fork-session copies the parent's rows under
   the fork's own session id plus forkedFrom, so a fork could report its
   parent's fallback as its own; entries with forkedFrom are now skipped. The
@@ -249,7 +250,7 @@ formation_test.go.
   session other than the holder reads as none. The store is owner-only.
 - `cbus formation bootstrap` records too, with `--dry-run` to print only.
   The low-level `cbus bootstrap` stays print-only, so a seat pasted from it
-  has no coordinator.
+  has no coordinator record, though its prompt still names one.
 - Review finding folded in: a bound record was answering when no meta.json
   existed, so a session that had left still looked coordinated; it now
   speaks only for the session holding the name. Undo restored the prior
@@ -263,8 +264,10 @@ formation_test.go.
 [Possible Ripple Effects]
 - Nothing reads the record yet; later milestones consume it, so a wrong
   record is invisible until then.
-- The record survives leave and collection by design. Deleting a channel's
-  store directory is the only cleanup.
+- The record survives leave and collection by design. A new holder taking
+  the alias, or a launch naming no coordinator, replaces or removes it;
+  nothing collects unused records, and deleting a channel's store directory
+  leaves `.coordinators/<channel>/` in place.
 - A seat started from the low-level `cbus bootstrap` has no record.
 
 [Testing Notes]
