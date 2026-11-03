@@ -96,7 +96,7 @@ func TestNormalizeRepo(t *testing.T) {
 	}
 	for _, raw := range []string{"", "/srv/git/r.git", "./r", "../r", "file:///srv/r.git", "justaname", "https://github.com", "https://h/a/../b", "ftp://h/o/r",
 		"user:s3cret@github.com:o/r.git", "git@github.com:o/r?x=s3cret", "git@github.com:o/r#s3cret", "https//user:s3cret@github.com/o/r", "foo bar:s3cret@x",
-		"C:/repos/r", `C:\repos\r`, "git@host.test:o/r\x1b", "https://host.test/o/r\x07"} {
+		"C:/repos/r", `C:\repos\r`, "a/b:o/r", "foo bar:o/r", "ho_st:o/r", "git@host.test:o/r\x1b", "https://host.test/o/r\x07"} {
 		if got, err := NormalizeRepo(raw); err == nil {
 			t.Errorf("%q: want a refusal, got %q", raw, got)
 		}
@@ -111,6 +111,7 @@ func TestNormalizeRepoDoesNotEchoACredential(t *testing.T) {
 		"foo bar:s3cret@x",
 		"git@github.com:o/r?x=s3cret",
 		"s3cret",
+		"s3cret.host:",
 	} {
 		if _, err := NormalizeRepo(raw); err == nil || strings.Contains(err.Error(), "s3cret") {
 			t.Errorf("%q: %v", raw, err)
