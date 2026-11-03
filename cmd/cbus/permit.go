@@ -187,6 +187,10 @@ func runPermitsUse(args []string) int {
 	if err != nil {
 		return permitExit(err)
 	}
-	fmt.Printf("covered by %s: %s, until %s (use %d)\n", v.ID, permitScope(v.Permit), v.ExpiresAt.Format(time.RFC3339), v.Uses)
+	checked := "1 time"
+	if v.Uses != 1 {
+		checked = fmt.Sprintf("%d times", v.Uses)
+	}
+	fmt.Printf("covered by %s: %s, until %s (not consumed; checked %s)\n", v.ID, permitScope(v.Permit), v.ExpiresAt.Format(time.RFC3339), checked)
 	return 0
 }

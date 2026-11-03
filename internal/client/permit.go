@@ -30,6 +30,7 @@ const (
 	permitTextMax     = 2000
 	permitTargetMax   = 200
 	permitClassEffort = "effort"
+	permitClassList   = "one of push-branch, draft-pr, pr-update, merge, release, install, effort"
 )
 
 const (
@@ -295,7 +296,7 @@ func fillPermitScope(p *Permit, req PermitRequest) error {
 		case a == permitClassEffort:
 			effort++
 		default:
-			return permitUsage("unknown action class %q", a)
+			return permitUsage("unknown action class %q: %s", a, permitClassList)
 		}
 		seen[a] = true
 		p.Actions = append(p.Actions, a)
@@ -459,7 +460,7 @@ func UsePermit(u PermitUse) (PermitView, error) {
 			return PermitView{}, permitUsage("%s needs --target", u.Action)
 		}
 	default:
-		return PermitView{}, permitUsage("unknown action class %q", u.Action)
+		return PermitView{}, permitUsage("unknown action class %q: %s", u.Action, permitClassList)
 	}
 	alias := ""
 	for _, reg := range ResolveSelf() {

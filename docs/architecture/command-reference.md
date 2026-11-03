@@ -1297,8 +1297,9 @@ mismatch refuses. The writer is an address, with its session stored for audit on
 restored coordinator's permits keep working; the cost is that whoever later takes that alias
 on this machine is the writer. A permit is not bound to the seat's session either.
 
-**`use` output.** Covered: one stdout line naming the permit and its use count, exit 0, and a
-line appended to `<id>.uses`; a use that cannot be recorded is refused. Otherwise one stderr
+**`use` output.** Covered: one stdout line naming the permit and how many times it was checked, exit 0,
+and a line appended to `<id>.uses`. Uses are counted for audit, not consumed. A use that
+cannot be recorded is refused. Otherwise one stderr
 line, `not covered: <reason>; ask <coordinator> on the bus`, exit 1, naming the nearest
 miss: written by someone else, revoked, expired, another repo, another ref or target. A bad
 request exits 2, so a seat can tell a typo from a no.

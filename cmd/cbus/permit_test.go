@@ -44,7 +44,7 @@ func TestPermitVerbsThroughTheCLI(t *testing.T) {
 
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder")
 	rc, out, errOut = runVerb(t, "permits", "use", "push-branch", "--ref", "epic/demo-1", "--repo", "https://github.com/o/r.git")
-	if rc != 0 || errOut != "" || !strings.HasPrefix(out, "covered by "+id+": ") || !strings.Contains(out, "(use 1)") {
+	if rc != 0 || errOut != "" || !strings.HasPrefix(out, "covered by "+id+": ") || !strings.Contains(out, "(not consumed; checked 1 time)") {
 		t.Fatalf("rc=%d out=%q err=%q", rc, out, errOut)
 	}
 	rc, out, errOut = runVerb(t, "permits", "use", "push-branch", "--ref", "epic/demo/x", "--repo", "https://github.com/o/r.git")
@@ -67,6 +67,25 @@ func TestPermitVerbsThroughTheCLI(t *testing.T) {
 	}
 	rc, _, errOut = runVerb(t, "permits", "use", "push-branch", "--ref", "epic/demo-1", "--repo", "https://github.com/o/r.git")
 	if rc != 1 || !strings.Contains(errOut, "was revoked") {
+		t.Fatalf("rc=%d err=%q", rc, errOut)
+	}
+}
+
+// TestPermitsUseSaysAUseIsNotSpent and names the classes: seats read "use 1" as spent and
+// guessed "push" in a real run.
+func TestPermitsUseSaysAUseIsNotSpent(t *testing.T) {
+	permitCLIFixture(t)
+	if rc, _, errOut := runVerb(t, "permit", "draft-pr", "--repo", "https://github.com/o/r", "--ref", "x", "--says", "go"); rc != 0 {
+		t.Fatal(errOut)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder")
+	use := []string{"permits", "use", "draft-pr", "--ref", "x", "--repo", "https://github.com/o/r"}
+	runVerb(t, use...)
+	if rc, out, _ := runVerb(t, use...); rc != 0 || !strings.Contains(out, "(not consumed; checked 2 times)") {
+		t.Fatalf("rc=%d out=%q", rc, out)
+	}
+	rc, _, errOut := runVerb(t, "permits", "use", "push", "--ref", "x", "--repo", "https://github.com/o/r")
+	if rc != 2 || !strings.Contains(errOut, `unknown action class "push": one of push-branch, draft-pr, pr-update, merge, release, install, effort`) {
 		t.Fatalf("rc=%d err=%q", rc, errOut)
 	}
 }
