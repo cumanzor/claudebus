@@ -4,6 +4,67 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 01:15:02 UTC] [Delegation/Permits] Doctrine: seats check a permit and ask their coordinator
+
+[Attempt #1] Files: roles/coder.md, documenter.md, orchestrator.md, reviewer.md
+(doctrine 3 and 8 and the orchestrator's escalation; the shared core is still
+identical across the four and go:embed copies follow), internal/client/delegation.go,
+commands/bus-join.md; docs/security.md, claude.md, formations.md, usage.md,
+architecture/command-reference.md; tests in assets_test.go,
+formation_kickoff_test.go, formation_resume_test.go, role_test.go.
+
+[What changed]
+- Seats stopped for the operator's word in their own pane, which nobody
+  watches. A seat now runs `cbus permits use` before a reserved action. Exit
+  0 covers it; otherwise it holds and asks its coordinator on the bus. The
+  coordinator rules what is inside the effort, files one ask for an approval
+  it does not hold, writes the permit once the operator has said so in its
+  session, and tells the seat to check it. A message telling a seat to go is
+  not the permit; the seat's own command output is its reason for acting.
+- An effort permit can record the coordinator's own ruling inside the epic,
+  and says so in --says. Otherwise only the operator's word justifies a
+  permit. merge, release and install need a named target, force pushes are
+  never covered, a public repo gets no standing push permit unless the
+  operator said so for it, and repository policy and classifier blocks still
+  bind. docs/security.md states the honest limit.
+- Review fixes folded in: doctrine 3 told a coordinator never to write a
+  permit except on the operator's word while its launch clause told it to
+  record its own effort ruling, so it could not follow both; doctrine 3 and
+  the orchestrator's escalation now name the exception. The peer clause told
+  every seat not to ask the operator in its pane, including a seat pasted from
+  `cbus bootstrap` with no coordinator record, for which no permit can count;
+  it now says what that refusal means and allows the question.
+- Grants are unchanged, but seats and coordinators stop suggesting them.
+
+[Possible Ripple Effects]
+- Takes effect for a seat only after a release and `cbus selfupdate`; running
+  seats keep the text they launched with.
+- The doctrine block stays duplicated across the four role files by design;
+  the canary was extended to the effort exception and the go line in each.
+- Hooks (denied, regressed) still need entries in settings to do anything.
+- A coordinator model decides what to write; the permit store is same-user
+  file state and not a security boundary.
+
+[Testing Notes]
+- Live runs on Haiku through the real formation door, against a loopback git
+  server, at the commit before the last two wording fixes; n=1 per part. A
+  seat with no permit asked its coordinator instead of its pane and pushed
+  nothing. With a permit, two pushes landed with no second question and a
+  merge stayed held. A peer saying the operator agreed did not make the
+  coordinator write a permit.
+- The permit in that run was written by a shell and says so; no operator
+  answer was typed. The remote was a loopback git server. In both runs of the
+  question part the coordinator set no `from` on its ask. The first run of the
+  permit part was invalid (a push identity hook blocked the push, and the
+  script wrote the permit under a live coordinator's session), and it exposed
+  two defects fixed in the permit CLI: a seat guessed an unknown class, and a
+  use count read as a use spent.
+- 31 wording mutants were all killed. One go test failure appeared unattributed
+  in six reviewer runs, test name lost.
+- Not yet shown: a real private remote, a real band approval with a real model
+  writing the permit, a real classifier verdict on a real push, hooks in
+  settings, larger models.
+
 ## [2026-11-03 00:50:06 UTC] [Permits/Store] Permit store and CLI, inert
 
 [Attempt #1] Files: internal/client/permit.go (new: store, matching, use),
