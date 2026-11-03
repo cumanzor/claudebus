@@ -4,6 +4,58 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 00:50:06 UTC] [Permits/Store] Permit store and CLI, inert
+
+[Attempt #1] Files: internal/client/permit.go (new: store, matching, use),
+coordinator.go (writer lookup), regressed.go (small shared-helper cleanup);
+cmd/cbus/permit.go (new), main.go, usage.go; docs/architecture/command-reference.md,
+protocol.md; tests in permit_test.go, permit_unix_test.go and cmd/cbus/permit_test.go.
+
+[What changed]
+- Seats stop for the operator's word in their own pane, and `cbus grant`
+  needs the operator at a terminal per seat and action. A coordinator can now
+  record what the operator said with `cbus permit <actions> --repo R (--ref
+  PATTERN | --target T | --effort TEXT) --says WORDS [--ttl D]`, and a seat
+  asks `cbus permits use <action> ...` whether it is covered. A use prints one
+  line naming the permit and its use count (exit 0) or a not-covered line
+  naming the nearest miss and the coordinator to ask (exit 1).
+- Classes: push-branch, draft-pr and pr-update cover a ref pattern; merge,
+  release and install cover one exact target, one per permit; effort carries
+  text and is read, not used. There is no wildcard class and force pushes
+  have no class, so they are never covered. Ref patterns allow `*` and `?`
+  without crossing a slash, need a literal prefix, and a wildcard that reaches
+  main or master is refused; an exact main is allowed because the operator
+  named it. TTL defaults to 7 days, maximum 30. Revoke needs no terminal gate
+  because it only tightens.
+- The writer must hold an address a coordinator record on the channel names,
+  and at use the seat's coordinator must equal the permit's writer, compared
+  by address with the session kept for audit. A seat with no record, or an
+  unanswered one, gets nothing. Relay channels are refused.
+- The repo is stored as host/path so ssh and https compare equal. Local
+  paths, file URLs and credentials are not stored: review fixes made an scp
+  remote carrying user:secret@host refuse instead of storing the secret,
+  checked the whole path for @ and : (a password containing a slash had
+  slipped through), stopped errors printing any part of the value, and
+  stripped control characters from --says and --effort and refused them in
+  --target.
+
+[Possible Ripple Effects]
+- Inert until the doctrine change: nothing in a role or prompt refers to
+  permits, so no seat consults them yet.
+- Not a security boundary. State is same-user files and --says is an audit
+  trail, not proof; whoever later takes a coordinator's alias on the machine
+  becomes the writer.
+- A permit is not bound to the seat's session, and cbus cannot see which flags
+  a later git push carries; the seat is responsible for pushing to the repo
+  it checked.
+
+[Testing Notes]
+- 52 mutants across writer, ref, repo, state, target, ttl, uses, version and
+  CLI behavior were all killed; two survived a first run and got tests.
+- Live CLI run through a scratch store: covered, not-covered, refused and
+  exit-code cases matched the documented behavior, including wildcard-reaches-
+  main and a seat that is not a coordinator.
+
 ## [2026-11-03 00:20:29 UTC] [Hooks/Regressed] Tell the coordinator when a seat falls back to another model
 
 [Attempt #1] Files: internal/client/regressed.go (new: transcript scan,
