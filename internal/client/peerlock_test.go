@@ -127,7 +127,7 @@ func TestPeerLockGuardsStoreLifecycle(t *testing.T) {
 				case "join":
 					_, _, err = Join("ch", "advisor")
 				case "reserve":
-					_, err = ReserveAlias("ch", "advisor", OriginFresh, "")
+					_, err = ReserveAlias("ch", "advisor", OriginFresh, "", "")
 				case "leave":
 					_, err = Leave("ch")
 				case "unregister":

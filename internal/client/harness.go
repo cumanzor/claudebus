@@ -263,7 +263,7 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	// branch forks the parent's transcript, so the child is fork-born (cbus-m9l). Formation
 	// apply stamps the same origin for a fork-mode peer (formation_apply.go, ActionFork);
 	// the origin is what makes apply refuse to resume a fork-born peer as itself.
-	if childAlias, err = ReserveAlias(ch, name, OriginFork, model); err != nil {
+	if childAlias, err = ReserveAlias(ch, name, OriginFork, model, ""); err != nil {
 		return "", "", "", err
 	}
 	undoRecord, err := recordCoordinator(ch, childAlias, forkSeat(ch, alias).Coord, coordinatorDoorBranch, "")

@@ -47,7 +47,7 @@ func TestSaveFormationRetargetsOnlyTheSaver(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, rep, err := SaveFormation("roles", "roles", nil)
+	f, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSaveFormationRetargetsOnlyTheSaver(t *testing.T) {
 
 	// the same seat back in a plain iTerm2 tab: the tmux record no longer holds
 	t.Setenv("TMUX", "")
-	f2, rep2, err := SaveFormation("roles", "roles", nil)
+	f2, rep2, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -228,6 +228,7 @@ this exact same path (`writeDaemonMeta`, `daemon.go:428-434`), not the plain
 | `lastActivity` | string, `omitempty` | Go client only | grace-clock timestamp (compat-deletion-plan #3); absent on bash-written metas. Written at join (`store.go:291-295`), native connect (`daemon.go:724`), and tail arm (`follow.go:192`); also refreshed by `touchActivity` when a session's own registration is the anchor or target of `arrange`/`scatter`/`focus` (`layout.go:340`, `store.go:863-883`, skipped for a daemon-managed peer since the daemon owns its grace). **`send` does NOT write it.** Since P3 homogenization this is the ONLY grace-clock input, see the mtime correction below |
 | `origin` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: `fresh` (spawn) / `fork` (branch) / `joined` (plain join); absent = unknown / hand-maintained |
 | `model` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the model the child was launched on; absent = unknown |
+| `role` | string, `omitempty` | Go client; stamped by the **launcher** at reservation | birth record: the committed role the child was briefed from (`spawn --role`, a `template`/`fork` restore from a `rolefile`); absent = none recorded |
 | `listenerStart` | string, `omitempty` | Go client only; set at tail arm alongside `listenerPid` | the structural identity witness, `procStartTime` of the listener pid at arm time; a listener whose current start time no longer matches this value is treated as dead outright (pid recycling guard), replacing the bash-era argv-string check |
 | `profile` | string, `omitempty` | Go client only; stamped at join ONLY (`store.go:295`) | the CCS instance directory basename the peer is running under, or `""` for the default `~/.claude`. Native connect does not set this meta field at all (`daemon.go:724`'s `peerMeta` literal has no `Profile:`); a managed peer's profile is instead derived on demand from the connection binding's `ConfigHome` when something needs it (`formation_harness.go`, command-reference.md §10) |
 | `harness` | string, `omitempty` | Go client only; stamped at join/connect | `claude` / `codex` / `grok` / `opencode`; empty on legacy templates predating harness identity, in which case `claude` is assumed |
@@ -243,31 +244,40 @@ parseable `lastActivity` reads as already past grace (pre-port relics become
 prunable on sight, they never get a mtime-based reprieve). Touching the file with
 no `lastActivity` bump no longer resets anything.
 
-**Birth records (Go client).** `spawn` / `branch` stamp `origin` and `model` into the
-peer's meta **before the child boots** — the launcher knows how a session was born; the
+**Birth records (Go client).** `spawn` / `branch` stamp `origin` and `model` (and
+`spawn --role` the `role`) into the peer's meta **before the child boots** — the launcher knows how a session was born; the
 session cannot reliably know its own origin. `ReserveAlias` (store.go) lays down a
-placeholder meta (`sessionId: "reserved"`, null pids) carrying the two fields; the
+placeholder meta (`sessionId: "reserved"`, null pids) carrying the fields; the
 child's `join` reclaims the reservation and inherits them. Both fields are `omitempty`:
 a meta written by bash `cbus`, or any pre-birth-record join, omits the keys entirely and
 stays **byte-identical** for bash's tolerant reader (the A3 freeze, port-map §5) — an
 absent field reads as unknown / hand-maintained, never inferred. `formation save` reads
 these fields directly, which is how a spawn-born peer records its origin/model with no
-hand-edit.
+hand-edit, and how a role-briefed peer saves with `rolefile: roles/<role>.md` instead of
+a TODO. A daemon `connect` that claims a reservation carries the same three fields.
 
-**The join stamp map** (`birthForJoin`, store.go) resolves origin/model against whatever
+**The join stamp map** (`birthForJoin`, store.go) resolves origin/model/role against whatever
 meta already sits at the alias:
 
-- placeholder `sessionId: "reserved"` → carry its stamped origin/model through the
+- placeholder `sessionId: "reserved"` → carry its stamped origin/model/role through the
   reclaim (a blank stays blank);
 - `sessionId` == this session's own → resume-rejoin, **preserve** the existing
-  origin/model;
+  origin/model/role;
 - any other sid, or unreadable → `origin=joined`, model unknown (a takeover never
-  inherits the stranger's `fork`).
+  inherits the stranger's `fork` or role).
+
+A `joined` result is then checked against this session's own history: if any meta in
+another channel, or any self-recorded `join`/`resume` ledger line, records this same
+session id as `origin=fork`, the join records `fork` instead. A fork-born session that
+joins a second channel under an alias it did not reserve stays fork-born there, so
+`formation save` never defaults it to `resume`. A daemon `connect` that claims no
+reservation runs the same check against its thread id.
 
 A **reservation is never laid down for a resume** — `formation apply`'s `resume` mode
 skips `ReserveAlias`, because a placeholder would win over the resumed session's own sid
 in `birthForJoin` and clobber its preserved origin. The `template` and `fork` restore
-modes do reserve, stamping `fresh` / `fork` respectively.
+modes do reserve, stamping `fresh` / `fork` respectively, plus the role named by the
+peer's `rolefile`.
 
 ### 2.3 `inbox.jsonl`
 

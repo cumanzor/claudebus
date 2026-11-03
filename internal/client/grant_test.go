@@ -304,7 +304,7 @@ func TestGrantBindsTheExactSession(t *testing.T) {
 		t.Fatalf("the grant must record the grantee's session: %+v", g)
 	}
 
-	if _, err := ReserveAlias("ch", "coder", OriginFresh, ""); err != nil {
+	if _, err := ReserveAlias("ch", "coder", OriginFresh, "", ""); err != nil {
 		t.Fatalf("reserve over the dead peer: %v", err)
 	}
 	if _, err := NewGrant("ch/coder", "push", GrantOnce, 0); err == nil || !strings.Contains(err.Error(), "reserved but has not joined") {
