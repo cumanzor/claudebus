@@ -29,6 +29,7 @@ const (
 	// the alias weeks later; a pasted bootstrap prompt can reasonably wait hours
 	coordinatorBindWindow = 24 * time.Hour
 	coordinatorRecordMax  = 64 << 10
+	coordinatorScanMax    = 256
 )
 
 // coordinatorRecord: an empty SessionID is a launch nobody has answered yet.
@@ -228,6 +229,27 @@ func moveCoordinatorRecord(ch, oldAlias, newAlias string) error {
 	} else {
 		return err
 	}
+}
+
+// coordinatesAnySeat reports a record on ch naming addr. Past the cap it answers no.
+func coordinatesAnySeat(ch, addr string) bool {
+	dir := filepath.Dir(coordinatorRecordPath(ch, "x"))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	if len(entries) > coordinatorScanMax {
+		entries = entries[:coordinatorScanMax]
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if rec, ok := readCoordinatorRecord(filepath.Join(dir, e.Name())); ok && rec.Coordinator == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // RecordBootstrapCoordinator records the seat a pasted prompt will name. A name already

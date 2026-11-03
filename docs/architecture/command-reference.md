@@ -1256,6 +1256,59 @@ be live and bound to this session (`grant <id> is bound to session ..., not this
 otherwise). A once grant is consumed by exactly one use (a first-writer-wins
 `<id>.used` marker); a second use prints `... was already used`.
 
+### `cbus permit` / `cbus permits` / `cbus permits use` / `cbus permit revoke`
+
+A permit is a coordinator's record of what the operator said a seat may do, so a seat
+reaching a gated action does not have to stop for the operator's word in its own pane.
+Local to this machine: a relay channel is refused, and a seat elsewhere has none.
+
+```
+cbus permit <actions> --repo <remote> (--ref <pattern> | --target <t> | --effort <text>)
+            --says "<operator's words>" [--ttl D] [--channel ch]
+cbus permits [--all] [--json]
+cbus permits use <action> (--ref <branch> | --target <t>) [--repo <remote>] [--channel ch]
+cbus permit revoke <id>
+```
+
+`--channel` defaults to this session's one channel. `--ttl` takes `12h` or `7d`, default
+7 days, maximum 30. `--says` is required: an audit trail, not proof.
+
+**Classes.** `push-branch`, `draft-pr` and `pr-update` cover a ref pattern, several per
+permit. `merge`, `release` and `install` cover one exact `--target` and take no pattern, one
+per permit. `effort` carries scope text, is read with plain `cbus permits` and is not
+used. There is no wildcard class. Force pushes have no class and are never covered, and
+cbus cannot see which flags a later `git push` carries.
+
+**Ref patterns.** `*` and `?` only, with `path.Match` semantics: neither crosses a slash.
+`epic/demo*` covers `epic/demo-1`, not `epic/demo/x`; `epic/demo/*` covers `epic/demo/x`,
+not `epic/demo/x/y`. A leading `refs/heads/` is dropped. Refused: no literal prefix before
+the first wildcard (`*`, `*/*`), and a wildcard pattern that reaches `main` or `master`
+(`m*`). An exact `--ref main` is allowed, because that is the operator naming it.
+
+**Repo.** Stored as `host/path`, so ssh and https of one repo compare equal and a credential
+in a URL is not stored. Path case is kept, so a case difference is a mismatch. A local path
+or `file://` is refused. `use` defaults to the working directory's `origin`. This checks
+what was asked: the seat is responsible for pushing to the repo it checked.
+
+**Who can write.** The caller must hold an address that some coordinator record on that
+channel names (`.coordinators/<channel>/`). **Who it counts for.** At `use`, the seat's
+`CoordinatorOf` must equal the permit's `writer`. No record, an unanswered record or a
+mismatch refuses. The writer is an address, with its session stored for audit only, so a
+restored coordinator's permits keep working; the cost is that whoever later takes that alias
+on this machine is the writer. A permit is not bound to the seat's session either.
+
+**`use` output.** Covered: one stdout line naming the permit and its use count, exit 0, and a
+line appended to `<id>.uses`; a use that cannot be recorded is refused. Otherwise one stderr
+line, `not covered: <reason>; ask <coordinator> on the bus`, exit 1, naming the nearest
+miss: written by someone else, revoked, expired, another repo, another ref or target. A bad
+request exits 2, so a seat can tell a typo from a no.
+
+**`permits`** lists live permits on this session's channels written by its coordinator or by
+itself. `--all` lists every channel and state with use counts and `says`.
+
+**`permit revoke`** has no terminal gate and any local caller can run it, because revoking
+only tightens. Revoking twice reports the first revocation.
+
 ### `cbus close <channel>/<alias> [...] [--force]`
 
 Ends one or more **local** peer sessions on request — the only command that

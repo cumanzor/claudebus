@@ -213,6 +213,17 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus grants [--all] [--json]     grants for this session's address; a peer acts
                                    only on one listed live; cbus grants use <id>
                                    takes it first (a once grant is consumed)
+  cbus permit <actions> --repo R (--ref P | --target T | --effort TEXT) --says WORDS
+       [--ttl D] [--channel C]     a seat's recorded coordinator records what the
+                                   operator said; push-branch, draft-pr, pr-update
+                                   take --ref (* stops at a slash), merge, release,
+                                   install --target, effort --effort. Default ttl 7d,
+                                   max 30d. cbus permit revoke <id> (any local caller)
+  cbus permits [--all] [--json]    live permits from your coordinator or you; --all
+                                   is the audit of every channel and state
+  cbus permits use <action> (--ref B | --target T) [--repo R] [--channel C]
+                                   exit 0 and one line if covered, and counts the
+                                   use; exit 1 and why not; exit 2 for a bad request
   cbus close <channel>/<alias> [...] [--force]   end peer sessions: SIGTERM the
                                    owning process, then sweep its terminal surface
                                    once the tty is dead (local only — a remote peer

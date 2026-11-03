@@ -89,6 +89,10 @@ func run(args []string) int {
 		return runGrant(args[1:])
 	case "grants":
 		return runGrants(args[1:])
+	case "permit": // a coordinator's record of what the operator said a seat may do
+		return runPermit(args[1:])
+	case "permits":
+		return runPermits(args[1:])
 	case "close":
 		return runClose(args[1:])
 

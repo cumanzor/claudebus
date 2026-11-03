@@ -19,7 +19,6 @@ const (
 	regressedSubtype  = "model_refusal_fallback"
 	regressedScanMax  = 4 << 20
 	regressedLock     = 250 * time.Millisecond
-	regressedPeersMax = 256
 	regressedFieldMax = 64
 )
 
@@ -91,21 +90,8 @@ func regressionRecipient(reg LocalReg) string {
 		return coord
 	}
 	self := reg.Channel + "/" + reg.Alias
-	entries, err := os.ReadDir(filepath.Dir(coordinatorRecordPath(reg.Channel, reg.Alias)))
-	if err != nil {
-		return ""
-	}
-	if len(entries) > regressedPeersMax {
-		entries = entries[:regressedPeersMax]
-	}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		rec, ok := readCoordinatorRecord(filepath.Join(filepath.Dir(coordinatorRecordPath(reg.Channel, reg.Alias)), e.Name()))
-		if ok && rec.Coordinator == self {
-			return self
-		}
+	if coordinatesAnySeat(reg.Channel, self) {
+		return self
 	}
 	return ""
 }
