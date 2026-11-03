@@ -77,6 +77,48 @@ internal/client/codex_runtime_writer_linux_test.go.
   fails a test. Eight managed Codex tests that failed on a machine with a zombie
   now pass there.
 
+## [2026-11-03 06:22:24 UTC] [Relay/Feature] cbus forward: relay mailbox to outbound webhook
+
+[Attempt #1] Files: internal/client/forward.go, internal/client/forward_test.go,
+cmd/cbus/forward.go, cmd/cbus/main.go, cmd/cbus/usage.go.
+
+[What changed]
+- New verb `cbus forward <channel>@<host>/<alias> --webhook-config FILE`.
+  It subscribes to `/tail/durable-v1` with the consumer id `forward-<alias>`,
+  POSTs each message as `{id, from, to, ts, text}` (plus `relayId`/`eventId`
+  when present) and sends the ACK only after the webhook settles it. The relay
+  owns the cursor, so there is no local state file, and a forwarder that stops
+  mid-delivery gets the same message again (at-least-once; receivers dedupe on
+  `id`, the relay spool id).
+- A reader goroutine answers relay pings while a POST or retry backoff is in
+  flight; frame writes are serialized.
+- Settling: 2xx delivers; other 4xx except 401/403/408/429 dead-letters at
+  once; everything else (5xx, transport errors, 3xx, those four 4xx) retries
+  with backoff from 2 s up to 5 min and dead-letters after `--max-attempts`
+  (default 10). Dead letters are appended with the raw message to
+  `$CBUS_DIR/forward/<channel>@<host>/<alias>.deadletter.jsonl` (mode 600)
+  before the ACK; if that write fails the message stays on the relay.
+- Redirects are never followed (Go would replay the POST as a bodiless GET and
+  report success). Text over 16 KiB is cut on a UTF-8 boundary with
+  `truncated` set to the original byte length; messages over 256 KiB are
+  dead-lettered.
+- `--per-min`/`--per-hour` (default 6/30) hold delivery when exceeded, so two
+  automated peers answering each other cannot trigger unbounded webhook runs.
+- The webhook config holds `url=` and `key=`; it must be mode 600 (not
+  checked on Windows), the url must be https (plain http only to loopback),
+  and the key is sent as a bearer token and never logged.
+- Relay credentials and front door resolve exactly as for `send` and
+  `connect` (`cbus auth set <host> --token -`, loopback probe, then
+  `CBUS_SITE_<HOST>_URL`).
+
+[Testing]
+- Unit: config validation, redirect never followed (no GET reaches the
+  webhook, dead letter written, logs carry neither key nor URL), rate cap
+  holds per minute and per hour, byte-based truncation.
+- Real relay (built and run on loopback): mixed 200/400/500-then-200 traffic
+  delivered in order with one dead letter and nothing re-sent on a second
+  pass; an abandoned delivery is redelivered with the same id.
+
 ## [2026-11-03 01:15:02 UTC] [Delegation/Permits] Doctrine: seats check a permit and ask their coordinator
 
 [Attempt #1] Files: roles/coder.md, documenter.md, orchestrator.md, reviewer.md
