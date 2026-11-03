@@ -61,11 +61,32 @@ func peerClause(coord, source, absent string, effort bool) string {
 	return strings.ReplaceAll(s, "$coord", coord)
 }
 
-// formationDelegation names a formation peer's coordinator. A formation that declares
+// seatDelegation is who a launch names as a seat's coordinator: one value, so the
+// prompt and the coordinator record cannot disagree. A zero value names nobody.
+type seatDelegation struct {
+	Coord       string
+	Launcher    string // set when someone other than Coord launched the seat
+	Coordinates bool   // the seat is itself a coordinator
+}
+
+func (s seatDelegation) clause(effort bool) string {
+	switch {
+	case s.Coordinates:
+		return coordinatorClause(effort)
+	case s.Launcher != "":
+		return seatDelegationClause(s.Coord, s.Launcher, effort)
+	}
+	return delegationClause(s.Coord, effort)
+}
+
+// formationSeat names a formation peer's coordinator. A formation that declares
 // exactly one orchestrator seat has that seat coordinate, even when someone else (the
 // operator's own session, typically) ran apply; with none or several, the applier does.
 // The seat comes from the formation record, never from presence.
-func formationDelegation(f *Formation, self string, effort bool) string {
+func formationSeat(f *Formation, p *FormationPeer, self string) seatDelegation {
+	if isOrchestratorRolefile(p) {
+		return seatDelegation{Coordinates: true}
+	}
 	var seats []string
 	for i := range f.Peers {
 		if isOrchestratorRolefile(&f.Peers[i]) {
@@ -73,9 +94,25 @@ func formationDelegation(f *Formation, self string, effort bool) string {
 		}
 	}
 	if len(seats) == 1 && seats[0] != self {
-		return seatDelegationClause(seats[0], self, effort)
+		return seatDelegation{Coord: seats[0], Launcher: self}
 	}
-	return delegationClause(self, effort)
+	return seatDelegation{Coord: self}
+}
+
+// spawnSeat: an orchestrator coordinates the peers it launches, never its spawner.
+func spawnSeat(role, spawner string) seatDelegation {
+	if role == "orchestrator" {
+		return seatDelegation{Coordinates: true}
+	}
+	return seatDelegation{Coord: spawner}
+}
+
+func forkSeat(channel, parentAlias string) seatDelegation {
+	return seatDelegation{Coord: channel + "/" + parentAlias}
+}
+
+func anchorSeat() seatDelegation {
+	return seatDelegation{Coordinates: true}
 }
 
 func isOrchestratorRolefile(p *FormationPeer) bool {

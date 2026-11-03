@@ -327,6 +327,17 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 			return "", err
 		}
 	}
+	sid := "" // a template or fork has no session id until its first connect
+	if pp.Action == ActionResume {
+		sid = p.SessionID
+	}
+	undoRecord, err := recordCoordinator(f.Channel, p.Alias, formationSeat(f, p, self).Coord, coordinatorDoorApply, sid)
+	if err != nil {
+		if reserved {
+			Unreserve(f.Channel, p.Alias)
+		}
+		return "", err
+	}
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
 		Target:      launchTarget(p.Target),
@@ -341,6 +352,7 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	}
 	created, err := forker.Fork(spec)
 	if err != nil {
+		undoRecord()
 		if reserved {
 			Unreserve(f.Channel, p.Alias)
 		}

@@ -266,6 +266,11 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 	if childAlias, err = ReserveAlias(ch, name, OriginFork, model, ""); err != nil {
 		return "", "", "", err
 	}
+	undoRecord, err := recordCoordinator(ch, childAlias, forkSeat(ch, alias).Coord, coordinatorDoorBranch, "")
+	if err != nil {
+		Unreserve(ch, childAlias)
+		return "", "", "", err
+	}
 	spec := ForkSpec{
 		Target:   target,
 		Argv:     forkLaunchArgv(SessionID(), model, childAlias, BootstrapPromptAliased(ch, alias, childAlias)),
@@ -275,6 +280,7 @@ func Branch(target, channel, model, name string, forker TerminalForker) (ch, ali
 		Title:    childAlias,
 	}
 	if _, err := forker.Fork(spec); err != nil {
+		undoRecord()
 		Unreserve(ch, childAlias)
 		return "", "", "", err
 	}
