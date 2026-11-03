@@ -195,3 +195,14 @@ test('/asks clear closes every open question', async ($, on) => {
   expect(await band.find({ type: 'Text', text: 'One?' })).toBeFalsy()
   await band.unmount()
 })
+
+test('a carried question shows the seat that asked', async ($, on) => {
+  await boot($, on)
+  await $.tool.call({ tool: 'mcp__cbus-asks__ask', question: 'Target develop or release?', from: 'acc/coder' })
+  const band = await $.ui.mount(BAND)
+  expect((await band.find({ type: 'Text', text: 'q1 (coder)' }))?.text).toBe('q1 (coder)')
+  await band.unmount()
+  const a = addAsk(EMPTY, { question: 'x?', from: 'acc/coder' }, AT)
+  if ('error' in a) throw new Error(a.error)
+  expect(openNote(a.state.open) ?? '').toContain('q1 (from acc/coder): x?')
+})

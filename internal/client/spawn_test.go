@@ -84,7 +84,7 @@ func TestSpawnRemoteAddress(t *testing.T) {
 
 func TestSpawnPromptLocalContent(t *testing.T) {
 	p := SpawnPrompt("dev")
-	for _, want := range []string{"cbus connect dev", "do not start a Monitor", "cbus list dev"} {
+	for _, want := range []string{"cbus connect dev", "do not start a Monitor", "cbus list dev", "do not restate or summarize one for them", "do not restate it to them"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("local prompt missing %q:\n%s", want, p)
 		}

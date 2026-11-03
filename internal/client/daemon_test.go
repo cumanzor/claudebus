@@ -229,8 +229,8 @@ func TestDaemonIdleDoesNotQueryHarnessButRealPresenceIsDelivered(t *testing.T) {
 	if err := d.deliver(c); err != nil {
 		t.Fatal(err)
 	}
-	if q.opens != opens+1 || q.inspects != inspects+1 || len(q.calls) != 1 || c.Offset != end || c.Accepted != 1 || !strings.Contains(q.calls[0].text, "Briefly tell the user") || !strings.Contains(q.calls[0].text, "Do not send a bus reply") {
-		t.Fatalf("presence lacks visible notice or bus-loop protection: queue=%+v, connection=%+v", q, c)
+	if q.opens != opens+1 || q.inspects != inspects+1 || len(q.calls) != 1 || c.Offset != end || c.Accepted != 1 || !strings.Contains(q.calls[0].text, "do not restate it to them") || !strings.Contains(q.calls[0].text, "Do not send a bus reply") {
+		t.Fatalf("presence lacks the membership notice or bus-loop protection: queue=%+v, connection=%+v", q, c)
 	}
 }
 

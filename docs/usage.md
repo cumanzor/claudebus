@@ -235,8 +235,9 @@ alias.
 ## Presence & session-end announcements
 
 Native presence follows the observed CLI session, separately from the daemon or
-relay connection. Tell the user the full address that joined, left, departed or
-was renamed; preserve known roles, and treat the timestamp as an observation,
+relay connection. The notice tells the model to update its roster silently,
+since the user sees the event in their own transcript, and to mention it only when
+it changes the plan; preserve known roles, and treat the timestamp as an observation,
 not a promise of current availability. Do not acknowledge presence on the bus.
 Compaction updates context without implying a membership change. Native managed
 aliases cannot currently be renamed in place.
