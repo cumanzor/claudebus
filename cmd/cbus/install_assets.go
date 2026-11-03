@@ -413,5 +413,8 @@ func runInstallAssets(args []string) int {
 			rc = 1
 		}
 	}
+	if hint := claudeHooksHint(); hint != "" {
+		fmt.Fprintln(os.Stderr, hint)
+	}
 	return rc
 }

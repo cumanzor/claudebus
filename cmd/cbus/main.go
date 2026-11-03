@@ -143,6 +143,8 @@ func run(args []string) int {
 		return runInstallMods(args[1:])
 	case "install-opencode":
 		return runInstallOpencode(args[1:])
+	case "install-hooks":
+		return runInstallHooks(args[1:])
 	case "install-assets":
 		return runInstallAssets(args[1:])
 	case "codex-permissions":
@@ -154,6 +156,9 @@ func run(args []string) int {
 		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
 		// pure swap (bin/cbus:913).
 		fmt.Fprintf(os.Stderr, "cbus: unknown command '%s' (cbus --help)\n", verb)
+		if hint := unknownVerbHint(verb); hint != "" {
+			fmt.Fprintln(os.Stderr, hint)
+		}
 		return 1
 	}
 }

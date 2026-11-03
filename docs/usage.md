@@ -243,8 +243,12 @@ Compaction updates context without implying a membership change. Native managed
 aliases cannot currently be renamed in place.
 
 A seat's coordinator hears about auto mode denials through the `PermissionDenied`
-hook, and about a classifier model fallback through the `Stop` hook. You add both to
-Claude Code's settings by hand:
+hook, and about a classifier model fallback through the `Stop` hook. Add both with
+`cbus install-hooks` (`--dry-run` shows the change, `--path FILE` targets one settings
+file). It merges into your existing hooks, keeps your key order, writes a backup, follows
+a symlinked settings file, and refuses a file it cannot parse. It does rewrite the file
+with two-space indentation. `selfupdate` never changes settings: it prints a note when
+these hooks are missing. The entries it adds:
 
 ```json
 {"hooks": {

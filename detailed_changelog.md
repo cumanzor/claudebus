@@ -4,6 +4,38 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 23:00:56 UTC] [Install/Hooks] cbus install-hooks
+
+[Attempt #1] Files: cmd/cbus/install_hooks.go, cmd/cbus/install_hooks_test.go,
+cmd/cbus/install_assets.go, cmd/cbus/install_all_test.go, cmd/cbus/main.go,
+cmd/cbus/usage.go, docs/usage.md.
+
+[What changed]
+- A machine without the two hook entries is silent, so no notice looks the same
+  as no denial. New `cbus install-hooks` adds them to
+  `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`, or to
+  `--path FILE`. `--dry-run` prints the additions and writes nothing.
+- The merge keeps key order, number spelling and characters such as `&&`, and
+  appends to an existing event list. The file is rewritten with two-space
+  indentation. A settings file with comments or an unexpected `hooks` shape is
+  refused unchanged.
+- An entry counts as present when the command calls a program named `cbus`, from
+  any path, with the verb, or when it holds the exact command this binary would
+  write. A second run changes nothing and writes no backup.
+- A symlinked settings file is written through, so profiles sharing one file
+  stay shared. The original is copied to `<file>.bak-<time>` and the new file
+  replaces it atomically with the same mode.
+- The command uses `$HOME/...` when the binary is under the home directory, so a
+  shared settings file stays valid across machines.
+- Updates stay read-only for settings: install-assets prints one note when a
+  settings file exists without the hooks. A test keeps `install-hooks` out of
+  install-assets.
+- `cbus install` now names the real install verbs after the unknown-command line.
+
+[Testing]
+- Unit tests for the merge, refusals, symlink, mode, backup, dry run, second run
+  and the note. Eight mutations each fail a test.
+
 ## [2026-11-03 20:11:50 UTC] [Tests/Canary] Git helpers are not CLI frontends
 
 [Attempt #1] Files: scripts/codex_cli_resume_canary.py,
