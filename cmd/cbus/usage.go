@@ -74,6 +74,9 @@ const usage = `cbus — message bus between coding sessions, in named channels
                                    (repeatable; a flag overwrites its own key,
                                    git_head stays machine-owned; convention:
                                    tracker=<id> links the effort's tracker item)
+       --mode alias=mode           set that peer's saved mode (resume|fork|template,
+                                   repeatable); new peers default to resume when
+                                   their origin is fresh/joined, else template
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); connect to the
                                    channel first — peers are briefed to answer you.

@@ -262,6 +262,13 @@ meta already sits at the alias:
 - any other sid, or unreadable → `origin=joined`, model unknown (a takeover never
   inherits the stranger's `fork` or role).
 
+A `joined` result is then checked against this session's own history: if any meta in
+another channel, or any self-recorded `join`/`resume` ledger line, records this same
+session id as `origin=fork`, the join records `fork` instead. A fork-born session that
+joins a second channel under an alias it did not reserve stays fork-born there, so
+`formation save` never defaults it to `resume`. A daemon `connect` that claims no
+reservation runs the same check against its thread id.
+
 A **reservation is never laid down for a resume** — `formation apply`'s `resume` mode
 skips `ReserveAlias`, because a placeholder would win over the resumed session's own sid
 in `birthForJoin` and clobber its preserved origin. The `template` and `fork` restore

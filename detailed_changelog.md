@@ -4,6 +4,48 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
+
+[Attempt #1] Files: internal/client/formation_save.go (newPeerMode,
+SaveOptions, setHandModes), cmd/cbus/formation.go (save
+--mode, per-mode report lines), cmd/cbus/usage.go; docs and the
+save-formation command.
+
+[What changed]
+- New peers saved with `mode=template`, a rule from before apply could tell
+  a safe resume from an unsafe one. Apply now refuses a fork-born resume, an
+  unattributed one, a session claimed twice, and a session still held live,
+  and `onStale=template` degrades a lost transcript, so the template default
+  only threw context away. Save now picks `resume` for a
+  peer with a real session id and origin fresh or joined, and `template`
+  otherwise.
+- `formation save --mode alias=mode` (repeatable) sets a peer's saved mode.
+  An unknown alias, a mode outside the enum, or resume/fork for a peer whose
+  origin is fork or unknown refuses the save, since apply would refuse it.
+- Apply sees more running sessions before it resumes one. It reads Claude
+  Code's session registry (`<config>/sessions/<pid>.json` under ~/.claude,
+  $CLAUDE_CONFIG_DIR and each CCS instance) and treats a session whose pid is
+  alive as held. That catches a session started fresh that left the bus or
+  lost its listener, which neither the bus nor the argv scan could see. A
+  stale file whose pid was recycled reads as held, which refuses rather than
+  double-launching.
+- Apply claims the same launch-intent marker `formation resume` uses before
+  it resumes a peer, so a second apply before the child joins is refused.
+- A join or daemon connect under an alias the session did not reserve was
+  always recorded `origin=joined`, so a branch child joining a second
+  channel looked resumable there. Join now checks the session's own history
+  (metas in other channels, then self-recorded join/resume ledger lines)
+  and records `fork` when that session is fork-born.
+- A blank `mode` in a hand-written file still plans as template.
+
+[Possible Ripple Effects]
+- Existing envelopes keep their recorded modes; only peers new to the file
+  get the new default.
+- A resume of a seat whose original is still running is refused at apply;
+  the operator either stops it or sets `mode=fork`.
+- A failed resume launch keeps its marker until the TTL (180s), the same as
+  `formation resume`.
+
 ## [2026-10-31 19:01:56 UTC] [Formation/Roles] role in the birth record; save fills rolefile
 
 [Attempt #1] Files: internal/client/store.go (peerMeta.Role, ReserveAlias

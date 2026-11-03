@@ -2153,7 +2153,7 @@ variants:
 A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
 committed role files states the matching rule from the peer's side.
 
-### `cbus formation save <name> [channel]`
+### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...]`
 
 Snapshots the channel's current peers into the runtime store. Channel defaults to
 this session's own registration (`not joined to a channel in this session — pass
@@ -2204,9 +2204,18 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   refusing would strand the files the invariant exists to converge), and any
   joined re-save heals via the anchor default. `show` renders the absence as a
   named `DEFECT` row.
-- New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
-  `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
-  this with the peer's brief`).
+- New peers get `mode=resume` when they hold a real session id and their
+  origin is `fresh` or `joined` (the transcript is their own), else
+  `mode=template` (fork-born, origin unknown, or no session yet; `apply` would
+  refuse a resume of those). Also `onStale=template`, so a lost transcript
+  degrades to a fresh start, `target=tab`, and, unless a birth-record role
+  filled `rolefile`, a `role` TODO marker (`TODO: set rolefile to
+  roles/<alias>.md@<commit>, or replace this with the peer's brief`). A refresh
+  never changes a recorded mode; the CLI lists which new peers got which mode.
+- `--mode alias=resume|fork|template` (repeatable) sets that peer's mode in
+  the file, overwriting what it held. An alias the formation does not hold, a
+  mode outside the enum, or `resume`/`fork` for a peer whose origin is `fork`
+  or unknown (apply would refuse it) refuses the save with nothing written.
 - Peers in the file but no longer on the channel are **kept**, not dropped.
 - Refusals: `refusing to overwrite an envelope that will not load: <err>` and
   `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
@@ -2303,15 +2312,24 @@ surfaced as the per-peer detail — the load-bearing ones:
   → refused (D14): `session <sid> is held at <where> (live or availability
   unresolved) — resume risks a second process on one transcript; confirm the
   original has stopped, or set mode=fork if a copy of it is what you want`
-  (`formation_plan.go:309-315`, quoted verbatim). "Held" covers two sources:
-  a live listener or managed consumer on the bus, and, on macOS and Linux, a
+  (`formation_plan.go`, quoted verbatim). "Held" covers three sources:
+  a live listener or managed consumer on the bus; on macOS and Linux, a
   running process whose argv resumes the sid (`--resume <sid>`, `-r <sid>`,
   `--resume=<sid>`, read from `ps`), reported as `held at pid <n> (a process
-  resuming it, not on the bus)`. The second catches a session reopened by hand
-  or by another launcher that never re-joined. A fresh session that never
-  joined carries no sid in its argv and stays invisible; Windows has no argv
-  read and reports only bus holders. `formation resume` gates its anchor on
-  the same set.
+  resuming it, not on the bus)`; and Claude Code's own session registry,
+  `<config>/sessions/<pid>.json` under `~/.claude`, `$CLAUDE_CONFIG_DIR` and
+  each CCS instance, where a file whose pid is alive and names the sid is
+  reported as `held at pid <n> (Claude Code's session registry lists it
+  running)`. The registry catches a session started fresh that left the bus
+  or lost its listener, which carries no sid in its argv. A stale file whose
+  pid was recycled reads as held: the refusal fails closed. `formation resume`
+  gates its anchor on the same set.
+- a resume whose launch-intent marker another launch holds → `failed`: before
+  it forks a `resume`, apply claims the same marker `formation resume` uses
+  (`a launch of "<alias>" was started <age> ago (pid <n>) and has not joined
+  yet ...`). It closes the gap between a fork and the child's join, when no
+  bus record shows the session yet, so two applies cannot resume one
+  session. The marker clears on that session's join or after 180s.
 - one transcript recorded under two aliases → refused: `session <sid> is
   recorded under more than one alias in this formation — one of them is wrong;
   fix the file` (`formation_plan.go:278-282`).
@@ -2911,7 +2929,7 @@ file, never launches, kills, renames or edits a peer.
    freeform `role` text; stale sids mean `onStale=template` applies and that
    seat comes back fresh; `kept, not on the channel now` seats are usually
    fine but worth stating; a `mode=template` peer that still has a live sid
-   is worth flagging as probably better off `resume`d; the anchor peer is
+   is offered a `--mode <alias>=resume` re-save; the anchor peer is
    named, or flagged if `show` reports none.
 4. **Report** in a few lines: name, channel, peer count, new vs kept, then
    only the items needing a decision, each tied to its peer; a clean

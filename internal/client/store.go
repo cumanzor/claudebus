@@ -231,6 +231,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 			resuming = true
 		}
 	}
+	origin = joinOrigin(origin, SessionID())
 	// Run boundary, captured BEFORE this join mutates the channel. Afterwards our own
 	// meta makes the channel look populated, so a first join into a dead channel would
 	// be indistinguishable from one landing in a live run — and would silently inherit

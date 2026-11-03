@@ -29,7 +29,10 @@ cbus formation rm myeffort                # delete a saved formation
   session id, cwd, machine — plus whatever the launcher recorded when the peer
   was born (see *Birth records*, below). Everything else (a hand-picked role,
   notes, narrative) is yours to fill in, and a later save never overwrites a
-  hand-edited field.
+  hand-edited field. A new peer whose transcript is its own (spawned fresh or
+  joined) is saved with `mode=resume`; a fork-born or unattributed one gets
+  `mode=template`. `--mode alias=resume|fork|template` changes one peer's
+  saved mode.
 - **`apply`** relaunches exactly the peers missing from the channel,
   sequentially and anchor-first (the orchestrator comes up before anyone who
   expects to reach it). Convergence is a round-trip, not a timer: each kickoff

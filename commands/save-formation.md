@@ -64,9 +64,12 @@ formation name, second bare word is the channel, and flags pass through to
    of at restore time.
 
    **Per-peer `mode`**: `resume` brings the session back as itself, `template`
-   starts it fresh from its role. A peer whose transcript is present is usually
-   more useful resumed, so call out any `mode=template` peer that still has a
-   live sid.
+   starts it fresh from its role. Save picks `resume` for a new peer whose
+   origin is fresh or joined, and `template` for a fork-born or unattributed
+   one. It never changes the mode of a peer already in the file, so an older
+   save can hold `mode=template` peers whose transcript is present. Name each
+   one and give the fix: `cbus formation save <name> --mode <alias>=resume`.
+   Do not suggest it for a fork-born peer, since apply refuses to resume those.
 
    **The anchor peer**: `apply` launches it first and `cbus formation resume`
    needs it. Say which peer it is, and flag it if show reports no anchor.

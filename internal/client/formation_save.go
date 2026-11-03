@@ -12,10 +12,7 @@ import (
 	"claudebus/internal/core"
 )
 
-// Save-side defaults. meta.json records a peer's alias, sessionId, cwd and host —
-// and nothing else — so these four are POLICY, not captured facts (see SaveFormation).
-// template/template is the safe pair: a template peer never touches a transcript, so
-// a freshly saved formation cannot resume or fork anything until a human says so.
+// defaults for fields the store does not record; newPeerMode overrides the mode when it can
 const (
 	defaultMode    = ModeTemplate
 	defaultOnStale = OnStaleTemplate
@@ -151,6 +148,12 @@ func loadRepoTemplate(name string) (*Formation, error) {
 	return loadFormationFileAt(filepath.Join(dir, name+".json"), name)
 }
 
+// SaveOptions are the caller's hand fields; a flag overwrites what the file holds
+type SaveOptions struct {
+	Anchors map[string]string
+	Modes   map[string]string // alias -> resume|fork|template
+}
+
 // SaveFormation captures ch's topology into the named envelope, refreshing an
 // existing file in place.
 //
@@ -167,7 +170,11 @@ func loadRepoTemplate(name string) (*Formation, error) {
 //
 // anchors are the caller's --anchor pairs, written into drift_anchors (nil is
 // fine). git_head is refused up front — it is the one machine-owned key.
-func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *SaveReport, error) {
+func SaveFormation(name, ch string, opts SaveOptions) (*Formation, *SaveReport, error) {
+	anchors := opts.Anchors
+	if err := checkModes(opts.Modes); err != nil {
+		return nil, nil, err
+	}
 	if err := checkHandAnchors(anchors); err != nil {
 		return nil, nil, err
 	}
@@ -235,13 +242,13 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		}
 		p := FormationPeer{
 			Alias:     r.Alias,
-			Mode:      defaultMode,
 			OnStale:   defaultOnStale,
 			Target:    defaultTarget,
 			Role:      strPtr(roleTODOMarker),
 			Addresses: []string{},
 		}
 		capturePeer(&p, r, rep)
+		p.Mode = newPeerMode(&p)
 		f.Peers = append(f.Peers, p)
 		rep.Added = append(rep.Added, r.Alias)
 	}
@@ -251,6 +258,9 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		}
 	}
 	retargetSelf(ch, f.Peers, observedSurface(), rep)
+	if err := setHandModes(f.Peers, opts.Modes); err != nil {
+		return nil, nil, err
+	}
 
 	f.SavedAt = Now()
 	if f.SavedBy, err = savedBy(ch); err != nil {
@@ -319,6 +329,56 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		return nil, nil, err
 	}
 	return f, rep, nil
+}
+
+// newPeerMode resumes a peer with a real session and an origin apply will resume
+func newPeerMode(p *FormationPeer) string {
+	if p.SessionID == "" || p.SessionID == "reserved" {
+		return defaultMode
+	}
+	switch p.Origin {
+	case OriginFresh, OriginJoined:
+		return ModeResume
+	}
+	return defaultMode
+}
+
+func checkModes(modes map[string]string) error {
+	for alias, m := range modes {
+		if m == "" {
+			return fmt.Errorf("--mode %s= needs resume|fork|template", alias)
+		}
+		if err := oneOf("--mode "+alias, m, ModeResume, ModeFork, ModeTemplate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setHandModes applies --mode alias=mode, refusing what apply would refuse later
+func setHandModes(peers []FormationPeer, modes map[string]string) error {
+	var unknown []string
+	for alias, m := range modes {
+		found := false
+		for i := range peers {
+			if peers[i].Alias != alias {
+				continue
+			}
+			if o := peers[i].Origin; m != ModeTemplate && o != OriginFresh && o != OriginJoined {
+				return fmt.Errorf("--mode %s=%s: origin is %s, and apply only resumes or forks a peer born fresh or joined; use template",
+					alias, m, orUnset(o))
+			}
+			peers[i].Mode, found = m, true
+		}
+		if !found {
+			unknown = append(unknown, alias)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("--mode names no peer in this formation: %s", strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 // checkHandAnchors refuses the machine-owned key before any store work: git_head

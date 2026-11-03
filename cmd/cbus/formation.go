@@ -43,7 +43,7 @@ func runFormation(args []string) int {
 }
 
 func runFormationSave(args []string) int {
-	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...]"
+	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=resume|fork|template ...]"
 	if len(args) == 0 {
 		return die(use)
 	}
@@ -56,7 +56,7 @@ func runFormationSave(args []string) int {
 		ch = rest[0]
 		rest = rest[1:]
 	}
-	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true}, nil, true)
+	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true, "--mode": true}, nil, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
@@ -71,12 +71,20 @@ func runFormationSave(args []string) int {
 		}
 		anchors[k] = v
 	}
+	modes := map[string]string{}
+	for _, kv := range p.all("--mode") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return die("--mode: want alias=resume|fork|template, got %q", kv)
+		}
+		modes[k] = v
+	}
 	if ch == "" {
 		if ch, err = ownChannel(); err != nil {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormation(name, ch, anchors)
+	f, rep, err := client.SaveFormation(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -101,8 +109,33 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
 	}
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;")
-		fmt.Println("  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded")
+		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them;")
+		fmt.Println("  a TODO role is yours to fill in — as are profile/origin/model on peers older binaries recorded")
+		added := map[string]bool{}
+		for _, a := range rep.Added {
+			added[a] = true
+		}
+		var resume, fork, template []string
+		for _, p := range f.Peers {
+			switch {
+			case !added[p.Alias]:
+			case p.Mode == client.ModeResume:
+				resume = append(resume, p.Alias)
+			case p.Mode == client.ModeFork:
+				fork = append(fork, p.Alias)
+			default:
+				template = append(template, p.Alias)
+			}
+		}
+		if len(resume) > 0 {
+			fmt.Printf("  mode=resume (own transcript): %s\n", strings.Join(resume, ", "))
+		}
+		if len(fork) > 0 {
+			fmt.Printf("  mode=fork (set by --mode): %s\n", strings.Join(fork, ", "))
+		}
+		if len(template) > 0 {
+			fmt.Printf("  mode=template (fork-born, origin unknown, no session, or set by --mode): %s\n", strings.Join(template, ", "))
+		}
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the
 	// terminal, not only in the report struct (C4) — a silent skip reads as a clean save.
