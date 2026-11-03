@@ -23,6 +23,8 @@ const (
 	regressedFieldMax = 64
 )
 
+var regressedDeliver = deliverNoticeWithin
+
 // regressionEntry is the undocumented transcript line a classifier fallback leaves. Its
 // content and explanation are never decoded.
 type regressionEntry struct {
@@ -33,6 +35,9 @@ type regressionEntry struct {
 	OriginalModel string `json:"originalModel"`
 	FallbackModel string `json:"fallbackModel"`
 	Category      string `json:"apiRefusalCategory"`
+	Timestamp     string `json:"timestamp"`
+	// --fork-session copies the parent's rows under the fork's own sessionId
+	ForkedFrom json.RawMessage `json:"forkedFrom"`
 }
 
 type regressionMark struct {
@@ -122,7 +127,7 @@ func reportRegressions(reg LocalReg, to, sid, transcript string) error {
 	}
 	var sendErr error
 	for _, f := range found {
-		sendErr = deliverNoticeWithin(ch, alias, core.Message{From: reg.Channel + "/" + reg.Alias, To: to, TS: Now(),
+		sendErr = regressedDeliver(ch, alias, core.Message{From: reg.Channel + "/" + reg.Alias, To: to, TS: Now(),
 			Kind: regressedKind, Text: regressedText(reg.Alias, f.entry)}, regressedLock)
 		if sendErr != nil {
 			next = f.start // the next Stop tries this one again
@@ -133,6 +138,17 @@ func reportRegressions(reg LocalReg, to, sid, transcript string) error {
 		return sendErr
 	}
 	return errors.Join(sendErr, writeRegressionMark(reg.Channel, reg.Alias, markPath, regressionMark{SessionID: sid, Offset: next}))
+}
+
+// moveRegressionMark follows a legacy rename, so the new name does not rescan and report
+// again. The caller holds both peer locks.
+func moveRegressionMark(ch, oldAlias, newAlias string) error {
+	oldPath, newPath := regressionMarkPath(ch, oldAlias), regressionMarkPath(ch, newAlias)
+	if err := os.Rename(oldPath, newPath); errors.Is(err, os.ErrNotExist) {
+		return removeCoordinatorFile(newPath)
+	} else {
+		return err
+	}
 }
 
 func readRegressionMark(path, sid string) int64 {
@@ -196,7 +212,7 @@ func scanRegressions(path, sid string, offset int64) (found []regressionFound, n
 			continue
 		}
 		var e regressionEntry
-		if json.Unmarshal(line, &e) != nil || e.Type != "system" || e.Subtype != regressedSubtype || e.IsSidechain || e.SessionID != sid {
+		if json.Unmarshal(line, &e) != nil || e.Type != "system" || e.Subtype != regressedSubtype || e.IsSidechain || e.SessionID != sid || regressionInherited(e) {
 			continue
 		}
 		found = append(found, regressionFound{entry: e, start: start, end: pos})
@@ -204,9 +220,20 @@ func scanRegressions(path, sid string, offset int64) (found []regressionFound, n
 	return found, pos, nil
 }
 
+func regressionInherited(e regressionEntry) bool {
+	return len(e.ForkedFrom) > 0 && string(e.ForkedFrom) != "null"
+}
+
+// regressedText dates the entry and leaves the present open: the mark starts at 0, so a
+// seat resumed into a formation reports a fallback someone may already have cleared.
 func regressedText(alias string, e regressionEntry) string {
-	return fmt.Sprintf("%s regressed: %s -> %s, [%s], session stays on the fallback until /model",
-		alias, regressedField(e.OriginalModel), regressedField(e.FallbackModel), regressedField(e.Category))
+	at := "an unknown time"
+	if t, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+		at = t.UTC().Format(time.RFC3339)
+	}
+	to := regressedField(e.FallbackModel)
+	return fmt.Sprintf("%s fell back from %s to %s at %s, [%s]; /model in that pane if it is still on %s",
+		alias, regressedField(e.OriginalModel), to, at, regressedField(e.Category), to)
 }
 
 func regressedField(s string) string {

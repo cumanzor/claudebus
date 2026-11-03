@@ -622,6 +622,7 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 	}
 	_ = renameMeta(newDir, newAlias) // best-effort, like bash `|| true`
 	_ = moveCoordinatorRecord(ch, old, newAlias)
+	_ = moveRegressionMark(ch, old, newAlias)
 	// prevAlias is the whole point: without it a consumer sees one session vanish and
 	// an unrelated one appear, and alias+time-window correlation guesses the link
 	RecordEvent(LedgerRename, ch, newAlias, metaSessionID(filepath.Join(newDir, "meta.json")), func(ev *LedgerEvent) {

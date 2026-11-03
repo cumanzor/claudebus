@@ -2,6 +2,8 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +98,7 @@ func TestRegressedNoticeReachesTheCoordinatorOnce(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	want := core.Message{From: "ch/coder", To: "ch/lead", TS: got[0].TS, Kind: "regressed",
-		Text: "coder regressed: claude-fable-5-1 -> claude-opus-4-8, [cyber], session stays on the fallback until /model"}
+		Text: "coder fell back from claude-fable-5-1 to claude-opus-4-8 at 2026-11-02T00:00:00Z, [cyber]; /model in that pane if it is still on claude-opus-4-8"}
 	if got[0] != want {
 		t.Fatalf("got %+v", got[0])
 	}
@@ -119,14 +121,19 @@ func TestRegressedCarriesOnlyTheThreeFields(t *testing.T) {
 		t.Fatalf("%s", raw)
 	}
 	got := regressedNotices(t, "ch", "lead")
-	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "coder regressed: abscript -> "+strings.Repeat("x", regressedFieldMax)+", [unknown],") {
+	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "coder fell back from abscript to "+strings.Repeat("x", regressedFieldMax)+" at 2026-11-02T00:00:00Z, [unknown];") {
 		t.Fatalf("%+v", got)
 	}
 }
 
 func TestRegressedIgnoresWhatIsNotThisSessionsFallback(t *testing.T) {
 	for name, line := range map[string]func(t *testing.T) string{
-		"a fork's inherited entry": func(t *testing.T) string {
+		"a fork's inherited entry, under the fork's own id": func(t *testing.T) string {
+			return regressedLine(t, deniedSeatSID, func(m map[string]any) {
+				m["forkedFrom"] = map[string]any{"sessionId": "sid-parent", "messageUuid": "u0"}
+			})
+		},
+		"another session's entry": func(t *testing.T) string {
 			return regressedLine(t, "sid-parent", nil)
 		},
 		"a sidechain": func(t *testing.T) string {
@@ -223,14 +230,74 @@ func TestRegressedUndeliveredRetriesOnTheNextStop(t *testing.T) {
 	}
 }
 
-// TestRegressedPartialDeliveryKeepsItsPlace: the first of two landed, so only the second
-// may repeat.
+// TestRegressedPartialDeliveryKeepsItsPlace: the first of two landed and the second did
+// not, so only the second goes again.
 func TestRegressedPartialDeliveryKeepsItsPlace(t *testing.T) {
 	deniedFixture(t)
 	line := regressedLine(t, deniedSeatSID, nil)
-	found, next, err := scanRegressions(seatTranscript(t, deniedSeatSID, line+line), deniedSeatSID, 0)
-	if err != nil || len(found) != 2 || next != int64(2*len(line)) || found[1].start != int64(len(line)) {
-		t.Fatalf("found=%+v next=%d err=%v", found, next, err)
+	path := seatTranscript(t, deniedSeatSID, line+line)
+	sends := 0
+	regressedDeliver = func(ch, alias string, msg core.Message, wait time.Duration) error {
+		if sends++; sends == 2 {
+			return errors.New("second send fails")
+		}
+		return deliverNoticeWithin(ch, alias, msg, wait)
+	}
+	t.Cleanup(func() { regressedDeliver = deliverNoticeWithin })
+	if err := HookRegressed(strings.NewReader(stopPayload(t, deniedSeatSID, path))); err == nil {
+		t.Fatal("want the delivery error")
+	}
+	if got := readRegressionMark(regressionMarkPath("ch", "coder"), deniedSeatSID); got != int64(len(line)) {
+		t.Fatalf("offset = %d, want the start of the second entry %d", got, len(line))
+	}
+	fireStop(t, deniedSeatSID, path)
+	if got := regressedNotices(t, "ch", "lead"); len(got) != 2 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRegressedUndatedEntrySaysSo(t *testing.T) {
+	deniedFixture(t)
+	fireStop(t, deniedSeatSID, seatTranscript(t, deniedSeatSID, regressedLine(t, deniedSeatSID, func(m map[string]any) { m["timestamp"] = "yesterday; rm" })))
+	got := regressedNotices(t, "ch", "lead")
+	if len(got) != 1 || !strings.Contains(got[0].Text, " at an unknown time, ") || strings.Contains(got[0].Text, "yesterday") {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRegressedRenameDoesNotReportAgain(t *testing.T) {
+	deniedFixture(t)
+	path := seatTranscript(t, deniedSeatSID, regressedLine(t, deniedSeatSID, nil))
+	fireStop(t, deniedSeatSID, path)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", deniedSeatSID)
+	if _, _, _, err := Rename("renamed", "ch"); err != nil {
+		t.Fatal(err)
+	}
+	fireStop(t, deniedSeatSID, path)
+	if got := regressedNotices(t, "ch", "lead"); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := os.Stat(regressionMarkPath("ch", "coder")); !os.IsNotExist(err) {
+		t.Fatalf("the old name kept a mark: %v", err)
+	}
+}
+
+// TestRegressedRecipientScanIsBounded: past the cap the answer is nobody.
+func TestRegressedRecipientScanIsBounded(t *testing.T) {
+	deniedFixture(t)
+	for i := 0; i < regressedPeersMax; i++ {
+		if _, err := recordCoordinator("ch", fmt.Sprintf("a%03d", i), "ch/boss", coordinatorDoorApply, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := regressionRecipient(LocalReg{Channel: "ch", Alias: "lead"}); got != "" {
+		t.Fatalf("the naming record sorts past the cap, got %q", got)
+	}
+	if err := os.Remove(coordinatorRecordPath("ch", "a000")); err != nil {
+		t.Fatal(err)
+	}
+	if got := regressionRecipient(LocalReg{Channel: "ch", Alias: "lead"}); got != "ch/lead" {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -321,7 +388,7 @@ func TestRegressedBusyLockDoesNotHoldTheStop(t *testing.T) {
 }
 
 func TestRegressedNativePayloadAsksForOneAsk(t *testing.T) {
-	msg := core.Message{From: "ch/coder", To: "ch/lead", TS: "2026-11-02T00:00:00Z", Kind: regressedKind, Text: "coder regressed: a -> b"}
+	msg := core.Message{From: "ch/coder", To: "ch/lead", TS: "2026-11-02T00:00:00Z", Kind: regressedKind, Text: "coder fell back from a to b"}
 	line, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatal(err)

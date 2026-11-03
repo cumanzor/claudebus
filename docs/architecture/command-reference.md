@@ -1605,11 +1605,15 @@ Behavior, exactly:
 3. Reads the transcript from a per-seat offset (`.regressions/<channel>/<alias>.json`), at
    most 4 MiB per Stop, whole lines only. A slice with no newline is one oversized line
    and is skipped. A large backlog takes several Stops.
-4. Counts only an entry with `isSidechain` false and `sessionId` equal to this session,
-   so a fork does not report what it inherited from its parent's transcript.
-5. Appends a `kind=regressed` line: `coder regressed: claude-a -> claude-b, [cyber],
-   session stays on the fallback until /model`. Only those three fields are read, each
-   reduced to `[A-Za-z0-9._-]`. Never the entry's content or explanation.
+4. Counts only an entry with `isSidechain` false, `sessionId` equal to this session and
+   no `forkedFrom`. `--fork-session` copies the parent's rows under the fork's own
+   `sessionId` plus `forkedFrom`, so without that a fork would report its parent's fallback.
+5. Appends a `kind=regressed` line: `coder fell back from claude-a to claude-b at
+   2026-11-02T10:00:00Z, [cyber]; /model in that pane if it is still on claude-b`. Only
+   those fields are read, the names reduced to `[A-Za-z0-9._-]`, never the entry's content
+   or explanation. The notice is dated and says nothing about now: the first scan of a seat
+   starts at offset 0, so a session resumed into a formation reports an old fallback once,
+   even if someone has since run `/model`. A silent seat still on the fallback is the worse miss.
 6. The offset moves past an entry only once it was delivered. Lock waits are 250 ms, and
    a busy lock leaves the entry for the next Stop.
 

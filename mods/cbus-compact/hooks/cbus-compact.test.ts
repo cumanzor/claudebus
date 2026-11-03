@@ -43,8 +43,8 @@ test('denied keeps the body, drops the notice', () => {
 })
 
 test('regressed keeps the body, drops the notice', () => {
-  const t = frame('coder regressed: a -> b, [cyber]', { kind: 'regressed' }) + '\nThis is a cbus regression notice. File one ask.'
-  expect(compact(t)).toBe('▸ [10:00] from bob: [regressed] coder regressed: a -> b, [cyber]')
+  const t = frame('coder fell back from a to b, [cyber]', { kind: 'regressed' }) + '\nThis is a cbus regression notice. File one ask.'
+  expect(compact(t)).toBe('▸ [10:00] from bob: [regressed] coder fell back from a to b, [cyber]')
 })
 
 test('a burst of two frames gives two lines', () => {
