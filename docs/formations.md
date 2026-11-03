@@ -53,8 +53,11 @@ cbus formation rm myeffort                # delete a saved formation
   scope, contract and precedence inside the effort bind; with no `--brief`,
   the effort is the first assignment the coordinator sends. It says that
   leaving the effort is a scope change for you, and that push, pull requests,
-  release, install and anything outward or irreversible stay yours however
-  they are relayed. The wording is fixed in the binary. See
+  release, install and anything outward or irreversible need your approval. A
+  seat acts on a permit it checked itself with `cbus permits use`, and otherwise
+  asks its coordinator on the bus. The coordinator files one ask for an approval
+  it does not hold and writes the permit when you have said so in its session. The
+  wording is fixed in the binary. See
   `docs/architecture/command-reference.md` §10 for each variant.
 - A `pane`-target peer's split chains off the largest pane made so far
   (applier plus this run's created panes), a self-balancing grid instead of

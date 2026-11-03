@@ -137,7 +137,10 @@ Claude Code only; Codex and OpenCode seats are unaffected.
 - In a formation, only the coordinator uses the band. A seat whose launch prompt
   names a coordinator sends its questions for you to that coordinator on the bus.
   The coordinator answers what falls inside its delegation and files the rest,
-  shown with the seat that asked: `q3 (coder) Target develop or release?`.
+  shown with the seat that asked: `q3 (coder) Target develop or release?`. When you
+  approve a push, the coordinator writes it down with `cbus permit`, and the seat
+  checks that itself, so a later push on the same branches asks nothing. Say which
+  repo and which branches; merge, release and install need you to name the target.
 
 Questions live in the session's state. They survive a mod reload, not a new
 session. To try a checkout's copy in one session without installing it, start
