@@ -879,10 +879,17 @@ func (d *busDaemon) connectWithCredential(req ConnectRequest, token string) (*Co
 	now := Now()
 	m := peerMeta{Alias: c.Alias, Channel: c.Channel, SessionID: c.ThreadID, Cwd: connectionCwd(c), ListenerPid: jsonNull, OwnerPid: jsonNull, Host: host, TS: now, LastActivity: now, Origin: OriginJoined, Harness: c.Harness, ConnectionID: c.ID}
 	if reservation != nil {
-		m.Origin, m.Model = reservation.Origin, reservation.Model
+		m.Origin, m.Model, m.Role = reservation.Origin, reservation.Model, reservation.Role
+	} else {
+		m.Origin = joinOrigin(m.Origin, c.ThreadID)
 	}
 	if err = writeDaemonMeta(dir, m); err != nil {
 		return nil, err
+	}
+	if c.Relay == nil { // the record is local; a relay peer's name belongs to another store
+		if err := settleCoordinatorRecord(c.Channel, c.Alias, c.ThreadID); err != nil {
+			daemonLogf("%s: settle coordinator record: %v", ConnectionTarget(c), err)
+		}
 	}
 	if err = d.armLocked(c); err != nil {
 		return nil, err

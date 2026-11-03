@@ -278,7 +278,7 @@ func (b *codexBridge) startTurn(text string) error {
 type codexSink struct{ b *codexBridge }
 
 func (s codexSink) emit(kind string, rendered []byte) {
-	if kind != "" && kind != kindDormant && kind != "grant" {
+	if kind != "" && kind != kindDormant && kind != "grant" && kind != deniedKind && kind != regressedKind {
 		return // presence/status event: not a model turn
 	}
 	if err := s.b.inject(string(bytes.TrimRight(rendered, "\n"))); err != nil {

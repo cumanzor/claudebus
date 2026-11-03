@@ -482,6 +482,19 @@ func TestBridgeAttachToleratesWriterHeld(t *testing.T) {
 
 // TestCodexSinkDeliversAGrantNotice: a grant notice is something the peer is holding
 // for, so it is injected like a chat frame, not skipped like presence.
+func TestCodexSinkDeliversClassifierNotices(t *testing.T) {
+	for _, kind := range []string{deniedKind, regressedKind} {
+		f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
+			s.reply(req["id"], map[string]any{"turn": map[string]any{"id": "x"}})
+		})
+		sink := codexSink{bridgeOn(t, f, "T")}
+		sink.emit(kind, []byte("<= cbus msg from=z/a to=z/b ts=T kind="+kind+"\n  a notice\n<= cbus end\n"))
+		if got := f.recorded(); !reflect.DeepEqual(got, []string{"turn/start"}) {
+			t.Fatalf("%s must be injected, calls = %v", kind, got)
+		}
+	}
+}
+
 func TestCodexSinkDeliversAGrantNotice(t *testing.T) {
 	f := startFakeCodex(t, func(s *fakeSrv, req map[string]any) {
 		s.reply(req["id"], map[string]any{"turn": map[string]any{"id": "x"}})

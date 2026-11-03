@@ -307,18 +307,36 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	// reservation placeholder would win over that id in birthForJoin and clobber the
 	// resumed peer's preserved origin. TestApplyResumeNeverReserves pins this.
 	model := peerModel(p) // resolved once: explicit, else the role file's MODEL: line
+	role := peerRoleName(p)
 	reserved := false
 	switch pp.Action {
 	case ActionTemplate:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFresh, model, role); err != nil {
 			return "", err
 		}
 		reserved = true
 	case ActionFork:
-		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model); err != nil {
+		if _, err := ReserveAlias(f.Channel, p.Alias, OriginFork, model, role); err != nil {
 			return "", err
 		}
 		reserved = true
+	case ActionResume:
+		// the plan's liveness read cannot see a resume launched since, by this apply
+		// or another one, before the child joins; the marker can
+		if err := claimResumeIntent(f.Channel, p.Alias, p.SessionID); err != nil {
+			return "", err
+		}
+	}
+	sid := "" // a template or fork has no session id until its first connect
+	if pp.Action == ActionResume {
+		sid = p.SessionID
+	}
+	undoRecord, err := recordCoordinator(f.Channel, p.Alias, formationSeat(f, p, self).Coord, coordinatorDoorApply, sid)
+	if err != nil {
+		if reserved {
+			Unreserve(f.Channel, p.Alias)
+		}
+		return "", err
 	}
 	prompt := KickoffPrompt(f, pp, self, nonce, brief)
 	spec := ForkSpec{
@@ -334,12 +352,28 @@ func launchPeer(f *Formation, pp PeerPlan, self, nonce, brief string, forker Ter
 	}
 	created, err := forker.Fork(spec)
 	if err != nil {
+		undoRecord()
 		if reserved {
 			Unreserve(f.Channel, p.Alias)
 		}
 		return "", err
 	}
 	return created, nil
+}
+
+func claimResumeIntent(ch, alias, sid string) error {
+	in, age, claimed, err := ClaimLaunchIntent(ch, alias, sid)
+	if err != nil {
+		return fmt.Errorf("cannot record the launch intent for %q: %w", alias, err)
+	}
+	if claimed {
+		return nil
+	}
+	if in.TS == "" {
+		return fmt.Errorf("another launch of %q claimed it a moment ago — only one may run at a time", alias)
+	}
+	return fmt.Errorf("a launch of %q was started %s ago (pid %d) and has not joined yet — it is most likely still booting; "+
+		"this refusal expires in %s", alias, age.Round(time.Second), in.Pid, LaunchIntentExpiry(age).Round(time.Second))
 }
 
 func launchTarget(t string) string {
@@ -373,6 +407,18 @@ func peerModel(p *FormationPeer) string {
 		}
 	}
 	return ""
+}
+
+// peerRoleName is the committed role a peer is briefed from, "" unless it resolves here
+func peerRoleName(p *FormationPeer) string {
+	if p.Rolefile == "" {
+		return ""
+	}
+	name, _ := parseRolefile(p.Rolefile)
+	if _, _, err := LoadRole(name); err != nil {
+		return ""
+	}
+	return name
 }
 
 // peerLaunchArgv builds the launch per mode. The distinction IS the feature:

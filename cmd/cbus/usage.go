@@ -68,12 +68,17 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus formation save <name> [ch]  capture a channel's topology (channel
                                    defaults to this session's); refreshes an
                                    existing file, preserving hand-edited fields
-                                   (origin/model come from the birth-record when
-                                   recorded; role/profile stay hand-maintained)
+                                   (origin/model/role come from the birth-record
+                                   when recorded; other roles stay hand-maintained)
        --anchor key=value          record a hand anchor in drift_anchors
                                    (repeatable; a flag overwrites its own key,
                                    git_head stays machine-owned; convention:
                                    tracker=<id> links the effort's tracker item)
+       --mode alias=mode           set that peer's saved mode (resume|fork|template,
+                                   repeatable); new peers default to resume when
+                                   their origin is fresh/joined, else template
+       --role alias=role           point that peer's rolefile at roles/<role>.md
+                                   (repeatable; the role must resolve from here)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); connect to the
                                    channel first — peers are briefed to answer you.
@@ -114,10 +119,12 @@ const usage = `cbus — message bus between coding sessions, in named channels
        --brief TEXT                effort brief appended to the anchor's kickoff
        --target T                  launch on window|tab|pane|tmux this time
                                    instead of the recorded target
-  cbus formation bootstrap <name> <alias> [--brief TEXT]
+  cbus formation bootstrap <name> <alias> [--brief TEXT] [--dry-run]
                                    print ONE peer's first-turn prompt to paste
                                    by hand (the path for a peer apply will not
                                    launch — e.g. one recorded on another machine)
+                                   and record the coordinator it names
+       --dry-run                   print only; write nothing
   cbus formation list              saved channel topologies ($CBUS_DIR/.formations)
   cbus formation show <name>       one formation's peers, flagging stale sids
                                    (recorded transcript gone) and TODO roles
@@ -138,6 +145,10 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus install-mods [--path DIR] [--force]       write the embedded Claude Code mods
                                    to ~/.claude/skills/<mod> (sha-guarded per file;
                                    --force overwrites a locally-edited file)
+  cbus install-hooks [--path FILE] [--dry-run]   add the hook-denied and
+                                   hook-regressed entries to Claude Code's
+                                   settings (default $CLAUDE_CONFIG_DIR or
+                                   ~/.claude); merges, backs up, never automatic
   cbus install-opencode [--path DIR] [--force]   write the OpenCode server and TUI
                                    plugins to ~/.config/opencode (or DIR, e.g. a
                                    project's .opencode) and register the TUI one
@@ -221,6 +232,17 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus grants [--all] [--json]     grants for this session's address; a peer acts
                                    only on one listed live; cbus grants use <id>
                                    takes it first (a once grant is consumed)
+  cbus permit <actions> --repo R (--ref P | --target T | --effort TEXT) --says WORDS
+       [--ttl D] [--channel C]     a seat's recorded coordinator records what the
+                                   operator said; push-branch, draft-pr, pr-update
+                                   take --ref (* stops at a slash), merge, release,
+                                   install --target, effort --effort. Default ttl 7d,
+                                   max 30d. cbus permit revoke <id> (any local caller)
+  cbus permits [--all] [--json]    live permits from your coordinator or you; --all
+                                   is the audit of every channel and state
+  cbus permits use <action> (--ref B | --target T) [--repo R] [--channel C]
+                                   exit 0 and one line if covered, and counts the
+                                   use; exit 1 and why not; exit 2 for a bad request
   cbus close <channel>/<alias> [...] [--force]   end peer sessions: SIGTERM the
                                    owning process, then sweep its terminal surface
                                    once the tty is dead (local only — a remote peer

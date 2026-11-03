@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ import (
 // formationUsage advertises only the verbs that exist. bootstrap lands in a later
 // milestone and is absent on purpose — a help text that promises a verb the binary
 // does not have is a bug report waiting to happen.
-const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | resume <name> [--brief TEXT] | bootstrap <name> <alias> [--brief TEXT] | list | show <name> | rm <name>"
+const formationUsage = "usage: cbus formation save <name> [channel] | apply <name> [opts] | resume <name> [--brief TEXT] | bootstrap <name> <alias> [--brief TEXT] [--dry-run] | list | show <name> | rm <name>"
 
 func runFormation(args []string) int {
 	sub := ""
@@ -43,7 +44,7 @@ func runFormation(args []string) int {
 }
 
 func runFormationSave(args []string) int {
-	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...]"
+	const use = "usage: cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=resume|fork|template ...] [--role alias=role ...]"
 	if len(args) == 0 {
 		return die(use)
 	}
@@ -56,7 +57,7 @@ func runFormationSave(args []string) int {
 		ch = rest[0]
 		rest = rest[1:]
 	}
-	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true}, nil, true)
+	p, err := splitVerbArgs(rest, map[string]bool{"--anchor": true, "--mode": true, "--role": true}, nil, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
@@ -71,12 +72,28 @@ func runFormationSave(args []string) int {
 		}
 		anchors[k] = v
 	}
+	modes := map[string]string{}
+	for _, kv := range p.all("--mode") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return die("--mode: want alias=resume|fork|template, got %q", kv)
+		}
+		modes[k] = v
+	}
+	roles := map[string]string{}
+	for _, kv := range p.all("--role") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || v == "" {
+			return die("--role: want alias=role, got %q", kv)
+		}
+		roles[k] = v
+	}
 	if ch == "" {
 		if ch, err = ownChannel(); err != nil {
 			return die("%v (%s)", err, use)
 		}
 	}
-	f, rep, err := client.SaveFormation(name, ch, anchors)
+	f, rep, err := client.SaveFormation(name, ch, client.SaveOptions{Anchors: anchors, Modes: modes, Roles: roles})
 	if err != nil {
 		return die("%v", err)
 	}
@@ -101,8 +118,38 @@ func runFormationSave(args []string) int {
 		fmt.Printf("  based on the %s (its rolefile refs inherited; written to the runtime store, not the repo)\n", rep.BasedOn)
 	}
 	if len(rep.Added) > 0 {
-		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;")
-		fmt.Println("  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded")
+		fmt.Println("  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them")
+		added := map[string]bool{}
+		for _, a := range rep.Added {
+			added[a] = true
+		}
+		var resume, fork, template, todo []string
+		for _, p := range f.Peers {
+			if added[p.Alias] && p.RoleTODO() {
+				todo = append(todo, p.Alias)
+			}
+			switch {
+			case !added[p.Alias]:
+			case p.Mode == client.ModeResume:
+				resume = append(resume, p.Alias)
+			case p.Mode == client.ModeFork:
+				fork = append(fork, p.Alias)
+			default:
+				template = append(template, p.Alias)
+			}
+		}
+		if len(resume) > 0 {
+			fmt.Printf("  mode=resume (own transcript): %s\n", strings.Join(resume, ", "))
+		}
+		if len(fork) > 0 {
+			fmt.Printf("  mode=fork (set by --mode): %s\n", strings.Join(fork, ", "))
+		}
+		if len(template) > 0 {
+			fmt.Printf("  mode=template (fork-born, origin unknown, no session, or set by --mode): %s\n", strings.Join(template, ", "))
+		}
+		if len(todo) > 0 {
+			fmt.Printf("  role TODO (no recorded role; set one with --role <alias>=<role>): %s\n", strings.Join(todo, ", "))
+		}
 	}
 	// A birth-record the envelope would reject was NOT captured; say so at the
 	// terminal, not only in the report struct (C4) — a silent skip reads as a clean save.
@@ -295,21 +342,21 @@ func runFormationResume(args []string) int {
 	return 0
 }
 
-// runFormationBootstrap prints one peer's first-turn prompt and nothing else — the
-// paste-it-yourself path for when a peer is launched by hand, or when apply cannot
-// (another machine), or when someone wants to READ what a peer would be told before
-// a fleet is opened.
+// runFormationBootstrap prints one peer's first-turn prompt — the paste-it-yourself path
+// for when a peer is launched by hand, or when apply cannot (another machine), or when
+// someone wants to READ what a peer would be told before a fleet is opened.
 //
 // It composes through the same KickoffPrompt apply uses. A second renderer would
 // drift, and the two drifting silently is how a peer gets briefed differently
-// depending on who started it.
+// depending on who started it. It records the coordinator the prompt names, unless
+// --dry-run, which writes nothing.
 func runFormationBootstrap(args []string) int {
-	const use = "usage: cbus formation bootstrap <name> <alias> [--brief TEXT]"
+	const use = "usage: cbus formation bootstrap <name> <alias> [--brief TEXT] [--dry-run]"
 	if len(args) < 2 {
 		return die(use)
 	}
 	name, alias := args[0], args[1]
-	p, err := splitVerbArgs(args[2:], map[string]bool{"--brief": true}, nil, true)
+	p, err := splitVerbArgs(args[2:], map[string]bool{"--brief": true}, map[string]bool{"--dry-run": true}, true)
 	if err != nil {
 		return die("%v (%s)", err, use)
 	}
@@ -324,6 +371,14 @@ func runFormationBootstrap(args []string) int {
 	prompt, err := client.BootstrapPeer(f, alias, brief)
 	if err != nil {
 		return die("%v", err)
+	}
+	// the prompt still works without the record: that seat just stays pane-only
+	if !p.flags["--dry-run"] {
+		if wrote, err := client.RecordBootstrapCoordinator(f, alias); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: no coordinator record: %v\n", err)
+		} else if !wrote {
+			fmt.Fprintf(os.Stderr, "note: %s/%s is already in the store, its coordinator record was left alone\n", f.Channel, alias)
+		}
 	}
 	fmt.Println(prompt)
 	return 0

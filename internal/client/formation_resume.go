@@ -147,8 +147,13 @@ func resumeAnchorWorld(f *Formation, brief string, forker TerminalForker, world 
 		Dir:      launchDir(p.Cwd),
 		Title:    p.Alias,
 	}
+	undoRecord, err := recordCoordinator(f.Channel, p.Alias, anchorSeat().Coord, "", "")
+	if err != nil {
+		return "", "", err
+	}
 	created, err = forker.Fork(spec)
 	if err != nil {
+		undoRecord()
 		return "", "", err
 	}
 	// Launcher-authored restore record. The bare-shell launcher holds no claim, so the
@@ -300,7 +305,7 @@ func anchorKickoff(f *Formation, p *FormationPeer, brief string, rows []anchorRo
 		"not against this snapshot, which was composed when your window opened. Peers apply launches are briefed to answer YOU.")
 	b.WriteString("\n\nOnce the fleet has answered, refresh the checkpoint so the next restore starts from what you decided:\n" +
 		"  cbus formation save " + f.Name + " " + f.Channel)
-	b.WriteString("\n\n" + coordinatorClause(strings.TrimSpace(brief) != ""))
+	b.WriteString("\n\n" + anchorSeat().clause(strings.TrimSpace(brief) != ""))
 	if s := strings.TrimSpace(brief); s != "" {
 		b.WriteString("\n\n--- the effort ---\n")
 		b.WriteString(s)

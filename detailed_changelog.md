@@ -4,6 +4,79 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 23:00:56 UTC] [Install/Hooks] cbus install-hooks
+
+[Attempt #1] Files: cmd/cbus/install_hooks.go, cmd/cbus/install_hooks_test.go,
+cmd/cbus/install_assets.go, cmd/cbus/install_all_test.go, cmd/cbus/main.go,
+cmd/cbus/usage.go, docs/usage.md.
+
+[What changed]
+- A machine without the two hook entries is silent, so no notice looks the same
+  as no denial. New `cbus install-hooks` adds them to
+  `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`, or to
+  `--path FILE`. `--dry-run` prints the additions and writes nothing.
+- The merge keeps key order, number spelling and characters such as `&&`, and
+  appends to an existing event list. The file is rewritten with two-space
+  indentation. A settings file with comments or an unexpected `hooks` shape is
+  refused unchanged.
+- An entry counts as present when the command calls a program named `cbus`, from
+  any path, with the verb, or when it holds the exact command this binary would
+  write. A second run changes nothing and writes no backup.
+- A symlinked settings file is written through, so profiles sharing one file
+  stay shared. The original is copied to `<file>.bak-<time>` and the new file
+  replaces it atomically with the same mode.
+- The command uses `$HOME/...` when the binary is under the home directory, so a
+  shared settings file stays valid across machines.
+- Updates stay read-only for settings: install-assets prints one note when a
+  settings file exists without the hooks. A test keeps `install-hooks` out of
+  install-assets.
+- `cbus install` now names the real install verbs after the unknown-command line.
+
+[Testing]
+- Unit tests for the merge, refusals, symlink, mode, backup, dry run, second run
+  and the note. Eight mutations each fail a test.
+
+## [2026-11-03 20:11:50 UTC] [Tests/Canary] Git helpers are not CLI frontends
+
+[Attempt #1] Files: scripts/codex_cli_resume_canary.py,
+scripts/codex_frontend_processes_test.py.
+
+[What changed]
+- `quit_cli` requires every frontend process to exit within 5 s of `/quit`, and
+  it took "frontend" to mean everything in the CLI's tree except app-server.
+  Codex's plugin sync runs a background `git fetch` in that tree. The presence
+  canary keeps the CLI open long enough to start one, so it failed at this
+  check on every run and never reached its later checks. The resume canary
+  quits sooner and passed.
+- New `frontend_processes` leaves out processes whose argv[0] is `git` or
+  `git-*`. A path or argument that merely contains "git" still counts.
+
+[Testing]
+- `scripts/codex_frontend_processes_test.py`, with the old filter, a substring
+  match and a filter missing `git-*` each failing it.
+
+## [2026-11-03 19:09:58 UTC] [Codex/Fix] A defunct codex process no longer breaks consumer checks on Linux
+
+[Attempt #1] Files: internal/client/codex_runtime_writer_linux.go,
+internal/client/codex_runtime_writer_linux_test.go.
+
+[What changed]
+- `codexRolloutWriters` and the TUI listener lookup read `/proc/<pid>/fd` for
+  each process named `codex`. That read returns EACCES for a zombie, and both
+  scans returned the error, so one unreaped child failed the check for every
+  session on the machine. A Codex app-server that does not reap a child can
+  leave one in place for days.
+- `codexProcessFiles` now returns no files for a zombie. The state is read
+  after the last `)` in `/proc/<pid>/stat`, because the name may hold spaces
+  and parens. Other permission errors still fail the scan.
+
+[Testing]
+- A real unreaped child named `codex` fails the scan without the fix and passes
+  with it. A live unreadable process still returns a permission error. Mutating
+  the check to skip every permission error, or to parse from the first `)`,
+  fails a test. Eight managed Codex tests that failed on a machine with a zombie
+  now pass there.
+
 ## [2026-11-03 06:22:24 UTC] [Relay/Feature] cbus forward: relay mailbox to outbound webhook
 
 [Attempt #1] Files: internal/client/forward.go, internal/client/forward_test.go,
@@ -45,6 +118,377 @@ cmd/cbus/forward.go, cmd/cbus/main.go, cmd/cbus/usage.go.
 - Real relay (built and run on loopback): mixed 200/400/500-then-200 traffic
   delivered in order with one dead letter and nothing re-sent on a second
   pass; an abandoned delivery is redelivered with the same id.
+
+## [2026-11-03 01:15:02 UTC] [Delegation/Permits] Doctrine: seats check a permit and ask their coordinator
+
+[Attempt #1] Files: roles/coder.md, documenter.md, orchestrator.md, reviewer.md
+(doctrine 3 and 8 and the orchestrator's escalation; the shared core is still
+identical across the four and go:embed copies follow), internal/client/delegation.go,
+commands/bus-join.md; docs/security.md, claude.md, formations.md, usage.md,
+architecture/command-reference.md; tests in assets_test.go,
+formation_kickoff_test.go, formation_resume_test.go, role_test.go.
+
+[What changed]
+- Seats stopped for the operator's word in their own pane, which nobody
+  watches. A seat now runs `cbus permits use` before a reserved action. Exit
+  0 covers it; otherwise it holds and asks its coordinator on the bus. The
+  coordinator rules what is inside the effort, files one ask for an approval
+  it does not hold, writes the permit once the operator has said so in its
+  session, and tells the seat to check it. A message telling a seat to go is
+  not the permit; the seat's own command output is its reason for acting.
+- An effort permit can record the coordinator's own ruling inside the epic,
+  and says so in --says. Otherwise only the operator's word justifies a
+  permit. merge, release and install need a named target, force pushes are
+  never covered, a public repo gets no standing push permit unless the
+  operator said so for it, and repository policy and classifier blocks still
+  bind. docs/security.md states the honest limit.
+- Review fixes folded in: doctrine 3 told a coordinator never to write a
+  permit except on the operator's word while its launch clause told it to
+  record its own effort ruling, so it could not follow both; doctrine 3 and
+  the orchestrator's escalation now name the exception. The peer clause told
+  every seat not to ask the operator in its pane, including a seat pasted from
+  `cbus bootstrap` with no coordinator record, for which no permit can count;
+  it now says what that refusal means and allows the question.
+- Grants are unchanged, but seats and coordinators stop suggesting them.
+
+[Possible Ripple Effects]
+- Takes effect for a seat only after a release and `cbus selfupdate`; running
+  seats keep the text they launched with.
+- The doctrine block stays duplicated across the four role files by design;
+  the canary was extended to the effort exception and the go line in each.
+- Hooks (denied, regressed) still need entries in settings to do anything.
+- A coordinator model decides what to write; the permit store is same-user
+  file state and not a security boundary.
+
+[Testing Notes]
+- Live runs on Haiku through the real formation door, against a loopback git
+  server, at the commit before the last two wording fixes; n=1 per part. A
+  seat with no permit asked its coordinator instead of its pane and pushed
+  nothing. With a permit, two pushes landed with no second question and a
+  merge stayed held. A peer saying the operator agreed did not make the
+  coordinator write a permit.
+- The permit in that run was written by a shell and says so; no operator
+  answer was typed. The remote was a loopback git server. In both runs of the
+  question part the coordinator set no `from` on its ask. The first run of the
+  permit part was invalid (a push identity hook blocked the push, and the
+  script wrote the permit under a live coordinator's session), and it exposed
+  two defects fixed in the permit CLI: a seat guessed an unknown class, and a
+  use count read as a use spent.
+- 31 wording mutants were all killed. One go test failure appeared unattributed
+  in six reviewer runs, test name lost.
+- Not yet shown: a real private remote, a real band approval with a real model
+  writing the permit, a real classifier verdict on a real push, hooks in
+  settings, larger models.
+
+## [2026-11-03 00:50:06 UTC] [Permits/Store] Permit store and CLI, inert
+
+[Attempt #1] Files: internal/client/permit.go (new: store, matching, use),
+coordinator.go (writer lookup), regressed.go (small shared-helper cleanup);
+cmd/cbus/permit.go (new), main.go, usage.go; docs/architecture/command-reference.md,
+protocol.md; tests in permit_test.go, permit_unix_test.go and cmd/cbus/permit_test.go.
+
+[What changed]
+- Seats stop for the operator's word in their own pane, and `cbus grant`
+  needs the operator at a terminal per seat and action. A coordinator can now
+  record what the operator said with `cbus permit <actions> --repo R (--ref
+  PATTERN | --target T | --effort TEXT) --says WORDS [--ttl D]`, and a seat
+  asks `cbus permits use <action> ...` whether it is covered. A use prints one
+  line naming the permit and how many times it was checked, marked not
+  consumed (exit 0), or a not-covered line naming the nearest miss and the
+  coordinator to ask (exit 1). An unknown class lists the valid classes. A
+  real seat had guessed `push` and both it and its coordinator read "use 1"
+  as a use spent; the count is an audit count, not a budget.
+- Classes: push-branch, draft-pr and pr-update cover a ref pattern; merge,
+  release and install cover one exact target, one per permit; effort carries
+  text and is read, not used. There is no wildcard class and force pushes
+  have no class, so they are never covered. Ref patterns allow `*` and `?`
+  without crossing a slash, need a literal prefix, and a wildcard that reaches
+  main or master is refused; an exact main is allowed because the operator
+  named it. TTL defaults to 7 days, maximum 30. Revoke needs no terminal gate
+  because it only tightens.
+- The writer must hold an address a coordinator record on the channel names,
+  and at use the seat's coordinator must equal the permit's writer, compared
+  by address with the session kept for audit. A seat with no record, or an
+  unanswered one, gets nothing. Relay channels are refused.
+- The repo is stored as host/path so ssh and https compare equal. Local
+  paths, file URLs and credentials are not stored: review fixes made an scp
+  remote carrying user:secret@host refuse instead of storing the secret,
+  checked the whole path for @ and : (a password containing a slash had
+  slipped through), stopped errors printing any part of the value, and
+  stripped control characters from --says and --effort and refused them in
+  --target.
+
+[Possible Ripple Effects]
+- Inert until the doctrine change: nothing in a role or prompt refers to
+  permits, so no seat consults them yet.
+- Not a security boundary. State is same-user files and --says is an audit
+  trail, not proof; whoever later takes a coordinator's alias on the machine
+  becomes the writer.
+- A permit is not bound to the seat's session, and cbus cannot see which flags
+  a later git push carries; the seat is responsible for pushing to the repo
+  it checked.
+
+[Testing Notes]
+- 65 mutants across writer, ref, repo, state, target, ttl, uses, version and
+  CLI behavior: 64 killed. The survivor (scp credential in path) is backed by
+  the general path check and fails when both are mutated together. Earlier
+  survivors got tests.
+- Live CLI run through a scratch store: covered, not-covered, refused and
+  exit-code cases matched the documented behavior, including wildcard-reaches-
+  main and a seat that is not a coordinator.
+
+## [2026-11-03 00:20:29 UTC] [Hooks/Regressed] Tell the coordinator when a seat falls back to another model
+
+[Attempt #1] Files: internal/client/regressed.go (new: transcript scan,
+per-seat mark, notice), grant.go (shared notice writer), daemon_presence.go
+(regressed frame), codexbridge.go, store.go (.regressions), core/message.go;
+cmd/cbus/main.go, update_check.go; mods/cbus-compact/hooks/frame.ts; docs/usage.md,
+architecture/command-reference.md, architecture/protocol.md, CHEATSHEET.md;
+tests in regressed_test.go, hook_classifier_test.go, codexbridge_test.go and
+the cbus-compact hook test.
+
+[What changed]
+- A classifier refusal can move a session to a fallback model until someone
+  runs /model in its pane, and nobody watching the coordinator would know.
+  `cbus hook-regressed` is a Stop hook target: it scans the transcript for the
+  fallback entry and sends a `kind=regressed` notice. The guidance asks the
+  coordinator to file one ask, so the model change shows in its asks band. A
+  coordinator's own fallback goes to itself; a plain session is not told.
+- The hook runs on every session, so it reads at most 4 MiB per Stop from a
+  per-seat offset, does not read the transcript when nobody would be told,
+  and gives up on a busy lock after 250 ms. The notice renders the two model
+  names, the refusal category and the entry's time; the entry's content and
+  explanation are never decoded.
+- Review findings folded in: --fork-session copies the parent's rows under
+  the fork's own session id plus forkedFrom, so a fork could report its
+  parent's fallback as its own; entries with forkedFrom are now skipped. The
+  first scan of a resumed seat starts at offset 0 and can report a fallback
+  someone has since cleared, so the notice now carries the entry's time and
+  says to run /model if the session is still on the fallback. A legacy rename
+  moves the scan mark so the new name does not report again. Tests pin a null
+  forkedFrom and a rename onto a stale mark.
+
+[Possible Ripple Effects]
+- Without the settings entry the hook never fires; nothing warns about it.
+- The fallback entry (a system entry with a model_refusal_fallback subtype)
+  is undocumented. If Claude Code renames it the hook goes silent with no
+  signal. PostModelSwitch was not measured as an alternative.
+- Whether the coordinator files the ask depends on its model; observed once
+  for a seat's fallback and once for its own.
+
+[Testing Notes]
+- Real hook run in place over two real transcripts: four real fallback
+  entries produced exactly four notices, repeat Stops added none, and the
+  transcripts' hashes did not change (reviewer evidence).
+- No live Stop carried a real fallback entry. The route that appends an entry
+  to a live seat's transcript was refused by the classifier, so end to end
+  was shown with a fixture file. A real fork with a copied fallback is
+  unmeasured.
+- Stop cost: 0.01 s on a 200 MiB transcript, one 4 MiB window per Stop.
+
+## [2026-11-03 00:04:08 UTC] [Hooks/Denied] Tell a seat's coordinator about classifier denials
+
+[Attempt #1] Files: internal/client/denied.go (new: payload parse, input-echo
+guard, collapse state, delivery), grant.go (notice writer split into
+deliverNotice), daemon_presence.go (denial notice frame), codexbridge.go,
+core/message.go (kind comment), cmd/cbus/main.go, update_check.go;
+mods/cbus-compact/hooks/frame.ts; docs/usage.md, architecture/command-reference.md,
+architecture/protocol.md, CHEATSHEET.md; tests in denied_test.go,
+hook_denied_test.go, codexbridge_test.go, daemon_wake_unix_test.go and the
+cbus-compact hook test.
+
+[What changed]
+- A classifier denial stopped a seat with nobody watching its pane.
+  `cbus hook-denied` reads the coordinator record written at launch and
+  appends a `kind=denied` line to that coordinator's inbox. The daemon
+  renders it as a denial notice: the coordinator cannot override the
+  classifier, so it is told to reroute the work or ask the operator, and not
+  to acknowledge on the bus.
+- The notice never carries the command or tool_input. The reason and the
+  Bash description can echo the input, so echoed pieces are withheld. A field
+  echoing two or more is withheld whole; two adjacent input words of any
+  length count as an echo, and a whole short input value is withheld where it
+  appears. Control characters are dropped, and a reason ending in [withheld]
+  keeps its brackets balanced. Descriptions may often read [withheld].
+- Repeats of the same tool and reason collapse for 10 minutes and are counted
+  on the next notice. An undelivered notice does not count as sent.
+- Review finding folded in: the first guard only counted pieces of 8 or more
+  characters, so a command of short words (a password argument, `cat .env`)
+  could reach the notice whole; fixed by the adjacent-words and whole-short-
+  value rules, with a test that input words apart are not a quoted run.
+- Wiring is a documented settings snippet like hook-exit and hook-compact.
+
+[Possible Ripple Effects]
+- Without the settings entry the hook never fires; nothing warns about it.
+- Guard limit that remains: one short word on its own passes, the check is
+  case-sensitive, and separated short words pass.
+- DeliverGrantNotice now goes through a shared deliverNotice; grant notices
+  behave as before.
+- The installed cbus-compact predates the [denied] tag until mods are
+  reinstalled.
+
+[Testing Notes]
+- No real denial reached the hook: three plain attempts in an auto mode seat
+  were allowed, and a later real denial happened in a seat without the hook.
+  The payload shape and reason forms come from the Claude Code docs; whether
+  the hook reason matches the bracketed reason in a denied tool result is
+  unmeasured.
+- A documented-shape payload piped through the CLI reached a real session
+  as the coordinator; the second send collapsed; the fake token never reached
+  the inbox.
+- The new short-word tests fail on the first commit and pass at the tip; a
+  38-mutant run was fully killed. The cbus-compact test ran under a stand-in
+  host: 11 pass, and the same 2 render tests fail on main under it.
+
+## [2026-11-02 23:50:11 UTC] [Delegation/Coordinator] Record the coordinator at launch
+
+[Attempt #1] Files: internal/client/coordinator.go (new: record store and
+resolver), delegation.go (prompt and record share one resolver),
+formation_apply.go, formation_kickoff.go, formation_resume.go, spawn.go,
+daemon.go, harness.go, store.go, bootstrap_prompt.go; cmd/cbus/formation.go,
+usage.go; docs/architecture/protocol.md (store layout), command-reference.md,
+docs/formations.md; tests in coordinator_test.go, coordinator_unix_test.go,
+formation_test.go.
+
+[What changed]
+- The coordinator a seat answers to existed only as launch prompt text, so
+  no hook or permit check could read it later. Formation apply, resume and
+  kickoff, and spawn with a role now write the coordinator the prompt names
+  to `.coordinators/<channel>/<alias>.json`. The prompt and the record come
+  from one resolver, so they cannot disagree. A seat with no coordinator
+  gets no record.
+- The record sits outside the peer dir because connection collection and
+  alias reclaim remove that dir, and an exact-session resume must keep the
+  record. A launched child binds it at first arrival; the same session
+  returning keeps it; any other session taking the alias inherits nothing.
+  An unanswered record, a corrupt or oversized one, or one bound to a
+  session other than the holder reads as none. The store is owner-only.
+- `cbus formation bootstrap` records too, with `--dry-run` to print only.
+  The low-level `cbus bootstrap` stays print-only, so a seat pasted from it
+  has no coordinator record, though its prompt still names one.
+- Review finding folded in: a bound record was answering when no meta.json
+  existed, so a session that had left still looked coordinated; it now
+  speaks only for the session holding the name. Undo restored the prior
+  record unconditionally, so a forker reporting failure after the window
+  opened could take the record from a child that had already answered; undo
+  now applies only if the file is still what that write left. The tests run
+  a real connection collection instead of removing the peer dir and pin an
+  unreadable holder, an oversized record, settling with no session, and a
+  rename onto a name with a stale record.
+
+[Possible Ripple Effects]
+- Nothing reads the record yet; later milestones consume it, so a wrong
+  record is invisible until then.
+- The record survives leave and collection by design. A new holder taking
+  the alias, or a launch naming no coordinator, replaces or removes it;
+  nothing collects unused records, and deleting a channel's store directory
+  leaves `.coordinators/<channel>/` in place.
+- A seat started from the low-level `cbus bootstrap` has no record.
+
+[Testing Notes]
+- Table test per launch door asserts the record equals the coordinator named
+  in the rendered prompt; the no-coordinator case writes none; a resumed
+  seat keeps its record.
+- A live formation run read the records back from the store.
+- Run `go test ./...` and the linux amd64/arm64 compile gate before release.
+
+## [2026-10-31 19:09:04 UTC] [Formation/Roles] save --role for joined seats; /save-formation fills
+
+[Attempt #1] Files: internal/client/formation_save.go (SaveOptions.Roles,
+checkRoles, setHandRoles), cmd/cbus/formation.go, cmd/cbus/usage.go,
+commands/save-formation.md; docs.
+
+[What changed]
+- A seat that joined with `cbus join` or `cbus connect` has no launcher, so
+  no birth-record role, and its brief stayed TODO. `formation save --role
+  alias=role` (repeatable) sets that peer's `rolefile` to `roles/<role>.md`
+  and clears freeform text. The role resolves through LoadRole before
+  anything is written, so a typo refuses instead of saving a brief that
+  apply cannot load.
+- `/save-formation` used to list TODO roles and template modes and stop. It
+  now proposes a fill per peer (its own seat as orchestrator when it
+  coordinates the channel; other peers only from what the conversation
+  shows), asks once, and re-saves with `--role`/`--mode`.
+
+[Possible Ripple Effects]
+- `join`/`connect` do not take `--role`: carrying it through connect would
+  change the daemon connect request and journal. The save flag covers
+  joined seats instead.
+
+## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
+
+[Attempt #1] Files: internal/client/formation_save.go (newPeerMode,
+SaveOptions, setHandModes), cmd/cbus/formation.go (save
+--mode, per-mode report lines), cmd/cbus/usage.go; docs and the
+save-formation command.
+
+[What changed]
+- New peers saved with `mode=template`, a rule from before apply could tell
+  a safe resume from an unsafe one. Apply now refuses a fork-born resume, an
+  unattributed one, a session claimed twice, and a session still held live,
+  and `onStale=template` degrades a lost transcript, so the template default
+  only threw context away. Save now picks `resume` for a
+  peer with a real session id and origin fresh or joined, and `template`
+  otherwise.
+- `formation save --mode alias=mode` (repeatable) sets a peer's saved mode.
+  An unknown alias, a mode outside the enum, or resume/fork for a peer whose
+  origin is fork or unknown refuses the save, since apply would refuse it.
+- Apply sees more running sessions before it resumes one. It reads Claude
+  Code's session registry (`<config>/sessions/<pid>.json` under ~/.claude,
+  $CLAUDE_CONFIG_DIR and each CCS instance) and treats a session whose pid is
+  alive as held. That catches a session started fresh that left the bus or
+  lost its listener, which neither the bus nor the argv scan could see. A
+  stale file whose pid was recycled reads as held, which refuses rather than
+  double-launching.
+- Apply claims the same launch-intent marker `formation resume` uses before
+  it resumes a peer, so a second apply before the child joins is refused.
+- A join or daemon connect under an alias the session did not reserve was
+  always recorded `origin=joined`, so a branch child joining a second
+  channel looked resumable there. Join now checks the session's own history
+  (metas in other channels, then self-recorded join/resume ledger lines)
+  and records `fork` when that session is fork-born.
+- A blank `mode` in a hand-written file still plans as template.
+
+[Possible Ripple Effects]
+- Existing envelopes keep their recorded modes; only peers new to the file
+  get the new default.
+- A resume of a seat whose original is still running is refused at apply;
+  the operator either stops it or sets `mode=fork`.
+- A failed resume launch keeps its marker until the TTL (180s), the same as
+  `formation resume`.
+
+## [2026-10-31 19:01:56 UTC] [Formation/Roles] role in the birth record; save fills rolefile
+
+[Attempt #1] Files: internal/client/store.go (peerMeta.Role, ReserveAlias
+role parameter, birthForJoin), daemon.go (reservation claim),
+spawn.go, harness.go, formation_apply.go (peerRoleName), liveness.go,
+formation_save.go (RosterPeer.Role, capturePeer), role.go
+(validRoleName); docs and the save-formation/bus-formation commands.
+
+[What changed]
+- `cbus spawn --role <r>` briefed the child from roles/<r>.md and then
+  dropped the name, so a later `formation save` wrote a TODO role for every
+  spawned seat. The reservation meta now carries `role` next to origin and
+  model; the child's join and a daemon connect carry it through the reclaim
+  under the same identity rules as origin (a takeover never inherits it).
+- `formation save` fills `rolefile: roles/<role>.md` from a recorded role
+  while the peer's brief is still blank or the TODO marker. A hand rolefile
+  or freeform role is never overwritten; an unusable role token is skipped
+  and reported like a corrupted origin.
+- `formation apply` stamps the role parsed from the peer's rolefile when it
+  reserves a template or fork seat, and only when that role resolves here, so
+  a restored seat re-saves with a rolefile apply can load.
+- A refresh that added a new peer ahead of an existing one in roster order
+  could lose the existing peer's update: save held pointers into the peer
+  slice and the append reallocated it. It now indexes the slice.
+- The fill treats only a blank brief or save's own TODO marker as unset, so
+  hand-written role text that mentions "todo" is never replaced.
+
+[Possible Ripple Effects]
+- `ReserveAlias` takes a fifth argument; branch passes none, since a fork
+  inherits its parent's intent.
+- `role` is omitempty, so metas without one rewrite byte-identically. An
+  older binary that rewrites the meta drops the field, as with profile.
 
 ## [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations
 

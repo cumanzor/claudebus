@@ -12,10 +12,7 @@ import (
 	"claudebus/internal/core"
 )
 
-// Save-side defaults. meta.json records a peer's alias, sessionId, cwd and host —
-// and nothing else — so these four are POLICY, not captured facts (see SaveFormation).
-// template/template is the safe pair: a template peer never touches a transcript, so
-// a freshly saved formation cannot resume or fork anything until a human says so.
+// defaults for fields the store does not record; newPeerMode overrides the mode when it can
 const (
 	defaultMode    = ModeTemplate
 	defaultOnStale = OnStaleTemplate
@@ -38,6 +35,7 @@ type RosterPeer struct {
 	Machine      string // meta.host, which is HostLabel() on the writing machine
 	Origin       string
 	Model        string
+	Role         string // role name from the birth-record, blank when the peer was not briefed from one
 	Profile      string // the CCS instance the session stamped about itself at join
 	ProfileKnown bool   // captured native default profile is a known blank, not missing metadata
 	Listening    bool
@@ -100,6 +98,7 @@ func ChannelRoster(ch string) ([]RosterPeer, error) {
 			Machine:      m.Host,
 			Origin:       m.Origin,
 			Model:        m.Model,
+			Role:         m.Role,
 			Profile:      m.Profile,
 			ProfileKnown: managed != nil && managed.ProfileKnown,
 			Listening:    listening,
@@ -149,13 +148,20 @@ func loadRepoTemplate(name string) (*Formation, error) {
 	return loadFormationFileAt(filepath.Join(dir, name+".json"), name)
 }
 
+// SaveOptions are the caller's hand fields; a flag overwrites what the file holds
+type SaveOptions struct {
+	Anchors map[string]string
+	Modes   map[string]string // alias -> resume|fork|template
+	Roles   map[string]string // alias -> committed role name, written as rolefile
+}
+
 // SaveFormation captures ch's topology into the named envelope, refreshing an
 // existing file in place.
 //
 // What it captures is bounded by what the substrate records. meta.json holds a
 // peer's alias, sessionId, cwd and host, a profile when the session stamped one at
-// join, and origin/model when the launcher recorded them; there is no role and no
-// prose anywhere on disk. Save refreshes the session facts, fills the
+// join, and origin/model/role when the launcher recorded them; there is no prose
+// anywhere on disk. Save refreshes the session facts, fills the
 // launcher-recorded ones once, and treats everything else as the human's: it never
 // overwrites a hand edit. That is what makes a re-save at a milestone boundary
 // safe — it refreshes sid checkpoints without eating the prose around them.
@@ -165,7 +171,14 @@ func loadRepoTemplate(name string) (*Formation, error) {
 //
 // anchors are the caller's --anchor pairs, written into drift_anchors (nil is
 // fine). git_head is refused up front — it is the one machine-owned key.
-func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *SaveReport, error) {
+func SaveFormation(name, ch string, opts SaveOptions) (*Formation, *SaveReport, error) {
+	anchors := opts.Anchors
+	if err := checkModes(opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := checkRoles(opts.Roles); err != nil {
+		return nil, nil, err
+	}
 	if err := checkHandAnchors(anchors); err != nil {
 		return nil, nil, err
 	}
@@ -218,27 +231,28 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 			"(save it under a different name, or fix the channel field)", name, f.Channel, ch)
 	}
 
-	byAlias := make(map[string]*FormationPeer, len(f.Peers))
+	// indices, not pointers: appending a new peer below can reallocate f.Peers
+	byAlias := make(map[string]int, len(f.Peers))
 	for i := range f.Peers {
-		byAlias[f.Peers[i].Alias] = &f.Peers[i]
+		byAlias[f.Peers[i].Alias] = i
 	}
 	onChannel := make(map[string]bool, len(roster))
 	for _, r := range roster {
 		onChannel[r.Alias] = true
-		if p, ok := byAlias[r.Alias]; ok {
-			capturePeer(p, r, rep) // captured facts only; hand-edits survive
+		if i, ok := byAlias[r.Alias]; ok {
+			capturePeer(&f.Peers[i], r, rep) // captured facts only; hand-edits survive
 			rep.Updated = append(rep.Updated, r.Alias)
 			continue
 		}
 		p := FormationPeer{
 			Alias:     r.Alias,
-			Mode:      defaultMode,
 			OnStale:   defaultOnStale,
 			Target:    defaultTarget,
 			Role:      strPtr(roleTODOMarker),
 			Addresses: []string{},
 		}
 		capturePeer(&p, r, rep)
+		p.Mode = newPeerMode(&p)
 		f.Peers = append(f.Peers, p)
 		rep.Added = append(rep.Added, r.Alias)
 	}
@@ -248,6 +262,12 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		}
 	}
 	retargetSelf(ch, f.Peers, observedSurface(), rep)
+	if err := setHandModes(f.Peers, opts.Modes); err != nil {
+		return nil, nil, err
+	}
+	if err := setHandRoles(f.Peers, opts.Roles); err != nil {
+		return nil, nil, err
+	}
 
 	f.SavedAt = Now()
 	if f.SavedBy, err = savedBy(ch); err != nil {
@@ -316,6 +336,84 @@ func SaveFormation(name, ch string, anchors map[string]string) (*Formation, *Sav
 		return nil, nil, err
 	}
 	return f, rep, nil
+}
+
+// newPeerMode resumes a peer with a real session and an origin apply will resume
+func newPeerMode(p *FormationPeer) string {
+	if p.SessionID == "" || p.SessionID == "reserved" {
+		return defaultMode
+	}
+	switch p.Origin {
+	case OriginFresh, OriginJoined:
+		return ModeResume
+	}
+	return defaultMode
+}
+
+func checkModes(modes map[string]string) error {
+	for alias, m := range modes {
+		if m == "" {
+			return fmt.Errorf("--mode %s= needs resume|fork|template", alias)
+		}
+		if err := oneOf("--mode "+alias, m, ModeResume, ModeFork, ModeTemplate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setHandModes applies --mode alias=mode, refusing what apply would refuse later
+func setHandModes(peers []FormationPeer, modes map[string]string) error {
+	return applyHand(peers, "--mode", modes, func(p *FormationPeer, m string) error {
+		if o := p.Origin; m != ModeTemplate && o != OriginFresh && o != OriginJoined {
+			return fmt.Errorf("--mode %s=%s: origin is %s, and apply only resumes or forks a peer born fresh or joined; use template",
+				p.Alias, m, orUnset(o))
+		}
+		p.Mode = m
+		return nil
+	})
+}
+
+// checkRoles refuses a role that does not resolve here, so a typo is not saved as a brief.
+func checkRoles(roles map[string]string) error {
+	for alias, r := range roles {
+		if _, _, err := LoadRole(r); err != nil {
+			return fmt.Errorf("--role %s=%s: %v", alias, r, err)
+		}
+	}
+	return nil
+}
+
+// setHandRoles points each named peer's rolefile at roles/<role>.md, replacing any brief.
+func setHandRoles(peers []FormationPeer, roles map[string]string) error {
+	return applyHand(peers, "--role", roles, func(p *FormationPeer, r string) error {
+		p.Rolefile, p.Role = "roles/"+r+".md", nil
+		return nil
+	})
+}
+
+// applyHand sets one hand flag per alias; an alias the formation does not hold is an error
+func applyHand(peers []FormationPeer, flag string, vals map[string]string, set func(*FormationPeer, string) error) error {
+	var unknown []string
+	for alias, v := range vals {
+		found := false
+		for i := range peers {
+			if peers[i].Alias == alias {
+				if err := set(&peers[i], v); err != nil {
+					return err
+				}
+				found = true
+			}
+		}
+		if !found {
+			unknown = append(unknown, alias)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("%s names no peer in this formation: %s", flag, strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 // checkHandAnchors refuses the machine-owned key before any store work: git_head
@@ -391,6 +489,15 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: origin %q (meta not one of fresh|fork|joined)", r.Alias, r.Origin))
 		}
 	}
+	// a recorded role fills the brief only while it is blank or save's own TODO marker
+	if r.Role != "" && briefUnset(p) {
+		if validRoleName(r.Role) {
+			p.Rolefile = "roles/" + r.Role + ".md"
+			p.Role = nil
+		} else {
+			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: role %q (meta not a usable role name)", r.Alias, r.Role))
+		}
+	}
 	if p.Model == "" && r.Model != "" {
 		if validModel(r.Model) {
 			p.Model = r.Model
@@ -398,6 +505,11 @@ func capturePeer(p *FormationPeer, r RosterPeer, rep *SaveReport) {
 			rep.SkippedBirth = append(rep.SkippedBirth, fmt.Sprintf("%s: model %q (meta not a usable model token)", r.Alias, r.Model))
 		}
 	}
+}
+
+// briefUnset is stricter than RoleTODO: hand prose that mentions "todo" is still a brief.
+func briefUnset(p *FormationPeer) bool {
+	return p.Rolefile == "" && (p.Role == nil || strings.TrimSpace(*p.Role) == "" || *p.Role == roleTODOMarker)
 }
 
 func validOrigin(o string) bool {

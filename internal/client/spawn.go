@@ -114,6 +114,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		unsetEnv = claudeLaunchUnset
 	}
 	var title, prompt string
+	var seat seatDelegation // a spawn with no role names nobody
 	if IsRemote(addr) {
 		at := strings.Index(addr, "@")
 		ch, host := addr[:at], addr[at+1:]
@@ -133,7 +134,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 			return "", "", fmt.Errorf("bad channel %q: %s", addr, why)
 		}
 		// spawn is always a fresh, blank-transcript session (cbus-m9l birth-record).
-		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model); err != nil {
+		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model, role); err != nil {
 			return "", "", err
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)
@@ -145,12 +146,16 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		// role brief rides AFTER the join/arm instructions, matching how briefs
 		// were dispatched manually; the file is designed to be pasted alone.
 		prompt = prompt + "\n\n" + strings.TrimSpace(roleBody)
-		// an orchestrator coordinates the peers it launches, never its spawner; spawn carries no effort
-		deleg := delegationClause(coord, false)
-		if role == "orchestrator" {
-			deleg = coordinatorClause(false)
+		// spawn carries no effort
+		seat = spawnSeat(role, coord)
+		prompt = prompt + "\n\n" + seat.clause(false)
+	}
+	undoRecord := func() {}
+	if !IsRemote(addr) {
+		if undoRecord, err = recordCoordinator(addr, childAlias, seat.Coord, coordinatorDoorSpawn, ""); err != nil {
+			Unreserve(addr, childAlias)
+			return "", "", err
 		}
-		prompt = prompt + "\n\n" + deleg
 	}
 	spec := ForkSpec{
 		Target:   target,
@@ -165,6 +170,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 		spec.Env = codexLaunch.env
 	}
 	if _, err := forker.Fork(spec); err != nil {
+		undoRecord()
 		if childAlias != "" && !IsRemote(addr) {
 			Unreserve(addr, childAlias)
 		}

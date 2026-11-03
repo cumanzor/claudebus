@@ -50,6 +50,16 @@ def process_descendants(pid):
     return [rows[key] for key in sorted(selected) if key in rows]
 
 
+def frontend_processes(tree):
+    """The CLI's own processes. Codex syncs its plugins with a background git
+    fetch that can outlive /quit by many seconds, and app-server is a backend."""
+    def is_git(row):
+        argv0 = row.get("args", "").split(None, 1)
+        name = Path(argv0[0]).name if argv0 else ""
+        return name == "git" or name.startswith("git-")
+    return [row for row in tree if " app-server " not in row.get("args", "") and not is_git(row)]
+
+
 def is_native_codex(row):
     """A native codex process, by comm or argv[0]. ps truncates comm to a short
     prefix of a long path, as for the vendor binary of an npm-installed Codex."""
@@ -144,7 +154,7 @@ class ResumeCanary(Canary):
         original = self.process
         tree = process_descendants(original.pid)
         self.result["originalProcessTree"] = tree
-        frontend = [row for row in tree if " app-server " not in row.get("args", "")]
+        frontend = frontend_processes(tree)
         self.result["originalFrontendProcessTree"] = frontend
         self.check("ordinary_native_cli_process_observed", any(is_native_codex(row) for row in tree))
         os.write(self.master, b"/quit")

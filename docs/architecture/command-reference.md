@@ -177,7 +177,7 @@ set`. The Go port unified both into the single `cbus: usage: ...` form.
 
 | Code | When |
 |---|---|
-| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
+| 0 | Success; `--help` / no args; `prune` with nothing to do; `list`/`channels` on empty; `hook-exit` / `hook-compact` / `hook-denied` / `hook-regressed` / `hook-join` **always**; `codex-stop-hook` always except a Windows phase-1 refusal; idempotent re-join; no-op rename |
 | 1 | Every `die()` (the one error path in the Go client, see above); `whoami` with no registrations; `leave` with nothing to leave; `auth status <bad-host>` (host is validated, not unconditional 0); `connection status <target>` with no managed connection for that target; `cbus list @host` transport failure |
 
 ### Environment variables (not exhaustive)
@@ -215,6 +215,8 @@ and the Codex identity chain (`CODEX_HOME`, `CODEX_THREAD_ID` and related
 | `cbus auth set ... --token - / --cf-id - / --cf-secret -` | Each `-` value reads **all of stdin** — only one `-` per invocation is practical |
 | `cbus hook-exit` | Reads the SessionEnd hook's JSON payload; extracts `session_id`. **Blocks awaiting EOF at an interactive TTY** |
 | `cbus hook-compact <pre\|post>` | Reads the PreCompact/PostCompact hook's JSON payload; extracts `session_id` + `trigger`. Same TTY-block behavior as `hook-exit` |
+| `cbus hook-denied` | Reads the PermissionDenied hook's JSON payload; never forwards `tool_input`. Same TTY-block behavior as `hook-exit` |
+| `cbus hook-regressed` | Reads the Stop hook's JSON payload; reads the transcript only for a seat with someone to tell. Same TTY-block behavior as `hook-exit` |
 | `cbus hook-join` | Reads the SessionStart hook's JSON payload (`main.go:313`) |
 | `cbus codex-stop-hook` | Reads the Codex Stop hook's JSON payload; long-polls the inbox under the hook's timeout |
 | (internal) | The Go client dials the relay directly over `net/http`, never a shelled-out `curl`; Keychain writes go through `security -i`; secrets never appear in any argv |
@@ -250,7 +252,7 @@ switch to a `run*` function).
 
 > **Go-native verbs (post-cutover).** `connect`, `connection`, `daemon`,
 > `codex`, `codex-bridge`, `hook-join`, `hook-compact <pre|post>`,
-> `codex-stop-hook`,
+> `hook-denied`, `hook-regressed`, `codex-stop-hook`,
 > `install-codex-skills`, `codex-permissions`, `spawn`, the `formation …`
 > family, `close`, `arrange`/`scatter`/`focus` (§9), `selfupdate`,
 > `install-commands`, `install-roles`, and
@@ -654,7 +656,7 @@ for hooks and scripted multi-session drivers.
    (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host,
    ts}`, where `host` is `$CBUS_HOST` or the system hostname (see the
    environment variables table), plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
-   launcher's birth record supplied it, with `model`; `profile` and
+   launcher's birth record supplied it, with `model` and `role`; `profile` and
    `harness` are stamped too (`store.go:295`). `listenerStart` arrives only
    at arm, and `connectionId` stays absent until a native `connect` claims
    the alias.
@@ -1254,6 +1256,60 @@ be live and bound to this session (`grant <id> is bound to session ..., not this
 otherwise). A once grant is consumed by exactly one use (a first-writer-wins
 `<id>.used` marker); a second use prints `... was already used`.
 
+### `cbus permit` / `cbus permits` / `cbus permits use` / `cbus permit revoke`
+
+A permit is a coordinator's record of what the operator said a seat may do, so a seat
+reaching a gated action does not have to stop for the operator's word in its own pane.
+Local to this machine: a relay channel is refused, and a seat elsewhere has none.
+
+```
+cbus permit <actions> --repo <remote> (--ref <pattern> | --target <t> | --effort <text>)
+            --says "<operator's words>" [--ttl D] [--channel ch]
+cbus permits [--all] [--json]
+cbus permits use <action> (--ref <branch> | --target <t>) [--repo <remote>] [--channel ch]
+cbus permit revoke <id>
+```
+
+`--channel` defaults to this session's one channel. `--ttl` takes `12h` or `7d`, default
+7 days, maximum 30. `--says` is required: an audit trail, not proof.
+
+**Classes.** `push-branch`, `draft-pr` and `pr-update` cover a ref pattern, several per
+permit. `merge`, `release` and `install` cover one exact `--target` and take no pattern, one
+per permit. `effort` carries scope text, is read with plain `cbus permits` and is not
+used. There is no wildcard class. Force pushes have no class and are never covered, and
+cbus cannot see which flags a later `git push` carries.
+
+**Ref patterns.** `*` and `?` only, with `path.Match` semantics: neither crosses a slash.
+`epic/demo*` covers `epic/demo-1`, not `epic/demo/x`; `epic/demo/*` covers `epic/demo/x`,
+not `epic/demo/x/y`. A leading `refs/heads/` is dropped. Refused: no literal prefix before
+the first wildcard (`*`, `*/*`), and a wildcard pattern that reaches `main` or `master`
+(`m*`). An exact `--ref main` is allowed, because that is the operator naming it.
+
+**Repo.** Stored as `host/path`, so ssh and https of one repo compare equal and a credential
+in a URL is not stored. Path case is kept, so a case difference is a mismatch. A local path
+or `file://` is refused. `use` defaults to the working directory's `origin`. This checks
+what was asked: the seat is responsible for pushing to the repo it checked.
+
+**Who can write.** The caller must hold an address that some coordinator record on that
+channel names (`.coordinators/<channel>/`). **Who it counts for.** At `use`, the seat's
+`CoordinatorOf` must equal the permit's `writer`. No record, an unanswered record or a
+mismatch refuses. The writer is an address, with its session stored for audit only, so a
+restored coordinator's permits keep working; the cost is that whoever later takes that alias
+on this machine is the writer. A permit is not bound to the seat's session either.
+
+**`use` output.** Covered: one stdout line naming the permit and how many times it was checked, exit 0,
+and a line appended to `<id>.uses`. Uses are counted for audit, not consumed. A use that
+cannot be recorded is refused. Otherwise one stderr
+line, `not covered: <reason>; ask <coordinator> on the bus`, exit 1, naming the nearest
+miss: written by someone else, revoked, expired, another repo, another ref or target. A bad
+request exits 2, so a seat can tell a typo from a no.
+
+**`permits`** lists live permits on this session's channels written by its coordinator or by
+itself. `--all` lists every channel and state with use counts and `says`.
+
+**`permit revoke`** has no terminal gate and any local caller can run it, because revoking
+only tightens. Revoking twice reports the first revocation.
+
 ### `cbus close <channel>/<alias> [...] [--force]`
 
 Ends one or more **local** peer sessions on request — the only command that
@@ -1549,6 +1605,92 @@ profile. Applied by hand, Carlos-gated; no installer or `cbus` verb does this.)
 
 **Quirk:** args are dropped past `phase` — same family as `hook-exit`'s
 dropped args, different reason underneath (point 1 above).
+
+### `cbus hook-denied` — the PermissionDenied flow
+
+Lets a seat's coordinator hear that the auto mode classifier refused a tool call
+in that seat, with no model involved. The coordinator cannot override a denial: it
+reroutes the work or asks the operator. Claude Code fires this hook only in auto
+mode, so manual denials and deny rules never reach it.
+
+Behavior, exactly:
+
+1. Reads `session_id`, `tool_name`, `reason` and `tool_input` from stdin; env
+   fallback for the session, silent no-op without one. Always exits 0 and writes
+   nothing to stdout, so it never asks for a retry.
+2. For each local registration of that session, reads the coordinator record
+   (`CoordinatorOf`). No coordinator means no notice.
+3. Appends a `kind=denied` line to the coordinator's inbox, from the seat's address:
+   `coder denied: Bash, [Credential Exploration], "Read the deploy config"`. The
+   quoted part is the Bash `description` field; other tools have none.
+4. Reads no command or `tool_input` into the notice. `reason` and `description` are
+   written by a classifier and a model and could quote the input, so a field holding
+   two adjacent words from any `tool_input` string, or two or more pieces of 8 or more
+   characters, is withheld whole. A single such piece, or a whole short value, becomes
+   `[withheld]`. Control characters are dropped and each field is one line of at most
+   200 characters. This cannot catch one short word on its own, or a secret that was
+   paraphrased, split or re-encoded. Common words in the command can withhold more than
+   they need to.
+5. Collapses repeats per seat, session, tool and reason (`.denials/<channel>/<alias>.json`).
+   The first sends; repeats within 10 minutes only count; the next send after that
+   adds `(N more since HH:MMZ)`. A count with no later denial is never reported.
+   A notice that could not be delivered does not count as sent.
+
+Local only, like the coordinator record: a coordinator on another machine hears nothing.
+
+**Wiring is manual** — no installer touches settings. A machine without the hook is
+silent, so no notice does not mean no denials. The entry is in the snippet under
+`cbus hook-regressed` below.
+
+### `cbus hook-regressed` — the Stop flow
+
+Lets a coordinator hear that a seat fell back to another model after a classifier
+refusal. Claude Code writes a `type: system`, `subtype: model_refusal_fallback` line to
+the transcript and the session stays on the fallback until someone runs `/model` there.
+That step stays with the operator.
+
+Behavior, exactly:
+
+1. Reads `session_id` and `transcript_path` from stdin. Always exits 0 and writes nothing
+   to stdout. The path's file name must be `<session_id>.jsonl`.
+2. Picks a recipient for each local registration of that session: its coordinator
+   (`CoordinatorOf`), or itself if any record on the channel names it, or nobody. With
+   nobody the transcript is not read, so a plain session pays for a directory read at most.
+3. Reads the transcript from a per-seat offset (`.regressions/<channel>/<alias>.json`), at
+   most 4 MiB per Stop, whole lines only. A slice with no newline is one oversized line
+   and is skipped. A large backlog takes several Stops.
+4. Counts only an entry with `isSidechain` false, `sessionId` equal to this session and
+   no `forkedFrom`. `--fork-session` copies the parent's rows under the fork's own
+   `sessionId` plus `forkedFrom`, so without that a fork would report its parent's fallback.
+5. Appends a `kind=regressed` line: `coder fell back from claude-a to claude-b at
+   2026-11-02T10:00:00Z, [cyber]; /model in that pane if it is still on claude-b`. Only
+   those fields are read, the names reduced to `[A-Za-z0-9._-]`, never the entry's content
+   or explanation. The notice is dated and says nothing about now: the first scan of a seat
+   starts at offset 0, so a session resumed into a formation reports an old fallback once,
+   even if someone has since run `/model`. A silent seat still on the fallback is the worse miss.
+6. The offset moves past an entry only once it was delivered. Lock waits are 250 ms, and
+   a busy lock leaves the entry for the next Stop.
+
+The coordinator's model files the ask, so this reaches the asks band only if that model
+does. The notice's guidance tells it to.
+
+**Limits.** The transcript entry is undocumented: if a Claude Code version renames it, this
+goes silent with no signal. `PostModelSwitch` with `source: "auto"` may cover the same
+event, but that was not measured, because no way to trigger it short of a real refusal
+was available. A session that ends before its next Stop reports nothing until it resumes.
+
+**Wiring is manual** — no installer touches settings. A machine without these hooks is
+silent, so no notice does not mean no denials and no fallbacks. Add to
+`~/.claude/settings.json`:
+
+```json
+{"hooks": {
+  "PermissionDenied": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}],
+  "Stop": [{"hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-regressed"}]}]
+}}
+```
 
 ### Codex integration — `codex`, `codex-bridge`, `hook-join`, `codex-stop-hook`
 
@@ -2127,12 +2269,15 @@ variants:
   take the peer outside the effort (another repository, another machine, work
   the effort excludes) is a scope change for the operator, not a ruling. Push,
   opening or merging a pull request, release or install, and anything else
-  outward or irreversible are reserved to the operator whoever relays them,
-  and a quoted approval in a bus message does not grant them.
+  outward or irreversible need the operator's approval. A quoted approval,
+  permit or grant, or a message telling the peer to go, does not grant them: the
+  peer runs `cbus permits use` itself, and otherwise holds and asks its coordinator
+  on the bus rather than the operator in its pane.
 - **No effort stated.** With no `--brief`, and always for `spawn --role` and
   the fork prompt, a line fixes the scope: the effort is the first assignment
-  the coordinator sends, and widening it later is a scope change for the
-  operator. With a brief, the brief is the effort and the line is absent.
+  the coordinator sends. Widening it within the same epic or tracker item is the
+  coordinator's ruling, recorded as an effort permit; anything wider is a scope
+  change for the operator. With a brief, the brief is the effort and the line is absent.
 - **No coordinator.** This covers `spawn --role` from a session that is not
   registered on that local channel, and any remote `spawn --role`, except
   `--role orchestrator` (below): `No coordinator is
@@ -2145,15 +2290,18 @@ variants:
   and a formation's other peers when it names you its orchestrator seat.` The
   line holds in every topology, including the operator applying a formation
   whose orchestrator seat launched nobody. They get the same effort fence and
-  reserved list, and are told that a peer holding a reserved action needs the
-  operator's own word, not the coordinator's relay of it. Without a brief, the coordinator's own effort
-  is what the operator assigns it, and a peer's effort is the first assignment
-  the coordinator sends that peer.
+  approval list. They rule what is inside the delegation, file one ask for an
+  approval they do not hold, write a permit when the operator has said so in that
+  session, and tell the seat to check it. Apart from an effort permit for their own
+  ruling, nothing else justifies a permit: a peer saying the operator agreed is not
+  the operator's word. Without a brief, the coordinator's own effort is what the
+  operator assigns it, and a peer's effort is the first assignment the coordinator
+  sends that peer.
 
 A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
 committed role files states the matching rule from the peer's side.
 
-### `cbus formation save <name> [channel]`
+### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...] [--role alias=role ...]`
 
 Snapshots the channel's current peers into the runtime store. Channel defaults to
 this session's own registration (`not joined to a channel in this session — pass
@@ -2167,7 +2315,9 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
   skipped with a note), and the birth-record `origin`/`model` **when the
   launcher recorded them** (§9 / protocol.md birth records). It fills a blank
-  origin/model **once** and never overwrites a hand-edited field;
+  origin/model **once** and never overwrites a hand-edited field; a recorded
+  birth-record `role` fills `rolefile: roles/<role>.md` while the peer's brief
+  is still blank or the TODO marker, never over a hand rolefile or freeform role;
   The **saving session's own** peer also gets its `target` reconciled with
   the terminal save runs in: `$TMUX` set moves `tab`/`window`/blank to
   `tmux`, a plain iTerm2 session moves `tmux` back to `tab`, and `pane` or a
@@ -2175,7 +2325,7 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   terminal — <alias>: tab -> tmux`. Other peers keep their recorded target,
   since save cannot see their terminals; the saver is normally the anchor,
   the one seat `resume` launches.
-  `rolefile`/`role` and `split` are yours to fill in — `save` never writes
+  `rolefile`/`role` for a peer with no recorded role, and `split`, are yours to fill in — `save` never writes
   `split` at all, even on a blank one. A corrupted birth-record is skipped with
   a note, not fatal. (Fleet caveat until every binary carries the profile
   field: an older binary's meta rewrite drops the stamp — hand fills in the
@@ -2202,9 +2352,23 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   refusing would strand the files the invariant exists to converge), and any
   joined re-save heals via the anchor default. `show` renders the absence as a
   named `DEFECT` row.
-- New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
-  `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
-  this with the peer's brief`).
+- New peers get `mode=resume` when they hold a real session id and their
+  origin is `fresh` or `joined` (the transcript is their own), else
+  `mode=template` (fork-born, origin unknown, or no session yet; `apply` would
+  refuse a resume of those). Also `onStale=template`, so a lost transcript
+  degrades to a fresh start, `target=tab`, and, unless a birth-record role
+  filled `rolefile`, a `role` TODO marker (`TODO: set rolefile to
+  roles/<alias>.md@<commit>, or replace this with the peer's brief`). A refresh
+  never changes a recorded mode; the CLI lists which new peers got which mode.
+- `--mode alias=resume|fork|template` (repeatable) sets that peer's mode in
+  the file, overwriting what it held. An alias the formation does not hold, a
+  mode outside the enum, or `resume`/`fork` for a peer whose origin is `fork`
+  or unknown (apply would refuse it) refuses the save with nothing written.
+- `--role alias=role` (repeatable) points that peer's `rolefile` at
+  `roles/<role>.md` and clears any freeform `role`. It is the fill for a seat
+  that joined instead of being spawned with `--role`. The role must resolve
+  from here (this repo's `roles/`, else `$CBUS_DIR/roles`) and the alias must
+  be in the formation, or the save refuses with nothing written.
 - Peers in the file but no longer on the channel are **kept**, not dropped.
 - Refusals: `refusing to overwrite an envelope that will not load: <err>` and
   `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
@@ -2216,8 +2380,10 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 ```
 saved formation "myeffort" (<path>, new)
   channel "myeffort": +3 new (orchestrator, coder, reviewer)
-  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;
-  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded
+  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them
+  mode=resume (own transcript): coder, reviewer
+  mode=template (fork-born, origin unknown or no session): orchestrator
+  role TODO (no recorded role; set one with --role <alias>=<role>): orchestrator
   check it: cbus formation show myeffort
 ```
 
@@ -2301,15 +2467,24 @@ surfaced as the per-peer detail — the load-bearing ones:
   → refused (D14): `session <sid> is held at <where> (live or availability
   unresolved) — resume risks a second process on one transcript; confirm the
   original has stopped, or set mode=fork if a copy of it is what you want`
-  (`formation_plan.go:309-315`, quoted verbatim). "Held" covers two sources:
-  a live listener or managed consumer on the bus, and, on macOS and Linux, a
+  (`formation_plan.go`, quoted verbatim). "Held" covers three sources:
+  a live listener or managed consumer on the bus; on macOS and Linux, a
   running process whose argv resumes the sid (`--resume <sid>`, `-r <sid>`,
   `--resume=<sid>`, read from `ps`), reported as `held at pid <n> (a process
-  resuming it, not on the bus)`. The second catches a session reopened by hand
-  or by another launcher that never re-joined. A fresh session that never
-  joined carries no sid in its argv and stays invisible; Windows has no argv
-  read and reports only bus holders. `formation resume` gates its anchor on
-  the same set.
+  resuming it, not on the bus)`; and Claude Code's own session registry,
+  `<config>/sessions/<pid>.json` under `~/.claude`, `$CLAUDE_CONFIG_DIR` and
+  each CCS instance, where a file whose pid is alive and names the sid is
+  reported as `held at pid <n> (Claude Code's session registry lists it
+  running)`. The registry catches a session started fresh that left the bus
+  or lost its listener, which carries no sid in its argv. A stale file whose
+  pid was recycled reads as held: the refusal fails closed. `formation resume`
+  gates its anchor on the same set.
+- a resume whose launch-intent marker another launch holds → `failed`: before
+  it forks a `resume`, apply claims the same marker `formation resume` uses
+  (`a launch of "<alias>" was started <age> ago (pid <n>) and has not joined
+  yet ...`). It closes the gap between a fork and the child's join, when no
+  bus record shows the session yet, so two applies cannot resume one
+  session. The marker clears on that session's join or after 180s.
 - one transcript recorded under two aliases → refused: `session <sid> is
   recorded under more than one alias in this formation — one of them is wrong;
   fix the file` (`formation_plan.go:278-282`).
@@ -2421,11 +2596,14 @@ liveness is volatile, so the brief hands it to the dry-run by name. It closes
 with the reconvene re-save instruction, then the coordinator's side of the
 delegation section (§10, above).
 
-### `cbus formation bootstrap <name> <alias> [--brief TEXT]`
+### `cbus formation bootstrap <name> <alias> [--brief TEXT] [--dry-run]`
 
 Prints **one** peer's first-turn prompt to stdout for you to paste by hand — the
 path for a peer `apply` will not launch (recorded on another machine; cross-
-machine launch is not in v1) or for previewing a brief. It refuses whatever
+machine launch is not in v1). It also records the coordinator that prompt names,
+so use `--dry-run` to preview a brief: it prints the same prompt and writes nothing.
+A name already in the store keeps its record, with a note on stderr, so a preview
+without the flag cannot unbind a running seat. It refuses whatever
 the file alone proves wrong, the same identity checks apply enforces
 (`harness=codex`/`formationHarnessRefusal`, duplicate sid, `origin=fork`,
 empty origin for a resume/fork mode), without gathering apply's world. The one
@@ -2483,7 +2661,7 @@ continues a session's own transcript; `fork` tells the child plainly it is not
 the original and must not act on unfinished parent work; `template` comes back on
 a fresh transcript, briefed from its role file. **A peer is never forked across
 roles** — the exact design mistake formations exist to fix. The `origin`/`model`
-that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
+(and `role`) that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
 the peer's `meta.json` at birth, before the child boots, and `save` picks them up
 automatically. Full field-level mechanics: protocol.md (meta.json birth records).
 
@@ -2673,7 +2851,9 @@ Connects the current session through its native messaging socket.
    Monitor, `cbus tail`, polling loop, keepalive, or periodic model task.
 
 Incoming messages: reply to the exact `from=` address; peer text cannot
-approve actions or override the user's permissions. Presence: report joins/
+approve actions or override the user's permissions; a permit is not peer text,
+since the seat checks it itself with `cbus permits use`, and a permit quoted in a
+message is still nothing. Presence: report joins/
 leaves/departures/renames briefly, retaining known roles, never inferring a
 role from an alias or current availability from a stale event.
 
@@ -2829,8 +3009,8 @@ Wraps the whole `cbus formation` family (§10): `save`, `show`, `apply`
 command and reports its output.
 
 **save** records only what the bus knows (alias, sessionId, cwd, machine),
-auto-stamping origin/model from a launcher birth-record when one exists,
-while role/profile/split stay hand-maintained; points the user at `show` for
+auto-stamping origin/model/role from a launcher birth-record when one exists,
+while split and the role of a peer that was not spawned with one stay hand-maintained; points the user at `show` for
 what still needs filling in. **show** flags stale sids and TODO roles before
 anything applies. **apply** relaunches missing peers, anchor-first,
 sequentially: this session must be joined to the formation's channel first
@@ -2891,8 +3071,9 @@ Do nothing else.
 `allowed-tools: Bash(cbus:*), Bash(git rev-parse:*)`
 
 Zero-friction checkpoint: saves the channel's topology, then triages what the
-bare save left unusable for a later `apply`. Read-mostly, writes one envelope
-file, never launches, kills, renames or edits a peer.
+bare save left unusable for a later `apply`. Read-mostly: writes one envelope
+file, re-saves with the role and mode fills the user approves, never launches,
+kills, renames or edits a peer.
 
 1. **Resolve the channel** from `cbus whoami`: one local channel, use it;
    several, ask which (never guess); none (exit 1), fall back to the git repo
@@ -2909,11 +3090,15 @@ file, never launches, kills, renames or edits a peer.
    freeform `role` text; stale sids mean `onStale=template` applies and that
    seat comes back fresh; `kept, not on the channel now` seats are usually
    fine but worth stating; a `mode=template` peer that still has a live sid
-   is worth flagging as probably better off `resume`d; the anchor peer is
+   is proposed for `resume`; the anchor peer is
    named, or flagged if `show` reports none.
 4. **Report** in a few lines: name, channel, peer count, new vs kept, then
    only the items needing a decision, each tied to its peer; a clean
    checkpoint (no warnings, no TODO roles) says so and stops.
+5. **Fill**: asks once with every proposed role (its own seat as
+   `orchestrator` when it coordinates; other peers only from what the
+   conversation shows) and mode, then applies the approved ones in one
+   `save --role <alias>=<role> --mode <alias>=resume` re-save and shows again.
 
 Never runs `apply`, `resume`, `bootstrap` or `rm` from here, and never arms a
 Monitor; send the user to `/bus-formation` for those.

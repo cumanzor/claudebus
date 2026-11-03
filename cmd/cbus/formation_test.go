@@ -218,10 +218,22 @@ func TestFormationSaveVerb(t *testing.T) {
 		}
 	})
 	for _, want := range []string{`saved formation "roles"`, "new", "+2 new", "coder", "orchestrator",
-		"rolefile/role are yours to fill in", "cbus formation show roles"} {
+		"role TODO (no recorded role; set one with --role <alias>=<role>): coder, orchestrator", "mode=template (fork-born, origin unknown, no session, or set by --mode): coder, orchestrator",
+		"cbus formation show roles"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("save output missing %q:\n%s", want, out)
 		}
+	}
+
+	// --mode is the hand acting; a typo'd alias refuses
+	if rc := runFormation([]string{"save", "roles", "--mode", "coder=resume"}); rc == 0 {
+		t.Error("--mode resume for a peer with no recorded origin must refuse")
+	}
+	if rc := runFormation([]string{"save", "roles", "--mode", "coder=fork"}); rc == 0 {
+		t.Error("--mode fork for a peer with no recorded origin must refuse")
+	}
+	if rc := runFormation([]string{"save", "roles", "--mode", "ghost=resume"}); rc == 0 {
+		t.Error("--mode for an unknown alias must refuse")
 	}
 
 	// a re-save is a refresh, and says so
@@ -514,5 +526,38 @@ func TestFormationSaveReportsRetarget(t *testing.T) {
 	}
 	if !strings.Contains(out, "target follows this session's terminal — orchestrator: tab -> tmux") {
 		t.Errorf("save output does not name the retarget:\n%s", out)
+	}
+}
+
+// TestFormationBootstrapRecordsUnlessDryRun: the verb writes the coordinator record
+// the prompt names, and --dry-run leaves the store untouched.
+func TestFormationBootstrapRecordsUnlessDryRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	saveFixture(t, dir, "roles", fixtureRoles())
+	record := filepath.Join(dir, ".coordinators", "roles", "coder.json")
+
+	withStdout := func(args ...string) string {
+		t.Helper()
+		return captureStdout(t, func() {
+			if rc := runFormation(args); rc != 0 {
+				t.Fatalf("%v: rc = %d", args, rc)
+			}
+		})
+	}
+	dry := withStdout("bootstrap", "roles", "coder", "--dry-run")
+	if !strings.Contains(dry, "--- delegation ---") {
+		t.Fatalf("--dry-run must still print the prompt:\n%s", dry)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".coordinators")); !os.IsNotExist(err) {
+		t.Fatalf("--dry-run wrote to the store: %v", err)
+	}
+	if got := withStdout("bootstrap", "roles", "coder"); !strings.Contains(got, "Your coordinator is roles/orchestrator,") {
+		t.Fatalf("prompt:\n%s", got)
+	}
+	b, err := os.ReadFile(record)
+	if err != nil || !strings.Contains(string(b), `"coordinator": "roles/orchestrator"`) || !strings.Contains(string(b), "deadbeef-") {
+		t.Fatalf("record %q: %v", b, err)
 	}
 }

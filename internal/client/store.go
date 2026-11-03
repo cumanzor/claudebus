@@ -42,6 +42,8 @@ type peerMeta struct {
 	// field reads as unknown/hand-maintained — never inferred.
 	Origin string `json:"origin,omitempty"`
 	Model  string `json:"model,omitempty"`
+	// role name the launcher briefed the child with; omitempty so older metas rewrite byte-identically
+	Role string `json:"role,omitempty"`
 	// Profile is the CCS instance this session runs under, stamped at join from the
 	// session's own CLAUDE_CONFIG_DIR — the session is the only party that knows it,
 	// and formation save captures it so a restore can relaunch the same profile.
@@ -216,11 +218,11 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 	// instant before birthForJoin could read it — D18 case 1 would silently fail for
 	// any session that had armed. Reading up front preserves it through the reap. An
 	// auto-pick join has no prior meta and stays origin=joined, model unknown.
-	origin, model := OriginJoined, ""
+	origin, model, role := OriginJoined, "", ""
 	resuming := false
 	if alias != "" && core.ValidName(alias) {
 		metaPath := filepath.Join(CBUSDir(), ch, alias, "meta.json")
-		origin, model = birthForJoin(metaPath, SessionID())
+		origin, model, role = birthForJoin(metaPath, SessionID())
 		// a session coming back to its own meta is a RESUME, not a new arrival: the
 		// process ended, the registration survived, the same session is returning.
 		// Recorded as its own kind so continuity is a fact rather than something a
@@ -229,6 +231,7 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 			resuming = true
 		}
 	}
+	origin = joinOrigin(origin, SessionID())
 	// Run boundary, captured BEFORE this join mutates the channel. Afterwards our own
 	// meta makes the channel look populated, so a first join into a dead channel would
 	// be indistinguishable from one landing in a live run — and would silently inherit
@@ -296,11 +299,12 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 		Alias: alias, Channel: ch, SessionID: SessionID(), Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: host, TS: now, LastActivity: now,
-		Origin: origin, Model: model, Profile: currentProfile(), Harness: harnessNameFn(),
+		Origin: origin, Model: model, Role: role, Profile: currentProfile(), Harness: harnessNameFn(),
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", false, err
 	}
+	_ = settleCoordinatorRecord(ch, alias, m.SessionID)
 	// A launch intent for this name is answered the moment the SAME session arrives:
 	// the child is here, the window it guarded is shut, and the launcher's own opinion
 	// never enters into it. A different session joining this name leaves the marker
@@ -339,23 +343,24 @@ func Join(ch, alias string) (chosen string, alreadyJoined bool, err error) {
 //   - anything else, or no readable meta: a session joining under a name it did not
 //     reserve — origin=joined, model unknown. Another session's birth-record would be
 //     misattribution if carried.
-func birthForJoin(metaPath, selfSid string) (origin, model string) {
+func birthForJoin(metaPath, selfSid string) (origin, model, role string) {
 	b, err := os.ReadFile(metaPath)
 	if err != nil {
-		return OriginJoined, ""
+		return OriginJoined, "", ""
 	}
 	var m struct {
 		SessionID string `json:"sessionId"`
 		Origin    string `json:"origin"`
 		Model     string `json:"model"`
+		Role      string `json:"role"`
 	}
 	if json.Unmarshal(b, &m) != nil {
-		return OriginJoined, ""
+		return OriginJoined, "", ""
 	}
 	if m.SessionID == "reserved" || (selfSid != "" && m.SessionID == selfSid) {
-		return m.Origin, m.Model
+		return m.Origin, m.Model, m.Role
 	}
-	return OriginJoined, ""
+	return OriginJoined, "", ""
 }
 
 // ReserveAlias claims an alias in ch on behalf of a NOT-YET-BOOTED child session
@@ -370,8 +375,8 @@ func birthForJoin(metaPath, selfSid string) (origin, model string) {
 // origin/model are the birth-record (cbus-m9l): the launcher knows how the child was
 // born (spawn=fresh, branch=fork) and on what model, and stamps them here so the
 // child's join can carry them into the real-sid meta. Blank when the caller does not
-// know (never a guess).
-func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
+// know (never a guess). role is the role name the child is briefed with, "" when none.
+func ReserveAlias(ch, want, origin, model, role string) (alias string, err error) {
 	host, err := HostLabel() // before any store mutation: a bad label must leave no trace
 	if err != nil {
 		return "", err
@@ -426,7 +431,7 @@ func ReserveAlias(ch, want, origin, model string) (alias string, err error) {
 		Alias: alias, Channel: ch, SessionID: "reserved", Cwd: cwd(),
 		ListenerPid: jsonNull, OwnerPid: jsonNull,
 		Host: host, TS: now, LastActivity: now,
-		Origin: origin, Model: model,
+		Origin: origin, Model: model, Role: role,
 	}
 	if err := writeMeta(dir, m); err != nil {
 		return "", err
@@ -620,6 +625,8 @@ func Rename(newAlias, wantCh string) (ch, old string, alreadyNamed bool, err err
 		return "", "", false, fmt.Errorf("rename failed")
 	}
 	_ = renameMeta(newDir, newAlias) // best-effort, like bash `|| true`
+	_ = moveCoordinatorRecord(ch, old, newAlias)
+	_ = moveRegressionMark(ch, old, newAlias)
 	// prevAlias is the whole point: without it a consumer sees one session vanish and
 	// an unrelated one appear, and alias+time-window correlation guesses the link
 	RecordEvent(LedgerRename, ch, newAlias, metaSessionID(filepath.Join(newDir, "meta.json")), func(ev *LedgerEvent) {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"claudebus/internal/core"
 )
 
 // serveControlSocket serves h on the store's real control socket. The store is
@@ -53,6 +55,10 @@ func TestCLIWritersWakeTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	schedulerWait(t, "grant notice woke the daemon", func() bool { return d.snapshot(cs[0].ID).Accepted == 3 })
+	if err := deliverNotice("scheduler", "worker-0", core.Message{From: "scheduler/tester", To: "scheduler/worker-0", TS: Now(), Kind: deniedKind, Text: "tester denied: Bash"}); err != nil {
+		t.Fatal(err)
+	}
+	schedulerWait(t, "denial notice woke the daemon", func() bool { return d.snapshot(cs[0].ID).Accepted == 4 })
 }
 
 func TestDaemonWakeEndpoint(t *testing.T) {

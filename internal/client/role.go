@@ -17,7 +17,7 @@ import (
 // serve), then $CBUS_DIR/roles/<role>.md as the machine-global fallback.
 // Read before any alias is reserved, so a missing role fails clean.
 func LoadRole(role string) (body, model string, err error) {
-	if !core.ValidName(role) || strings.HasPrefix(role, "-") {
+	if !validRoleName(role) {
 		return "", "", fmt.Errorf("bad role %q", role)
 	}
 	var dirs []string
@@ -38,6 +38,10 @@ func LoadRole(role string) (body, model string, err error) {
 		return string(b), roleModel(string(b)), nil
 	}
 	return "", "", fmt.Errorf("role %q not found (tried %s)", role, strings.Join(tried, ", "))
+}
+
+func validRoleName(role string) bool {
+	return core.ValidName(role) && !strings.HasPrefix(role, "-")
 }
 
 // roleModel pulls the first "MODEL: <short>" line; invalid or flag-shaped

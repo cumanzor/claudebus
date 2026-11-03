@@ -46,9 +46,23 @@ func codexRolloutWriters(ctx context.Context, path string) ([]codexWriterFD, err
 	return found, nil
 }
 
+func procIsZombie(pid int) bool {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	return err == nil && statIsZombie(string(b))
+}
+
+// the name in /proc/<pid>/stat may hold spaces and parens, so the state follows the last ')'
+func statIsZombie(stat string) bool {
+	i := strings.LastIndexByte(stat, ')')
+	return i >= 0 && strings.HasPrefix(stat[i+1:], " Z")
+}
+
 func codexProcessFiles(ctx context.Context, pid int) ([]codexWriterFD, error) {
 	base := filepath.Join("/proc", strconv.Itoa(pid))
 	es, err := os.ReadDir(filepath.Join(base, "fd"))
+	if os.IsPermission(err) && procIsZombie(pid) {
+		return nil, nil // a zombie has no descriptor table; only a live unreadable process stays uncertain
+	}
 	if err != nil {
 		return nil, err
 	}

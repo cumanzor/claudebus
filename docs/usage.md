@@ -242,6 +242,34 @@ not a promise of current availability. Do not acknowledge presence on the bus.
 Compaction updates context without implying a membership change. Native managed
 aliases cannot currently be renamed in place.
 
+A seat's coordinator hears about auto mode denials through the `PermissionDenied`
+hook, and about a classifier model fallback through the `Stop` hook. Add both with
+`cbus install-hooks` (`--dry-run` shows the change, `--path FILE` targets one settings
+file). It merges into your existing hooks, keeps your key order, writes a backup, follows
+a symlinked settings file, and refuses a file it cannot parse. It does rewrite the file
+with two-space indentation. `selfupdate` never changes settings: it prints a note when
+these hooks are missing. The entries it adds:
+
+```json
+{"hooks": {
+  "PermissionDenied": [{"matcher": "*", "hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}],
+  "Stop": [{"hooks": [
+    {"type": "command", "command": "$HOME/.local/bin/cbus hook-regressed"}]}]
+}}
+```
+
+A machine without these hooks is silent, so no notice does not mean no denials and no
+fallbacks. Manual denials and deny rules do not fire the first. See
+[`cbus hook-denied`](architecture/command-reference.md#cbus-hook-denied--the-permissiondenied-flow)
+and [`cbus hook-regressed`](architecture/command-reference.md#cbus-hook-regressed--the-stop-flow).
+
+A seat with a coordinator record acts on an approval through `cbus permits use`
+([permits](architecture/command-reference.md#cbus-permit--cbus-permits--cbus-permits-use--cbus-permit-revoke))
+and otherwise asks its coordinator on the bus. If your own instructions file tells a
+model to push only when you ask, a seat may still stop at that rule. Add a line saying
+a permit it checked itself counts as your word; cbus does not write that file.
+
 Legacy `join`/Monitor peers retain their listener-based presence and optional
 `cbus hook-exit` / `cbus hook-compact pre|post` hooks. Relay presence differs by
 transport; see [relay.md](relay.md). Before replacing a legacy membership, follow

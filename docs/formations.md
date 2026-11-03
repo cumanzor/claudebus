@@ -20,7 +20,7 @@ cbus formation save myeffort              # snapshot this channel's peers
 cbus formation show myeffort              # inspect it — stale sids, TODO roles
 cbus formation apply myeffort --dry-run   # preview the relaunch plan
 cbus formation apply myeffort             # relaunch the peers that are missing
-cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt
+cbus formation bootstrap myeffort coder   # print one peer's first-turn prompt, record its coordinator
 cbus formation list                       # runtime saves only (starters resolve via show/apply)
 cbus formation rm myeffort                # delete a saved formation
 ```
@@ -29,7 +29,11 @@ cbus formation rm myeffort                # delete a saved formation
   session id, cwd, machine — plus whatever the launcher recorded when the peer
   was born (see *Birth records*, below). Everything else (a hand-picked role,
   notes, narrative) is yours to fill in, and a later save never overwrites a
-  hand-edited field.
+  hand-edited field. A new peer whose transcript is its own (spawned fresh or
+  joined) is saved with `mode=resume`; a fork-born or unattributed one gets
+  `mode=template`. `--mode alias=resume|fork|template` changes one peer's
+  saved mode, and `--role alias=role` points a seat that joined (rather than
+  being spawned with `--role`) at `roles/<role>.md`.
 - **`apply`** relaunches exactly the peers missing from the channel,
   sequentially and anchor-first (the orchestrator comes up before anyone who
   expects to reach it). Convergence is a round-trip, not a timer: each kickoff
@@ -44,16 +48,20 @@ cbus formation rm myeffort                # delete a saved formation
   only, without editing the saved file, and composes with `--only`.
 - **`bootstrap`** prints one peer's first-turn prompt for you to paste by
   hand — the path for a peer `apply` won't launch itself (recorded on another
-  machine; cross-machine launch isn't in v1) or for previewing a brief before
-  opening a fleet.
+  machine; cross-machine launch isn't in v1). It also records the coordinator
+  that prompt names; `--dry-run` prints the same prompt and writes nothing, for
+  previewing a brief before opening a fleet.
 - Every kickoff says who coordinates the peer. That is the seat that launched
   it, or the formation's orchestrator seat when the file declares exactly one
   and someone else ran `apply`. The kickoff says the coordinator's rulings on
   scope, contract and precedence inside the effort bind; with no `--brief`,
   the effort is the first assignment the coordinator sends. It says that
   leaving the effort is a scope change for you, and that push, pull requests,
-  release, install and anything outward or irreversible stay yours however
-  they are relayed. The wording is fixed in the binary. See
+  release, install and anything outward or irreversible need your approval. A
+  seat acts on a permit it checked itself with `cbus permits use`, and otherwise
+  asks its coordinator on the bus. The coordinator files one ask for an approval
+  it does not hold and writes the permit when you have said so in its session. The
+  wording is fixed in the binary. See
   `docs/architecture/command-reference.md` §10 for each variant.
 - A `pane`-target peer's split chains off the largest pane made so far
   (applier plus this run's created panes), a self-balancing grid instead of
@@ -123,8 +131,8 @@ myeffort --dry-run`, and so on — for driving formations from inside a Claude
 Code session rather than shelling out directly. `/save-formation` is the
 no-argument sibling: it resolves the channel from `cbus whoami`, saves, then
 names the peers whose `role: TODO`, stale sid, or `mode: template` would bite
-on the next `apply`. It only saves and reports; it never applies, resumes,
-bootstraps or removes.
+on the next `apply`, then offers the `--role`/`--mode` fills and re-saves with
+the ones you approve. It never applies, resumes, bootstraps or removes.
 
 ## Coming back after a reboot
 

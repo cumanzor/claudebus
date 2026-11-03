@@ -91,6 +91,10 @@ func run(args []string) int {
 		return runGrant(args[1:])
 	case "grants":
 		return runGrants(args[1:])
+	case "permit": // a coordinator's record of what the operator said a seat may do
+		return runPermit(args[1:])
+	case "permits":
+		return runPermits(args[1:])
 	case "close":
 		return runClose(args[1:])
 
@@ -105,6 +109,10 @@ func run(args []string) int {
 		return runHookExit()
 	case "hook-compact": // PreCompact/PostCompact hooks: announce compaction (never fails the session)
 		return runHookCompact(args[1:])
+	case "hook-denied": // PermissionDenied hook: tell the coordinator (never fails the session)
+		return runHookDenied()
+	case "hook-regressed": // Stop hook: report a classifier model fallback (never fails the session)
+		return runHookRegressed()
 	case "hook-join": // cbus-6ij.4: SessionStart hook — harness-neutral auto-join (never fails the session)
 		return runHookJoin()
 	case "codex-stop-hook": // cbus-6ij.4: Stop hook — fallback delivery for a codex exec worker
@@ -137,6 +145,8 @@ func run(args []string) int {
 		return runInstallMods(args[1:])
 	case "install-opencode":
 		return runInstallOpencode(args[1:])
+	case "install-hooks":
+		return runInstallHooks(args[1:])
 	case "install-assets":
 		return runInstallAssets(args[1:])
 	case "codex-permissions":
@@ -148,6 +158,9 @@ func run(args []string) int {
 		// bash-exact (Option X): single-quoted verb + `cbus --help` so cutover is a
 		// pure swap (bin/cbus:913).
 		fmt.Fprintf(os.Stderr, "cbus: unknown command '%s' (cbus --help)\n", verb)
+		if hint := unknownVerbHint(verb); hint != "" {
+			fmt.Fprintln(os.Stderr, hint)
+		}
 		return 1
 	}
 }
@@ -327,12 +340,30 @@ func runHookCompact(args []string) int {
 	return 0
 }
 
+// runHookDenied runs the PermissionDenied hook. It ALWAYS returns 0 and writes nothing to
+// stdout, which Claude Code parses for a retry decision.
+func runHookDenied() int {
+	if err := client.HookDenied(os.Stdin); err != nil {
+		fmt.Fprintf(os.Stderr, "cbus: hook-denied: %v\n", err)
+	}
+	return 0
+}
+
+// runHookRegressed runs the Stop hook. It ALWAYS returns 0 and writes nothing to stdout,
+// where a decision could block the stop.
+func runHookRegressed() int {
+	if err := client.HookRegressed(os.Stdin); err != nil {
+		fmt.Fprintf(os.Stderr, "cbus: hook-regressed: %v\n", err)
+	}
+	return 0
+}
+
 // hostLabelGated: every verb refuses up front on an invalid CBUS_HOST, except help
 // and version (they never resolve it) and the hooks, whose contract is exit 0: a
 // PreCompact hook exiting 2 blocks compaction. The hooks fail closed internally.
 func hostLabelGated(verb string) bool {
 	switch verb {
-	case "", "-h", "--help", "--version", "version", "hook-exit", "hook-compact", "hook-join", "codex-stop-hook":
+	case "", "-h", "--help", "--version", "version", "hook-exit", "hook-compact", "hook-denied", "hook-regressed", "hook-join", "codex-stop-hook":
 		return false
 	}
 	return true
