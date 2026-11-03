@@ -109,7 +109,7 @@ func NormalizeRepo(raw string) (string, error) {
 	case strings.Contains(s, "://"):
 		u, err := url.Parse(s)
 		if err != nil {
-			return "", fmt.Errorf("bad remote %s", permitRedactURL(s))
+			return "", errors.New("remote is not a URL this can read")
 		}
 		switch u.Scheme {
 		case "ssh", "git+ssh", "https", "http", "git":
@@ -132,14 +132,14 @@ func NormalizeRepo(raw string) (string, error) {
 	}
 	host = strings.ToLower(host)
 	p = strings.TrimSuffix(strings.Trim(p, "/"), ".git")
-	if host == "" || p == "" || strings.Contains(p, "..") || strings.IndexFunc(host+p, func(r rune) bool { return !unicode.IsPrint(r) || r == ' ' }) >= 0 {
-		return "", fmt.Errorf("remote %s has no host and path", permitRedactURL(s))
+	if host == "" || p == "" || strings.Contains(p, "..") || strings.ContainsAny(p, "@:") || strings.IndexFunc(host+p, func(r rune) bool { return !unicode.IsPrint(r) || r == ' ' }) >= 0 {
+		return "", errors.New("remote has no plain host and path, and may hold a credential")
 	}
 	return host + "/" + p, nil
 }
 
 // parseScpRemote reads [user@]host:path. Anything looser could carry user:secret@host in
-// what would be stored as the path, and these errors print no part of the value.
+// what would be stored as the path. No error here or in NormalizeRepo prints the value.
 func parseScpRemote(s string) (host, p string, err error) {
 	left, right, ok := strings.Cut(s, ":")
 	if !ok {
@@ -154,20 +154,10 @@ func parseScpRemote(s string) (host, p string, err error) {
 	if len(left) == 1 {
 		return "", "", errors.New("remote looks like a drive path, not a shared repo")
 	}
-	first, _, _ := strings.Cut(right, "/")
-	if strings.ContainsAny(first, "@:") || strings.ContainsAny(right, `?#\`) {
+	if strings.ContainsAny(right, `@:?#\`) {
 		return "", "", errors.New("remote path has characters a repo path does not, and may hold a credential")
 	}
 	return left, right, nil
-}
-
-// permitRedactURL names a remote in an error without its credential. A value that is not
-// a URL may be anything, so it is not printed at all.
-func permitRedactURL(s string) string {
-	if u, err := url.Parse(s); err == nil && u.Scheme != "" && u.Host != "" {
-		return u.Scheme + "://" + u.Host + u.Path
-	}
-	return "(not shown)"
 }
 
 // OriginRepo is the origin remote of the working directory, as git reports it.
