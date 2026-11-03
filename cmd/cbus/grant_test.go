@@ -241,7 +241,7 @@ func TestGrantTerminalErrorIsReported(t *testing.T) {
 
 func TestGrantRefusesUnbindableTargets(t *testing.T) {
 	root := grantStore(t)
-	if _, err := client.ReserveAlias("ch", "fresh", client.OriginFresh, ""); err != nil {
+	if _, err := client.ReserveAlias("ch", "fresh", client.OriginFresh, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	// an armed peer whose listener has gone: the pid no longer runs

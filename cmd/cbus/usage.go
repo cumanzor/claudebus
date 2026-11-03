@@ -68,12 +68,17 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus formation save <name> [ch]  capture a channel's topology (channel
                                    defaults to this session's); refreshes an
                                    existing file, preserving hand-edited fields
-                                   (origin/model come from the birth-record when
-                                   recorded; role/profile stay hand-maintained)
+                                   (origin/model/role come from the birth-record
+                                   when recorded; other roles stay hand-maintained)
        --anchor key=value          record a hand anchor in drift_anchors
                                    (repeatable; a flag overwrites its own key,
                                    git_head stays machine-owned; convention:
                                    tracker=<id> links the effort's tracker item)
+       --mode alias=mode           set that peer's saved mode (resume|fork|template,
+                                   repeatable); new peers default to resume when
+                                   their origin is fresh/joined, else template
+       --role alias=role           point that peer's rolefile at roles/<role>.md
+                                   (repeatable; the role must resolve from here)
   cbus formation apply <name>      relaunch a formation's MISSING peers on this
                                    host (sequential, anchor first); connect to the
                                    channel first — peers are briefed to answer you.

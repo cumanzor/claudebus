@@ -97,7 +97,7 @@ func TestSaveFormationCapturesCodexHarnessAndBackend(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f, _, err := SaveFormation("native", "native", nil)
+	f, _, err := SaveFormation("native", "native", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestSaveFormationCapturesCodexHarnessAndBackend(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := SaveFormation("native", "native", nil); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+	if _, _, err := SaveFormation("native", "native", SaveOptions{}); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 		t.Fatalf("mismatched backend saved: %v", err)
 	}
 }

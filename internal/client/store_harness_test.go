@@ -33,7 +33,7 @@ func TestReserveDoesNotStampHarness(t *testing.T) {
 	harnessNameFn = func() string { return "codex" }
 	t.Cleanup(func() { harnessNameFn = old })
 
-	if _, err := ReserveAlias("dev", "child", "fresh", ""); err != nil {
+	if _, err := ReserveAlias("dev", "child", "fresh", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	m, ok := ReadPeerMeta(filepath.Join(CBUSDir(), "dev", "child", "meta.json"))

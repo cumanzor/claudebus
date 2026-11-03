@@ -12,7 +12,7 @@ func TestDaemonConnectClaimsLaunchReservation(t *testing.T) {
 	for _, queued := range []bool{false, true} {
 		t.Run(map[bool]string{false: "empty", true: "queued"}[queued], func(t *testing.T) {
 			d, q, req := daemonFixture(t)
-			if _, err := ReserveAlias(req.Channel, req.Alias, OriginFork, "test-model"); err != nil {
+			if _, err := ReserveAlias(req.Channel, req.Alias, OriginFork, "test-model", "coder"); err != nil {
 				t.Fatal(err)
 			}
 			var end int64
@@ -27,7 +27,7 @@ func TestDaemonConnectClaimsLaunchReservation(t *testing.T) {
 			}
 			b, err := os.ReadFile(filepath.Join(d.peerDir(c), "meta.json"))
 			var m peerMeta
-			if err != nil || json.Unmarshal(b, &m) != nil || m.Origin != OriginFork || m.Model != "test-model" || m.SessionID != req.ThreadID || m.ConnectionID != c.ID {
+			if err != nil || json.Unmarshal(b, &m) != nil || m.Origin != OriginFork || m.Model != "test-model" || m.Role != "coder" || m.SessionID != req.ThreadID || m.ConnectionID != c.ID {
 				t.Fatal("claim lost launch provenance or did not bind the new session")
 			}
 			if err := d.deliver(c); err != nil || c.Offset != end || len(q.calls) != map[bool]int{false: 0, true: 1}[queued] {
@@ -41,7 +41,7 @@ func TestDaemonConnectRefusesNonReservationWithoutChangingMail(t *testing.T) {
 	for _, kind := range []string{"real session", "managed", "owner", "listener", "wrong alias", "malformed", "oversized", "symlink directory", "symlink metadata", "symlink inbox"} {
 		t.Run(kind, func(t *testing.T) {
 			d, _, req := daemonFixture(t)
-			if _, err := ReserveAlias(req.Channel, req.Alias, OriginFresh, "test-model"); err != nil {
+			if _, err := ReserveAlias(req.Channel, req.Alias, OriginFresh, "test-model", ""); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(CBUSDir(), req.Channel, req.Alias)

@@ -277,6 +277,104 @@ formation_test.go.
 - A live formation run read the records back from the store.
 - Run `go test ./...` and the linux amd64/arm64 compile gate before release.
 
+## [2026-10-31 19:09:04 UTC] [Formation/Roles] save --role for joined seats; /save-formation fills
+
+[Attempt #1] Files: internal/client/formation_save.go (SaveOptions.Roles,
+checkRoles, setHandRoles), cmd/cbus/formation.go, cmd/cbus/usage.go,
+commands/save-formation.md; docs.
+
+[What changed]
+- A seat that joined with `cbus join` or `cbus connect` has no launcher, so
+  no birth-record role, and its brief stayed TODO. `formation save --role
+  alias=role` (repeatable) sets that peer's `rolefile` to `roles/<role>.md`
+  and clears freeform text. The role resolves through LoadRole before
+  anything is written, so a typo refuses instead of saving a brief that
+  apply cannot load.
+- `/save-formation` used to list TODO roles and template modes and stop. It
+  now proposes a fill per peer (its own seat as orchestrator when it
+  coordinates the channel; other peers only from what the conversation
+  shows), asks once, and re-saves with `--role`/`--mode`.
+
+[Possible Ripple Effects]
+- `join`/`connect` do not take `--role`: carrying it through connect would
+  change the daemon connect request and journal. The save flag covers
+  joined seats instead.
+
+## [2026-10-31 19:06:50 UTC] [Formation/Modes] save defaults attributable peers to resume; save --mode
+
+[Attempt #1] Files: internal/client/formation_save.go (newPeerMode,
+SaveOptions, setHandModes), cmd/cbus/formation.go (save
+--mode, per-mode report lines), cmd/cbus/usage.go; docs and the
+save-formation command.
+
+[What changed]
+- New peers saved with `mode=template`, a rule from before apply could tell
+  a safe resume from an unsafe one. Apply now refuses a fork-born resume, an
+  unattributed one, a session claimed twice, and a session still held live,
+  and `onStale=template` degrades a lost transcript, so the template default
+  only threw context away. Save now picks `resume` for a
+  peer with a real session id and origin fresh or joined, and `template`
+  otherwise.
+- `formation save --mode alias=mode` (repeatable) sets a peer's saved mode.
+  An unknown alias, a mode outside the enum, or resume/fork for a peer whose
+  origin is fork or unknown refuses the save, since apply would refuse it.
+- Apply sees more running sessions before it resumes one. It reads Claude
+  Code's session registry (`<config>/sessions/<pid>.json` under ~/.claude,
+  $CLAUDE_CONFIG_DIR and each CCS instance) and treats a session whose pid is
+  alive as held. That catches a session started fresh that left the bus or
+  lost its listener, which neither the bus nor the argv scan could see. A
+  stale file whose pid was recycled reads as held, which refuses rather than
+  double-launching.
+- Apply claims the same launch-intent marker `formation resume` uses before
+  it resumes a peer, so a second apply before the child joins is refused.
+- A join or daemon connect under an alias the session did not reserve was
+  always recorded `origin=joined`, so a branch child joining a second
+  channel looked resumable there. Join now checks the session's own history
+  (metas in other channels, then self-recorded join/resume ledger lines)
+  and records `fork` when that session is fork-born.
+- A blank `mode` in a hand-written file still plans as template.
+
+[Possible Ripple Effects]
+- Existing envelopes keep their recorded modes; only peers new to the file
+  get the new default.
+- A resume of a seat whose original is still running is refused at apply;
+  the operator either stops it or sets `mode=fork`.
+- A failed resume launch keeps its marker until the TTL (180s), the same as
+  `formation resume`.
+
+## [2026-10-31 19:01:56 UTC] [Formation/Roles] role in the birth record; save fills rolefile
+
+[Attempt #1] Files: internal/client/store.go (peerMeta.Role, ReserveAlias
+role parameter, birthForJoin), daemon.go (reservation claim),
+spawn.go, harness.go, formation_apply.go (peerRoleName), liveness.go,
+formation_save.go (RosterPeer.Role, capturePeer), role.go
+(validRoleName); docs and the save-formation/bus-formation commands.
+
+[What changed]
+- `cbus spawn --role <r>` briefed the child from roles/<r>.md and then
+  dropped the name, so a later `formation save` wrote a TODO role for every
+  spawned seat. The reservation meta now carries `role` next to origin and
+  model; the child's join and a daemon connect carry it through the reclaim
+  under the same identity rules as origin (a takeover never inherits it).
+- `formation save` fills `rolefile: roles/<role>.md` from a recorded role
+  while the peer's brief is still blank or the TODO marker. A hand rolefile
+  or freeform role is never overwritten; an unusable role token is skipped
+  and reported like a corrupted origin.
+- `formation apply` stamps the role parsed from the peer's rolefile when it
+  reserves a template or fork seat, and only when that role resolves here, so
+  a restored seat re-saves with a rolefile apply can load.
+- A refresh that added a new peer ahead of an existing one in roster order
+  could lose the existing peer's update: save held pointers into the peer
+  slice and the append reallocated it. It now indexes the slice.
+- The fill treats only a blank brief or save's own TODO marker as unset, so
+  hand-written role text that mentions "todo" is never replaced.
+
+[Possible Ripple Effects]
+- `ReserveAlias` takes a fifth argument; branch passes none, since a fork
+  inherits its parent's intent.
+- `role` is omitempty, so metas without one rewrite byte-identically. An
+  older binary that rewrites the meta drops the field, as with profile.
+
 ## [2026-10-31 17:13:04 UTC] [Notices/Mods] Less narration in formations
 
 [Attempt #1] Files: internal/client/daemon_presence.go (membershipNotice),
@@ -482,6 +580,7 @@ Findings from an independent review of the OpenCode PR stack.
   0.31 s CPU in a burst, the fixed one 0.01 s; for a session deleted by
   another process the sentinel lookup read present:false both before and
   after, while the session op read exists:true then exists:false.
+
 ## [2026-10-23 14:34:24 UTC] [Tests/Harness] Wider harness-dispatch guard
 
 [Attempt #1] Files: internal/client/harness_dispatch_test.go (scanner
@@ -813,6 +912,7 @@ plugins only; TUI plugins load only from the tui.json(c) plugin list.
   back present; a wrong session was refused; watch showed snapshot, route,
   one idle, route to null after /new, dispose; the socket was gone after
   exit.
+
 ## [2026-10-22 14:51:20 UTC] [Daemon/Harness] Explicit per-harness dispatch
 
 [Attempt #1] Files: internal/client/daemon_harness.go (opencode constant,

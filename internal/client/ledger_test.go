@@ -553,7 +553,7 @@ func TestResumeRejoinRecordsContinuity(t *testing.T) {
 // writing a store placeholder into a sessionId field hands consumers a fake id.
 func TestSpawnReservationRecordsNoFakeSessionID(t *testing.T) {
 	setupStore(t)
-	if _, err := ReserveAlias("cc", "child", OriginFresh, "opus"); err != nil {
+	if _, err := ReserveAlias("cc", "child", OriginFresh, "opus", ""); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	evs := ledgerLines(t, "cc")
@@ -596,7 +596,7 @@ func TestAllWiredEventsCarryARunID(t *testing.T) {
 	_, _, _ = Join("cc", "coder")
 	// a REAL start token, or the peer reads dead and the reaper eats it mid-test
 	armMeta(filepath.Join(root, "cc", "coder", "meta.json"), startTokenOf(t, os.Getpid()))
-	_, _ = ReserveAlias("cc", "child", OriginFork, "")
+	_, _ = ReserveAlias("cc", "child", OriginFork, "", "")
 	_, _, _, _ = Rename("builder", "cc")
 	_, _ = Leave("cc")
 	evs := ledgerLines(t, "cc")
@@ -758,7 +758,7 @@ func TestSnapshotSaveRecordsTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, _, err := SaveFormation("cc", "cc", nil)
+	f, _, err := SaveFormation("cc", "cc", SaveOptions{})
 	if err != nil {
 		t.Fatalf("SaveFormation: %v", err)
 	}
@@ -947,7 +947,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		_, _, _ = Join("cc", "coder")
 		want := readClaim(filepath.Join(root, "cc", "coder"))
 		seedDeadMeta(t, filepath.Join(root, "cc", "coder", "meta.json")) // dying peer
-		f, _, err := SaveFormation("cc", "cc", nil)
+		f, _, err := SaveFormation("cc", "cc", SaveOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -965,7 +965,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		if err := seed.Save(); err != nil {
 			t.Fatal(err)
 		}
-		f, _, err := SaveFormation("cc", "cc", nil)
+		f, _, err := SaveFormation("cc", "cc", SaveOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -982,7 +982,7 @@ func TestSnapshotRunFromRoster(t *testing.T) {
 		t.Setenv("CLAUDE_CODE_SESSION_ID", "SA") // the saver is a peer, so the mint resolves an anchor
 		writeClaim("cc", "a", "run_X")
 		writeClaim("cc", "b", "run_Y")
-		f, rep, err := SaveFormation("cc", "cc", nil)
+		f, rep, err := SaveFormation("cc", "cc", SaveOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1061,7 +1061,7 @@ func TestSpawnCarriesTheParentsRunExplicitly(t *testing.T) {
 	root := setupStore(t)
 	_, _, _ = Join("cc", "parent")
 	parentRun := readClaim(filepath.Join(root, "cc", "parent"))
-	if _, err := ReserveAlias("cc", "child", OriginFork, ""); err != nil {
+	if _, err := ReserveAlias("cc", "child", OriginFork, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var spawn *LedgerEvent
@@ -1100,7 +1100,7 @@ func TestSpawnUsesTheParentsOwnRunNotAnyLiveClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ReserveAlias("cc", "child", OriginFork, ""); err != nil {
+	if _, err := ReserveAlias("cc", "child", OriginFork, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var spawn *LedgerEvent

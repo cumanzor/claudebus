@@ -134,7 +134,7 @@ func SpawnWithOptions(target, address, model, name, role string, opts SpawnOptio
 			return "", "", fmt.Errorf("bad channel %q: %s", addr, why)
 		}
 		// spawn is always a fresh, blank-transcript session (cbus-m9l birth-record).
-		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model); err != nil {
+		if childAlias, err = ReserveAlias(addr, name, OriginFresh, model, role); err != nil {
 			return "", "", err
 		}
 		title, prompt = childAlias, SpawnPromptAliased(addr, childAlias)
