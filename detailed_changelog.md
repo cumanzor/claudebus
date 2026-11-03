@@ -4,6 +4,25 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 20:11:50 UTC] [Tests/Canary] Git helpers are not CLI frontends
+
+[Attempt #1] Files: scripts/codex_cli_resume_canary.py,
+scripts/codex_frontend_processes_test.py.
+
+[What changed]
+- `quit_cli` requires every frontend process to exit within 5 s of `/quit`, and
+  it took "frontend" to mean everything in the CLI's tree except app-server.
+  Codex's plugin sync runs a background `git fetch` in that tree. The presence
+  canary keeps the CLI open long enough to start one, so it failed at this
+  check on every run and never reached its later checks. The resume canary
+  quits sooner and passed.
+- New `frontend_processes` leaves out processes whose argv[0] is `git` or
+  `git-*`. A path or argument that merely contains "git" still counts.
+
+[Testing]
+- `scripts/codex_frontend_processes_test.py`, with the old filter, a substring
+  match and a filter missing `git-*` each failing it.
+
 ## [2026-11-03 19:09:58 UTC] [Codex/Fix] A defunct codex process no longer breaks consumer checks on Linux
 
 [Attempt #1] Files: internal/client/codex_runtime_writer_linux.go,
