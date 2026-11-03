@@ -53,8 +53,8 @@ protocol.md; tests in permit_test.go, permit_unix_test.go and cmd/cbus/permit_te
   it checked.
 
 [Testing Notes]
-- 63 mutants across writer, ref, repo, state, target, ttl, uses, version and
-  CLI behavior: 62 killed. The survivor (scp credential in path) is backed by
+- 65 mutants across writer, ref, repo, state, target, ttl, uses, version and
+  CLI behavior: 64 killed. The survivor (scp credential in path) is backed by
   the general path check and fails when both are mutated together. Earlier
   survivors got tests.
 - Live CLI run through a scratch store: covered, not-covered, refused and
