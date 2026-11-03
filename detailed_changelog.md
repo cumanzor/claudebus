@@ -4,6 +4,60 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 00:04:08 UTC] [Hooks/Denied] Tell a seat's coordinator about classifier denials
+
+[Attempt #1] Files: internal/client/denied.go (new: payload parse, input-echo
+guard, collapse state, delivery), grant.go (notice writer split into
+deliverNotice), daemon_presence.go (denial notice frame), codexbridge.go,
+core/message.go (kind comment), cmd/cbus/main.go, update_check.go;
+mods/cbus-compact/hooks/frame.ts; docs/usage.md, architecture/command-reference.md,
+architecture/protocol.md, CHEATSHEET.md; tests in denied_test.go,
+hook_denied_test.go, codexbridge_test.go, daemon_wake_unix_test.go and the
+cbus-compact hook test.
+
+[What changed]
+- A classifier denial stopped a seat with nobody watching its pane.
+  `cbus hook-denied` reads the coordinator record written at launch and
+  appends a `kind=denied` line to that coordinator's inbox. The daemon
+  renders it as a denial notice: the coordinator cannot override the
+  classifier, so it is told to reroute the work or ask the operator, and not
+  to acknowledge on the bus.
+- The notice never carries the command or tool_input. The reason and the
+  Bash description can echo the input, so echoed pieces are withheld. A field
+  echoing two or more is withheld whole; two adjacent input words of any
+  length count as an echo, and a whole short input value is withheld where it
+  appears. Control characters are dropped, and a reason ending in [withheld]
+  keeps its brackets balanced. Descriptions may often read [withheld].
+- Repeats of the same tool and reason collapse for 10 minutes and are counted
+  on the next notice. An undelivered notice does not count as sent.
+- Review finding folded in: the first guard only counted pieces of 8 or more
+  characters, so a command of short words (a password argument, `cat .env`)
+  could reach the notice whole; fixed by the adjacent-words and whole-short-
+  value rules, with a test that input words apart are not a quoted run.
+- Wiring is a documented settings snippet like hook-exit and hook-compact.
+
+[Possible Ripple Effects]
+- Without the settings entry the hook never fires; nothing warns about it.
+- Guard limit that remains: one short word on its own passes, the check is
+  case-sensitive, and separated short words pass.
+- DeliverGrantNotice now goes through a shared deliverNotice; grant notices
+  behave as before.
+- The installed cbus-compact predates the [denied] tag until mods are
+  reinstalled.
+
+[Testing Notes]
+- No real denial reached the hook: three plain attempts in an auto mode seat
+  were allowed, and a later real denial happened in a seat without the hook.
+  The payload shape and reason forms come from the Claude Code docs; whether
+  the hook reason matches the bracketed reason in a denied tool result is
+  unmeasured.
+- A documented-shape payload piped through the CLI reached a real session
+  as the coordinator; the second send collapsed; the fake token never reached
+  the inbox.
+- The new short-word tests fail on the first commit and pass at the tip; a
+  38-mutant run was fully killed. The cbus-compact test ran under a stand-in
+  host: 11 pass, and the same 2 render tests fail on main under it.
+
 ## [2026-11-02 23:50:11 UTC] [Delegation/Coordinator] Record the coordinator at launch
 
 [Attempt #1] Files: internal/client/coordinator.go (new: record store and

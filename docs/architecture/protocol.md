@@ -176,6 +176,8 @@ $CBUS_DIR/
 │                               # Go client only: who coordinates a seat, written at launch,
 │                               #   bound to the session at its first arrival. Outside the
 │                               #   peer dir so collection and reclaim leave it (coordinator.go)
+├── .denials/<channel>/<alias>.json
+│                               # Go client only: collapse state for cbus hook-denied
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
                                  # prompts; a channel literally named "roles" would
@@ -1506,7 +1508,7 @@ Routes (`(*busDaemon).handler`, `daemon.go:246-340`):
 | Route | Request | Response |
 |---|---|---|
 | `GET /health` | none | `{"running":true,"pid":<pid>,"start":"<procStartTime>","protocol":<n>,"version":"<v>","fencedDisconnect":true,"wake":true}`, plus `"skippedRecords":["<id>.json",...]` when `load` skipped a connection record it could not read or validate; `DaemonProtocolVersion` is `3` (`daemon.go:115,253-256`) |
-| `POST /wake` | `{"connectionIds":["<id>",...]}`, ≤64 KiB | `{"ok":true}`. Marks each known connection ready for the scheduler; unknown ids are ignored. Inbox writers (`cbus send`, presence broadcasts, grant notices) call it after appending, with the id from the recipient's `meta.json`, a 200 ms deadline, and every error ignored; it never starts a daemon. A daemon without this route answers `404`, and delivery then waits for the 2 s sweep |
+| `POST /wake` | `{"connectionIds":["<id>",...]}`, ≤64 KiB | `{"ok":true}`. Marks each known connection ready for the scheduler; unknown ids are ignored. Inbox writers (`cbus send`, presence broadcasts, grant notices, `cbus hook-denied`) call it after appending, with the id from the recipient's `meta.json`, a 200 ms deadline, and every error ignored; it never starts a daemon. A daemon without this route answers `404`, and delivery then waits for the 2 s sweep |
 | `POST /stop` | optional `{"pid":<n>,"start":"<s>"}`, ≤4096 bytes | if both fields are set and either mismatches this daemon's own pid/start: `409 daemon instance changed; nothing stopped`; else `{"stopping":true}`, then the context is cancelled (`daemon.go:257-274`) |
 | `POST /connect` | `connectWireRequest{ConnectRequest, ClaudeToken}`, ≤64 KiB | the new connection's full snapshot, plus `deferred` when a step after registration failed (`daemon.go:276-292`) |
 | `GET /connections` | none | `statusSnapshots()` for every managed connection (`daemon.go:293-294`) |
