@@ -69,15 +69,42 @@ Established by tests (in-process, through the real code paths):
 - **Dead targets.** The refusal to bind a dead target covers peers with a listener process. A daemon-managed peer whose session has exited still reads as registered; the grant binds that exact session, which can only use it if it resumes.
 - **Not supported:** Windows (refused) and remote peers (refused at mint; a `kind=grant` frame arriving over a relay is rejected by the daemon on receipt).
 
-**The boundary is doctrine.** The committed role files tell a peer to act on a
-reserved action only on the operator's own word or on a grant `cbus grants` lists as
-live for it, taken with `cbus grants use` first, and never to run `cbus grant` itself.
+**The boundary is doctrine.** The committed role files tell a peer to act on an
+action needing approval only on a permit it checked itself, on the operator's own
+word when it has no coordinator record, or on a grant `cbus grants` lists as live for
+it, taken with `cbus grants use` first, and never to run `cbus grant` itself.
 A model that writes under `.grants/`, wraps the command to escape the ancestry check,
 or sets another session's id is breaking that rule. Provenance written by `cbus grant`
 itself shows a harness or pty-wrapped mint as suspect, and `cbus grants --all` lists
 it with its session, minting terminal and nearest ancestors. But a hand-written record
 can claim any provenance, and a reparented mint reads like an ordinary terminal
 multiplexer, so the listing cannot prove that a live grant came from the operator.
+
+## Permits
+
+`cbus permit` records what the operator said a seat may do, written by the seat's
+coordinator and checked by the seat itself with `cbus permits use`. Command details:
+[command reference](architecture/command-reference.md#cbus-permit--cbus-permits--cbus-permits-use--cbus-permit-revoke).
+
+It is **same-user file state written by a model**. A coordinator could write a permit
+the operator never gave, and so could any process running as that user. `--says` is
+an audit trail, not proof: if a permit looks wrong, compare its `--says` with the
+operator's turns in the coordinator's transcript. It stops a seat treating a relayed
+message as approval. It does not stop a coordinator or a same-user process that sets
+out to get around it. An effort permit can record the coordinator's own ruling, and
+says so in `--says`.
+
+- The record names its writer by address, so whoever later holds that alias on this
+  machine is the writer.
+- Public repositories are a doctrine rule, not a check. cbus cannot reliably tell a
+  remote's visibility, so the coordinator names the repo and does not relay a standing
+  push permit for a public repo unless the operator said so for that repo.
+- Force pushes have no class, and cbus cannot see what flags a later push carries.
+- `use` checks the repo it was asked about; the seat is responsible for pushing to that repo.
+- A permit does not override repository policy or a classifier block.
+- A seat with no coordinator record gets nothing, and a seat on another machine has none.
+
+Grants remain available and unchanged; seats no longer suggest them.
 
 ## Deploying a relay
 

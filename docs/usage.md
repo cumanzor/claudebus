@@ -260,6 +260,12 @@ fallbacks. Manual denials and deny rules do not fire the first. See
 [`cbus hook-denied`](architecture/command-reference.md#cbus-hook-denied--the-permissiondenied-flow)
 and [`cbus hook-regressed`](architecture/command-reference.md#cbus-hook-regressed--the-stop-flow).
 
+A seat with a coordinator record acts on an approval through `cbus permits use`
+([permits](architecture/command-reference.md#cbus-permit--cbus-permits--cbus-permits-use--cbus-permit-revoke))
+and otherwise asks its coordinator on the bus. If your own instructions file tells a
+model to push only when you ask, a seat may still stop at that rule. Add a line saying
+a permit it checked itself counts as your word; cbus does not write that file.
+
 Legacy `join`/Monitor peers retain their listener-based presence and optional
 `cbus hook-exit` / `cbus hook-compact pre|post` hooks. Relay presence differs by
 transport; see [relay.md](relay.md). Before replacing a legacy membership, follow
