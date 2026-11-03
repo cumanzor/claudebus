@@ -256,6 +256,31 @@ func TestRegressedPartialDeliveryKeepsItsPlace(t *testing.T) {
 	}
 }
 
+func TestRegressedNullForkedFromIsNotInherited(t *testing.T) {
+	deniedFixture(t)
+	fireStop(t, deniedSeatSID, seatTranscript(t, deniedSeatSID, regressedLine(t, deniedSeatSID, func(m map[string]any) { m["forkedFrom"] = nil })))
+	if got := regressedNotices(t, "ch", "lead"); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestRegressedRenameOntoAStaleMarkStartsClean(t *testing.T) {
+	deniedFixture(t)
+	line := regressedLine(t, deniedSeatSID, nil)
+	path := seatTranscript(t, deniedSeatSID, line)
+	if err := writeRegressionMark("ch", "renamed", regressionMarkPath("ch", "renamed"), regressionMark{SessionID: deniedSeatSID, Offset: int64(len(line))}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", deniedSeatSID)
+	if _, _, _, err := Rename("renamed", "ch"); err != nil {
+		t.Fatal(err)
+	}
+	fireStop(t, deniedSeatSID, path)
+	if got := regressedNotices(t, "ch", "lead"); len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestRegressedUndatedEntrySaysSo(t *testing.T) {
 	deniedFixture(t)
 	fireStop(t, deniedSeatSID, seatTranscript(t, deniedSeatSID, regressedLine(t, deniedSeatSID, func(m map[string]any) { m["timestamp"] = "yesterday; rm" })))
