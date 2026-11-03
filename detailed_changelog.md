@@ -4,6 +4,54 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 00:20:29 UTC] [Hooks/Regressed] Tell the coordinator when a seat falls back to another model
+
+[Attempt #1] Files: internal/client/regressed.go (new: transcript scan,
+per-seat mark, notice), grant.go (shared notice writer), daemon_presence.go
+(regressed frame), codexbridge.go, store.go (.regressions), core/message.go;
+cmd/cbus/main.go, update_check.go; mods/cbus-compact/hooks/frame.ts; docs/usage.md,
+architecture/command-reference.md, architecture/protocol.md, CHEATSHEET.md;
+tests in regressed_test.go, hook_classifier_test.go, codexbridge_test.go and
+the cbus-compact hook test.
+
+[What changed]
+- A classifier refusal can move a session to a fallback model until someone
+  runs /model in its pane, and nobody watching the coordinator would know.
+  `cbus hook-regressed` is a Stop hook target: it scans the transcript for the
+  fallback entry and sends a `kind=regressed` notice. The guidance asks the
+  coordinator to file one ask, so the model change shows in its asks band. A
+  coordinator's own fallback goes to itself; a plain session is not told.
+- The hook runs on every session, so it reads at most 4 MiB per Stop from a
+  per-seat offset, does not read the transcript when nobody would be told,
+  and gives up on a busy lock after 250 ms. Only the two model names and the
+  refusal category are read from the entry.
+- Review findings folded in: --fork-session copies the parent's rows under
+  the fork's own session id plus forkedFrom, so a fork could report its
+  parent's fallback as its own; entries with forkedFrom are now skipped. The
+  first scan of a resumed seat starts at offset 0 and can report a fallback
+  someone has since cleared, so the notice now carries the entry's time and
+  says to run /model if the session is still on the fallback. A legacy rename
+  moves the scan mark so the new name does not report again. Tests pin a null
+  forkedFrom and a rename onto a stale mark.
+
+[Possible Ripple Effects]
+- Without the settings entry the hook never fires; nothing warns about it.
+- The fallback entry (a system entry with a model_refusal_fallback subtype)
+  is undocumented. If Claude Code renames it the hook goes silent with no
+  signal. PostModelSwitch was not measured as an alternative.
+- Whether the coordinator files the ask depends on its model; observed once
+  for a seat's fallback and once for its own.
+
+[Testing Notes]
+- Real hook run in place over two real transcripts: four real fallback
+  entries produced exactly four notices, repeat Stops added none, and the
+  transcripts' hashes did not change (reviewer evidence).
+- No live Stop carried a real fallback entry. The route that appends an entry
+  to a live seat's transcript was refused by the classifier, so end to end
+  was shown with a fixture file. A real fork with a copied fallback is
+  unmeasured.
+- Stop cost: 0.01 s on a 200 MiB transcript, one 4 MiB window per Stop.
+
 ## [2026-11-03 00:04:08 UTC] [Hooks/Denied] Tell a seat's coordinator about classifier denials
 
 [Attempt #1] Files: internal/client/denied.go (new: payload parse, input-echo

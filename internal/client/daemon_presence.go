@@ -420,6 +420,9 @@ func nativeBusPayload(line []byte, msg core.Message) string {
 		}
 		return frame + fmt.Sprintf("\nThis is a cbus presence notification (event=%q). %s Do not send a bus reply or acknowledgment solely for this event. No polling or monitor re-arming is needed.", msg.Event, guidance)
 	}
+	if msg.Kind == regressedKind {
+		return frame + "\nThis is a cbus regression notice: that session fell back to another model after a classifier refusal, at the time stated, and it does not say what model the session is on now. A session stays on the fallback until the operator runs /model in its pane. File one ask with the ask tool where your harness has one, setting from to that seat (no from when it is your own session). Do not reply on the bus and do not restate the notice to the user."
+	}
 	if msg.Kind == deniedKind {
 		return frame + "\nThis is a cbus denial notice: the auto mode classifier refused a tool call in that seat. You cannot override it. Reroute the work or ask the operator; do not restate the notice to the user, and do not reply on the bus solely to acknowledge it."
 	}

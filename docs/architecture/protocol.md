@@ -178,6 +178,8 @@ $CBUS_DIR/
 │                               #   peer dir so collection and reclaim leave it (coordinator.go)
 ├── .denials/<channel>/<alias>.json
 │                               # Go client only: collapse state for cbus hook-denied
+├── .regressions/<channel>/<alias>.json
+│                               # Go client only: transcript scan offset for cbus hook-regressed
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
                                  # prompts; a channel literally named "roles" would

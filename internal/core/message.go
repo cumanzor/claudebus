@@ -24,7 +24,7 @@ type Message struct {
 	To      string `json:"to"`
 	TS      string `json:"ts"`
 	Text    string `json:"text"`
-	Kind    string `json:"kind,omitempty"`    // "presence", "grant" for an operator grant notice, "denied" for a classifier denial notice
+	Kind    string `json:"kind,omitempty"`    // "presence", "grant" for an operator grant notice, "denied" and "regressed" for classifier notices
 	Event   string `json:"event,omitempty"`   // presence only (join|leave|rename|departed)
 	EventID string `json:"eventId,omitempty"` // durable managed presence identity
 }
