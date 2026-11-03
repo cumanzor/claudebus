@@ -25,6 +25,7 @@ type PeerMeta struct {
 	SessionID     string
 	Origin        string // birth-record (cbus-m9l); "" when a pre-m9l/bash meta omits it
 	Model         string
+	Role          string // role name the launcher stamped; "" when none was recorded
 	Profile       string // the CCS instance the session stamped at join; "" pre-profile or non-CCS
 	Harness       string // owning harness stamped at join; "" pre-harness, or no harness ancestor
 	ConnectionID  string // nonempty for a daemon-managed registration epoch
@@ -51,6 +52,7 @@ func ReadPeerMeta(metaPath string) (PeerMeta, bool) {
 		SessionID:     rawStr(raw["sessionId"]),
 		Origin:        rawStr(raw["origin"]),
 		Model:         rawStr(raw["model"]),
+		Role:          rawStr(raw["role"]),
 		Profile:       rawStr(raw["profile"]),
 		Harness:       rawStr(raw["harness"]),
 		ConnectionID:  rawStr(raw["connectionId"]),

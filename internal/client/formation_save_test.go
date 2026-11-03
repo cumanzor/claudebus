@@ -78,7 +78,7 @@ func TestSaveFormationNew(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, rep, err := SaveFormation("roles", "roles", nil)
+	f, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v1")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSaveFormationRefreshPreservesHandEdits(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
 	plantPeer(t, "roles", "reviewer", "sid-rev")
 
-	f2, rep, err := SaveFormation("roles", "roles", nil)
+	f2, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
 	plantPeer(t, "un", "coder", "sid-coder")
 	plantPeer(t, "un", "orchestrator", "sid-orch")
-	if _, _, err := SaveFormation("b31", "un", nil); err != nil {
+	if _, _, err := SaveFormation("b31", "un", SaveOptions{}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// the coder's tab is closed and its registration reaped
@@ -232,7 +232,7 @@ func TestSaveFormationKeepsPeersOffTheChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, rep, err := SaveFormation("b31", "un", nil)
+	f, rep, err := SaveFormation("b31", "un", SaveOptions{})
 	if err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestSaveFormationRefusesToClobber(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fdir, "roles.json"), []byte(corrupt), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := SaveFormation("roles", "roles", nil); err == nil {
+	if _, _, err := SaveFormation("roles", "roles", SaveOptions{}); err == nil {
 		t.Fatal("want a refusal, not an overwrite")
 	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Errorf("error should say it refused to overwrite: %v", err)
@@ -286,10 +286,10 @@ func TestSaveFormationRefusesChannelRepoint(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "other", "coder", "sid-other")
-	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", SaveOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := SaveFormation("roles", "other", nil)
+	_, _, err := SaveFormation("roles", "other", SaveOptions{})
 	if err == nil || !strings.Contains(err.Error(), "records channel") {
 		t.Errorf("want a channel-repoint refusal, got %v", err)
 	}
@@ -303,7 +303,7 @@ func TestSaveFormationGitHeadAnchor(t *testing.T) {
 	t.Setenv("CBUS_DIR", dir)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeer(t, "roles", "coder", "sid-coder")
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestSaveFormationSavedByOutsider(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantLegacyFormation(t, "roles", "roles")
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestSaveFormationRefusesAnchorlessMint(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-nobody")
 	plantPeer(t, "roles", "coder", "sid-coder")
 
-	_, _, err := SaveFormation("roles", "roles", nil)
+	_, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err == nil {
 		t.Fatal("an anchorless envelope was minted")
 	}
@@ -392,7 +392,7 @@ func TestSaveFormationJoinedMintFillsAnchor(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, rep, err := SaveFormation("roles", "roles", nil)
+	f, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("a joined mint must save: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestSaveFormationAnchorlessRefreshWarnsThenHeals(t *testing.T) {
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 	plantLegacyFormation(t, "roles", "roles")
 
-	f, rep, err := SaveFormation("roles", "roles", nil)
+	f, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("an anchorless refresh must still save: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestSaveFormationAnchorlessRefreshWarnsThenHeals(t *testing.T) {
 
 	// same file, a joined saver: anchorDefault fills it and the defect is gone
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-orch")
-	f2, rep2, err := SaveFormation("roles", "roles", nil)
+	f2, rep2, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,6 +489,77 @@ func TestCapturePeerFillTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCapturePeerRoleFill: a recorded role fills only a blank or TODO brief, and hand edits win.
+func TestCapturePeerRoleFill(t *testing.T) {
+	freeform := "reviews the swift side"
+	mentionsTodo := "owns the TODO.md backlog triage"
+	for _, tc := range []struct {
+		name         string
+		rolefile     string
+		role         *string
+		metaRole     string
+		wantRolefile string
+		wantRole     *string
+		wantSkip     bool
+	}{
+		{"TODO marker -> filled", "", strPtr(roleTODOMarker), "coder", "roles/coder.md", nil, false},
+		{"absent -> filled", "", nil, "coder", "roles/coder.md", nil, false},
+		{"hand rolefile wins", "roles/reviewer.md@abc", nil, "coder", "roles/reviewer.md@abc", nil, false},
+		{"freeform role wins", "", &freeform, "coder", "", &freeform, false},
+		{"freeform mentioning todo wins", "", &mentionsTodo, "coder", "", &mentionsTodo, false},
+		{"no meta role -> TODO stays", "", strPtr(roleTODOMarker), "", "", strPtr(roleTODOMarker), false},
+		{"garbage role skipped", "", strPtr(roleTODOMarker), "../etc", "", strPtr(roleTODOMarker), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &FormationPeer{Alias: "a", Rolefile: tc.rolefile, Role: tc.role}
+			rep := &SaveReport{}
+			capturePeer(p, RosterPeer{Alias: "a", Role: tc.metaRole}, rep)
+			if p.Rolefile != tc.wantRolefile {
+				t.Errorf("rolefile = %q, want %q", p.Rolefile, tc.wantRolefile)
+			}
+			if (p.Role == nil) != (tc.wantRole == nil) || p.Role != nil && *p.Role != *tc.wantRole {
+				t.Errorf("role = %v, want %v", p.Role, tc.wantRole)
+			}
+			if got := len(rep.SkippedBirth) > 0; got != tc.wantSkip {
+				t.Errorf("skipped = %v, want %v", rep.SkippedBirth, tc.wantSkip)
+			}
+		})
+	}
+}
+
+// TestSaveEndToEndRole: spawn --role, then the child's join, then save leaves no TODO.
+func TestSaveEndToEndRole(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-parent")
+	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "coder.md"), []byte("you write code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Spawn("tab", "eff", "", "", "coder", &fakeForker{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-child")
+	if _, _, err := Join("eff", "coder"); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := SaveFormation("eff", "eff", SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range f.Peers {
+		if p := &f.Peers[i]; p.Alias == "coder" {
+			if p.Rolefile != "roles/coder.md" || p.RoleTODO() {
+				t.Errorf("coder brief = rolefile %q role %v, want roles/coder.md", p.Rolefile, p.Role)
+			}
+			return
+		}
+	}
+	t.Fatal("coder not captured")
 }
 
 // TestCapturePeerHardening is G6: a hand-corrupted meta origin/model must NOT ride
@@ -548,7 +619,7 @@ func TestSaveEndToEndBirth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the saver captures the channel.
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +643,9 @@ func TestSaveEndToEndBirth(t *testing.T) {
 	w := testWorld()
 	w.Host = coder.Machine // the peer was born on this host; match it
 	w = withTranscripts(w, coder.SessionID)
-	coder.Mode = ModeResume
+	if coder.Mode != ModeResume {
+		t.Errorf("mode = %q, want resume chosen by save for a fresh-born peer", coder.Mode)
+	}
 	pp := decidePeer(coder, f, w, map[string]bool{}, map[string]bool{}, map[string]bool{})
 	if pp.Action != ActionResume {
 		t.Errorf("a fresh-born peer with a transcript should resume, got %v (%s)", pp.Action, pp.Reason)
@@ -592,7 +665,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 	plantPeer(t, "roles", "coder", "sid-coder")
 	plantPeer(t, "roles", "orchestrator", "sid-orch")
 
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("first save: %v", err)
 	}
@@ -608,7 +681,7 @@ func TestSaveFormationPreservesSplitOnDisk(t *testing.T) {
 
 	// a later save refreshes live facts; the hand-set direction must ride through
 	plantPeer(t, "roles", "coder", "sid-coder-v2")
-	if _, _, err := SaveFormation("roles", "roles", nil); err != nil {
+	if _, _, err := SaveFormation("roles", "roles", SaveOptions{}); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 
@@ -660,7 +733,7 @@ func TestSaveFormationHandAnchors(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeer(t, "roles", "coder", "sid-coder")
 
-	f, _, err := SaveFormation("roles", "roles", map[string]string{"tracker": "trk-7m1", "note": "qa"})
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{Anchors: map[string]string{"tracker": "trk-7m1", "note": "qa"}})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -673,7 +746,7 @@ func TestSaveFormationHandAnchors(t *testing.T) {
 
 	// a re-save WITHOUT the flag keeps the hand key — through the real save path,
 	// not just the field-preservation rule in isolation
-	f2, _, err := SaveFormation("roles", "roles", nil)
+	f2, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
@@ -683,7 +756,7 @@ func TestSaveFormationHandAnchors(t *testing.T) {
 
 	// an explicit flag overwrites its own key: the preservation rule protects hand
 	// edits from the machine, and the flag is the hand acting
-	f3, _, err := SaveFormation("roles", "roles", map[string]string{"tracker": "trk-other"})
+	f3, _, err := SaveFormation("roles", "roles", SaveOptions{Anchors: map[string]string{"tracker": "trk-other"}})
 	if err != nil {
 		t.Fatalf("re-save with flag: %v", err)
 	}
@@ -699,7 +772,7 @@ func TestSaveFormationRefusesGitHeadAnchor(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	plantPeer(t, "roles", "coder", "sid-coder")
 
-	_, _, err := SaveFormation("fresh", "roles", map[string]string{"git_head": "abc"})
+	_, _, err := SaveFormation("fresh", "roles", SaveOptions{Anchors: map[string]string{"git_head": "abc"}})
 	if err == nil || !strings.Contains(err.Error(), "machine-owned") {
 		t.Fatalf("want the machine-owned refusal, got %v", err)
 	}
@@ -733,7 +806,7 @@ func TestSaveFormationCapturesProfile(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder") // the saver is a peer, so the mint resolves an anchor
 	plantPeerProfile(t, "roles", "coder", "sid-coder", "beta")
 
-	f, _, err := SaveFormation("roles", "roles", nil)
+	f, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -743,7 +816,7 @@ func TestSaveFormationCapturesProfile(t *testing.T) {
 
 	// a blank meta must NOT clobber a hand-filled (or previously captured) profile
 	plantPeer(t, "roles", "coder", "sid-coder") // rewrites meta with no profile
-	f2, _, err := SaveFormation("roles", "roles", nil)
+	f2, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
@@ -753,7 +826,7 @@ func TestSaveFormationCapturesProfile(t *testing.T) {
 
 	// a non-blank meta refreshes in place, like cwd
 	plantPeerProfile(t, "roles", "coder", "sid-coder", "alpha")
-	f3, _, err := SaveFormation("roles", "roles", nil)
+	f3, _, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("refresh save: %v", err)
 	}
@@ -766,7 +839,7 @@ func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
 	t.Setenv("CBUS_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-coder")                   // the saver is a peer, so the mint resolves an anchor
 	plantPeerProfile(t, "roles", "coder", "sid-coder", "bad profile") // space fails ValidName
-	f, rep, err := SaveFormation("roles", "roles", nil)
+	f, rep, err := SaveFormation("roles", "roles", SaveOptions{})
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -775,5 +848,131 @@ func TestSaveFormationSkipsGarbageProfile(t *testing.T) {
 	}
 	if len(rep.SkippedBirth) != 1 || !strings.Contains(rep.SkippedBirth[0], "profile") {
 		t.Errorf("skip must be surfaced, got %v", rep.SkippedBirth)
+	}
+}
+
+func TestNewPeerMode(t *testing.T) {
+	for _, tc := range []struct {
+		sid, origin, want string
+	}{
+		{"sid-1", OriginFresh, ModeResume},
+		{"sid-1", OriginJoined, ModeResume},
+		{"sid-1", OriginFork, ModeTemplate},
+		{"sid-1", "", ModeTemplate},
+		{"reserved", OriginFresh, ModeTemplate},
+		{"", OriginJoined, ModeTemplate},
+	} {
+		if got := newPeerMode(&FormationPeer{SessionID: tc.sid, Origin: tc.origin}); got != tc.want {
+			t.Errorf("newPeerMode(sid %q, origin %q) = %q, want %q", tc.sid, tc.origin, got, tc.want)
+		}
+	}
+}
+
+// TestSaveFormationModes: a refresh never flips a recorded mode, and --mode is the hand acting.
+func TestSaveFormationModes(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if _, _, err := Join("eff", "main"); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "eff", "coder", "sid-coder")
+	modeOf := func(f *Formation, alias string) string {
+		for i := range f.Peers {
+			if f.Peers[i].Alias == alias {
+				return f.Peers[i].Mode
+			}
+		}
+		t.Fatalf("%s not in formation", alias)
+		return ""
+	}
+	f, _, err := SaveFormation("eff", "eff", SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeResume || modeOf(f, "coder") != ModeTemplate {
+		t.Fatalf("modes = main %q coder %q, want resume (joined) and template (no origin)", modeOf(f, "main"), modeOf(f, "coder"))
+	}
+	for i := range f.Peers {
+		if f.Peers[i].Alias == "main" {
+			f.Peers[i].Mode = ModeTemplate // hand edit
+		}
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if f, _, err = SaveFormation("eff", "eff", SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeTemplate {
+		t.Errorf("a refresh flipped a recorded mode to %q", modeOf(f, "main"))
+	}
+	if f, _, err = SaveFormation("eff", "eff", SaveOptions{Modes: map[string]string{"main": ModeResume}}); err != nil {
+		t.Fatal(err)
+	}
+	if modeOf(f, "main") != ModeResume {
+		t.Errorf("--mode main=resume left %q", modeOf(f, "main"))
+	}
+	for _, bad := range []map[string]string{{"ghost": ModeResume}, {"main": "later"}, {"main": ""}, {"coder": ModeResume}, {"coder": ModeFork}} {
+		if _, _, err := SaveFormation("eff", "eff", SaveOptions{Modes: bad}); err == nil {
+			t.Errorf("--mode %v saved, want an error", bad)
+		}
+	}
+}
+
+// TestSaveFormationHandRoles: --role writes rolefile for a joined seat and refuses typos.
+func TestSaveFormationHandRoles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CBUS_DIR", dir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "zz-lead.md"), []byte("you lead\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Join("eff", "main"); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := SaveFormation("eff", "eff", SaveOptions{Roles: map[string]string{"main": "zz-lead"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := f.Peers[0]; p.Rolefile != "roles/zz-lead.md" || p.Role != nil || p.RoleTODO() {
+		t.Errorf("main brief = rolefile %q role %v, want roles/zz-lead.md", p.Rolefile, p.Role)
+	}
+	for _, bad := range []map[string]string{{"ghost": "zz-lead"}, {"main": "zz-missing"}, {"main": "../x"}} {
+		if _, _, err := SaveFormation("eff", "eff", SaveOptions{Roles: bad}); err == nil {
+			t.Errorf("--role %v saved, want an error", bad)
+		}
+	}
+}
+
+// TestSaveFormationRefreshWithNewPeerFirst: a new peer appended before an existing one
+// in roster order must not strand the existing peer's refresh in a stale array.
+func TestSaveFormationRefreshWithNewPeerFirst(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sid-main")
+	if _, _, err := Join("eff", "zmain"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := SaveFormation("eff", "eff", SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	plantPeer(t, "eff", "alpha", "sid-alpha")
+	plantPeer(t, "eff", "zmain", "sid-main2")
+	f, _, err := SaveFormation("eff", "eff", SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadFormation("eff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ff := range []*Formation{f, loaded} {
+		for _, p := range ff.Peers {
+			if p.Alias == "zmain" && p.SessionID != "sid-main2" {
+				t.Errorf("zmain sid = %q, want the refreshed sid-main2", p.SessionID)
+			}
+		}
 	}
 }

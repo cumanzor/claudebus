@@ -656,7 +656,7 @@ for hooks and scripted multi-session drivers.
    (`{alias, channel, sessionId, cwd, listenerPid: null, ownerPid: null, host,
    ts}`, where `host` is `$CBUS_HOST` or the system hostname (see the
    environment variables table), plus `lastActivity`; `origin` is `joined`, or `fresh`/`fork` when a
-   launcher's birth record supplied it, with `model`; `profile` and
+   launcher's birth record supplied it, with `model` and `role`; `profile` and
    `harness` are stamped too (`store.go:295`). `listenerStart` arrives only
    at arm, and `connectionId` stays absent until a native `connect` claims
    the alias.
@@ -2241,7 +2241,7 @@ variants:
 A `spawn` without `--role` carries no delegation section. Doctrine 3 in the
 committed role files states the matching rule from the peer's side.
 
-### `cbus formation save <name> [channel]`
+### `cbus formation save <name> [channel] [--anchor key=value ...] [--mode alias=mode ...] [--role alias=role ...]`
 
 Snapshots the channel's current peers into the runtime store. Channel defaults to
 this session's own registration (`not joined to a channel in this session — pass
@@ -2255,7 +2255,9 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   like `cwd`; a blank meta never clobbers a hand fill; a garbage token is
   skipped with a note), and the birth-record `origin`/`model` **when the
   launcher recorded them** (§9 / protocol.md birth records). It fills a blank
-  origin/model **once** and never overwrites a hand-edited field;
+  origin/model **once** and never overwrites a hand-edited field; a recorded
+  birth-record `role` fills `rolefile: roles/<role>.md` while the peer's brief
+  is still blank or the TODO marker, never over a hand rolefile or freeform role;
   The **saving session's own** peer also gets its `target` reconciled with
   the terminal save runs in: `$TMUX` set moves `tab`/`window`/blank to
   `tmux`, a plain iTerm2 session moves `tmux` back to `tab`, and `pane` or a
@@ -2263,7 +2265,7 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   terminal — <alias>: tab -> tmux`. Other peers keep their recorded target,
   since save cannot see their terminals; the saver is normally the anchor,
   the one seat `resume` launches.
-  `rolefile`/`role` and `split` are yours to fill in — `save` never writes
+  `rolefile`/`role` for a peer with no recorded role, and `split`, are yours to fill in — `save` never writes
   `split` at all, even on a blank one. A corrupted birth-record is skipped with
   a note, not fatal. (Fleet caveat until every binary carries the profile
   field: an older binary's meta rewrite drops the stamp — hand fills in the
@@ -2290,9 +2292,23 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
   refusing would strand the files the invariant exists to converge), and any
   joined re-save heals via the anchor default. `show` renders the absence as a
   named `DEFECT` row.
-- New peers get defaults `mode=template`, `onStale=template`, `target=tab`, and a
-  `role` TODO marker (`TODO: set rolefile to roles/<alias>.md@<commit>, or replace
-  this with the peer's brief`).
+- New peers get `mode=resume` when they hold a real session id and their
+  origin is `fresh` or `joined` (the transcript is their own), else
+  `mode=template` (fork-born, origin unknown, or no session yet; `apply` would
+  refuse a resume of those). Also `onStale=template`, so a lost transcript
+  degrades to a fresh start, `target=tab`, and, unless a birth-record role
+  filled `rolefile`, a `role` TODO marker (`TODO: set rolefile to
+  roles/<alias>.md@<commit>, or replace this with the peer's brief`). A refresh
+  never changes a recorded mode; the CLI lists which new peers got which mode.
+- `--mode alias=resume|fork|template` (repeatable) sets that peer's mode in
+  the file, overwriting what it held. An alias the formation does not hold, a
+  mode outside the enum, or `resume`/`fork` for a peer whose origin is `fork`
+  or unknown (apply would refuse it) refuses the save with nothing written.
+- `--role alias=role` (repeatable) points that peer's `rolefile` at
+  `roles/<role>.md` and clears any freeform `role`. It is the fill for a seat
+  that joined instead of being spawned with `--role`. The role must resolve
+  from here (this repo's `roles/`, else `$CBUS_DIR/roles`) and the alias must
+  be in the formation, or the save refuses with nothing written.
 - Peers in the file but no longer on the channel are **kept**, not dropped.
 - Refusals: `refusing to overwrite an envelope that will not load: <err>` and
   `formation "<name>" records channel "<a>", refusing to re-point it at "<b>"
@@ -2304,8 +2320,10 @@ one` if none; `joined to <N> channels (<list>) — pass one` if several).
 ```
 saved formation "myeffort" (<path>, new)
   channel "myeffort": +3 new (orchestrator, coder, reviewer)
-  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model when the launcher recorded them;
-  rolefile/role are yours to fill in — as are profile/origin/model on peers older binaries recorded
+  captured alias/sessionId/cwd/machine, profile when the session stamped it, plus origin/model/role when the launcher recorded them
+  mode=resume (own transcript): coder, reviewer
+  mode=template (fork-born, origin unknown or no session): orchestrator
+  role TODO (no recorded role; set one with --role <alias>=<role>): orchestrator
   check it: cbus formation show myeffort
 ```
 
@@ -2389,15 +2407,24 @@ surfaced as the per-peer detail — the load-bearing ones:
   → refused (D14): `session <sid> is held at <where> (live or availability
   unresolved) — resume risks a second process on one transcript; confirm the
   original has stopped, or set mode=fork if a copy of it is what you want`
-  (`formation_plan.go:309-315`, quoted verbatim). "Held" covers two sources:
-  a live listener or managed consumer on the bus, and, on macOS and Linux, a
+  (`formation_plan.go`, quoted verbatim). "Held" covers three sources:
+  a live listener or managed consumer on the bus; on macOS and Linux, a
   running process whose argv resumes the sid (`--resume <sid>`, `-r <sid>`,
   `--resume=<sid>`, read from `ps`), reported as `held at pid <n> (a process
-  resuming it, not on the bus)`. The second catches a session reopened by hand
-  or by another launcher that never re-joined. A fresh session that never
-  joined carries no sid in its argv and stays invisible; Windows has no argv
-  read and reports only bus holders. `formation resume` gates its anchor on
-  the same set.
+  resuming it, not on the bus)`; and Claude Code's own session registry,
+  `<config>/sessions/<pid>.json` under `~/.claude`, `$CLAUDE_CONFIG_DIR` and
+  each CCS instance, where a file whose pid is alive and names the sid is
+  reported as `held at pid <n> (Claude Code's session registry lists it
+  running)`. The registry catches a session started fresh that left the bus
+  or lost its listener, which carries no sid in its argv. A stale file whose
+  pid was recycled reads as held: the refusal fails closed. `formation resume`
+  gates its anchor on the same set.
+- a resume whose launch-intent marker another launch holds → `failed`: before
+  it forks a `resume`, apply claims the same marker `formation resume` uses
+  (`a launch of "<alias>" was started <age> ago (pid <n>) and has not joined
+  yet ...`). It closes the gap between a fork and the child's join, when no
+  bus record shows the session yet, so two applies cannot resume one
+  session. The marker clears on that session's join or after 180s.
 - one transcript recorded under two aliases → refused: `session <sid> is
   recorded under more than one alias in this formation — one of them is wrong;
   fix the file` (`formation_plan.go:278-282`).
@@ -2574,7 +2601,7 @@ continues a session's own transcript; `fork` tells the child plainly it is not
 the original and must not act on unfinished parent work; `template` comes back on
 a fresh transcript, briefed from its role file. **A peer is never forked across
 roles** — the exact design mistake formations exist to fix. The `origin`/`model`
-that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
+(and `role`) that drive these decisions are stamped by the *launcher* (`spawn`/`branch`) into
 the peer's `meta.json` at birth, before the child boots, and `save` picks them up
 automatically. Full field-level mechanics: protocol.md (meta.json birth records).
 
@@ -2920,8 +2947,8 @@ Wraps the whole `cbus formation` family (§10): `save`, `show`, `apply`
 command and reports its output.
 
 **save** records only what the bus knows (alias, sessionId, cwd, machine),
-auto-stamping origin/model from a launcher birth-record when one exists,
-while role/profile/split stay hand-maintained; points the user at `show` for
+auto-stamping origin/model/role from a launcher birth-record when one exists,
+while split and the role of a peer that was not spawned with one stay hand-maintained; points the user at `show` for
 what still needs filling in. **show** flags stale sids and TODO roles before
 anything applies. **apply** relaunches missing peers, anchor-first,
 sequentially: this session must be joined to the formation's channel first
@@ -2982,8 +3009,9 @@ Do nothing else.
 `allowed-tools: Bash(cbus:*), Bash(git rev-parse:*)`
 
 Zero-friction checkpoint: saves the channel's topology, then triages what the
-bare save left unusable for a later `apply`. Read-mostly, writes one envelope
-file, never launches, kills, renames or edits a peer.
+bare save left unusable for a later `apply`. Read-mostly: writes one envelope
+file, re-saves with the role and mode fills the user approves, never launches,
+kills, renames or edits a peer.
 
 1. **Resolve the channel** from `cbus whoami`: one local channel, use it;
    several, ask which (never guess); none (exit 1), fall back to the git repo
@@ -3000,11 +3028,15 @@ file, never launches, kills, renames or edits a peer.
    freeform `role` text; stale sids mean `onStale=template` applies and that
    seat comes back fresh; `kept, not on the channel now` seats are usually
    fine but worth stating; a `mode=template` peer that still has a live sid
-   is worth flagging as probably better off `resume`d; the anchor peer is
+   is proposed for `resume`; the anchor peer is
    named, or flagged if `show` reports none.
 4. **Report** in a few lines: name, channel, peer count, new vs kept, then
    only the items needing a decision, each tied to its peer; a clean
    checkpoint (no warnings, no TODO roles) says so and stops.
+5. **Fill**: asks once with every proposed role (its own seat as
+   `orchestrator` when it coordinates; other peers only from what the
+   conversation shows) and mode, then applies the approved ones in one
+   `save --role <alias>=<role> --mode <alias>=resume` re-save and shows again.
 
 Never runs `apply`, `resume`, `bootstrap` or `rm` from here, and never arms a
 Monitor; send the user to `/bus-formation` for those.
