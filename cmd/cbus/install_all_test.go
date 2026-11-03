@@ -44,9 +44,13 @@ func TestInstallAssetsCoversEveryInstallVerb(t *testing.T) {
 		covered = append(covered, a.verb)
 	}
 	for _, m := range advertised {
-		if m[1] != "install-assets" && !slices.Contains(covered, m[1]) {
+		// install-hooks edits the user's settings, so an update must never run it
+		if m[1] != "install-assets" && m[1] != "install-hooks" && !slices.Contains(covered, m[1]) {
 			t.Errorf("%s is advertised but install-assets does not run it", m[1])
 		}
+	}
+	if slices.Contains(covered, "install-hooks") {
+		t.Error("install-assets runs install-hooks; settings changes must stay opt-in")
 	}
 	if len(advertised) < 5 {
 		t.Fatalf("usage lists %d install verbs; the pattern no longer matches usage", len(advertised))

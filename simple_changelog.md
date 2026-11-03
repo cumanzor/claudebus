@@ -4,6 +4,8 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+[2026-11-03 23:00:56 UTC] [Install/Hooks] New `cbus install-hooks [--path FILE] [--dry-run]` adds the `hook-denied` and `hook-regressed` entries to Claude Code's settings, so coordinator notices no longer need a hand edit on each machine. It merges into existing hooks, keeps key order and number spelling, writes a backup, follows a symlinked settings file, does nothing when the entries exist, and refuses a file it cannot parse. An update never changes settings; install-assets prints one note when the hooks are missing. `cbus install` now lists the real install verbs.
+
 [2026-11-03 20:11:50 UTC] [Tests/Canary] The Codex resume and presence canaries no longer count git helpers as CLI frontends. Codex syncs its plugins with a background git fetch that can outlive /quit by many seconds, so `original_cli_frontends_exited` failed whenever the CLI stayed open long enough to start one, which stopped the presence canary before most of its checks.
 
 [2026-11-03 19:09:58 UTC] [Codex/Fix] On Linux, one defunct `codex` process no longer breaks Codex CLI consumer checks for every session on the machine. A zombie's `/proc/<pid>/fd` cannot be read, and the process scan returned that error instead of moving on, so the daemon reported `cannot verify current CLI consumer` until the zombie was reaped. A zombie now counts as having no open files. Any other permission error still fails the scan, because a live process that cannot be read might be the writer.
