@@ -79,7 +79,6 @@ previous repository and may not resolve.
 [2026-10-05 00:25:59 UTC] [Release] v0.18.0 (tag at `ebf0105`): control operations wait for their lane instead of failing busy and connects queue, so simultaneously spawned peers all join (#50, closes #19 and #48); one bad connection record no longer stops the daemon; daemon log lines carry timestamps; the scheduler loop wakes on in-process writes and follows up Claude receipts (#51); cbus send, presence broadcasts and grant notices wake the daemon through POST /wake and the full pass becomes a 2 s safety sweep (#52). Live with 92 stale records: append to accept 0.23 to 0.24 s for an idle Claude peer. Does not include the mods work merged after the tag (#54). Five assets reproduced byte-identically from two fresh clones; `SHA256SUMS` uploaded by hand and the downloads checked against it; Claude pair canary 3 of 3 on the release asset. Laptop and server selfupdated and both daemons restarted on v0.18.0; on the laptop 114 of 114 connections and 5 of 5 pending attempts were retained with no cursor moved back.
 
 [2026-10-03 20:29:44 UTC] [Mods] cbus-compact Claude Code mod draws a peer message as one line ('▸ [14:02] from bob: text', presence as 'bob joined'); cbus install-mods writes embedded mods to ~/.claude/skills/<mod>, refreshed by selfupdate and get.sh.
-
 [2026-10-03 02:31:42 UTC] [Daemon] cbus send, presence broadcasts and grant notices wake the daemon through a new POST /wake (advertised as "wake": true in /health), so a managed recipient's line is submitted at once instead of on the next pass; the full pass becomes a 2 s safety sweep. Best effort: 200 ms deadline, errors ignored, never starts a daemon, no call for unmanaged peers, no protocol bump. Live with 92 stale records: append to accept 0.23 to 0.24 s for an idle Claude peer (v0.17.1: about 1.9 s; v0.17.0: 54 to 82 s).
 
 [2026-10-02 22:25:21 UTC] [Daemon] The scheduler loop wakes on in-process writes and follows up Claude receipts: relay appends, daemon presence fanout and connects wake their connection, a receipt is looked up 100, 250 and 500 ms after the submit and then every second, and a backlog requeues after each accept instead of waiting a tick per line. Live with 92 stale records: append to accept 0.93 s mean, 1.05 s max (v0.17.1: 1.92 s, 2.04 s); submit to receipt about 128 ms (was about 1 s). CLI sends still wait for the 1 s sweep until they wake the daemon (#41).
@@ -523,25 +522,15 @@ Honest limits stated at wrap, v1-wide, in the coder's own words: fork mode is pe
 [2026-07-07 03:40:00 UTC] [Docs] Corrected delivery semantics: Monitor events are push — an idle session wakes and acts autonomously (verified live: parent replied to a bus message with no user present); "turn boundary" only defers delivery on a busy session.
 
 [2026-07-07 03:04:06 UTC] [Core] `send` now accepts a joined-but-never-armed peer (first arm replays the inbox); only a dead ex-listener is refused. Fixes the self-contradiction with the join→arm replay design.
-
 [2026-07-07 03:04:06 UTC] [Core] Atomic alias claim on `join` — bare `mkdir` as the lock, so concurrent joins can't pick the same alias and truncate each other's inbox.
-
 [2026-07-07 03:04:06 UTC] [Core] Re-arm no longer redelivers the whole inbox — `-n +1` only on first arm, `-n 0` after. `--force` to a dead ex-listener is now documented best-effort.
-
 [2026-07-07 03:04:06 UTC] [Core] Reject `.`/`..` in channel/alias names everywhere (`valid_name` + `split_target`) — closes a self-inflicted `rm -rf` path escape.
-
 [2026-07-07 03:04:06 UTC] [CLI] New `cbus bootstrap <channel> [parent]` prints the canonical fork-child prompt; `/bus-branch` consumes it so the prompt can't drift from CLI behavior.
-
 [2026-07-07 03:04:06 UTC] [Commands] `/bus-branch` reverted to arm-before-fork: the "no completion record" note is unavoidable (child resumes the transcript at boot, after the parent armed) and the old ordering opened an announce race. Note documented as cosmetic; `/bus-listen` reply guidance now warns about unroutable `hostname-PID` senders.
 
 [2026-07-07 00:20:44 UTC] [Core] Initial claudebus: file-based message bus between live Claude Code sessions, built on the Monitor tool + plain files.
-
 [2026-07-07 00:20:44 UTC] [Core] Named channels — peers addressed as `channel/alias`; bare alias resolves within your own channel(s); `global` reserved as the machine-wide orchestrator bus.
-
 [2026-07-07 00:20:44 UTC] [Core] Auto-recycled aliases — `cbus join` auto-picks `main`/`fork-N`, is idempotent, and prunes dead peers in the channel first (10-min grace for a joined-but-not-yet-armed peer).
-
 [2026-07-07 00:20:44 UTC] [Liveness] Hardened listener liveness — trust a live pid only if its args reference the inbox (kills pid-recycling false-positives); record owning `claude` pid so a crash-orphaned tail reads `off`.
-
 [2026-07-07 00:20:44 UTC] [CLI] Added `cbus active [channel]` / `cbus list --active` to list only currently-listening peers; `cbus channels` summarizes channels.
-
 [2026-07-07 00:20:44 UTC] [Commands] `/bus-branch` forks before arming the parent's Monitor (no stale "no completion record" task in the child); `/bus-listen` + `/bus-branch` default the channel to the repo name.

@@ -516,7 +516,6 @@ Findings from an independent review of the OpenCode PR stack.
   0.31 s CPU in a burst, the fixed one 0.01 s; for a session deleted by
   another process the sentinel lookup read present:false both before and
   after, while the session op read exists:true then exists:false.
-
 ## [2026-10-23 14:34:24 UTC] [Tests/Harness] Wider harness-dispatch guard
 
 [Attempt #1] Files: internal/client/harness_dispatch_test.go (scanner
@@ -848,7 +847,6 @@ plugins only; TUI plugins load only from the tui.json(c) plugin list.
   back present; a wrong session was refused; watch showed snapshot, route,
   one idle, route to null after /new, dispose; the socket was gone after
   exit.
-
 ## [2026-10-22 14:51:20 UTC] [Daemon/Harness] Explicit per-harness dispatch
 
 [Attempt #1] Files: internal/client/daemon_harness.go (opencode constant,
