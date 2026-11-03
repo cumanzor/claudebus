@@ -94,7 +94,9 @@ func TestNormalizeRepo(t *testing.T) {
 			t.Errorf("%q: got %q, %v; want %q", raw, got, err, want)
 		}
 	}
-	for _, raw := range []string{"", "/srv/git/r.git", "./r", "../r", "file:///srv/r.git", "justaname", "https://github.com", "https://h/a/../b", "ftp://h/o/r"} {
+	for _, raw := range []string{"", "/srv/git/r.git", "./r", "../r", "file:///srv/r.git", "justaname", "https://github.com", "https://h/a/../b", "ftp://h/o/r",
+		"user:s3cret@github.com:o/r.git", "git@github.com:o/r?x=s3cret", "git@github.com:o/r#s3cret", "https//user:s3cret@github.com/o/r", "foo bar:s3cret@x",
+		"C:/repos/r", `C:\repos\r`, "git@host.test:o/r\x1b", "https://host.test/o/r\x07"} {
 		if got, err := NormalizeRepo(raw); err == nil {
 			t.Errorf("%q: want a refusal, got %q", raw, got)
 		}
@@ -102,8 +104,40 @@ func TestNormalizeRepo(t *testing.T) {
 }
 
 func TestNormalizeRepoDoesNotEchoACredential(t *testing.T) {
-	if _, err := NormalizeRepo("https://user:s3cret@github.com"); err == nil || strings.Contains(err.Error(), "s3cret") {
+	for _, raw := range []string{
+		"https://user:s3cret@github.com",
+		"user:s3cret@github.com:o/r.git",
+		"https//user:s3cret@github.com/o/r",
+		"foo bar:s3cret@x",
+		"git@github.com:o/r?x=s3cret",
+		"s3cret",
+	} {
+		if _, err := NormalizeRepo(raw); err == nil || strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%q: %v", raw, err)
+		}
+	}
+}
+
+// TestPermitWithAnScpCredentialWritesNothing: through the door a coordinator uses.
+func TestPermitWithAnScpCredentialWritesNothing(t *testing.T) {
+	permitFixture(t)
+	_, err := NewPermit(PermitRequest{Channel: "dev", Actions: []string{"draft-pr"}, Repo: "user:s3cret@github.com:o/r.git", Ref: "x", Says: "go"})
+	var usage PermitUsageError
+	if !errors.As(err, &usage) || strings.Contains(err.Error(), "s3cret") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestPermitControlBytesDoNotReachTheAudit(t *testing.T) {
+	permitFixture(t)
+	p := writeTestPermit(t, PermitRequest{Actions: []string{"effort"}, Effort: "scope\x1b[31m\nhere", Says: "says\x1b[2Jthis\x07"})
+	if p.Effort != "scope[31m here" || p.Says != "says[2Jthis" {
+		t.Fatalf("%q %q", p.Effort, p.Says)
+	}
+	_, err := NewPermit(PermitRequest{Channel: "dev", Actions: []string{"merge"}, Repo: permitTestRepo, Target: "a\x1bb", Says: "go"})
+	var usage PermitUsageError
+	if !errors.As(err, &usage) {
+		t.Fatalf("a target with a control byte must be refused: %v", err)
 	}
 }
 

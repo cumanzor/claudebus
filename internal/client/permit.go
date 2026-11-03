@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"claudebus/internal/core"
 )
@@ -43,6 +44,7 @@ var (
 	permitPatternRe     = regexp.MustCompile(`^[A-Za-z0-9._/*?-]+$`)
 	permitRefRe         = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 	permitIDRe          = regexp.MustCompile(`^p-[0-9a-f]{10}$`)
+	permitScpHostRe     = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 	permitNow           = time.Now
 )
 
@@ -107,7 +109,7 @@ func NormalizeRepo(raw string) (string, error) {
 	case strings.Contains(s, "://"):
 		u, err := url.Parse(s)
 		if err != nil {
-			return "", fmt.Errorf("bad remote %q", permitRedactURL(s))
+			return "", fmt.Errorf("bad remote %s", permitRedactURL(s))
 		}
 		switch u.Scheme {
 		case "ssh", "git+ssh", "https", "http", "git":
@@ -121,35 +123,51 @@ func NormalizeRepo(raw string) (string, error) {
 			}
 		}
 	case strings.HasPrefix(s, "/") || strings.HasPrefix(s, "."):
-		return "", fmt.Errorf("remote %q is a local path, not a shared repo", s)
+		return "", errors.New("remote is a local path, not a shared repo")
 	default:
-		// scp form: [user@]host:path
-		left, right, ok := strings.Cut(s, ":")
-		if !ok || strings.Contains(left, "/") || strings.Contains(left, `\`) {
-			return "", fmt.Errorf("remote %q is not host:path or a URL", s)
+		var err error
+		if host, p, err = parseScpRemote(s); err != nil {
+			return "", err
 		}
-		if i := strings.LastIndex(left, "@"); i >= 0 {
-			left = left[i+1:]
-		}
-		host, p = left, right
 	}
 	host = strings.ToLower(host)
 	p = strings.TrimSuffix(strings.Trim(p, "/"), ".git")
-	if host == "" || p == "" || strings.Contains(p, "..") || strings.ContainsAny(host+p, " \t\r\n") {
-		return "", fmt.Errorf("remote %q has no host and path", permitRedactURL(s))
+	if host == "" || p == "" || strings.Contains(p, "..") || strings.IndexFunc(host+p, func(r rune) bool { return !unicode.IsPrint(r) || r == ' ' }) >= 0 {
+		return "", fmt.Errorf("remote %s has no host and path", permitRedactURL(s))
 	}
 	return host + "/" + p, nil
 }
 
+// parseScpRemote reads [user@]host:path. Anything looser could carry user:secret@host in
+// what would be stored as the path, and these errors print no part of the value.
+func parseScpRemote(s string) (host, p string, err error) {
+	left, right, ok := strings.Cut(s, ":")
+	if !ok {
+		return "", "", errors.New("remote is not host:path or a URL")
+	}
+	if i := strings.LastIndex(left, "@"); i >= 0 {
+		left = left[i+1:]
+	}
+	if !permitScpHostRe.MatchString(left) {
+		return "", "", errors.New("remote is not host:path or a URL")
+	}
+	if len(left) == 1 {
+		return "", "", errors.New("remote looks like a drive path, not a shared repo")
+	}
+	first, _, _ := strings.Cut(right, "/")
+	if strings.ContainsAny(first, "@:") || strings.ContainsAny(right, `?#\`) {
+		return "", "", errors.New("remote path has characters a repo path does not, and may hold a credential")
+	}
+	return left, right, nil
+}
+
+// permitRedactURL names a remote in an error without its credential. A value that is not
+// a URL may be anything, so it is not printed at all.
 func permitRedactURL(s string) string {
-	if u, err := url.Parse(s); err == nil && u.User != nil {
-		u.User = nil
-		return u.String()
+	if u, err := url.Parse(s); err == nil && u.Scheme != "" && u.Host != "" {
+		return u.Scheme + "://" + u.Host + u.Path
 	}
-	if i := strings.Index(s, "://"); i >= 0 {
-		return s[:i] + "://..."
-	}
-	return s
+	return "(not shown)"
 }
 
 // OriginRepo is the origin remote of the working directory, as git reports it.
@@ -213,14 +231,14 @@ func NewPermit(req PermitRequest) (Permit, error) {
 	if !core.ValidStoreName(req.Channel) {
 		return Permit{}, permitUsage("bad channel %q", req.Channel)
 	}
-	says := strings.TrimSpace(req.Says)
+	says := cleanPermitText(req.Says)
 	if says == "" {
 		return Permit{}, permitUsage("--says is required: the operator's words")
 	}
 	if len(says) > permitTextMax || len(req.Effort) > permitTextMax {
 		return Permit{}, permitUsage("--says and --effort are limited to %d bytes", permitTextMax)
 	}
-	p := Permit{V: permitVersion, Channel: req.Channel, Says: says, Effort: strings.TrimSpace(req.Effort)}
+	p := Permit{V: permitVersion, Channel: req.Channel, Says: says, Effort: cleanPermitText(req.Effort)}
 	if err := fillPermitScope(&p, req); err != nil {
 		return Permit{}, err
 	}
@@ -254,6 +272,20 @@ func NewPermit(req PermitRequest) (Permit, error) {
 	now := permitNow().UTC()
 	p.Writer, p.WriterSession, p.CreatedAt, p.ExpiresAt = self, SessionID(), now, now.Add(ttl)
 	return p, nil
+}
+
+// cleanPermitText keeps model-written text from carrying terminal control bytes into the
+// operator's audit view.
+func cleanPermitText(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case !unicode.IsPrint(r):
+			return -1
+		}
+		return r
+	}, s))
 }
 
 func fillPermitScope(p *Permit, req PermitRequest) error {
@@ -290,7 +322,7 @@ func fillPermitScope(p *Permit, req PermitRequest) error {
 		if t == "" {
 			return permitUsage("%s needs --target naming what the operator named", p.Actions[0])
 		}
-		if len(t) > permitTargetMax || strings.ContainsAny(t, "*?[]\\ \t\r\n") {
+		if len(t) > permitTargetMax || strings.ContainsAny(t, "*?[]\\ ") || strings.IndexFunc(t, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
 			return permitUsage("--target %q must be one exact name with no wildcard", t)
 		}
 		p.Target = t
@@ -480,11 +512,8 @@ func UsePermit(u PermitUse) (PermitView, error) {
 	if err := appendPermitUse(*found, u.Channel+"/"+alias, u.Action, ref, u.Target); err != nil {
 		return PermitView{}, PermitNotCovered{Reason: "could not record the use: " + err.Error(), Coordinator: coord}
 	}
-	v, ok := readPermitView(u.Channel, found.ID)
-	if !ok {
-		return PermitView{}, PermitNotCovered{Reason: found.ID + " can no longer be read", Coordinator: coord}
-	}
-	return v, nil
+	found.Uses++
+	return *found, nil
 }
 
 // permitRefusal is why v does not cover this use, "" if it does; score says how close
