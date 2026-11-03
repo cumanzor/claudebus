@@ -17,8 +17,11 @@ protocol.md; tests in permit_test.go, permit_unix_test.go and cmd/cbus/permit_te
   record what the operator said with `cbus permit <actions> --repo R (--ref
   PATTERN | --target T | --effort TEXT) --says WORDS [--ttl D]`, and a seat
   asks `cbus permits use <action> ...` whether it is covered. A use prints one
-  line naming the permit and its use count (exit 0) or a not-covered line
-  naming the nearest miss and the coordinator to ask (exit 1).
+  line naming the permit and how many times it was checked, marked not
+  consumed (exit 0), or a not-covered line naming the nearest miss and the
+  coordinator to ask (exit 1). An unknown class lists the valid classes. A
+  real seat had guessed `push` and both it and its coordinator read "use 1"
+  as a use spent; the count is an audit count, not a budget.
 - Classes: push-branch, draft-pr and pr-update cover a ref pattern; merge,
   release and install cover one exact target, one per permit; effort carries
   text and is read, not used. There is no wildcard class and force pushes
@@ -50,8 +53,10 @@ protocol.md; tests in permit_test.go, permit_unix_test.go and cmd/cbus/permit_te
   it checked.
 
 [Testing Notes]
-- 52 mutants across writer, ref, repo, state, target, ttl, uses, version and
-  CLI behavior were all killed; two survived a first run and got tests.
+- 63 mutants across writer, ref, repo, state, target, ttl, uses, version and
+  CLI behavior: 62 killed. The survivor (scp credential in path) is backed by
+  the general path check and fails when both are mutated together. Earlier
+  survivors got tests.
 - Live CLI run through a scratch store: covered, not-covered, refused and
   exit-code cases matched the documented behavior, including wildcard-reaches-
   main and a seat that is not a coordinator.
