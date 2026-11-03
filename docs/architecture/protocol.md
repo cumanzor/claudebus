@@ -180,6 +180,9 @@ $CBUS_DIR/
 │                               # Go client only: collapse state for cbus hook-denied
 ├── .regressions/<channel>/<alias>.json
 │                               # Go client only: transcript scan offset for cbus hook-regressed
+├── .permits/<channel>/<id>.json
+│                               # Go client only: a coordinator's permit, written once, with
+│                               #   <id>.uses (one line per use) and <id>.revoked beside it
 ├── .sock/<nonce>.sock          # Go client only: Codex wrapper compatibility sockets
 └── roles/                      # Go client only, NOT dot-prefixed: `spawn --role` fallback
                                  # prompts; a channel literally named "roles" would

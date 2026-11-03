@@ -310,7 +310,7 @@ func TestRegressedRenameDoesNotReportAgain(t *testing.T) {
 // TestRegressedRecipientScanIsBounded: past the cap the answer is nobody.
 func TestRegressedRecipientScanIsBounded(t *testing.T) {
 	deniedFixture(t)
-	for i := 0; i < regressedPeersMax; i++ {
+	for i := 0; i < coordinatorScanMax; i++ {
 		if _, err := recordCoordinator("ch", fmt.Sprintf("a%03d", i), "ch/boss", coordinatorDoorApply, ""); err != nil {
 			t.Fatal(err)
 		}
