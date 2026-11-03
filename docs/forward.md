@@ -41,7 +41,8 @@ cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --once      #
 Without `--once` it runs until stopped and reconnects by itself.
 
 **A mailbox with a backlog:** everything already queued is delivered on the first run. Check
-with `cbus list demo@server` first.
+with `cbus list demo@server` first, and see [Moving an existing mailbox](#moving-an-existing-mailbox)
+if you do not want that.
 
 **One consumer per mailbox:** the forwarder holds the consumer id `forward-<alias>`, and the
 relay refuses a different active consumer. Do not also connect a session to that alias.
@@ -96,6 +97,20 @@ before the ACK. If that write fails, the message stays on the relay and the forw
 and tries again. Check this file: nothing else tells you a message was given up on, apart from
 the log line.
 
+Send them again once the webhook is healthy:
+
+```sh
+F=~/.claude-bus/forward/demo@server/hook.deadletter.jsonl
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F" --dry-run   # list them
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F"             # POST each once
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F" --id <id>   # just these
+```
+
+Each record is POSTed once, with its original `id`, so a receiver that already handled it can
+ignore it. A delivered record leaves the file. One that fails stays, and the command exits 1. It
+does not contact the relay, and it is safe to run beside a running forwarder. A record with no
+message, such as an oversized one, stays in the file and counts as failed. The rate cap applies.
+
 ## Rate cap
 
 `--per-min` and `--per-hour` (default 6 and 30) cap the POSTs, retries included. Over the cap the
@@ -122,6 +137,29 @@ your shell, so `CBUS_SITE_<HOST>_URL`, `CBUS_DIR`, `CBUS_HOST`, `CBUS_RELAY_LOCA
   `journalctl --user -u <name>`.
 - **macOS:** the relay token is in the Keychain, which a LaunchAgent in your login session can
   read and an ssh session cannot. Logs go to `~/Library/Logs`.
+
+## Moving an existing mailbox
+
+A mailbox that something else read until now may hold old traffic, because reading it by other
+means does not take messages off the relay's queue. To start from now instead of replaying it:
+
+```sh
+cbus list demo@server                                    # how much is queued
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --skip-queued --dry-run   # the count, nothing else
+# stop whatever delivers this mailbox today, then:
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --skip-queued --once
+```
+
+`--skip-queued` asks the relay how many messages are queued, then settles exactly that many from
+the oldest without a POST. Each goes to the dead-letter file with the reason
+`skipped: queued before start`, so `--replay` can still send one. A message that arrives after
+the count is delivered normally, even during the skip.
+
+- Stop the old reader first, or both will deliver new messages. Nothing coordinates them.
+- Use it for one run, then start the service without it. On a service it would skip whatever
+  queued while it was down, so `--print-service` refuses it.
+- The count includes any stale presence events the relay discards without delivering. If so, a
+  new message can be skipped by mistake. It is still in the dead-letter file, not lost.
 
 ## Security
 

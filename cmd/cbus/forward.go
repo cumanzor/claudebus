@@ -14,7 +14,7 @@ import (
 	"claudebus/internal/client"
 )
 
-const forwardUsage = "usage: cbus forward <channel>@<host>/<alias> --webhook-config FILE [--dead-letter FILE] [--per-min N] [--per-hour N] [--max-attempts N] [--timeout D] [--once] [--dry-run] [--print-service]"
+const forwardUsage = "usage: cbus forward <channel>@<host>/<alias> --webhook-config FILE [--dead-letter FILE] [--per-min N] [--per-hour N] [--max-attempts N] [--timeout D] [--once] [--dry-run] [--print-service] [--skip-queued] [--replay FILE [--id ID]...]"
 
 // runForward delivers a relay mailbox to an outbound webhook; it is a durable
 // relay consumer, so it needs no inbound port and no local cursor.
@@ -30,8 +30,8 @@ func runForward(args []string) int {
 		return die("forward needs a full <channel>@<host>/<alias> address")
 	}
 	p, err := splitVerbArgs(args[1:],
-		map[string]bool{"--webhook-config": true, "--dead-letter": true, "--per-min": true, "--per-hour": true, "--max-attempts": true, "--timeout": true},
-		map[string]bool{"--once": true, "--dry-run": true, "--print-service": true}, true)
+		map[string]bool{"--webhook-config": true, "--dead-letter": true, "--per-min": true, "--per-hour": true, "--max-attempts": true, "--timeout": true, "--replay": true, "--id": true},
+		map[string]bool{"--once": true, "--dry-run": true, "--print-service": true, "--skip-queued": true}, true)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -68,9 +68,42 @@ func runForward(args []string) int {
 	if !ok || deadLetter == "" {
 		deadLetter = client.DefaultDeadLetter(ch, host, al)
 	}
+	replayFile, replaying := p.has("--replay")
+	ids := p.all("--id")
+	if len(ids) > 0 && !replaying {
+		return die("--id needs --replay")
+	}
+	logf := func(format string, a ...any) {
+		fmt.Fprintf(os.Stderr, "cbus forward: "+format+"\n", a...)
+	}
+	if replaying {
+		if replayFile == "" {
+			return die("--replay: want a dead-letter file")
+		}
+		if p.flags["--once"] || p.flags["--print-service"] || p.flags["--skip-queued"] {
+			return die("--replay runs alone; drop --once, --print-service and --skip-queued")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		res, err := client.ReplayDeadLetters(ctx, client.ForwardOptions{
+			Webhook: hook, PerMin: ints["--per-min"], PerHour: ints["--per-hour"], Timeout: timeout,
+			DryRun: p.flags["--dry-run"], Logf: logf,
+		}, replayFile, ids)
+		logf("replay: %d delivered, %d kept in %s", res.Delivered, res.Failed, replayFile)
+		if err != nil {
+			return die("%v", err)
+		}
+		if res.Failed > 0 {
+			return 1
+		}
+		return 0
+	}
 	if p.flags["--print-service"] {
 		if p.flags["--once"] || p.flags["--dry-run"] {
 			return die("--print-service describes a long-running forwarder; drop --once and --dry-run")
+		}
+		if p.flags["--skip-queued"] {
+			return die("--skip-queued is for one first run; a service would skip what queued while it was down")
 		}
 		return printForwardService(ch, host, al, cfgPath, deadLetter, ints, timeout)
 	}
@@ -82,11 +115,22 @@ func runForward(args []string) int {
 	if token == "" {
 		return die("no relay token for %q — run: cbus auth set %s --token -", host, host)
 	}
+	skip := 0
+	if p.flags["--skip-queued"] {
+		ep, err := client.ResolveRemote(client.NewCredStore(), host)
+		if err != nil {
+			return die("--skip-queued: %v", err)
+		}
+		if skip, err = client.RelayQueued(ep, ch, al); err != nil {
+			return die("--skip-queued: %v; not started", err)
+		}
+		logf("skip-queued: %d message(s) queued before start go to %s without a POST", skip, deadLetter)
+		if p.flags["--dry-run"] {
+			return 0
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logf := func(format string, a ...any) {
-		fmt.Fprintf(os.Stderr, "cbus forward: "+format+"\n", a...)
-	}
 	logf("%s@%s/%s -> webhook (%s relay, consumer %s, dead letters %s)", ch, host, al, map[bool]string{true: "local", false: "public"}[fd.Local], client.ForwardConsumer(al), deadLetter)
 	err = client.Forward(ctx, client.ForwardOptions{
 		Channel: ch, Host: host, Alias: al,
@@ -95,6 +139,7 @@ func runForward(args []string) int {
 		PerMin:  ints["--per-min"], PerHour: ints["--per-hour"], MaxAttempts: ints["--max-attempts"],
 		Timeout:    timeout,
 		DeadLetter: deadLetter,
+		SkipQueued: skip,
 		DryRun:     p.flags["--dry-run"],
 		Once:       p.flags["--once"] || p.flags["--dry-run"],
 		OnceIdle:   3 * time.Second,

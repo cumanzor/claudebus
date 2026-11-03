@@ -4,6 +4,39 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-03 23:53:43 UTC] [Forward/Operations] Replay dead letters and skip an existing backlog
+
+[Attempt #1] Files: internal/client/forward.go, internal/client/forward_replay.go,
+internal/client/forward_replay_test.go, cmd/cbus/forward.go, cmd/cbus/usage.go,
+docs/forward.md.
+
+[What changed]
+- `--replay FILE [--id ID]...` POSTs each record once with its original `id`, under
+  the rate cap, without contacting the relay. A delivered record leaves the file. A
+  failed, unreadable or message-less record stays and the command exits 1.
+  `--dry-run` lists them. An `--id` not in the file is an error.
+- Appends and rewrites of the dead-letter file now take a lock, held for one write
+  and never during a POST. The rewrite re-reads the file, so a record a running
+  forwarder appends during a slow POST survives.
+- `--skip-queued` reads the relay's queued count before subscribing, then settles
+  exactly that many frames from the oldest without a POST, each recorded as a dead
+  letter with the reason `skipped: queued before start`. The count is the relay's
+  own, so no clock is compared, and a message that arrives after the count is
+  delivered normally. It drops by one only after the ACK, so a frame redelivered
+  after a reconnect is still skipped. If the record cannot be written the message
+  stays on the relay. A failed count refuses to start. With `--dry-run` it prints
+  the count and stops. `--print-service` refuses it, because a service would skip
+  what queued while it was down.
+- Limit: the count includes stale presence events the relay discards undelivered,
+  so a new message can be skipped by mistake. It stays in the dead-letter file.
+
+[Testing]
+- Replay: partial failure, unreadable and message-less lines, dry run, ids, a
+  missing file, and a record appended during the POST. Real relay: the backlog is
+  skipped with no POST, a message sent afterward is delivered, and replay then
+  sends the skipped ones; a failed record leaves the message on the relay. Eleven
+  mutations each fail a test.
+
 ## [2026-11-03 23:32:15 UTC] [Forward/Docs] Service definition, request timeout and docs
 
 [Attempt #1] Files: cmd/cbus/forward.go, cmd/cbus/forward_service.go,
