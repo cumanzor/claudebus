@@ -23,9 +23,10 @@ internal/client/endpoint.go, docs/usage.md, docs/architecture/command-reference.
   shared across machines it may work elsewhere. `--repair` rewrites every dead entry in
   place and keeps its other fields. A bare name on PATH and a wrapped command are not
   judged. The update note covers this too.
-- A dangling symlinked settings file was replaced by a regular file. The link is now
-  followed, directory by directory so a relative link inside a linked directory lands
-  on the file the kernel opens, creating the target's parent directories. An empty
+- A dangling symlinked settings file was replaced by a regular file. The path is now
+  walked one component at a time as the kernel does, so a relative link inside a linked
+  directory, or one with a `..` after a link, lands on the file the kernel opens, and the
+  target's parent directories are created. A symlink cycle is refused. An empty
   `--path` is refused;
   before, a script's unset variable edited the default settings.
 - `--print-service`: the plist comment no longer holds the label, because a `--` in a

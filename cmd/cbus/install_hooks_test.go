@@ -416,3 +416,51 @@ func TestInstallHooksRefusesEmptyPath(t *testing.T) {
 		t.Error("an empty --path wrote the default settings")
 	}
 }
+
+// a link's own text can pass through another link before a "..", which only a real walk gets right
+func TestResolveLinkTargetWalksLikeTheKernel(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(root, "elsewhere", "deep"), 0o755)
+	os.MkdirAll(filepath.Join(root, "home"), 0o755)
+	if err := os.Symlink(filepath.Join(root, "elsewhere", "deep"), filepath.Join(root, "home", "via")); err != nil {
+		t.Skip(err)
+	}
+	mk := func(name, target string) string {
+		p := filepath.Join(root, "home", name)
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cycleA := mk("cycle-a", "cycle-b")
+	mk("cycle-b", "cycle-a")
+	for name, tc := range map[string]struct{ path, want string }{
+		"through a link before dot-dot": {mk("a.json", "via/../a.json"), filepath.Join(root, "elsewhere", "a.json")},
+		"plain file":                    {filepath.Join(root, "home", "plain.json"), filepath.Join(root, "home", "plain.json")},
+		"absolute dangling":             {mk("b.json", filepath.Join(root, "new", "b.json")), filepath.Join(root, "new", "b.json")},
+		"missing parent":                {mk("c.json", "../not/yet/c.json"), filepath.Join(root, "not", "yet", "c.json")},
+		"dot and doubled slash":         {mk("d.json", ".//via/./d.json"), filepath.Join(root, "elsewhere", "deep", "d.json")},
+	} {
+		got, err := resolveLinkTarget(tc.path)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: got %s, %v; want %s", name, got, err, tc.want)
+		}
+	}
+	if _, err := resolveLinkTarget(cycleA); err == nil {
+		t.Error("a symlink cycle was accepted")
+	}
+	// the kernel is the reference for an existing target
+	real := filepath.Join(root, "elsewhere", "a.json")
+	os.WriteFile(real, []byte("x"), 0o600)
+	got, err := resolveLinkTarget(filepath.Join(root, "home", "a.json"))
+	want, evalErr := filepath.EvalSymlinks(real)
+	if err != nil || evalErr != nil || got != want {
+		t.Errorf("existing target: %s %v, want %s %v", got, err, want, evalErr)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "home", "a.json")); err != nil || string(b) != "x" {
+		t.Errorf("the kernel disagrees with the fixture: %q %v", b, err)
+	}
+}

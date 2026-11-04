@@ -374,33 +374,48 @@ func shellSafe(s string) bool {
 	return s != ""
 }
 
-// resolveLinkTarget finds the file a settings path really opens. Text joins would misplace
-// a relative link whose directory is itself reached through a link, so each directory is
-// resolved first. A dangling link gives its target, which EvalSymlinks refuses to do.
+// resolveLinkTarget finds the file a settings path really opens, walking it one
+// component at a time as the kernel does, because a ".." after a symlink means the link
+// target's parent, which any text join gets wrong. EvalSymlinks refuses a dangling link.
 func resolveLinkTarget(path string) (string, error) {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved, nil
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
 	}
-	for i := 0; i < 40; i++ {
-		dir := filepath.Dir(path)
-		if real, err := filepath.EvalSymlinks(dir); err == nil {
-			dir = real
+	root := filepath.VolumeName(abs) + string(filepath.Separator)
+	cur := root
+	sep := string(filepath.Separator)
+	rest := strings.Split(strings.TrimPrefix(abs, root), sep)
+	for links := 0; len(rest) > 0; {
+		part := rest[0]
+		rest = rest[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
 		}
-		path = filepath.Join(dir, filepath.Base(path))
-		fi, err := os.Lstat(path)
+		next := filepath.Join(cur, part)
+		fi, err := os.Lstat(next)
 		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
-			return path, nil
+			cur = next
+			continue
 		}
-		link, err := os.Readlink(path)
+		if links++; links > 40 {
+			return "", fmt.Errorf("%s: too many levels of symlinks", path)
+		}
+		link, err := os.Readlink(next)
 		if err != nil {
 			return "", err
 		}
-		if !filepath.IsAbs(link) {
-			link = dir + string(filepath.Separator) + link
+		if filepath.IsAbs(link) {
+			cur = filepath.VolumeName(link) + sep
+			link = strings.TrimPrefix(link, cur)
 		}
-		path = link
+		rest = append(strings.Split(link, sep), rest...)
 	}
-	return "", fmt.Errorf("%s: too many levels of symlinks", path)
+	return cur, nil
 }
 
 func writeSettingsAtomic(path string, data []byte, mode os.FileMode) error {
