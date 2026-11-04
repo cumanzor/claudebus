@@ -1682,14 +1682,15 @@ was available. A session that ends before its next Stop reports nothing until it
 
 **Wiring is opt-in** with `cbus install-hooks`; an update never touches settings. A
 machine without these hooks is silent, so no notice does not mean no denials and no
-fallbacks. It adds to `~/.claude/settings.json`:
+fallbacks. It adds these to `$CLAUDE_CONFIG_DIR/settings.json` or `~/.claude/settings.json`,
+here for a binary at `~/.local/bin/cbus`:
 
 ```json
 {"hooks": {
   "PermissionDenied": [{"matcher": "*", "hooks": [
-    {"type": "command", "command": "$HOME/.local/bin/cbus hook-denied"}]}],
+    {"type": "command", "command": "\"$HOME/.local/bin/cbus\" hook-denied"}]}],
   "Stop": [{"hooks": [
-    {"type": "command", "command": "$HOME/.local/bin/cbus hook-regressed"}]}]
+    {"type": "command", "command": "\"$HOME/.local/bin/cbus\" hook-regressed"}]}]
 }}
 ```
 

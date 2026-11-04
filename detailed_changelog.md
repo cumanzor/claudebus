@@ -17,21 +17,28 @@ internal/client/endpoint.go, docs/usage.md, docs/architecture/command-reference.
   Paths use forward slashes.
 - An entry counted as installed whatever its path, so a moved binary or one written by
   `go run` left a hook that never runs, with no note and `already installed` on a
-  rerun. A plain `<path> <verb>` entry whose binary is missing, or whose unquoted `$HOME`
-  would split, is now repaired in place and keeps its other fields. A bare name on PATH
-  and a wrapped command are not judged. The update note covers this too.
+  rerun. A plain `<path> <verb>` entry is now judged the way the shell would run it:
+  missing binary, an unquoted `$HOME` that would split, a quoted `~`, a single-quoted
+  `$HOME`. A dead entry is reported with exit 1 and left, because in a settings file
+  shared across machines it may work elsewhere. `--repair` rewrites every dead entry in
+  place and keeps its other fields. A bare name on PATH and a wrapped command are not
+  judged. The update note covers this too.
 - A dangling symlinked settings file was replaced by a regular file. The link is now
-  followed, creating the target's parent directories. An empty `--path` is refused;
+  followed, directory by directory so a relative link inside a linked directory lands
+  on the file the kernel opens, creating the target's parent directories. An empty
+  `--path` is refused;
   before, a script's unset variable edited the default settings.
 - `--print-service`: the plist comment no longer holds the label, because a `--` in a
   name made the file invalid. The site variable comes from the client's own function,
   so hosts ending in punctuation keep it. `$$` is an escape only on `Exec` lines, so
   `Environment=` values now keep a single `$`.
-- The command reference no longer says no installer touches settings.
+- The command reference sections for these two hooks now name `install-hooks` and show
+  the quoted command.
 
 [Testing]
 - Each written command form runs in bash from a plain home, a home with a space, and
-  directories named `a&b` and `it's (x)`. Tests for repair, live and unjudged entries,
+  directories named `a&b` and `it's (x)`. The dead verdict is compared with what bash
+  does for each form. Tests for repair, live and unjudged entries, the relative link,
   the dangling link, the empty path, the plist, the site variable and the dollar. `plutil
   -lint` accepted a plist with `--` in its name on macOS. Mutations fail a test, except
   removing the empty-path check, where the write still fails and settings stay untouched.

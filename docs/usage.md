@@ -246,9 +246,11 @@ A seat's coordinator hears about auto mode denials through the `PermissionDenied
 hook, and about a classifier model fallback through the `Stop` hook. Add both with
 `cbus install-hooks` (`--dry-run` shows the change, `--path FILE` targets one settings
 file). It merges into your existing hooks, keeps your key order, writes a backup, follows
-a symlinked settings file, repairs a plain entry whose binary no longer exists, and refuses
-a file it cannot parse. It does rewrite the file with two-space indentation. `selfupdate`
-never changes settings: it prints a note when a settings file exists without these hooks.
+a symlinked settings file, and refuses a file it cannot parse. It does rewrite the file with
+two-space indentation. It reports a plain entry whose binary does not exist on this machine,
+exits 1 and leaves it, because in a settings file shared across machines it may work elsewhere;
+`--repair` points those entries at this binary. `selfupdate` never changes settings: it prints a
+note when a settings file exists without working entries for these hooks.
 The entries it adds, here for a binary at `~/.local/bin/cbus`:
 
 ```json

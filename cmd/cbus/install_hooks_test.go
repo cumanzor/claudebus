@@ -21,7 +21,7 @@ const existingSettings = `{
 `
 
 func TestMergeClaudeHooksKeepsTheUsersFile(t *testing.T) {
-	out, added, err := mergeClaudeHooks([]byte(existingSettings), "$HOME/.local/bin/cbus")
+	out, added, err := mergeClaudeHooks3([]byte(existingSettings), "$HOME/.local/bin/cbus")
 	if err != nil || len(added) != 2 {
 		t.Fatalf("added=%v err=%v", added, err)
 	}
@@ -52,7 +52,7 @@ func TestMergeClaudeHooksKeepsTheUsersFile(t *testing.T) {
 		t.Errorf("PermissionDenied = %+v", denied)
 	}
 
-	again, added, err := mergeClaudeHooks(out, "$HOME/.local/bin/cbus")
+	again, added, err := mergeClaudeHooks3(out, "$HOME/.local/bin/cbus")
 	if err != nil || len(added) != 0 || again != nil {
 		t.Errorf("second merge added %v, err %v", added, err)
 	}
@@ -60,12 +60,12 @@ func TestMergeClaudeHooksKeepsTheUsersFile(t *testing.T) {
 
 func TestMergeClaudeHooksSeesAHandWrittenEntry(t *testing.T) {
 	raw := `{"hooks":{"PermissionDenied":[{"matcher":"Bash","hooks":[{"type":"command","command":"/opt/my tools/cbus hook-denied 2>/dev/null"}]}]}}`
-	_, added, err := mergeClaudeHooks([]byte(raw), "cbus")
+	_, added, err := mergeClaudeHooks3([]byte(raw), "cbus")
 	if err != nil || len(added) != 1 || added[0].verb != "hook-regressed" {
 		t.Errorf("added=%v err=%v", added, err)
 	}
 	notCbus := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo hook-regressed"}]}]}}`
-	_, added, _ = mergeClaudeHooks([]byte(notCbus), "cbus")
+	_, added, _ = mergeClaudeHooks3([]byte(notCbus), "cbus")
 	if len(added) != 2 {
 		t.Errorf("an unrelated command counted as installed: %v", added)
 	}
@@ -79,11 +79,11 @@ func TestMergeClaudeHooksRefusesWhatItCannotParse(t *testing.T) {
 		"hooks shape":   `{"hooks":[]}`,
 		"event shape":   `{"hooks":{"Stop":{}}}`,
 	} {
-		if out, _, err := mergeClaudeHooks([]byte(raw), "cbus"); err == nil {
+		if out, _, err := mergeClaudeHooks3([]byte(raw), "cbus"); err == nil {
 			t.Errorf("%s: accepted:\n%s", name, out)
 		}
 	}
-	if out, added, err := mergeClaudeHooks(nil, "cbus"); err != nil || len(added) != 2 || !json.Valid(out) {
+	if out, added, err := mergeClaudeHooks3(nil, "cbus"); err != nil || len(added) != 2 || !json.Valid(out) {
 		t.Errorf("empty file: %v %v", added, err)
 	}
 }
@@ -225,22 +225,62 @@ func TestWrittenCommandRunsInAShell(t *testing.T) {
 	}
 }
 
-func TestDeadHookPathIsRepairedInPlace(t *testing.T) {
+func mergeClaudeHooks3(raw []byte, cbusPath string) ([]byte, []hookChange, error) {
+	out, changes, _, err := mergeClaudeHooks(raw, cbusPath, false)
+	return out, changes, err
+}
+
+const deadSettings = `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/gone/cbus hook-regressed","timeout":5}]}],"PermissionDenied":[{"matcher":"*","hooks":[{"type":"command","command":"/gone/a/cbus hook-denied"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"$HOME/.local/bin/cbus hook-denied"}]}]}}`
+
+func TestDeadHookIsReportedAndNotRewrittenByDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	raw := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/gone/cbus hook-regressed","timeout":5}]}],"PermissionDenied":[{"matcher":"Bash","hooks":[{"type":"command","command":"$HOME/.local/bin/cbus hook-denied"}]}]}}`
-	out, changed, err := mergeClaudeHooks([]byte(raw), "/new/cbus")
-	if err != nil || len(changed) != 2 {
-		t.Fatalf("changed=%v err=%v", changed, err)
+	out, _, dead, err := mergeClaudeHooks([]byte(deadSettings), "/new/cbus", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != nil {
+		t.Errorf("rewrote a dead entry without --repair:\n%s", out)
+	}
+	if len(dead) != 3 {
+		t.Errorf("dead = %v, want all three", dead)
+	}
+}
+
+func TestRepairFixesEveryDeadEntryInPlace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	out, _, dead, err := mergeClaudeHooks([]byte(deadSettings), "/new/cbus", true)
+	if err != nil || len(dead) != 3 {
+		t.Fatalf("dead=%v err=%v", dead, err)
 	}
 	s := string(out)
-	if strings.Contains(s, "/gone/cbus") || strings.Contains(s, "$HOME/.local/bin/cbus") {
+	if strings.Contains(s, "/gone/") || strings.Contains(s, "$HOME/.local/bin/cbus") {
 		t.Errorf("dead path kept:\n%s", s)
 	}
-	if strings.Count(s, "/new/cbus hook-regressed") != 1 || !strings.Contains(s, `"timeout": 5`) || !strings.Contains(s, `"matcher": "Bash"`) {
-		t.Errorf("repair must keep the entry:\n%s", s)
+	if strings.Count(s, "/new/cbus hook-denied") != 2 || strings.Count(s, "/new/cbus hook-regressed") != 1 {
+		t.Errorf("not every entry repaired:\n%s", s)
 	}
-	if strings.Count(s, `"command": `) != 2 {
+	for _, keep := range []string{`"timeout": 5`, `"matcher": "Bash"`, `"matcher": "*"`} {
+		if !strings.Contains(s, keep) {
+			t.Errorf("lost %s:\n%s", keep, s)
+		}
+	}
+	if strings.Count(s, `"command": `) != 3 {
 		t.Errorf("repair added an entry:\n%s", s)
+	}
+	if again, changes, _, err := mergeClaudeHooks(out, "/new/cbus", true); err != nil || again != nil || len(changes) != 0 {
+		t.Errorf("second repair: %v %v %v", again != nil, changes, err)
+	}
+}
+
+func TestDeadEntryBesideALiveOneIsReported(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	exe := filepath.Join(home, "cbus")
+	os.WriteFile(exe, nil, 0o755)
+	raw := `{"hooks":{"PermissionDenied":[{"hooks":[{"type":"command","command":"` + exe + ` hook-denied"},{"type":"command","command":"/gone/cbus hook-denied"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + exe + ` hook-regressed"}]}]}}`
+	_, _, dead, err := mergeClaudeHooks([]byte(raw), "/new/cbus", false)
+	if err != nil || len(dead) != 1 || !strings.Contains(dead[0], "/gone/cbus") {
+		t.Errorf("dead=%v err=%v", dead, err)
 	}
 }
 
@@ -253,25 +293,41 @@ func TestLiveAndUnjudgedHookCommandsCountAsPresent(t *testing.T) {
 	for _, cmd := range []string{
 		"$HOME/.local/bin/cbus hook-denied",
 		`"$HOME/.local/bin/cbus" hook-denied`,
+		"~/.local/bin/cbus hook-denied",
 		"cbus hook-denied",
 		"/gone/cbus hook-denied 2>/dev/null",
 		filepath.Join(bin, "cbus") + " hook-denied",
 	} {
-		if present, stale, _ := findHookCommand(groupsWith(cmd), "hook-denied", "/other/cbus"); !present || stale != nil {
-			t.Errorf("%q: present=%v stale=%v", cmd, present, stale != nil)
+		if present, dead := findHookCommand(groupsWith(cmd), "hook-denied", "/other/cbus"); !present || len(dead) != 0 {
+			t.Errorf("%q: present=%v dead=%d", cmd, present, len(dead))
 		}
 	}
 }
 
-func TestUnquotedHomeWithASpaceIsRepaired(t *testing.T) {
+// the verdict has to match what bash does with the entry
+func TestDeadVerdictMatchesTheShell(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "my home")
 	bin := filepath.Join(home, ".local", "bin")
 	os.MkdirAll(bin, 0o755)
-	os.WriteFile(filepath.Join(bin, "cbus"), nil, 0o755)
+	os.WriteFile(filepath.Join(bin, "cbus"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
 	t.Setenv("HOME", home)
-	present, stale, _ := findHookCommand(groupsWith("$HOME/.local/bin/cbus hook-denied"), "hook-denied", `"$HOME/.local/bin/cbus"`)
-	if present || stale == nil {
-		t.Errorf("present=%v stale=%v, want it repaired", present, stale != nil)
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	for _, cmd := range []string{
+		"~/.local/bin/cbus hook-denied",
+		`"$HOME/.local/bin/cbus" hook-denied`,
+		`"${HOME}/.local/bin/cbus" hook-denied`,
+		"$HOME/.local/bin/cbus hook-denied",
+		`"~/.local/bin/cbus" hook-denied`,
+		`'$HOME/.local/bin/cbus' hook-denied`,
+	} {
+		ran := exec.Command(bash, "-c", cmd).Run() == nil
+		_, dead := findHookCommand(groupsWith(cmd), "hook-denied", "/other/cbus")
+		if ran == (len(dead) > 0) {
+			t.Errorf("%s: shell ran=%v, tool dead=%v", cmd, ran, len(dead) > 0)
+		}
 	}
 }
 
@@ -294,6 +350,59 @@ func TestInstallHooksWritesThroughADanglingLink(t *testing.T) {
 	}
 	if b, err := os.ReadFile(target); err != nil || !strings.Contains(string(b), "hook-denied") {
 		t.Fatalf("target: %v %s", err, b)
+	}
+}
+
+// ~/.claude -> dotfiles/claude, whose settings.json -> ../shared/settings.json
+func TestInstallHooksFollowsARelativeLinkInsideALinkedDir(t *testing.T) {
+	for name, exists := range map[string]bool{"target exists": true, "target missing": false} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			real := filepath.Join(root, "dotfiles", "shared", "settings.json")
+			os.MkdirAll(filepath.Dir(real), 0o755)
+			if exists {
+				os.WriteFile(real, []byte(`{"model":"mine"}`), 0o600)
+			}
+			os.MkdirAll(filepath.Join(root, "dotfiles", "claude"), 0o755)
+			if err := os.Symlink("../shared/settings.json", filepath.Join(root, "dotfiles", "claude", "settings.json")); err != nil {
+				t.Skip(err)
+			}
+			linked := filepath.Join(root, ".claude")
+			os.Symlink(filepath.Join(root, "dotfiles", "claude"), linked)
+			if rc := runInstallHooks([]string{"--path", filepath.Join(linked, "settings.json")}); rc != 0 {
+				t.Fatalf("rc=%d", rc)
+			}
+			if b, err := os.ReadFile(real); err != nil || !strings.Contains(string(b), "hook-denied") {
+				t.Errorf("the real file was not updated: %v %s", err, b)
+			}
+			if _, err := os.Stat(filepath.Join(root, "shared", "settings.json")); err == nil {
+				t.Error("wrote the wrong file")
+			}
+		})
+	}
+}
+
+func TestInstallHooksDeadEntryExitCodes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "s.json")
+	os.WriteFile(path, []byte(deadSettings), 0o600)
+	if rc := runInstallHooks([]string{"--path", path}); rc != 1 {
+		t.Errorf("rc=%d, want 1 with a dead entry left", rc)
+	}
+	if b, _ := os.ReadFile(path); string(b) != deadSettings {
+		t.Error("changed without --repair")
+	}
+	if rc := runInstallHooks([]string{"--path", path, "--repair", "--dry-run"}); rc != 0 {
+		t.Errorf("repair dry run rc=%d", rc)
+	}
+	if b, _ := os.ReadFile(path); string(b) != deadSettings {
+		t.Error("--dry-run changed the file")
+	}
+	if rc := runInstallHooks([]string{"--path", path, "--repair"}); rc != 0 {
+		t.Errorf("repair rc=%d", rc)
+	}
+	if rc := runInstallHooks([]string{"--path", path}); rc != 0 {
+		t.Errorf("after repair rc=%d", rc)
 	}
 }
 

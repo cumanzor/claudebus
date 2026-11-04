@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const installHooksUsage = "usage: cbus install-hooks [--path FILE] [--dry-run]"
+const installHooksUsage = "usage: cbus install-hooks [--path FILE] [--dry-run] [--repair]"
 
 // claudeHook is one settings entry the coordinator features need.
 type claudeHook struct {
@@ -133,11 +133,10 @@ func parseSettings(raw []byte) (jsonObject, error) {
 	return o, nil
 }
 
-// hookChange is an entry to add, or with stale set, one whose command to repair.
+// hookChange is an entry to add. dead lists entries for the verb whose binary cannot run.
 type hookChange struct {
 	claudeHook
-	stale jsonObject
-	old   string
+	dead []jsonObject
 }
 
 func isCbusBinary(path string) bool {
@@ -145,40 +144,49 @@ func isCbusBinary(path string) bool {
 	return base == "cbus" || base == "cbus.exe"
 }
 
-// a plain "<path> <verb>" entry, the only shape whose binary can be judged
-func splitHookCommand(cmd string) (path, verb string, quoted, ok bool) {
+// a plain "<path> <verb>" entry, the only shape whose binary can be judged; quote is 0, ' or "
+func splitHookCommand(cmd string) (path, verb string, quote byte, ok bool) {
 	cmd = strings.TrimSpace(cmd)
 	if strings.HasPrefix(cmd, `"`) || strings.HasPrefix(cmd, `'`) {
-		end := strings.IndexByte(cmd[1:], cmd[0])
+		quote = cmd[0]
+		end := strings.IndexByte(cmd[1:], quote)
 		if end < 0 {
-			return "", "", false, false
+			return "", "", 0, false
 		}
 		path, verb = cmd[1:end+1], strings.TrimSpace(cmd[end+2:])
-		quoted = true
 	} else {
 		var found bool
 		if path, verb, found = strings.Cut(cmd, " "); !found {
-			return "", "", false, false
+			return "", "", 0, false
 		}
 		verb = strings.TrimSpace(verb)
 	}
-	return path, verb, quoted, path != "" && verb != "" && !strings.ContainsAny(verb, " \t;&|<>")
+	return path, verb, quote, path != "" && verb != "" && !strings.ContainsAny(verb, " \t;&|<>")
 }
 
-// hookBinaryDead reports a path that cannot run from this entry. A bare name resolves on PATH, so it is not judged.
-func hookBinaryDead(path string, quoted bool) bool {
+// hookBinaryDead follows what the shell would do with the path. A bare name resolves on PATH, so it is not judged.
+func hookBinaryDead(path string, quote byte) bool {
 	home, homeErr := os.UserHomeDir()
-	for _, prefix := range []string{"$HOME/", "${HOME}/", "~/"} {
-		if rest, ok := strings.CutPrefix(path, prefix); ok {
-			if homeErr != nil {
-				return false
-			}
-			if !quoted && strings.ContainsAny(home, " \t") {
-				return true // the shell splits an unquoted $HOME at the space
-			}
-			path = filepath.Join(home, filepath.FromSlash(rest))
-			break
+	switch {
+	case strings.HasPrefix(path, "~/"):
+		if quote != 0 {
+			return true // a quoted tilde does not expand
 		}
+		if homeErr != nil {
+			return false
+		}
+		path = filepath.Join(home, filepath.FromSlash(path[2:]))
+	case strings.HasPrefix(path, "$HOME/") || strings.HasPrefix(path, "${HOME}/"):
+		if quote == '\'' {
+			return true // single quotes do not expand
+		}
+		if homeErr != nil {
+			return false
+		}
+		if quote == 0 && strings.ContainsAny(home, " \t") {
+			return true // the shell splits an unquoted $HOME at the space
+		}
+		path = filepath.Join(home, filepath.FromSlash(path[strings.IndexByte(path, '/')+1:]))
 	}
 	if !filepath.IsAbs(path) {
 		return false
@@ -187,8 +195,8 @@ func hookBinaryDead(path string, quoted bool) bool {
 	return errors.Is(err, os.ErrNotExist)
 }
 
-// any path to this cbus counts, so a hand-written entry is not added twice; a dead one comes back to be repaired
-func findHookCommand(groups []any, verb, cbusPath string) (present bool, stale jsonObject, old string) {
+// any path to this cbus counts, so a hand-written entry is not added twice; dead entries are returned separately
+func findHookCommand(groups []any, verb, cbusPath string) (present bool, dead []jsonObject) {
 	for _, g := range groups {
 		group, ok := g.(jsonObject)
 		if !ok {
@@ -204,26 +212,34 @@ func findHookCommand(groups []any, verb, cbusPath string) (present bool, stale j
 			c, _ := hook.get("command")
 			cmd := fmt.Sprint(c)
 			if strings.Contains(cmd, cbusPath+" "+verb) {
-				return true, nil, ""
+				present = true
+				continue
 			}
-			if path, v, quoted, simple := splitHookCommand(cmd); simple && v == verb && isCbusBinary(path) {
-				if hookBinaryDead(path, quoted) {
-					stale, old = hook, cmd
-					continue
+			if path, v, quote, simple := splitHookCommand(cmd); simple && v == verb && isCbusBinary(path) {
+				if hookBinaryDead(path, quote) {
+					dead = append(dead, hook)
+				} else {
+					present = true
 				}
-				return true, nil, ""
+				continue
 			}
 			fields := strings.Fields(cmd)
 			for i := 1; i < len(fields); i++ {
 				if fields[i] == verb && isCbusBinary(fields[i-1]) {
-					return true, nil, ""
+					present = true
 				}
 			}
 		}
 	}
-	return false, stale, old
+	return present, dead
 }
 
+func hookCommandText(hook jsonObject) string {
+	c, _ := hook.get("command")
+	return fmt.Sprint(c)
+}
+
+// missingClaudeHooks lists verbs with no working entry, and verbs with a dead entry beside a working one.
 func missingClaudeHooks(settings jsonObject, cbusPath string) ([]hookChange, error) {
 	var hooksObj jsonObject
 	if v, i := settings.get("hooks"); i >= 0 {
@@ -243,32 +259,42 @@ func missingClaudeHooks(settings jsonObject, cbusPath string) ([]hookChange, err
 			}
 			groups = a
 		}
-		present, stale, old := findHookCommand(groups, h.verb, cbusPath)
-		if !present {
-			missing = append(missing, hookChange{claudeHook: h, stale: stale, old: old})
+		present, dead := findHookCommand(groups, h.verb, cbusPath)
+		if !present || len(dead) > 0 {
+			missing = append(missing, hookChange{claudeHook: h, dead: dead})
 		}
 	}
 	return missing, nil
 }
 
-// mergeClaudeHooks adds what is missing and returns the new file; existing entries are untouched.
-func mergeClaudeHooks(raw []byte, cbusPath string) ([]byte, []hookChange, error) {
+// mergeClaudeHooks adds what is missing. A dead entry is another machine's path as easily as
+// a stale one on this machine, so it is only rewritten with repair; otherwise it is reported.
+func mergeClaudeHooks(raw []byte, cbusPath string, repair bool) ([]byte, []hookChange, []string, error) {
 	settings, err := parseSettings(raw)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	missing, err := missingClaudeHooks(settings, cbusPath)
-	if err != nil || len(missing) == 0 {
-		return nil, nil, err
+	changes, err := missingClaudeHooks(settings, cbusPath)
+	if err != nil || len(changes) == 0 {
+		return nil, nil, nil, err
 	}
+	var dead []string
+	wrote := false
 	hooksVal, hooksAt := settings.get("hooks")
 	hooksObj, _ := hooksVal.(jsonObject)
-	for _, h := range missing {
-		if h.stale != nil {
-			_, at := h.stale.get("command")
-			h.stale[at].value = cbusPath + " " + h.verb
+	for _, h := range changes {
+		for _, hook := range h.dead {
+			dead = append(dead, h.event+": "+hookCommandText(hook))
+			if repair {
+				_, at := hook.get("command")
+				hook[at].value = cbusPath + " " + h.verb
+				wrote = true
+			}
+		}
+		if len(h.dead) > 0 {
 			continue
 		}
+		wrote = true
 		group := jsonObject{}
 		if h.matcher != "" {
 			group = append(group, jsonMember{"matcher", h.matcher})
@@ -289,16 +315,19 @@ func mergeClaudeHooks(raw []byte, cbusPath string) ([]byte, []hookChange, error)
 	} else {
 		settings = append(settings, jsonMember{"hooks", hooksObj})
 	}
+	if !wrote {
+		return nil, changes, dead, nil
+	}
 	compact, err := marshalNoEscape(settings)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var out bytes.Buffer
 	if err := json.Indent(&out, compact, "", "  "); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	out.WriteByte('\n')
-	return out.Bytes(), missing, nil
+	return out.Bytes(), changes, dead, nil
 }
 
 func defaultClaudeSettings() (string, error) {
@@ -345,9 +374,19 @@ func shellSafe(s string) bool {
 	return s != ""
 }
 
-// resolveLinkTarget follows a symlink even when its target does not exist yet, which EvalSymlinks refuses.
+// resolveLinkTarget finds the file a settings path really opens. Text joins would misplace
+// a relative link whose directory is itself reached through a link, so each directory is
+// resolved first. A dangling link gives its target, which EvalSymlinks refuses to do.
 func resolveLinkTarget(path string) (string, error) {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved, nil
+	}
 	for i := 0; i < 40; i++ {
+		dir := filepath.Dir(path)
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = real
+		}
+		path = filepath.Join(dir, filepath.Base(path))
 		fi, err := os.Lstat(path)
 		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
 			return path, nil
@@ -357,7 +396,7 @@ func resolveLinkTarget(path string) (string, error) {
 			return "", err
 		}
 		if !filepath.IsAbs(link) {
-			link = filepath.Join(filepath.Dir(path), link)
+			link = dir + string(filepath.Separator) + link
 		}
 		path = link
 	}
@@ -386,7 +425,7 @@ func writeSettingsAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 func runInstallHooks(args []string) int {
-	p, err := splitVerbArgs(args, map[string]bool{"--path": true}, map[string]bool{"--dry-run": true}, true)
+	p, err := splitVerbArgs(args, map[string]bool{"--path": true}, map[string]bool{"--dry-run": true, "--repair": true}, true)
 	if err != nil {
 		return die("%v\n%s", err, installHooksUsage)
 	}
@@ -419,24 +458,38 @@ func runInstallHooks(args []string) int {
 		}
 	}
 	cbusPath := hookCbusPath()
-	merged, added, err := mergeClaudeHooks(raw, cbusPath)
+	repair := p.flags["--repair"]
+	merged, changes, dead, err := mergeClaudeHooks(raw, cbusPath, repair)
 	if err != nil {
 		return die("%s: %v; not changed", target, err)
 	}
-	if len(added) == 0 {
+	if len(changes) == 0 {
 		fmt.Printf("%s: hooks already installed\n", target)
 		return 0
 	}
-	for _, h := range added {
-		if h.stale != nil {
-			fmt.Printf("repair %s: %s -> %s %s\n", h.event, h.old, cbusPath, h.verb)
-			continue
+	for _, h := range changes {
+		if len(h.dead) == 0 {
+			fmt.Printf("add %s: %s %s\n", h.event, cbusPath, h.verb)
 		}
-		fmt.Printf("add %s: %s %s\n", h.event, cbusPath, h.verb)
+	}
+	for _, d := range dead {
+		if repair {
+			fmt.Printf("repair %s -> %s\n", d, cbusPath)
+		} else {
+			fmt.Printf("dead on this machine: %s\n", d)
+		}
+	}
+	rc := 0
+	if len(dead) > 0 && !repair {
+		fmt.Println("not rewritten, in case the file is shared with a machine where it works; --repair points them at this binary")
+		rc = 1
+	}
+	if merged == nil {
+		return rc
 	}
 	if p.flags["--dry-run"] {
 		fmt.Printf("dry run: %s not changed\n", target)
-		return 0
+		return rc
 	}
 	if exists {
 		backup := fmt.Sprintf("%s.bak-%s", target, time.Now().Format("20060102-150405"))
@@ -451,7 +504,7 @@ func runInstallHooks(args []string) int {
 		return die("write %s: %v", target, err)
 	}
 	fmt.Printf("updated %s; new sessions pick it up\n", target)
-	return 0
+	return rc
 }
 
 // claudeHooksHint is one line for install-assets; a machine with no settings file says nothing.
