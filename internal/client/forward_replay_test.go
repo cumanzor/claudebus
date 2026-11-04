@@ -3,15 +3,18 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"claudebus/internal/core"
+	"claudebus/internal/wire"
 )
 
 func deadLetterLine(id, text string) string {
@@ -162,6 +165,13 @@ func TestSkipQueuedThroughRealRelay(t *testing.T) {
 	}
 
 	replay := ForwardOptions{Webhook: opts.Webhook, PerMin: 100, PerHour: 100, sleep: noSleep}
+	if res, err := ReplayDeadLetters(context.Background(), replay, dl, nil); err != nil || res.Delivered != 0 || res.LeftSkipped != 2 || res.Failed != 0 {
+		t.Fatalf("a bare replay must leave a skipped backlog alone: %+v %v", res, err)
+	}
+	if got := strings.Join(hook.texts(), ","); got != "new" {
+		t.Fatalf("a bare replay sent the backlog: %s", got)
+	}
+	replay.IncludeSkipped = true
 	if res, err := ReplayDeadLetters(context.Background(), replay, dl, nil); err != nil || res.Delivered != 2 {
 		t.Fatalf("replay: %+v %v", res, err)
 	}
@@ -192,4 +202,163 @@ func TestSkipQueuedKeepsTheMessageWhenTheRecordFails(t *testing.T) {
 	if n, _ := RelayQueued(ep, "demo", "hook"); n != 1 {
 		t.Errorf("queued = %d, want the message still on the relay", n)
 	}
+}
+
+func TestReplayNamedSkippedRecord(t *testing.T) {
+	skipped := strings.Replace(deadLetterLine("1", "old"), "HTTP 500", forwardSkippedReason, 1)
+	hook, o, path := replayFixture(t, nil, skipped, deadLetterLine("2", "real"))
+	res, err := ReplayDeadLetters(context.Background(), o, path, nil)
+	if err != nil || res.Delivered != 1 || res.LeftSkipped != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res, err = ReplayDeadLetters(context.Background(), o, path, []string{"1"}); err != nil || res.Delivered != 1 {
+		t.Fatalf("a named skipped record: %+v %v", res, err)
+	}
+	if got := strings.Join(hook.texts(), ","); got != "real,old" {
+		t.Errorf("posts = %s", got)
+	}
+}
+
+// the connection dies after an ACK was written and before the relay commits it
+func TestSkipQueuedSurvivesALostACK(t *testing.T) {
+	ids := []string{"A", "B", "C"}
+	var mu sync.Mutex
+	committed, lose := 0, true
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tail/durable-v1", func(w http.ResponseWriter, r *http.Request) {
+		c, err := wire.Upgrade(w, r, "bearer.cbus.tok")
+		if err != nil {
+			return
+		}
+		defer c.Abort()
+		_ = c.WriteFrame(wire.OpText, []byte(`{"type":"ready","protocol":"cbus-relay-durable/v1"}`))
+		for {
+			mu.Lock()
+			i := committed
+			mu.Unlock()
+			if i >= len(ids) {
+				<-r.Context().Done()
+				return
+			}
+			msg := fmt.Sprintf(`{"from":"demo/a","to":"demo/hook","ts":"t","text":%q}`, ids[i])
+			fr, _ := json.Marshal(relayFrame{Type: "message", SpoolID: ids[i], Message: json.RawMessage(msg)})
+			_ = c.WriteFrame(wire.OpText, fr)
+			if _, _, err := c.ReadFrame(); err != nil {
+				return
+			}
+			mu.Lock()
+			dropped := lose
+			lose = false
+			if !dropped {
+				committed++
+			}
+			mu.Unlock()
+			if dropped {
+				return
+			}
+		}
+	})
+	rel := httptest.NewServer(mux)
+	defer rel.Close()
+	hook := &hookRecorder{}
+	srv := httptest.NewServer(hook)
+	defer srv.Close()
+	dl := filepath.Join(t.TempDir(), "dl.jsonl")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Forward(ctx, ForwardOptions{Channel: "demo", Host: "s", Alias: "hook", Base: rel.URL, Token: "tok",
+			Webhook: WebhookConfig{URL: srv.URL, Key: "k"}, PerMin: 100, PerHour: 100, MaxAttempts: 3, DeadLetter: dl,
+			SkipQueued: 3, sleep: noSleep})
+	}()
+	schedulerWait(t, "all three settle", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return committed == 3
+	})
+	cancel()
+	<-done
+	if got := hook.texts(); len(got) != 0 {
+		t.Errorf("a backlog message was POSTed: %v", got)
+	}
+	b, _ := os.ReadFile(dl)
+	if n := strings.Count(string(b), "\n"); n != 3 {
+		t.Errorf("records = %d, want one per message:\n%s", n, b)
+	}
+}
+
+func TestOversizedIsDeliveredAndKeptWhole(t *testing.T) {
+	const token = "forwardbigtoken"
+	base := startTestRelay(t, token)
+	hook := &hookRecorder{status: func(string, int) int { return 500 }}
+	srv := httptest.NewServer(hook)
+	defer srv.Close()
+	big := strings.Repeat("x", 300*1024)
+	relaySend(t, base, token, big)
+	dl := filepath.Join(t.TempDir(), "dl.jsonl")
+	// the trailing slash is how a site URL is often written
+	opts := ForwardOptions{Channel: "demo", Host: "server", Alias: "hook", Base: base + "/", Token: token,
+		Webhook: WebhookConfig{URL: srv.URL, Key: "k"}, PerMin: 100, PerHour: 100, MaxAttempts: 1, DeadLetter: dl,
+		Once: true, OnceIdle: time.Second, sleep: noSleep}
+	if err := Forward(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(hook.bodies) != 1 || len(hook.texts()[0]) != forwardMaxText || hook.bodies[0]["truncated"] != float64(len(big)) {
+		t.Fatalf("POST: %d bodies", len(hook.bodies))
+	}
+	b, _ := os.ReadFile(dl)
+	if !strings.Contains(string(b), big) {
+		t.Fatal("the dead letter does not hold the whole message")
+	}
+	hook.mu.Lock()
+	hook.status = nil
+	hook.mu.Unlock()
+	res, err := ReplayDeadLetters(context.Background(), ForwardOptions{Webhook: opts.Webhook, PerMin: 100, PerHour: 100, sleep: noSleep}, dl, nil)
+	if err != nil || res.Delivered != 1 {
+		t.Fatalf("replay: %+v %v", res, err)
+	}
+}
+
+func TestDeadLetterRecordDoesNotGlueOntoATornLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dl.jsonl")
+	if err := os.WriteFile(path, []byte(`{"id":"torn","rea`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendDeadLetter(path, []byte(deadLetterLine("new", "text"))); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	want := `{"id":"torn","rea` + "\n" + deadLetterLine("new", "text") + "\n"
+	if string(b) != want {
+		t.Errorf("file = %q", b)
+	}
+	hook, o, _ := replayFixture(t, nil, "x")
+	if res, err := ReplayDeadLetters(context.Background(), o, path, []string{"new"}); err != nil || res.Delivered != 1 {
+		t.Fatalf("replay: %+v %v", res, err)
+	}
+	if got := hook.texts(); len(got) != 1 {
+		t.Errorf("posts = %v", got)
+	}
+}
+
+func TestLockForwardMailboxAllowsOneForwarder(t *testing.T) {
+	t.Setenv("CBUS_DIR", t.TempDir())
+	release, err := LockForwardMailbox("demo", "server", "hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LockForwardMailbox("demo", "server", "hook"); err == nil || !strings.Contains(err.Error(), "another forwarder") {
+		t.Fatalf("second forwarder: %v", err)
+	}
+	other, err := LockForwardMailbox("demo", "server", "other")
+	if err != nil {
+		t.Fatalf("another mailbox was refused: %v", err)
+	}
+	other()
+	release()
+	again, err := LockForwardMailbox("demo", "server", "hook")
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	again()
 }

@@ -22,7 +22,8 @@ door needs the same `/tail/durable-v1` exception `cbus connect` does
 ([security.md](security.md#deploying-a-relay)). Then write the webhook's address and key to a file only you can read:
 
 ```sh
-( umask 077; read -rp 'URL: ' u; read -rsp 'KEY: ' k; echo
+mkdir -p ~/.config
+( umask 077; printf 'URL: '; read -r u; printf 'KEY: '; stty -echo; read -r k; stty echo; echo
   printf 'url=%s\nkey=%s\n' "$u" "$k" > ~/.config/cbus-hook )
 ```
 
@@ -34,18 +35,23 @@ Try it, then start it:
 
 ```sh
 cbus send demo@server/hook --from demo@server/laptop -- 'hello'
-cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --dry-run   # logs the next message; no POST, no ACK
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --dry-run   # logs the next queued item; no POST, no ACK
 cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --once      # delivers what is queued, then exits
 ```
 
-Without `--once` it runs until stopped and reconnects by itself.
+Without `--once` it runs until stopped and reconnects by itself. It also waits for the relay at
+startup, so on the relay host it can start first. `--once` and `--dry-run` exit instead, and
+`--once` exits 1 if stopped before the mailbox was idle.
 
 **A mailbox with a backlog:** everything already queued is delivered on the first run. Check
 with `cbus list demo@server` first, and see [Moving an existing mailbox](#moving-an-existing-mailbox)
 if you do not want that.
 
-**One consumer per mailbox:** the forwarder holds the consumer id `forward-<alias>`, and the
-relay refuses a different active consumer. Do not also connect a session to that alias.
+**One forwarder per mailbox:** the forwarder holds the consumer id `forward-<alias>`, and the
+relay refuses a different active consumer, so do not also connect a session to that alias. A
+second forwarder on the same machine is refused. **Nothing stops one on another machine:** it
+shares the consumer id, so the two displace each other, and a webhook slower than that cycle gets
+the same message repeatedly and it never settles.
 
 ## What the webhook receives
 
@@ -61,7 +67,7 @@ Each message is one POST with a JSON body:
 |---|---|
 | `id` | The relay spool id. Stable across redelivery, so **dedupe on it**. |
 | `from`, `to`, `ts`, `text` | As sent. `from` is not verified (see [Security](#security)). |
-| `truncated` | Present when `text` was over 16 KiB: the original length in bytes. `text` is cut on a UTF-8 boundary. |
+| `truncated` | Present when `text` was over 16 KiB: the original length in bytes. `text` is cut on a UTF-8 boundary, and a dead letter keeps the whole message. |
 | `relayId`, `eventId` | Present when the message carries them. |
 
 Delivery is **at-least-once**. A crash after a successful POST and before the ACK sends that
@@ -74,7 +80,7 @@ Presence events are acknowledged and not sent.
 | Response | Result |
 |---|---|
 | 2xx | Delivered, ACKed |
-| A message over 256 KiB, or one that cannot be read | Dead-lettered without a POST, ACKed |
+| A message that cannot be read | Dead-lettered without a POST, ACKed |
 | Other 4xx | Dead-lettered at once, ACKed: the message will never be accepted |
 | 401, 403, 408, 429, 5xx, a 3xx, a timeout or a network error | Retried with backoff from 2 s up to 5 min, then dead-lettered after `--max-attempts` (default 10) |
 
@@ -108,8 +114,9 @@ cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F"
 
 Each record is POSTed once, with its original `id`, so a receiver that already handled it can
 ignore it. A delivered record leaves the file. One that fails stays, and the command exits 1. It
-does not contact the relay, and it is safe to run beside a running forwarder. A record with no
-message, such as an oversized one, stays in the file and counts as failed. The rate cap applies.
+does not contact the relay, and it is safe to run beside a running forwarder. A record it cannot
+read stays in the file and counts as failed. The rate cap applies. Records from `--skip-queued`
+stay and do not count as failed, unless you name them with `--id` or pass `--include-skipped`.
 
 ## Rate cap
 
@@ -135,8 +142,9 @@ your shell, so `CBUS_SITE_<HOST>_URL`, `CBUS_DIR`, `CBUS_HOST`, `CBUS_RELAY_LOCA
 
 - **Linux:** a user unit stops at logout unless you run `loginctl enable-linger $USER`. Logs:
   `journalctl --user -u <name>`.
-- **macOS:** the relay token is in the Keychain, which a LaunchAgent in your login session can
-  read and an ssh session cannot. Logs go to `~/Library/Logs`.
+- **macOS:** the relay token is in the Keychain, which an ssh session cannot read. A LaunchAgent
+  runs in your login session, so it should be able to; this is not yet tested. Logs go to
+  `~/Library/Logs`. launchd has no restart limit, so a config error logs every 10 s until fixed.
 
 ## Moving an existing mailbox
 
@@ -152,14 +160,15 @@ cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --skip-queued
 
 `--skip-queued` asks the relay how many messages are queued, then settles exactly that many from
 the oldest without a POST. Each goes to the dead-letter file with the reason
-`skipped: queued before start`, so `--replay` can still send one. A message that arrives after
-the count is delivered normally, even during the skip.
+`skipped: queued before start`. A bare `--replay` leaves those alone, so a later outage does not
+send a backlog you chose not to deliver; `--replay "$F" --id <id>` or `--include-skipped` sends
+them. A message that arrives after the count is delivered normally, even during the skip.
 
 - Stop the old reader first, or both will deliver new messages. Nothing coordinates them.
 - Use it for one run, then start the service without it. On a service it would skip whatever
   queued while it was down, so `--print-service` refuses it.
 - The count includes any stale presence events the relay discards without delivering. If so, a
-  new message can be skipped by mistake. It is still in the dead-letter file, not lost.
+  new message can be skipped by mistake. It is still in the dead-letter file, with the rest.
 
 ## Security
 

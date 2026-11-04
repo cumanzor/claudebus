@@ -109,7 +109,7 @@ func removeDeadLetterLine(path string, line []byte) error {
 
 // ReplayResult counts one replay. Failed records stay in the file.
 type ReplayResult struct {
-	Delivered, Failed int
+	Delivered, Failed, LeftSkipped int
 }
 
 // ReplayDeadLetters POSTs each record once. A delivered record leaves the file. A
@@ -144,6 +144,7 @@ func ReplayDeadLetters(ctx context.Context, o ForwardOptions, path string, ids [
 		}
 		var rec struct {
 			ID      string          `json:"id"`
+			Reason  string          `json:"reason"`
 			Message json.RawMessage `json:"message"`
 		}
 		if err := json.Unmarshal(line, &rec); err != nil || rec.ID == "" {
@@ -157,6 +158,11 @@ func ReplayDeadLetters(ctx context.Context, o ForwardOptions, path string, ids [
 			continue
 		}
 		delete(want, rec.ID)
+		// the operator chose not to deliver a skipped backlog, so it takes a name or a flag
+		if rec.Reason == forwardSkippedReason && len(ids) == 0 && !o.IncludeSkipped {
+			res.LeftSkipped++
+			continue
+		}
 		var m core.Message
 		if len(rec.Message) == 0 || json.Unmarshal(rec.Message, &m) != nil {
 			o.Logf("keep %s: no message recorded", rec.ID)
@@ -165,7 +171,7 @@ func ReplayDeadLetters(ctx context.Context, o ForwardOptions, path string, ids [
 		}
 		body := forwardPayload(rec.ID, m, rec.Message)
 		if o.DryRun {
-			o.Logf("dry-run replay %s from=%s %d bytes", rec.ID, m.From, len(body))
+			o.Logf("dry-run replay %s from=%s %d bytes (%s)", rec.ID, m.From, len(body), rec.Reason)
 			continue
 		}
 		if !f.throttle(ctx) {
