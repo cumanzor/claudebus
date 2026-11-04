@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,7 +15,7 @@ import (
 	"claudebus/internal/client"
 )
 
-const forwardUsage = "usage: cbus forward <channel>@<host>/<alias> --webhook-config FILE [--dead-letter FILE] [--per-min N] [--per-hour N] [--max-attempts N] [--timeout D] [--once] [--dry-run] [--print-service] [--skip-queued] [--replay FILE [--id ID]...]"
+const forwardUsage = "usage: cbus forward <channel>@<host>/<alias> --webhook-config FILE [--dead-letter FILE] [--per-min N] [--per-hour N] [--max-attempts N] [--timeout D] [--once] [--dry-run] [--print-service] [--skip-queued] [--replay FILE [--id ID]... [--include-skipped]]"
 
 // runForward delivers a relay mailbox to an outbound webhook; it is a durable
 // relay consumer, so it needs no inbound port and no local cursor.
@@ -31,7 +32,7 @@ func runForward(args []string) int {
 	}
 	p, err := splitVerbArgs(args[1:],
 		map[string]bool{"--webhook-config": true, "--dead-letter": true, "--per-min": true, "--per-hour": true, "--max-attempts": true, "--timeout": true, "--replay": true, "--id": true},
-		map[string]bool{"--once": true, "--dry-run": true, "--print-service": true, "--skip-queued": true}, true)
+		map[string]bool{"--once": true, "--dry-run": true, "--print-service": true, "--skip-queued": true, "--include-skipped": true}, true)
 	if err != nil {
 		return die("%v", err)
 	}
@@ -70,8 +71,8 @@ func runForward(args []string) int {
 	}
 	replayFile, replaying := p.has("--replay")
 	ids := p.all("--id")
-	if len(ids) > 0 && !replaying {
-		return die("--id needs --replay")
+	if (len(ids) > 0 || p.flags["--include-skipped"]) && !replaying {
+		return die("--id and --include-skipped need --replay")
 	}
 	logf := func(format string, a ...any) {
 		fmt.Fprintf(os.Stderr, "cbus forward: "+format+"\n", a...)
@@ -87,9 +88,12 @@ func runForward(args []string) int {
 		defer stop()
 		res, err := client.ReplayDeadLetters(ctx, client.ForwardOptions{
 			Webhook: hook, PerMin: ints["--per-min"], PerHour: ints["--per-hour"], Timeout: timeout,
-			DryRun: p.flags["--dry-run"], Logf: logf,
+			DryRun: p.flags["--dry-run"], IncludeSkipped: p.flags["--include-skipped"], Logf: logf,
 		}, replayFile, ids)
 		logf("replay: %d delivered, %d kept in %s", res.Delivered, res.Failed, replayFile)
+		if res.LeftSkipped > 0 {
+			logf("replay: %d skipped backlog record(s) left alone; --include-skipped or --id sends them", res.LeftSkipped)
+		}
 		if err != nil {
 			return die("%v", err)
 		}
@@ -107,13 +111,44 @@ func runForward(args []string) int {
 		}
 		return printForwardService(ch, host, al, cfgPath, deadLetter, ints, timeout)
 	}
-	fd, err := client.ResolveFrontDoor(host)
-	if err != nil {
-		return die("%v", err)
-	}
 	token, _ := client.NewCredStore().Get(host, "token")
 	if token == "" {
 		return die("no relay token for %q — run: cbus auth set %s --token -", host, host)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	oneShot := p.flags["--once"] || p.flags["--dry-run"]
+	// counting a backlog reads the relay and consumes nothing, so it can run beside a forwarder
+	if !(p.flags["--skip-queued"] && p.flags["--dry-run"]) {
+		release, err := client.LockForwardMailbox(ch, host, al)
+		// a service exiting here would use up its restart limit while a manual run finishes
+		for wait := 5 * time.Second; errors.Is(err, client.ErrForwarderRunning) && !oneShot && !p.flags["--skip-queued"]; wait = min(wait*2, time.Minute) {
+			logf("%v; waiting %s", err, wait)
+			select {
+			case <-ctx.Done():
+				return 0
+			case <-time.After(wait):
+			}
+			release, err = client.LockForwardMailbox(ch, host, al)
+		}
+		if err != nil {
+			return die("%v", err)
+		}
+		defer release()
+	}
+	fd, err := client.ResolveFrontDoor(host)
+	// on the relay host the relay may start after this does; exiting would use up a service's restart limit
+	for wait := 2 * time.Second; err != nil && !oneShot && !p.flags["--skip-queued"]; wait = min(wait*2, time.Minute) {
+		logf("%v; retrying in %s", err, wait)
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(wait):
+		}
+		fd, err = client.ResolveFrontDoor(host)
+	}
+	if err != nil {
+		return die("%v", err)
 	}
 	skip := 0
 	if p.flags["--skip-queued"] {
@@ -129,23 +164,26 @@ func runForward(args []string) int {
 			return 0
 		}
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	logf("%s@%s/%s -> webhook (%s relay, consumer %s, dead letters %s)", ch, host, al, map[bool]string{true: "local", false: "public"}[fd.Local], client.ForwardConsumer(al), deadLetter)
 	err = client.Forward(ctx, client.ForwardOptions{
 		Channel: ch, Host: host, Alias: al,
 		Base: fd.Base, Token: token,
+		Resolve: func() (string, error) {
+			d, err := client.ResolveFrontDoor(host)
+			return d.Base, err
+		},
 		Webhook: hook,
 		PerMin:  ints["--per-min"], PerHour: ints["--per-hour"], MaxAttempts: ints["--max-attempts"],
 		Timeout:    timeout,
 		DeadLetter: deadLetter,
 		SkipQueued: skip,
 		DryRun:     p.flags["--dry-run"],
-		Once:       p.flags["--once"] || p.flags["--dry-run"],
+		Once:       oneShot,
 		OnceIdle:   3 * time.Second,
 		Logf:       logf,
 	})
-	if err != nil && ctx.Err() == nil {
+	// stopping a service is normal; a one-shot that was stopped did not finish
+	if err != nil && (ctx.Err() == nil || oneShot) {
 		return die("forward: %v", err)
 	}
 	return 0

@@ -4,6 +4,42 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-04 00:39:55 UTC] [Forward/Fix] Review fixes for cbus forward
+
+[Attempt #1] Files: internal/client/forward.go, internal/client/forward_replay.go,
+internal/client/forward_replay_test.go, cmd/cbus/forward.go, cmd/cbus/usage.go,
+docs/forward.md.
+
+[What changed]
+- Messages from 256 KiB up to the relay's 1 MiB limit were ACKed with only their id
+  recorded, so nothing could send them again. The size check is gone: the POST
+  already cuts text at 16 KiB, and a dead letter keeps the raw message.
+- On the relay host a forwarder that started before the relay exited with `unknown
+  relay host`, which used up a service's restart limit. Long-running forwarders now
+  retry the lookup with backoff, and pick the relay again before each connection, so one
+  that chose the public URL at startup moves to the local relay once it is up.
+  `--once`, `--dry-run` and `--skip-queued` still exit.
+- A relay base URL ending in `/` built a `//tail/durable-v1` path and never connected.
+- Two forwarders on a mailbox share a consumer id, displace each other and never
+  settle a slow message. A lock under `CBUS_DIR` now makes a second long-running
+  forwarder wait, so a service does not use up its restart limit during a manual run,
+  and refuses a second one-shot run. docs/forward.md states that nothing stops one on
+  another machine or with another `CBUS_DIR`.
+- A lost ACK during `--skip-queued` used a second skip slot, which POSTed the last
+  backlog message and wrote a duplicate record. Skipped ids are now remembered, so a
+  redelivered frame only gets its ACK again.
+- A bare `--replay` sent a skipped backlog along with real dead letters. It now leaves
+  those records alone and reports them; `--id` or `--include-skipped` sends them.
+- A torn last line in the dead-letter file no longer corrupts the next record.
+- `--once` and `--dry-run` exit 1 when stopped before they finish. A long-running
+  forwarder still exits 0 when stopped.
+- The setup snippet in docs/forward.md now works in any POSIX shell and zsh.
+
+[Testing]
+- Regression tests for each, including a fake relay that loses an ACK. Seven
+  mutations each fail a test. On the CLI: a relay started after the forwarder, a
+  refused second forwarder and the stop exit codes. The snippet ran in dash and in zsh.
+
 ## [2026-11-03 23:53:43 UTC] [Forward/Operations] Replay dead letters and skip an existing backlog
 
 [Attempt #1] Files: internal/client/forward.go, internal/client/forward_replay.go,
