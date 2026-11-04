@@ -111,6 +111,7 @@ type ForwardOptions struct {
 	MaxAttempts          int
 	DeadLetter           string
 	DryRun               bool
+	SkipQueued           int  // first this many frames are the backlog: settle them without a POST
 	Once                 bool // exit once the mailbox has been idle for OnceIdle
 	OnceIdle             time.Duration
 	Logf                 func(format string, a ...any)
@@ -264,7 +265,14 @@ func (f *forwarder) session(ctx context.Context, conn *wire.Conn) error {
 		case <-idle:
 			return nil
 		case fr := <-messages:
-			if err := f.handle(ctx, fr); err != nil {
+			skipping := f.SkipQueued > 0
+			var err error
+			if skipping {
+				err = f.skip(fr)
+			} else {
+				err = f.handle(ctx, fr)
+			}
+			if err != nil {
 				return err // abandoned mid-delivery: no ACK, the relay redelivers
 			}
 			if f.DryRun {
@@ -273,6 +281,9 @@ func (f *forwarder) session(ctx context.Context, conn *wire.Conn) error {
 			ack, _ := json.Marshal(relayFrame{Type: "ack", SpoolID: fr.SpoolID})
 			if err := write(wire.OpText, ack); err != nil {
 				return err
+			}
+			if skipping {
+				f.SkipQueued-- // only after the ACK: an unacknowledged frame comes back after a reconnect
 			}
 		}
 	}
@@ -444,15 +455,17 @@ func appendDeadLetter(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
+	return withDeadLetterLock(path, func() error {
+		fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err = fh.Write(append(line, '\n')); err == nil {
+			err = fh.Sync()
+		}
+		if cerr := fh.Close(); err == nil {
+			err = cerr
+		}
 		return err
-	}
-	if _, err = fh.Write(append(line, '\n')); err == nil {
-		err = fh.Sync()
-	}
-	if cerr := fh.Close(); err == nil {
-		err = cerr
-	}
-	return err
+	})
 }
