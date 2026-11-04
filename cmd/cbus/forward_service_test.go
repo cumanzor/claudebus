@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,12 +69,14 @@ func TestRenderedSystemdUnitVerifies(t *testing.T) {
 func TestRenderLaunchdPlistIsWellFormed(t *testing.T) {
 	out := renderLaunchdPlist(testService(), "/logs")
 	dec := xml.NewDecoder(strings.NewReader(out))
-	dec.Strict = false
 	var text []string
 	for {
 		tok, err := dec.Token()
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			t.Fatalf("not well formed: %v\n%s", err, out)
 		}
 		if c, ok := tok.(xml.CharData); ok {
 			if s := strings.TrimSpace(string(c)); s != "" {
@@ -145,5 +148,36 @@ func TestPrintServiceKeepsSecretsOut(t *testing.T) {
 	}
 	if rc := runForward([]string{"demo@server/hook", "--webhook-config", cfg, "--timeout", "soon"}); rc == 0 {
 		t.Error("bad --timeout accepted")
+	}
+}
+
+func TestRenderLaunchdPlistAcceptsADoubleDashName(t *testing.T) {
+	svc := testService()
+	svc.label = forwardServiceLabel("team-", "server", "hook")
+	dec := xml.NewDecoder(strings.NewReader(renderLaunchdPlist(svc, "/logs")))
+	for {
+		if _, err := dec.Token(); err == io.EOF {
+			return
+		} else if err != nil {
+			t.Fatalf("not well formed: %v", err)
+		}
+	}
+}
+
+func TestSystemdEnvironmentKeepsADollar(t *testing.T) {
+	svc := testService()
+	svc.env = map[string]string{"CBUS_SITE_SERVER_URL": "https://bus.example.com/a$b%c"}
+	out := renderSystemdUnit(svc)
+	if !strings.Contains(out, "Environment=CBUS_SITE_SERVER_URL=https://bus.example.com/a$b%%c\n") {
+		t.Errorf("Environment line wrong:\n%s", out)
+	}
+}
+
+func TestForwardServiceEnvMatchesTheClientForOddHosts(t *testing.T) {
+	for host, name := range map[string]string{"server-": "CBUS_SITE_SERVER_URL", "my.host.": "CBUS_SITE_MY_HOST_URL"} {
+		t.Setenv(name, "https://bus.example.com")
+		if forwardServiceEnv(host)[name] == "" {
+			t.Errorf("%s: %s not carried", host, name)
+		}
 	}
 }

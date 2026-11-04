@@ -4,6 +4,46 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-04 00:46:05 UTC] [Install/Fix] Review fixes for install-hooks and print-service
+
+[Attempt #1] Files: cmd/cbus/install_hooks.go, cmd/cbus/install_hooks_test.go,
+cmd/cbus/forward_service.go, cmd/cbus/forward_service_test.go,
+internal/client/endpoint.go, docs/usage.md, docs/architecture/command-reference.md.
+
+[What changed]
+- install-hooks wrote `$HOME/.local/bin/cbus hook-denied` unquoted, so a home directory
+  with a space made the hook exit 127 while the verb reported success. It now writes
+  `"$HOME/.local/bin/cbus"`, and single-quotes any other path holding a shell character.
+  Paths use forward slashes.
+- An entry counted as installed whatever its path, so a moved binary or one written by
+  `go run` left a hook that never runs, with no note and `already installed` on a
+  rerun. A plain `<path> <verb>` entry is now judged the way the shell would run it:
+  missing binary, an unquoted `$HOME` that would split, a quoted `~`, a single-quoted
+  `$HOME`. A dead entry is reported with exit 1 and left, because in a settings file
+  shared across machines it may work elsewhere. `--repair` rewrites every dead entry in
+  place and keeps its other fields. A bare name on PATH and a wrapped command are not
+  judged. The update note covers this too.
+- A dangling symlinked settings file was replaced by a regular file. The path is now
+  walked one component at a time as the kernel does, so a relative link inside a linked
+  directory, or one with a `..` after a link, lands on the file the kernel opens, and the
+  target's parent directories are created. A symlink cycle is refused. An empty
+  `--path` is refused;
+  before, a script's unset variable edited the default settings.
+- `--print-service`: the plist comment no longer holds the label, because a `--` in a
+  name made the file invalid. The site variable comes from the client's own function,
+  so hosts ending in punctuation keep it. `$$` is an escape only on `Exec` lines, so
+  `Environment=` values now keep a single `$`.
+- The command reference sections for these two hooks now name `install-hooks` and show
+  the quoted command.
+
+[Testing]
+- Each written command form runs in bash from a plain home, a home with a space, and
+  directories named `a&b` and `it's (x)`. The dead verdict is compared with what bash
+  does for each form. Tests for repair, live and unjudged entries, the relative link,
+  the dangling link, the empty path, the plist, the site variable and the dollar. `plutil
+  -lint` accepted a plist with `--` in its name on macOS. Mutations fail a test, except
+  removing the empty-path check, where the write still fails and settings stay untouched.
+
 ## [2026-11-04 00:39:55 UTC] [Forward/Fix] Review fixes for cbus forward
 
 [Attempt #1] Files: internal/client/forward.go, internal/client/forward_replay.go,

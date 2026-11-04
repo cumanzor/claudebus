@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+
+	"claudebus/internal/client"
 )
 
 type forwardService struct {
@@ -19,9 +20,7 @@ type forwardService struct {
 // a service does not inherit the shell, so the settings that locate the relay and the store go with it
 func forwardServiceEnv(host string) map[string]string {
 	env := map[string]string{}
-	re := regexp.MustCompile(`[^A-Z0-9]`)
-	site := "CBUS_SITE_" + re.ReplaceAllString(strings.ToUpper(host), "_") + "_URL"
-	for _, name := range []string{site, "CBUS_DIR", "CBUS_RELAY_LOCAL_URL", "CBUS_HOST", "XDG_CONFIG_HOME"} {
+	for _, name := range []string{client.SiteEnvVar(host), "CBUS_DIR", "CBUS_RELAY_LOCAL_URL", "CBUS_HOST", "XDG_CONFIG_HOME"} {
 		if v := os.Getenv(name); v != "" {
 			env[name] = v
 		}
@@ -42,7 +41,18 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-func systemdQuote(s string) string {
+// $$ is an escape only on Exec lines; Environment= would keep both dollars
+func systemdQuoteEnv(s string) string {
+	s = strings.ReplaceAll(s, "%", "%%")
+	if !strings.ContainsAny(s, " \t\"'\\;") {
+		return s
+	}
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
+}
+
+func systemdQuoteExec(s string) string {
 	s = strings.ReplaceAll(s, "%", "%%")
 	if !strings.ContainsAny(s, " \t\"'\\$;") {
 		return s
@@ -65,11 +75,11 @@ func renderSystemdUnit(s forwardService) string {
 	b.WriteString("After=network-online.target\nWants=network-online.target\n")
 	b.WriteString("StartLimitIntervalSec=600\nStartLimitBurst=5\n\n[Service]\n")
 	for _, k := range sortedKeys(s.env) {
-		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(k+"="+s.env[k]))
+		fmt.Fprintf(&b, "Environment=%s\n", systemdQuoteEnv(k+"="+s.env[k]))
 	}
 	quoted := make([]string, len(s.argv))
 	for i, a := range s.argv {
-		quoted[i] = systemdQuote(a)
+		quoted[i] = systemdQuoteExec(a)
 	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", strings.Join(quoted, " "))
 	b.WriteString("Restart=always\nRestartSec=10\nUMask=0077\nNoNewPrivileges=yes\n\n[Install]\nWantedBy=default.target\n")
@@ -88,8 +98,9 @@ func renderLaunchdPlist(s forwardService, logDir string) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
-	fmt.Fprintf(&b, "<!-- install: save as ~/Library/LaunchAgents/%s.plist, then\n", xmlText(label))
-	fmt.Fprintf(&b, "     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/%s.plist -->\n", xmlText(label))
+	// a name may hold "--", which XML forbids inside a comment, so the label stays out of it
+	b.WriteString("<!-- install: save under ~/Library/LaunchAgents as <Label>.plist, then\n")
+	b.WriteString("     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<Label>.plist -->\n")
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
 	fmt.Fprintf(&b, "  <key>Label</key><string>%s</string>\n", xmlText(label))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")

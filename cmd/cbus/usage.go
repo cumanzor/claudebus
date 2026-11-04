@@ -145,7 +145,7 @@ const usage = `cbus — message bus between coding sessions, in named channels
   cbus install-mods [--path DIR] [--force]       write the embedded Claude Code mods
                                    to ~/.claude/skills/<mod> (sha-guarded per file;
                                    --force overwrites a locally-edited file)
-  cbus install-hooks [--path FILE] [--dry-run]   add the hook-denied and
+  cbus install-hooks [--path FILE] [--dry-run] [--repair]   add the hook-denied and
                                    hook-regressed entries to Claude Code's
                                    settings (default $CLAUDE_CONFIG_DIR or
                                    ~/.claude); merges, backs up, never automatic

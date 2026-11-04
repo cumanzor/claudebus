@@ -44,6 +44,9 @@ func siteEnvVar(host string) string {
 	return "CBUS_SITE_" + strings.TrimSuffix(b.String(), "_") + "_URL"
 }
 
+// SiteEnvVar names the variable that holds a host's public relay base.
+func SiteEnvVar(host string) string { return siteEnvVar(host) }
+
 // SiteURL resolves a host to its public relay base from its CBUS_SITE_<HOST>_URL
 // override. There are no built-in hosts — every host is configured via its env
 // override, so an unset override is an error.
