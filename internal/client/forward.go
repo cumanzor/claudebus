@@ -104,6 +104,7 @@ func checkWebhookURL(raw string) error {
 type ForwardOptions struct {
 	Channel, Host, Alias string
 	Base, Token          string
+	Resolve              func() (string, error) // re-picks the relay base before each dial
 	Webhook              WebhookConfig
 	PerMin, PerHour      int
 	Timeout              time.Duration // one webhook request; 0 means the default
@@ -171,6 +172,12 @@ func Forward(ctx context.Context, o ForwardOptions) error {
 	f := &forwarder{ForwardOptions: o, skipped: map[string]bool{}}
 	delay := time.Second
 	for {
+		// a relay that was down at startup may be up now, and local beats the public door
+		if f.Resolve != nil {
+			if base, err := f.Resolve(); err == nil {
+				f.Base = strings.TrimRight(base, "/")
+			}
+		}
 		conn, err := f.dial(ctx)
 		if err == nil {
 			delay = time.Second
@@ -481,7 +488,10 @@ func appendDeadLetter(path string, line []byte) error {
 	})
 }
 
-// LockForwardMailbox holds one forwarder per mailbox on this machine. Two would share
+// ErrForwarderRunning means another forwarder holds the mailbox lock.
+var ErrForwarderRunning = errors.New("another forwarder is running")
+
+// LockForwardMailbox holds one forwarder per mailbox under this CBUS_DIR. Two would share
 // a consumer id, displace each other on the relay and never settle a slow message.
 func LockForwardMailbox(channel, host, alias string) (release func(), err error) {
 	path := filepath.Join(CBUSDir(), "forward", channel+"@"+host, alias+".forwarder.lock")
@@ -495,7 +505,7 @@ func LockForwardMailbox(channel, host, alias string) (release func(), err error)
 	if err := tryLockExclusive(fh); err != nil {
 		_ = fh.Close()
 		if errors.Is(err, errLockContended) {
-			return nil, fmt.Errorf("another forwarder is running for %s@%s/%s on this machine", channel, host, alias)
+			return nil, fmt.Errorf("%w for %s@%s/%s under %s", ErrForwarderRunning, channel, host, alias, CBUSDir())
 		}
 		return nil, err
 	}

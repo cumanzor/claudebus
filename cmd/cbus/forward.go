@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -120,6 +121,16 @@ func runForward(args []string) int {
 	// counting a backlog reads the relay and consumes nothing, so it can run beside a forwarder
 	if !(p.flags["--skip-queued"] && p.flags["--dry-run"]) {
 		release, err := client.LockForwardMailbox(ch, host, al)
+		// a service exiting here would use up its restart limit while a manual run finishes
+		for wait := 5 * time.Second; errors.Is(err, client.ErrForwarderRunning) && !oneShot && !p.flags["--skip-queued"]; wait = min(wait*2, time.Minute) {
+			logf("%v; waiting %s", err, wait)
+			select {
+			case <-ctx.Done():
+				return 0
+			case <-time.After(wait):
+			}
+			release, err = client.LockForwardMailbox(ch, host, al)
+		}
 		if err != nil {
 			return die("%v", err)
 		}
@@ -157,6 +168,10 @@ func runForward(args []string) int {
 	err = client.Forward(ctx, client.ForwardOptions{
 		Channel: ch, Host: host, Alias: al,
 		Base: fd.Base, Token: token,
+		Resolve: func() (string, error) {
+			d, err := client.ResolveFrontDoor(host)
+			return d.Base, err
+		},
 		Webhook: hook,
 		PerMin:  ints["--per-min"], PerHour: ints["--per-hour"], MaxAttempts: ints["--max-attempts"],
 		Timeout:    timeout,

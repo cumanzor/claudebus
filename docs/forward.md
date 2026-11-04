@@ -23,7 +23,7 @@ door needs the same `/tail/durable-v1` exception `cbus connect` does
 
 ```sh
 mkdir -p ~/.config
-( umask 077; printf 'URL: '; read -r u; printf 'KEY: '; stty -echo; read -r k; stty echo; echo
+( umask 077; trap 'stty echo' EXIT; printf 'URL: '; read -r u; printf 'KEY: '; stty -echo; read -r k; echo
   printf 'url=%s\nkey=%s\n' "$u" "$k" > ~/.config/cbus-hook )
 ```
 
@@ -39,19 +39,23 @@ cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --dry-run   #
 cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --once      # delivers what is queued, then exits
 ```
 
-Without `--once` it runs until stopped and reconnects by itself. It also waits for the relay at
-startup, so on the relay host it can start first. `--once` and `--dry-run` exit instead, and
-`--once` exits 1 if stopped before the mailbox was idle.
+Without `--once` it runs until stopped and reconnects by itself. It picks the relay again before
+every connection, so on the relay host it can start first and moves to the local relay once that
+is up. It also waits when it cannot find the relay at all, which looks the same as a host name with
+no `CBUS_SITE_<HOST>_URL`: a mistyped host retries once a minute and logs the variable to set,
+instead of exiting. `--once`, `--dry-run` and `--skip-queued` exit instead, and they exit 1 if
+stopped before finishing, apart from `--skip-queued` without `--once`.
 
 **A mailbox with a backlog:** everything already queued is delivered on the first run. Check
 with `cbus list demo@server` first, and see [Moving an existing mailbox](#moving-an-existing-mailbox)
 if you do not want that.
 
 **One forwarder per mailbox:** the forwarder holds the consumer id `forward-<alias>`, and the
-relay refuses a different active consumer, so do not also connect a session to that alias. A
-second forwarder on the same machine is refused. **Nothing stops one on another machine:** it
-shares the consumer id, so the two displace each other, and a webhook slower than that cycle gets
-the same message repeatedly and it never settles.
+relay refuses a different active consumer, so do not also connect a session to that alias. With
+the same `CBUS_DIR`, a second one-shot run is refused and a second long-running forwarder waits for
+the first to stop. **Nothing stops one on another machine or with another `CBUS_DIR`:** it shares
+the consumer id, so the two displace each other, and a webhook slower than that cycle gets the same
+message repeatedly and it never settles.
 
 ## What the webhook receives
 
@@ -67,7 +71,7 @@ Each message is one POST with a JSON body:
 |---|---|
 | `id` | The relay spool id. Stable across redelivery, so **dedupe on it**. |
 | `from`, `to`, `ts`, `text` | As sent. `from` is not verified (see [Security](#security)). |
-| `truncated` | Present when `text` was over 16 KiB: the original length in bytes. `text` is cut on a UTF-8 boundary, and a dead letter keeps the whole message. |
+| `truncated` | Present when `text` was over 16 KiB: the original length in bytes. `text` is cut on a UTF-8 boundary. A dead letter keeps the whole message until a replay delivers it, and the replay sends the same cut text. |
 | `relayId`, `eventId` | Present when the message carries them. |
 
 Delivery is **at-least-once**. A crash after a successful POST and before the ACK sends that
@@ -80,12 +84,16 @@ Presence events are acknowledged and not sent.
 | Response | Result |
 |---|---|
 | 2xx | Delivered, ACKed |
-| A message that cannot be read | Dead-lettered without a POST, ACKed |
+| A message that cannot be parsed | Dead-lettered without a POST, ACKed |
 | Other 4xx | Dead-lettered at once, ACKed: the message will never be accepted |
 | 401, 403, 408, 429, 5xx, a 3xx, a timeout or a network error | Retried with backoff from 2 s up to 5 min, then dead-lettered after `--max-attempts` (default 10) |
 
 Redirects are never followed: Go would replay the POST as a bodiless GET and report success.
 Update the URL if the endpoint moves.
+
+**Known limit:** a stored message over the client's 2 MiB frame limit cannot be read at all, so it
+is never settled and everything behind it waits ([#117](https://github.com/cumanzor/claudebus/issues/117)).
+`cbus send` cannot produce one; a raw client holding the relay token can.
 
 `--timeout` bounds one request (default 30 s). A receiver slower than that never succeeds, so
 raise it for one that does its work before answering, for example `--timeout 90s`.
@@ -107,7 +115,7 @@ Send them again once the webhook is healthy:
 
 ```sh
 F=~/.claude-bus/forward/demo@server/hook.deadletter.jsonl
-cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F" --dry-run   # list them
+cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F" --dry-run   # list them; add --include-skipped to see a skipped backlog
 cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F"             # POST each once
 cbus forward demo@server/hook --webhook-config ~/.config/cbus-hook --replay "$F" --id <id>   # just these
 ```

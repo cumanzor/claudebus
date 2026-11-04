@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -347,7 +348,7 @@ func TestLockForwardMailboxAllowsOneForwarder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LockForwardMailbox("demo", "server", "hook"); err == nil || !strings.Contains(err.Error(), "another forwarder") {
+	if _, err := LockForwardMailbox("demo", "server", "hook"); !errors.Is(err, ErrForwarderRunning) {
 		t.Fatalf("second forwarder: %v", err)
 	}
 	other, err := LockForwardMailbox("demo", "server", "other")
@@ -361,4 +362,34 @@ func TestLockForwardMailboxAllowsOneForwarder(t *testing.T) {
 		t.Fatalf("after release: %v", err)
 	}
 	again()
+}
+
+// a forwarder that started before the local relay moves to it once it is up
+func TestForwardResolvesTheRelayBeforeEachDial(t *testing.T) {
+	const token = "forwardresolvetoken"
+	base := startTestRelay(t, token)
+	hook := &hookRecorder{}
+	srv := httptest.NewServer(hook)
+	defer srv.Close()
+	relaySend(t, base, token, "waiting")
+	var mu sync.Mutex
+	calls := 0
+	opts := ForwardOptions{Channel: "demo", Host: "server", Alias: "hook", Base: "http://127.0.0.1:1", Token: token,
+		Webhook: WebhookConfig{URL: srv.URL, Key: "k"}, PerMin: 100, PerHour: 100, MaxAttempts: 1,
+		DeadLetter: filepath.Join(t.TempDir(), "dl.jsonl"), sleep: noSleep,
+		Resolve: func() (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			if calls < 3 {
+				return "http://127.0.0.1:1", nil
+			}
+			return base + "/", nil
+		}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Forward(ctx, opts) }()
+	schedulerWait(t, "the message arrives through the relay that came up", func() bool { return len(hook.texts()) == 1 })
+	cancel()
+	<-done
 }

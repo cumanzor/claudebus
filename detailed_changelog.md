@@ -16,11 +16,15 @@ docs/forward.md.
   already cuts text at 16 KiB, and a dead letter keeps the raw message.
 - On the relay host a forwarder that started before the relay exited with `unknown
   relay host`, which used up a service's restart limit. Long-running forwarders now
-  retry the lookup with backoff. `--once`, `--dry-run` and `--skip-queued` still exit.
+  retry the lookup with backoff, and pick the relay again before each connection, so one
+  that chose the public URL at startup moves to the local relay once it is up.
+  `--once`, `--dry-run` and `--skip-queued` still exit.
 - A relay base URL ending in `/` built a `//tail/durable-v1` path and never connected.
 - Two forwarders on a mailbox share a consumer id, displace each other and never
-  settle a slow message. A lock now refuses the second on one machine; docs/forward.md
-  states that nothing stops one on another machine.
+  settle a slow message. A lock under `CBUS_DIR` now makes a second long-running
+  forwarder wait, so a service does not use up its restart limit during a manual run,
+  and refuses a second one-shot run. docs/forward.md states that nothing stops one on
+  another machine or with another `CBUS_DIR`.
 - A lost ACK during `--skip-queued` used a second skip slot, which POSTed the last
   backlog message and wrote a duplicate record. Skipped ids are now remembered, so a
   redelivered frame only gets its ACK again.
