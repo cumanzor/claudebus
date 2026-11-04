@@ -227,7 +227,9 @@ const usage = `cbus — message bus between coding sessions, in named channels
        --skip-queued               first run on a mailbox with a backlog: what is
                                    queued now goes to the dead letters, not the webhook
        --replay FILE [--id ID]...  POST dead letters once each; delivered ones leave
-                                   the file, failed ones stay (--dry-run lists them)
+                                   the file, failed ones stay (--dry-run lists them).
+                                   A skipped backlog stays unless named by --id
+                                   or --include-skipped is given
   cbus leave [channel]             remove this session's legacy memberships/inboxes
   cbus rename <new-alias> [channel]  rename this session's legacy alias (mv dir +
                                    meta); re-arm the Monitor on the new address

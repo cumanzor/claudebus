@@ -28,9 +28,8 @@ import (
 // receivers dedupe on the payload id (the relay spool id).
 
 const (
-	forwardMaxText    = 16 * 1024
-	forwardMaxMessage = 256 * 1024
-	forwardReadGrace  = 2 * time.Minute
+	forwardMaxText   = 16 * 1024
+	forwardReadGrace = 2 * time.Minute
 )
 
 // WebhookConfig is the outbound endpoint; Key is sent as a bearer token.
@@ -105,6 +104,7 @@ func checkWebhookURL(raw string) error {
 type ForwardOptions struct {
 	Channel, Host, Alias string
 	Base, Token          string
+	Resolve              func() (string, error) // re-picks the relay base before each dial
 	Webhook              WebhookConfig
 	PerMin, PerHour      int
 	Timeout              time.Duration // one webhook request; 0 means the default
@@ -112,6 +112,7 @@ type ForwardOptions struct {
 	DeadLetter           string
 	DryRun               bool
 	SkipQueued           int  // first this many frames are the backlog: settle them without a POST
+	IncludeSkipped       bool // replay also sends records skipped by SkipQueued
 	Once                 bool // exit once the mailbox has been idle for OnceIdle
 	OnceIdle             time.Duration
 	Logf                 func(format string, a ...any)
@@ -145,7 +146,8 @@ func ForwardConsumer(alias string) string { return "forward-" + alias }
 
 type forwarder struct {
 	ForwardOptions
-	sent []time.Time
+	sent    []time.Time
+	skipped map[string]bool // spool ids settled as backlog; a redelivered one only needs its ACK again
 }
 
 // Forward runs until ctx ends (or, with Once, until the mailbox is idle),
@@ -166,9 +168,16 @@ func Forward(ctx context.Context, o ForwardOptions) error {
 	if o.OnceIdle <= 0 {
 		o.OnceIdle = 3 * time.Second
 	}
-	f := &forwarder{ForwardOptions: o}
+	o.Base = strings.TrimRight(o.Base, "/")
+	f := &forwarder{ForwardOptions: o, skipped: map[string]bool{}}
 	delay := time.Second
 	for {
+		// a relay that was down at startup may be up now, and local beats the public door
+		if f.Resolve != nil {
+			if base, err := f.Resolve(); err == nil {
+				f.Base = strings.TrimRight(base, "/")
+			}
+		}
 		conn, err := f.dial(ctx)
 		if err == nil {
 			delay = time.Second
@@ -265,11 +274,15 @@ func (f *forwarder) session(ctx context.Context, conn *wire.Conn) error {
 		case <-idle:
 			return nil
 		case fr := <-messages:
-			skipping := f.SkipQueued > 0
 			var err error
-			if skipping {
-				err = f.skip(fr)
-			} else {
+			switch {
+			case f.skipped[fr.SpoolID]:
+			case f.SkipQueued > 0:
+				if err = f.skip(fr); err == nil {
+					f.skipped[fr.SpoolID] = true
+					f.SkipQueued--
+				}
+			default:
 				err = f.handle(ctx, fr)
 			}
 			if err != nil {
@@ -281,9 +294,6 @@ func (f *forwarder) session(ctx context.Context, conn *wire.Conn) error {
 			ack, _ := json.Marshal(relayFrame{Type: "ack", SpoolID: fr.SpoolID})
 			if err := write(wire.OpText, ack); err != nil {
 				return err
-			}
-			if skipping {
-				f.SkipQueued-- // only after the ACK: an unacknowledged frame comes back after a reconnect
 			}
 		}
 	}
@@ -298,8 +308,8 @@ func (f *forwarder) handle(ctx context.Context, fr relayFrame) error {
 		return errors.New("delivery abandoned")
 	}
 	var m core.Message
-	if len(fr.Message) > forwardMaxMessage || json.Unmarshal(fr.Message, &m) != nil {
-		return f.deadLetter(fr, "unreadable or oversized message")
+	if json.Unmarshal(fr.Message, &m) != nil {
+		return f.deadLetter(fr, "unreadable message")
 	}
 	if m.Kind == "presence" {
 		f.Logf("skip presence %s", fr.SpoolID)
@@ -445,7 +455,7 @@ func (f *forwarder) deadLetter(fr relayFrame, reason string) error {
 }
 
 func validJSONOrNil(b json.RawMessage) json.RawMessage {
-	if len(b) > forwardMaxMessage || !json.Valid(b) {
+	if !json.Valid(b) {
 		return nil
 	}
 	return b
@@ -456,11 +466,19 @@ func appendDeadLetter(path string, line []byte) error {
 		return err
 	}
 	return withDeadLetterLock(path, func() error {
-		fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		fh, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 		if err != nil {
 			return err
 		}
-		if _, err = fh.Write(append(line, '\n')); err == nil {
+		// a torn write leaves no newline; the next record must not glue onto it
+		rec := append(line[:len(line):len(line)], '\n')
+		if fi, err := fh.Stat(); err == nil && fi.Size() > 0 {
+			last := make([]byte, 1)
+			if _, err := fh.ReadAt(last, fi.Size()-1); err == nil && last[0] != '\n' {
+				rec = append([]byte{'\n'}, rec...)
+			}
+		}
+		if _, err = fh.Write(rec); err == nil {
 			err = fh.Sync()
 		}
 		if cerr := fh.Close(); err == nil {
@@ -468,4 +486,28 @@ func appendDeadLetter(path string, line []byte) error {
 		}
 		return err
 	})
+}
+
+// ErrForwarderRunning means another forwarder holds the mailbox lock.
+var ErrForwarderRunning = errors.New("another forwarder is running")
+
+// LockForwardMailbox holds one forwarder per mailbox under this CBUS_DIR. Two would share
+// a consumer id, displace each other on the relay and never settle a slow message.
+func LockForwardMailbox(channel, host, alias string) (release func(), err error) {
+	path := filepath.Join(CBUSDir(), "forward", channel+"@"+host, alias+".forwarder.lock")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	fh, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := tryLockExclusive(fh); err != nil {
+		_ = fh.Close()
+		if errors.Is(err, errLockContended) {
+			return nil, fmt.Errorf("%w for %s@%s/%s under %s", ErrForwarderRunning, channel, host, alias, CBUSDir())
+		}
+		return nil, err
+	}
+	return func() { _ = unlockFile(fh); _ = fh.Close() }, nil
 }
