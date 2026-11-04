@@ -4,6 +4,38 @@ This project moved to a new repository in 2026-09. Commit hashes, pull
 request and milestone links in entries dated before the move refer to the
 previous repository and may not resolve.
 
+## [2026-11-04 00:46:05 UTC] [Install/Fix] Review fixes for install-hooks and print-service
+
+[Attempt #1] Files: cmd/cbus/install_hooks.go, cmd/cbus/install_hooks_test.go,
+cmd/cbus/forward_service.go, cmd/cbus/forward_service_test.go,
+internal/client/endpoint.go, docs/usage.md, docs/architecture/command-reference.md.
+
+[What changed]
+- install-hooks wrote `$HOME/.local/bin/cbus hook-denied` unquoted, so a home directory
+  with a space made the hook exit 127 while the verb reported success. It now writes
+  `"$HOME/.local/bin/cbus"`, and single-quotes any other path holding a shell character.
+  Paths use forward slashes.
+- An entry counted as installed whatever its path, so a moved binary or one written by
+  `go run` left a hook that never runs, with no note and `already installed` on a
+  rerun. A plain `<path> <verb>` entry whose binary is missing, or whose unquoted `$HOME`
+  would split, is now repaired in place and keeps its other fields. A bare name on PATH
+  and a wrapped command are not judged. The update note covers this too.
+- A dangling symlinked settings file was replaced by a regular file. The link is now
+  followed, creating the target's parent directories. An empty `--path` is refused;
+  before, a script's unset variable edited the default settings.
+- `--print-service`: the plist comment no longer holds the label, because a `--` in a
+  name made the file invalid. The site variable comes from the client's own function,
+  so hosts ending in punctuation keep it. `$$` is an escape only on `Exec` lines, so
+  `Environment=` values now keep a single `$`.
+- The command reference no longer says no installer touches settings.
+
+[Testing]
+- Each written command form runs in bash from a plain home, a home with a space, and
+  directories named `a&b` and `it's (x)`. Tests for repair, live and unjudged entries,
+  the dangling link, the empty path, the plist, the site variable and the dollar. `plutil
+  -lint` accepted a plist with `--` in its name on macOS. Mutations fail a test, except
+  removing the empty-path check, where the write still fails and settings stay untouched.
+
 ## [2026-11-03 23:53:43 UTC] [Forward/Operations] Replay dead letters and skip an existing backlog
 
 [Attempt #1] Files: internal/client/forward.go, internal/client/forward_replay.go,

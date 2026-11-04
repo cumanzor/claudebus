@@ -1639,9 +1639,9 @@ Behavior, exactly:
 
 Local only, like the coordinator record: a coordinator on another machine hears nothing.
 
-**Wiring is manual** — no installer touches settings. A machine without the hook is
-silent, so no notice does not mean no denials. The entry is in the snippet under
-`cbus hook-regressed` below.
+**Wiring is opt-in** with `cbus install-hooks`; an update never touches settings. A
+machine without the hook is silent, so no notice does not mean no denials. The entry is
+in the snippet under `cbus hook-regressed` below.
 
 ### `cbus hook-regressed` — the Stop flow
 
@@ -1680,9 +1680,9 @@ goes silent with no signal. `PostModelSwitch` with `source: "auto"` may cover th
 event, but that was not measured, because no way to trigger it short of a real refusal
 was available. A session that ends before its next Stop reports nothing until it resumes.
 
-**Wiring is manual** — no installer touches settings. A machine without these hooks is
-silent, so no notice does not mean no denials and no fallbacks. Add to
-`~/.claude/settings.json`:
+**Wiring is opt-in** with `cbus install-hooks`; an update never touches settings. A
+machine without these hooks is silent, so no notice does not mean no denials and no
+fallbacks. It adds to `~/.claude/settings.json`:
 
 ```json
 {"hooks": {

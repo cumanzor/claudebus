@@ -133,8 +133,62 @@ func parseSettings(raw []byte) (jsonObject, error) {
 	return o, nil
 }
 
-// any path to this cbus counts, so a hand-written entry is not added twice
-func hookCommandPresent(groups []any, verb, cbusPath string) bool {
+// hookChange is an entry to add, or with stale set, one whose command to repair.
+type hookChange struct {
+	claudeHook
+	stale jsonObject
+	old   string
+}
+
+func isCbusBinary(path string) bool {
+	base := filepath.Base(filepath.FromSlash(strings.Trim(path, `"'`)))
+	return base == "cbus" || base == "cbus.exe"
+}
+
+// a plain "<path> <verb>" entry, the only shape whose binary can be judged
+func splitHookCommand(cmd string) (path, verb string, quoted, ok bool) {
+	cmd = strings.TrimSpace(cmd)
+	if strings.HasPrefix(cmd, `"`) || strings.HasPrefix(cmd, `'`) {
+		end := strings.IndexByte(cmd[1:], cmd[0])
+		if end < 0 {
+			return "", "", false, false
+		}
+		path, verb = cmd[1:end+1], strings.TrimSpace(cmd[end+2:])
+		quoted = true
+	} else {
+		var found bool
+		if path, verb, found = strings.Cut(cmd, " "); !found {
+			return "", "", false, false
+		}
+		verb = strings.TrimSpace(verb)
+	}
+	return path, verb, quoted, path != "" && verb != "" && !strings.ContainsAny(verb, " \t;&|<>")
+}
+
+// hookBinaryDead reports a path that cannot run from this entry. A bare name resolves on PATH, so it is not judged.
+func hookBinaryDead(path string, quoted bool) bool {
+	home, homeErr := os.UserHomeDir()
+	for _, prefix := range []string{"$HOME/", "${HOME}/", "~/"} {
+		if rest, ok := strings.CutPrefix(path, prefix); ok {
+			if homeErr != nil {
+				return false
+			}
+			if !quoted && strings.ContainsAny(home, " \t") {
+				return true // the shell splits an unquoted $HOME at the space
+			}
+			path = filepath.Join(home, filepath.FromSlash(rest))
+			break
+		}
+	}
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	_, err := os.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
+}
+
+// any path to this cbus counts, so a hand-written entry is not added twice; a dead one comes back to be repaired
+func findHookCommand(groups []any, verb, cbusPath string) (present bool, stale jsonObject, old string) {
 	for _, g := range groups {
 		group, ok := g.(jsonObject)
 		if !ok {
@@ -148,21 +202,29 @@ func hookCommandPresent(groups []any, verb, cbusPath string) bool {
 				continue
 			}
 			c, _ := hook.get("command")
-			if strings.Contains(fmt.Sprint(c), cbusPath+" "+verb) {
-				return true
+			cmd := fmt.Sprint(c)
+			if strings.Contains(cmd, cbusPath+" "+verb) {
+				return true, nil, ""
 			}
-			fields := strings.Fields(fmt.Sprint(c))
+			if path, v, quoted, simple := splitHookCommand(cmd); simple && v == verb && isCbusBinary(path) {
+				if hookBinaryDead(path, quoted) {
+					stale, old = hook, cmd
+					continue
+				}
+				return true, nil, ""
+			}
+			fields := strings.Fields(cmd)
 			for i := 1; i < len(fields); i++ {
-				if fields[i] == verb && filepath.Base(strings.Trim(fields[i-1], `"'`)) == "cbus" {
-					return true
+				if fields[i] == verb && isCbusBinary(fields[i-1]) {
+					return true, nil, ""
 				}
 			}
 		}
 	}
-	return false
+	return false, stale, old
 }
 
-func missingClaudeHooks(settings jsonObject, cbusPath string) ([]claudeHook, error) {
+func missingClaudeHooks(settings jsonObject, cbusPath string) ([]hookChange, error) {
 	var hooksObj jsonObject
 	if v, i := settings.get("hooks"); i >= 0 {
 		o, ok := v.(jsonObject)
@@ -171,7 +233,7 @@ func missingClaudeHooks(settings jsonObject, cbusPath string) ([]claudeHook, err
 		}
 		hooksObj = o
 	}
-	var missing []claudeHook
+	var missing []hookChange
 	for _, h := range claudeHooks {
 		var groups []any
 		if v, i := hooksObj.get(h.event); i >= 0 {
@@ -181,15 +243,16 @@ func missingClaudeHooks(settings jsonObject, cbusPath string) ([]claudeHook, err
 			}
 			groups = a
 		}
-		if !hookCommandPresent(groups, h.verb, cbusPath) {
-			missing = append(missing, h)
+		present, stale, old := findHookCommand(groups, h.verb, cbusPath)
+		if !present {
+			missing = append(missing, hookChange{claudeHook: h, stale: stale, old: old})
 		}
 	}
 	return missing, nil
 }
 
 // mergeClaudeHooks adds what is missing and returns the new file; existing entries are untouched.
-func mergeClaudeHooks(raw []byte, cbusPath string) ([]byte, []claudeHook, error) {
+func mergeClaudeHooks(raw []byte, cbusPath string) ([]byte, []hookChange, error) {
 	settings, err := parseSettings(raw)
 	if err != nil {
 		return nil, nil, err
@@ -201,6 +264,11 @@ func mergeClaudeHooks(raw []byte, cbusPath string) ([]byte, []claudeHook, error)
 	hooksVal, hooksAt := settings.get("hooks")
 	hooksObj, _ := hooksVal.(jsonObject)
 	for _, h := range missing {
+		if h.stale != nil {
+			_, at := h.stale.get("command")
+			h.stale[at].value = cbusPath + " " + h.verb
+			continue
+		}
 		group := jsonObject{}
 		if h.matcher != "" {
 			group = append(group, jsonMember{"matcher", h.matcher})
@@ -244,21 +312,56 @@ func defaultClaudeSettings() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// $HOME keeps the entry valid in a settings file shared across machines
+// hookCbusPath is how a settings entry should invoke this binary.
 func hookCbusPath() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "cbus"
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if rel, err := filepath.Rel(home, exe); err == nil && !strings.HasPrefix(rel, "..") && !strings.ContainsAny(rel, " \t") {
-			return "$HOME/" + filepath.ToSlash(rel)
+	home, _ := os.UserHomeDir()
+	return hookCommandPath(filepath.ToSlash(exe), filepath.ToSlash(home))
+}
+
+// $HOME keeps the entry valid in a settings file shared across machines, and the
+// quotes keep it one word when the home directory has a space
+func hookCommandPath(exe, home string) string {
+	if home != "" && strings.HasPrefix(exe, home+"/") {
+		if rel := strings.TrimPrefix(exe, home+"/"); shellSafe(rel) {
+			return `"$HOME/` + rel + `"`
 		}
 	}
-	if strings.ContainsAny(exe, " \t") {
-		return `"` + exe + `"`
+	if shellSafe(exe) {
+		return exe
 	}
-	return exe
+	return "'" + strings.ReplaceAll(exe, "'", `'\''`) + "'"
+}
+
+func shellSafe(s string) bool {
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("/._-+:@%,=", r)) {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// resolveLinkTarget follows a symlink even when its target does not exist yet, which EvalSymlinks refuses.
+func resolveLinkTarget(path string) (string, error) {
+	for i := 0; i < 40; i++ {
+		fi, err := os.Lstat(path)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(link) {
+			link = filepath.Join(filepath.Dir(path), link)
+		}
+		path = link
+	}
+	return "", fmt.Errorf("%s: too many levels of symlinks", path)
 }
 
 func writeSettingsAtomic(path string, data []byte, mode os.FileMode) error {
@@ -291,15 +394,18 @@ func runInstallHooks(args []string) int {
 		return die("%v", err)
 	}
 	path, ok := p.has("--path")
-	if !ok || path == "" {
+	if ok && path == "" {
+		return die("--path: want a settings file")
+	}
+	if !ok {
 		if path, err = defaultClaudeSettings(); err != nil {
 			return die("%v", err)
 		}
 	}
 	// a profile's settings may be a link to a shared file; replacing the link would fork it
-	target := path
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		target = resolved
+	target, err := resolveLinkTarget(path)
+	if err != nil {
+		return die("%v", err)
 	}
 	mode := os.FileMode(0o600)
 	raw, err := os.ReadFile(target)
@@ -322,6 +428,10 @@ func runInstallHooks(args []string) int {
 		return 0
 	}
 	for _, h := range added {
+		if h.stale != nil {
+			fmt.Printf("repair %s: %s -> %s %s\n", h.event, h.old, cbusPath, h.verb)
+			continue
+		}
 		fmt.Printf("add %s: %s %s\n", h.event, cbusPath, h.verb)
 	}
 	if p.flags["--dry-run"] {

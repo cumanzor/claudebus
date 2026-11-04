@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,5 +177,133 @@ func TestUnknownVerbHint(t *testing.T) {
 	}
 	if unknownVerbHint("instal") != "" {
 		t.Error("other verbs get the hint")
+	}
+}
+
+func TestHookCommandPath(t *testing.T) {
+	for _, tc := range []struct{ exe, home, want string }{
+		{"/home/me/.local/bin/cbus", "/home/me", `"$HOME/.local/bin/cbus"`},
+		{"/x/my home/.local/bin/cbus", "/x/my home", `"$HOME/.local/bin/cbus"`},
+		{"/usr/local/bin/cbus", "/home/me", "/usr/local/bin/cbus"},
+		{"/opt/my tools/cbus", "/home/me", "'/opt/my tools/cbus'"},
+		{"/x/a&b/cbus", "/home/me", "'/x/a&b/cbus'"},
+		{"/x/it's/cbus", "/home/me", `'/x/it'\''s/cbus'`},
+		{"/home/me/a b/cbus", "/home/me", "'/home/me/a b/cbus'"},
+		{"C:/tools/cbus.exe", "C:/Users/me", "C:/tools/cbus.exe"},
+	} {
+		if got := hookCommandPath(tc.exe, tc.home); got != tc.want {
+			t.Errorf("hookCommandPath(%q, %q) = %s, want %s", tc.exe, tc.home, got, tc.want)
+		}
+	}
+}
+
+// what is written must run in a shell, in the awkward places too
+func TestWrittenCommandRunsInAShell(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	root := t.TempDir()
+	for _, sub := range []string{"plain", "my home", "a&b", "it's (x)"} {
+		home := filepath.Join(root, sub)
+		bin := filepath.Join(home, ".local", "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		exe := filepath.Join(bin, "cbus")
+		if err := os.WriteFile(exe, []byte("#!/bin/sh\necho ran:$1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range []string{home, "/somewhere/else"} {
+			cmd := exec.Command(bash, "-c", hookCommandPath(exe, h)+" hook-denied")
+			cmd.Env = []string{"HOME=" + home, "PATH=/usr/bin:/bin"}
+			out, err := cmd.CombinedOutput()
+			if err != nil || strings.TrimSpace(string(out)) != "ran:hook-denied" {
+				t.Errorf("%q from home %q: %v %s", sub, h, err, out)
+			}
+		}
+	}
+}
+
+func TestDeadHookPathIsRepairedInPlace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	raw := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/gone/cbus hook-regressed","timeout":5}]}],"PermissionDenied":[{"matcher":"Bash","hooks":[{"type":"command","command":"$HOME/.local/bin/cbus hook-denied"}]}]}}`
+	out, changed, err := mergeClaudeHooks([]byte(raw), "/new/cbus")
+	if err != nil || len(changed) != 2 {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	s := string(out)
+	if strings.Contains(s, "/gone/cbus") || strings.Contains(s, "$HOME/.local/bin/cbus") {
+		t.Errorf("dead path kept:\n%s", s)
+	}
+	if strings.Count(s, "/new/cbus hook-regressed") != 1 || !strings.Contains(s, `"timeout": 5`) || !strings.Contains(s, `"matcher": "Bash"`) {
+		t.Errorf("repair must keep the entry:\n%s", s)
+	}
+	if strings.Count(s, `"command": `) != 2 {
+		t.Errorf("repair added an entry:\n%s", s)
+	}
+}
+
+func TestLiveAndUnjudgedHookCommandsCountAsPresent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "cbus"), nil, 0o755)
+	for _, cmd := range []string{
+		"$HOME/.local/bin/cbus hook-denied",
+		`"$HOME/.local/bin/cbus" hook-denied`,
+		"cbus hook-denied",
+		"/gone/cbus hook-denied 2>/dev/null",
+		filepath.Join(bin, "cbus") + " hook-denied",
+	} {
+		if present, stale, _ := findHookCommand(groupsWith(cmd), "hook-denied", "/other/cbus"); !present || stale != nil {
+			t.Errorf("%q: present=%v stale=%v", cmd, present, stale != nil)
+		}
+	}
+}
+
+func TestUnquotedHomeWithASpaceIsRepaired(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "my home")
+	bin := filepath.Join(home, ".local", "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "cbus"), nil, 0o755)
+	t.Setenv("HOME", home)
+	present, stale, _ := findHookCommand(groupsWith("$HOME/.local/bin/cbus hook-denied"), "hook-denied", `"$HOME/.local/bin/cbus"`)
+	if present || stale == nil {
+		t.Errorf("present=%v stale=%v, want it repaired", present, stale != nil)
+	}
+}
+
+func groupsWith(cmd string) []any {
+	return []any{jsonObject{{"hooks", []any{jsonObject{{"type", "command"}, {"command", cmd}}}}}}
+}
+
+func TestInstallHooksWritesThroughADanglingLink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "settings.json")
+	target := filepath.Join(dir, "dotfiles", "claude", "settings.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip(err)
+	}
+	if rc := runInstallHooks([]string{"--path", link}); rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the link was replaced")
+	}
+	if b, err := os.ReadFile(target); err != nil || !strings.Contains(string(b), "hook-denied") {
+		t.Fatalf("target: %v %s", err, b)
+	}
+}
+
+func TestInstallHooksRefusesEmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	if rc := runInstallHooks([]string{"--path", ""}); rc == 0 {
+		t.Error("an empty --path was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "settings.json")); err == nil {
+		t.Error("an empty --path wrote the default settings")
 	}
 }
